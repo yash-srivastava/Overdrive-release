@@ -20,7 +20,7 @@ Choose the configuration that matches your connection type:
   * Keep the **Sing-box Proxy** disabled.
   * Directly enable your preferred tunnel (**Zrok** or **Cloudflared**).
 
-* **Option B: Public / Shared Wi-Fi**
+* **Option B: Public / BYD SIM**
   * Toggle the **"Public"** switch at the top right of the dashboard.
   * Go to **Daemon View** and verify that the **Sing-box Proxy Daemon** is running.
   * Once verified, enable your preferred tunnel (**Zrok** or **Cloudflared**).
