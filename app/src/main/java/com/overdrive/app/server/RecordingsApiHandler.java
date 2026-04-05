@@ -60,10 +60,10 @@ public class RecordingsApiHandler {
     private static final String LEGACY_RECORDINGS_DIR = "/storage/emulated/0/Android/data/com.overdrive.app/files";
     private static final String LEGACY_SENTRY_DIR = LEGACY_RECORDINGS_DIR + "/sentry_events";
     
-    // Filename patterns
-    private static final Pattern CAM_PATTERN = Pattern.compile("cam(\\d+)?_(\\d{8})_(\\d{6})\\.mp4");
-    private static final Pattern EVENT_PATTERN = Pattern.compile("event_(\\d{8})_(\\d{6})\\.mp4");
-    private static final Pattern PROXIMITY_PATTERN = Pattern.compile("proximity_(\\d{8})_(\\d{6})\\.mp4");
+    // Filename patterns (support optional _N segment suffix for multi-segment recordings)
+    private static final Pattern CAM_PATTERN = Pattern.compile("cam(\\d+)?_(\\d{8})_(\\d{6})(?:_\\d+)?\\.mp4");
+    private static final Pattern EVENT_PATTERN = Pattern.compile("event_(\\d{8})_(\\d{6})(?:_\\d+)?\\.mp4");
+    private static final Pattern PROXIMITY_PATTERN = Pattern.compile("proximity_(\\d{8})_(\\d{6})(?:_\\d+)?\\.mp4");
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US);
     
     /**
