@@ -90,6 +90,9 @@ public class CameraDaemon {
     private static com.overdrive.app.surveillance.GpuSurveillancePipeline gpuPipeline;
     private static boolean surveillanceEnabled = false;
     private static volatile boolean safeZoneSuppressed = false;
+    // Pending ACC OFF state: if ACC goes off before GPU pipeline is ready,
+    // queue the request and apply it once the pipeline initializes
+    private static volatile boolean pendingAccOff = false;
     
     // ==================== RECORDING MODE MANAGER ====================
     private static com.overdrive.app.recording.RecordingModeManager recordingModeManager;
@@ -199,12 +202,31 @@ public class CameraDaemon {
         HttpServer.loadPersistedSettings();
         
         // Initialize surveillance module (will use loaded settings)
-        initSurveillance();
-        
-        // Apply persisted settings to GPU pipeline (for runtime changes)
-        // Note: Codec/bitrate are already applied during init, but this ensures
-        // the config object is in sync and handles any settings that need runtime application
-        applyPersistedSettings();
+        // DELAY GPU pipeline init to let BYD camera apps (dashcam, 360 view) 
+        // initialize their EGL surfaces first. Without this delay, our app grabs
+        // the camera/EGL resources and BYD's apps fail.
+        // The HTTP server, IPC server, and monitoring start immediately.
+        log("Delaying GPU pipeline init by 45s to let BYD camera apps start first...");
+        new Thread(() -> {
+            try {
+                Thread.sleep(45000);
+            } catch (InterruptedException e) {
+                log("GPU init delay interrupted");
+                return;
+            }
+            log("GPU pipeline init delay complete, initializing now...");
+            initSurveillance();
+            
+            // Apply persisted settings to GPU pipeline (for runtime changes)
+            applyPersistedSettings();
+            
+            // Apply any pending ACC OFF state that arrived during the delay
+            if (pendingAccOff && gpuPipeline != null) {
+                log("Applying pending ACC OFF surveillance request...");
+                pendingAccOff = false;
+                onAccStateChanged(true);  // true = ACC is off
+            }
+        }, "GpuInitDelay").start();
         
         new Thread(tcpServer::start, "TcpServer").start();
         new Thread(httpServer::start, "HttpServer").start();
@@ -764,7 +786,8 @@ public class CameraDaemon {
      */
     public static void enableSurveillance() {
         if (gpuPipeline == null) {
-            log("ERROR: GPU Surveillance not initialized");
+            log("GPU pipeline not ready — queuing surveillance enable for when pipeline initializes");
+            pendingAccOff = true;
             return;
         }
         
@@ -828,7 +851,13 @@ public class CameraDaemon {
         com.overdrive.app.monitor.AccMonitor.setAccState(!accIsOff);
         
         if (gpuPipeline == null) {
-            log("ACC state changed but pipeline not initialized");
+            if (accIsOff) {
+                log("ACC OFF but GPU pipeline not ready — queuing for when pipeline initializes");
+                pendingAccOff = true;
+            } else {
+                log("ACC ON but GPU pipeline not ready — clearing pending state");
+                pendingAccOff = false;
+            }
             return;
         }
         

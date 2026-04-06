@@ -174,14 +174,23 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         if ("byd_cam_daemon".equals(processName)) {
             ctx.execShell("pkill -9 -f start_cam_daemon 2>/dev/null");
             ctx.execShell("rm -f /data/local/tmp/start_cam_daemon.sh 2>/dev/null");
+            ctx.execShell("rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null");
+        }
+        
+        // For acc sentry daemon, also kill the watchdog script
+        if ("acc_sentry_daemon".equals(processName)) {
+            ctx.execShell("pkill -9 -f start_acc_sentry 2>/dev/null");
+            ctx.execShell("rm -f /data/local/tmp/start_acc_sentry.sh 2>/dev/null");
+            ctx.execShell("rm -f /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null");
         }
         
         // Use pkill -9 -f to match full command line (same as DaemonLauncher.kt)
-        // killall only matches process name which may differ for app_process daemons
         ctx.execShell("pkill -9 -f " + processName + " 2>/dev/null");
         
-        // Clean up lock file (SIGKILL doesn't trigger shutdown hooks)
-        ctx.execShell("rm -f /data/local/tmp/" + processName + ".lock 2>/dev/null");
+        // Clean up lock file for daemons that use processName-based lock files
+        if (!"byd_cam_daemon".equals(processName) && !"acc_sentry_daemon".equals(processName)) {
+            ctx.execShell("rm -f /data/local/tmp/" + processName + ".lock 2>/dev/null");
+        }
         
         // Wait and verify
         try { Thread.sleep(500); } catch (InterruptedException ignored) {}

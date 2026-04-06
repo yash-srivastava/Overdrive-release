@@ -125,6 +125,7 @@ class DaemonLauncher(
             append("pkill -9 -f '$CAMERA_DAEMON_PROCESS' 2>/dev/null; ")
             append("pkill -9 -f 'start_cam_daemon.sh' 2>/dev/null; ")
             append("rm -f $scriptPath 2>/dev/null; ")
+            append("rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null; ")
             append("sleep 1; echo done")
         }
         
