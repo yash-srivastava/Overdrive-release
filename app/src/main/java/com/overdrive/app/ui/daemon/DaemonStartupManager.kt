@@ -117,6 +117,7 @@ class DaemonStartupManager(
 
     private fun initializeOnBoot() {
         log.info(TAG, "=== Initializing daemon startup on boot ===")
+        log.info(TAG, "Waiting 45 seconds before starting daemons (system stabilization)...")
         
         // Reset user-stopped flags on boot
         userStoppedDaemons.clear()
@@ -124,13 +125,12 @@ class DaemonStartupManager(
         // Enable AccessibilityService keep-alive immediately on boot
         enableAccessibilityKeepAlive()
         
-        // Start core daemons quickly (5s) — CameraDaemon starts HTTP server and IPC
-        // but delays GPU pipeline init internally to let BYD camera apps initialize first
-        handler.postDelayed({ startCoreDaemonsViaAdb() }, 5000)
-        handler.postDelayed({ startOptionalDaemonsViaAdb() }, 15000)
+        // Wait 45 seconds for system to fully stabilize before starting any daemons
+        handler.postDelayed({ startCoreDaemonsViaAdb() }, 45000)
+        handler.postDelayed({ startOptionalDaemonsViaAdb() }, 60000)
 
-        // Start periodic health check after daemons have had time to start
-        handler.postDelayed({ startDaemonHealthCheck() }, 60000)
+        // Start periodic health check after initial daemons have had time to start
+        handler.postDelayed({ startDaemonHealthCheck() }, 90000)
     }
 
 

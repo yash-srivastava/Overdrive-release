@@ -202,32 +202,19 @@ public class CameraDaemon {
         HttpServer.loadPersistedSettings();
         
         // Initialize surveillance module (will use loaded settings)
-        // DELAY GPU pipeline init to let BYD camera apps (dashcam, 360 view) 
-        // initialize their EGL surfaces first. Without this delay, our app grabs
-        // the camera/EGL resources and BYD's apps fail.
-        // The HTTP server, IPC server, and monitoring start immediately.
-        log("Delaying GPU pipeline init by 45s to let BYD camera apps start first...");
-        new Thread(() -> {
-            try {
-                Thread.sleep(45000);
-            } catch (InterruptedException e) {
-                log("GPU init delay interrupted");
-                return;
-            }
-            log("GPU pipeline init delay complete, posting to main thread...");
-            // CRITICAL: Must run on main thread (which has a Looper) because
-            // EGL context creation and camera open may need Handler callbacks
-            mainHandler.post(() -> {
-                initSurveillance();
-                applyPersistedSettings();
-                
-                if (pendingAccOff && gpuPipeline != null) {
-                    log("Applying pending ACC OFF surveillance request...");
-                    pendingAccOff = false;
-                    onAccStateChanged(true);
-                }
-            });
-        }, "GpuInitDelay").start();
+        initSurveillance();
+        
+        // Apply persisted settings to GPU pipeline (for runtime changes)
+        // Note: Codec/bitrate are already applied during init, but this ensures
+        // the config object is in sync and handles any settings that need runtime application
+        applyPersistedSettings();
+        
+        // If ACC went OFF before pipeline was ready, apply it now
+        if (pendingAccOff && gpuPipeline != null) {
+            log("Applying pending ACC OFF surveillance request...");
+            pendingAccOff = false;
+            onAccStateChanged(true);
+        }
         
         new Thread(tcpServer::start, "TcpServer").start();
         new Thread(httpServer::start, "HttpServer").start();
