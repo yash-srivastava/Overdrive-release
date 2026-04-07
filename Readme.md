@@ -17,7 +17,9 @@ Free, open-source dashcam and sentry mode app built specifically for BYD vehicle
 ---
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/d5faeb2a-96dd-4737-86f4-2e87af52ec4c" width="100%" alt="Overdrive Demo">
+  <a href="https://player.cloudinary.com/embed/?cloud_name=dhwuuoz67&public_id=Demo_nqf0ky">
+    <img src="https://github.com/user-attachments/assets/d5faeb2a-96dd-4737-86f4-2e87af52ec4c" alt="Click to Watch OverDrive Demo" width="100%">
+  </a>
 </p>
 
 ---
