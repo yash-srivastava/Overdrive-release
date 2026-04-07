@@ -1031,10 +1031,13 @@ const TRIPS = {
             this.renderMicroMoments(trip.microMomentsJson || trip.micro_moments_json);
             this.loadRouteComparison(trip);
 
-            // Fetch telemetry
-            const telResp = await fetch('/api/trips/' + tripId + '/telemetry');
-            const telData = await telResp.json();
-            if (telData.success && telData.telemetry && telData.telemetry.length > 0) {
+            // Fetch telemetry (may be unavailable for older trips)
+            if (trip.telemetryFilePath || trip.telemetry_file_path) {
+                try {
+                    const telResp = await fetch('/api/trips/' + tripId + '/telemetry');
+                    if (telResp.ok) {
+                        const telData = await telResp.json();
+                        if (telData.success && telData.telemetry && telData.telemetry.length > 0) {
                 const samples = telData.telemetry;
                 this.telemetryCache = samples;
                 this.currentTripData = trip;
@@ -1057,6 +1060,9 @@ const TRIPS = {
                         }
                     }, 100);
                 }
+                        }
+                    }
+                } catch (e) { /* telemetry unavailable for this trip */ }
             }
         } catch (e) { console.warn('[Trips] Detail load failed:', e); }
     },
@@ -2272,9 +2278,10 @@ const TRIPS = {
             const resp = await fetch('/api/trips/' + tripId, { method: 'DELETE' });
             const data = await resp.json();
             if (data.success) {
-                this.trips = this.trips.filter(t => t.id !== tripId);
+                const id = Number(tripId);
+                this.trips = this.trips.filter(t => t.id !== id);
                 this.renderTripList(this.trips);
-                if (this.currentTripId === tripId) this.hideDetail();
+                if (this.currentTripId == tripId) this.hideDetail();
             }
         } catch (e) { console.warn('[Trips] Delete failed:', e); }
     },

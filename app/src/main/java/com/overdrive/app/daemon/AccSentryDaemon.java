@@ -341,6 +341,9 @@ public class AccSentryDaemon {
                 // Start periodic status monitoring
                 startStatusMonitoring();
                 
+                // Disable BYD traffic monitor app (consumes data/battery in background)
+                disableBydTrafficMonitor();
+                
                 // Note: VehicleDataMonitor is initialized in CameraDaemon (separate process)
                 // which handles the HTTP API for vehicle data
             } else {
@@ -2158,6 +2161,19 @@ public class AccSentryDaemon {
     }
 
     // ==================== SHELL EXECUTION ====================
+
+    /**
+     * Disable BYD's built-in traffic monitor app.
+     * It runs in the background consuming mobile data and battery.
+     */
+    private static void disableBydTrafficMonitor() {
+        try {
+            String result = execShell("pm disable-user --user 0 com.byd.trafficmonitor 2>&1");
+            log("Disable BYD traffic monitor: " + result);
+        } catch (Exception e) {
+            log("Failed to disable BYD traffic monitor: " + e.getMessage());
+        }
+    }
 
     private static String execShell(String cmd) {
         try {

@@ -39,7 +39,7 @@ public class TripTelemetryRecorder {
     private static final long MAX_BUFFER_BYTES = 10 * 1024 * 1024; // 10MB
 
     // Dependencies: existing singleton monitors
-    private final TelemetryDataCollector telemetryDataCollector;
+    private volatile TelemetryDataCollector telemetryDataCollector;
 
     // Executor for 5Hz sampling
     private ScheduledExecutorService executor;
@@ -73,9 +73,18 @@ public class TripTelemetryRecorder {
 
     /**
      * Constructor takes TelemetryDataCollector as parameter (injected from TripAnalyticsManager).
+     * May be null if TelemetryDataCollector hasn't been initialized yet (GPU init delay).
      */
     public TripTelemetryRecorder(TelemetryDataCollector telemetryDataCollector) {
         this.telemetryDataCollector = telemetryDataCollector;
+    }
+
+    /**
+     * Update the TelemetryDataCollector reference after late initialization.
+     * Called by CameraDaemon once TelemetryDataCollector is ready (after GPU init delay).
+     */
+    public void setTelemetryDataCollector(TelemetryDataCollector collector) {
+        this.telemetryDataCollector = collector;
     }
 
     /**
@@ -237,7 +246,8 @@ public class TripTelemetryRecorder {
             long now = System.currentTimeMillis();
 
             // Read speed/accel/brake/brakePedalPressed from TelemetryDataCollector
-            TelemetrySnapshot snapshot = telemetryDataCollector.getLatestSnapshot();
+            TelemetryDataCollector collector = telemetryDataCollector;
+            TelemetrySnapshot snapshot = collector != null ? collector.getLatestSnapshot() : null;
             int speedKmh = 0;
             int accelPedal = 0;
             int brakePedal = 0;

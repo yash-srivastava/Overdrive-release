@@ -425,10 +425,18 @@ object UnifiedConfigManager {
     fun updateSection(section: String, data: JSONObject): Boolean {
         synchronized(this) {
             val config = loadConfig()
-            config.put(section, data)
+            // Merge into existing section to preserve keys not present in data
+            // (e.g. surveillanceEnabled is set separately from detection params)
+            val existing = config.optJSONObject(section) ?: JSONObject()
+            val keys = data.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                existing.put(key, data.get(key))
+            }
+            config.put(section, existing)
             val success = saveConfig(config)
             if (success) {
-                notifyListeners(section, data)
+                notifyListeners(section, existing)
             }
             return success
         }

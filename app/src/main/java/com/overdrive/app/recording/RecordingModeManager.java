@@ -176,16 +176,18 @@ public class RecordingModeManager {
         accIsOn = isOn;
         
         if (isOn) {
-            // ACC is ON — ensure recording mode is active
-            // Always try to activate (handles both fresh ACC ON and state sync)
+            // ACC is ON — full pipeline stop+restart to release camera EGL surface
+            // for BYD native dashcam app, then reacquire as secondary consumer.
             if (pipeline.isRunning()) {
                 pipeline.stop();
             }
             
             if (currentMode == Mode.DRIVE_MODE && !isDrivingGear(currentGear)) {
-                // Will activate on gear change
+                // Will activate on gear change (pipeline.start happens then)
+                logger.info("DRIVE_MODE waiting for driving gear (current=" + gearToString(currentGear) + ")");
             } else if (currentMode == Mode.PROXIMITY_GUARD && currentGear == GEAR_P) {
-                // Will activate on gear change  
+                // Will activate on gear change
+                logger.info("PROXIMITY_GUARD waiting for gear != P");
             } else if (currentMode != Mode.NONE) {
                 activateMode(currentMode);
             }
@@ -326,12 +328,14 @@ public class RecordingModeManager {
                 break;
                 
             case DRIVE_MODE:
-                // Start pipeline and recording when driving (gear != P)
+                // Start recording when driving (gear is D/R/S/M)
+                // Pipeline may already be running (kept alive from previous gear cycle)
                 try {
                     if (!pipeline.isRunning()) {
                         logger.info("Starting pipeline for DRIVE_MODE");
                         pipeline.start(true);  // Auto-start recording
                     } else if (!pipeline.isRecording()) {
+                        logger.info("Pipeline running, resuming DRIVE_MODE recording");
                         pipeline.startRecording();
                     }
                 } catch (Exception e) {
@@ -379,11 +383,10 @@ public class RecordingModeManager {
                 break;
                 
             case DRIVE_MODE:
-                // Stop recording but keep pipeline if ACC is OFF (surveillance running)
+                // Stop recording only — keep pipeline alive for quick resume on next gear change.
+                // Full pipeline teardown (camera/EGL/encoder release) makes restart unreliable
+                // and slow. Only stop the pipeline on full ACC OFF (handled by onAccStateChanged).
                 pipeline.stopRecording();
-                if (pipeline.isRunning() && !keepPipelineRunning) {
-                    pipeline.stop();
-                }
                 break;
                 
             case PROXIMITY_GUARD:

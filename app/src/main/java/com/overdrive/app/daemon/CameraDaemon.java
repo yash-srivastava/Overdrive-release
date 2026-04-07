@@ -763,6 +763,13 @@ public class CameraDaemon {
                         .getTelemetryOverlay().optBoolean("enabled", false);
                     gpuPipeline.setOverlayEnabled(overlayEnabled);
                     log("TelemetryDataCollector initialized, overlay=" + overlayEnabled);
+                    
+                    // Late-bind TelemetryDataCollector to TripAnalyticsManager
+                    // (it was null when TripAnalytics was initialized before the 45s GPU delay)
+                    if (tripAnalyticsManager != null) {
+                        tripAnalyticsManager.setTelemetryDataCollector(telemetryDataCollector);
+                        log("TelemetryDataCollector bound to TripAnalyticsManager");
+                    }
                 } catch (Exception e) {
                     log("WARNING: TelemetryDataCollector init failed: " + e.getMessage());
                 }
