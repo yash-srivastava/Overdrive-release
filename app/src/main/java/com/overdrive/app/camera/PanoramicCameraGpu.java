@@ -681,8 +681,6 @@ public class PanoramicCameraGpu {
         logger.info("Yielding camera to native AVM app...");
         
         // CRITICAL: Finalize active recording BEFORE closing camera.
-        // If we close the camera while the encoder is writing, the MP4 moov atom
-        // won't be written and the file will be corrupt.
         if (yieldListener != null) {
             try {
                 yieldListener.onPreYield();
@@ -691,6 +689,14 @@ public class PanoramicCameraGpu {
                 logger.warn("Pre-yield callback error: " + e.getMessage());
             }
         }
+        
+        // Detach streaming components to stop drainer threads
+        if (streamScaler != null || streamEncoder != null) {
+            clearStreamingComponents();
+        }
+        
+        // Wait for encoder drainer threads to quiesce
+        try { Thread.sleep(100); } catch (InterruptedException ignored) {}
         
         if (cameraObj != null) {
             BydCameraCoordinator.closeCamera(cameraObj, cameraSurfaceMode);
@@ -724,6 +730,17 @@ public class PanoramicCameraGpu {
                     logger.warn("Pre-restart callback error: " + e.getMessage());
                 }
             }
+            
+            // CRITICAL: Detach streaming components so the stream encoder's drainer
+            // thread stops trying to read from the camera's SurfaceTexture.
+            // Without this, the drainer thread hits the destroyed mutex → FORTIFY crash.
+            if (streamScaler != null || streamEncoder != null) {
+                clearStreamingComponents();
+                logger.info("Pre-restart: streaming components detached");
+            }
+            
+            // Wait for encoder drainer threads to quiesce after detach
+            Thread.sleep(100);
             
             // Close with proper cleanup
             if (cameraObj != null) {

@@ -218,11 +218,18 @@ public class BydDataCollector {
                 if (soc > 0 && soc <= 100) b.socPercent(soc);
             }
 
-            // Battery SOC HEV
+            // Battery SOC HEV — getBatteryPowerHEV() as kWh remaining, not percentage
             Object hev = BydDeviceHelper.callGetter(bodyworkDevice, "getBatteryPowerHEV");
             if (hev instanceof Number) {
                 double hevVal = ((Number) hev).doubleValue();
-                if (hevVal >= 0) b.socHevPercent(hevVal);
+                if (hevVal >= 0) {
+                    b.socHevPercent(hevVal);
+                    // SOTA: getBatteryPowerHEV() returns kWh remaining on most models
+                    // Use as remainKwh fallback if PowerDevice didn't provide it
+                    if (hevVal > 0 && hevVal < 200 && Double.isNaN(b.remainKwh)) {
+                        b.remainKwh(hevVal);
+                    }
+                }
             }
 
             // Battery capacity
@@ -230,6 +237,14 @@ public class BydDataCollector {
             if (cap instanceof Number) {
                 double capVal = ((Number) cap).doubleValue();
                 if (capVal > 0) b.capacityAh(capVal);
+                // SOTA: Diplus fallback — if getBatteryPowerHEV() returned negative,
+                // use getBatteryCapacity() / 10.0 as kWh remaining
+                if (Double.isNaN(b.remainKwh) && capVal > 0) {
+                    double kwhFromCap = capVal / 10.0;
+                    if (kwhFromCap > 0 && kwhFromCap < 200) {
+                        b.remainKwh(kwhFromCap);
+                    }
+                }
             }
 
             // Power level
