@@ -561,6 +561,49 @@ public class GpuSurveillancePipeline {
             // Start camera (this creates EGL context and initializes downscaler)
             camera.start();
             
+            // SOTA: Register yield listener for recording finalization during camera yield.
+            // When contention is detected and the camera must yield to the native AVM app,
+            // this ensures any active recording is properly finalized (moov atom written)
+            // before the camera closes, and recording resumes after re-acquisition.
+            camera.setCameraYieldListener(new PanoramicCameraGpu.CameraYieldListener() {
+                @Override
+                public void onPreYield() {
+                    logger.info("Pre-yield: finalizing active recording...");
+                    
+                    // Stop any active recording to finalize the MP4 file
+                    if (recorder != null && recorder.isRecording()) {
+                        recorder.stopRecording();
+                        logger.info("Pre-yield: recording stopped");
+                    }
+                    
+                    // Flush encoder to ensure all buffered frames are written
+                    if (encoder != null && encoder.isWritingToFile()) {
+                        encoder.flushAndClose();
+                        logger.info("Pre-yield: encoder flushed");
+                    }
+                }
+                
+                @Override
+                public void onPostReacquire() {
+                    logger.info("Post-reacquire: resuming recording...");
+                    
+                    // Resume recording in whatever mode was active before yield
+                    if (currentMode == Mode.SURVEILLANCE) {
+                        // Sentry mode — re-enable surveillance (it will start recording on motion)
+                        if (sentry != null && !sentry.isActive()) {
+                            sentry.enable();
+                        }
+                        logger.info("Post-reacquire: surveillance mode restored");
+                    } else if (currentMode == Mode.NORMAL_RECORDING || recordingMode) {
+                        // Normal recording mode — restart recording
+                        if (recorder != null && !recorder.isRecording()) {
+                            recorder.startRecording();
+                            logger.info("Post-reacquire: normal recording resumed");
+                        }
+                    }
+                }
+            });
+            
             // Wait for camera to fully initialize and GL context to be ready
             // Increased timeout to ensure recorder can be initialized
             Thread.sleep(1500);  // Increased from 1000ms to 1500ms

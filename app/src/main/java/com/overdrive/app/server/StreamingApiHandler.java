@@ -182,21 +182,10 @@ public class StreamingApiHandler {
         streamingQuality = newQuality.name();
         CameraDaemon.setStreamingQuality(quality);
         
-        // If streaming is active, restart with new quality
-        GpuSurveillancePipeline pipeline = CameraDaemon.getGpuPipeline();
-        if (pipeline != null && pipeline.isStreamingEnabled()) {
-            int savedViewMode = pipeline.getStreamViewMode();
-            
-            CameraDaemon.log("Restarting stream with new quality: " + newQuality.displayName);
-            pipeline.disableStreaming();
-            Thread.sleep(200);
-            pipeline.enableStreaming(newQuality.width, newQuality.height, newQuality.fps, newQuality.bitrate);
-            
-            if (savedViewMode > 0) {
-                pipeline.setStreamViewMode(savedViewMode);
-                CameraDaemon.log("Restored view mode to " + savedViewMode + " after quality change");
-            }
-        }
+        // Save quality preference — it will be applied on next stream start.
+        // Don't restart the active stream to avoid disrupting the live view.
+        // The /ws handler applies the quality when the client reconnects.
+        CameraDaemon.log("Streaming quality set to: " + newQuality.displayName);
         
         JSONObject response = new JSONObject();
         response.put("success", true);
@@ -217,8 +206,8 @@ public class StreamingApiHandler {
             return;
         }
         
-        if (viewMode < 0 || viewMode > 4) {
-            HttpResponse.sendJsonError(out, "Invalid view mode. Use 0=Mosaic, 1=Front, 2=Right, 3=Rear, 4=Left");
+        if (viewMode < 0 || viewMode > 5) {
+            HttpResponse.sendJsonError(out, "Invalid view mode. Use 0=Mosaic, 1=Front, 2=Right, 3=Rear, 4=Left, 5=Raw strip");
             return;
         }
         
@@ -249,13 +238,13 @@ public class StreamingApiHandler {
         
         pipeline.setStreamViewMode(viewMode);
         
-        String[] modeNames = {"Mosaic", "Front", "Right", "Rear", "Left"};
-        CameraDaemon.log("Stream view mode set to: " + modeNames[viewMode]);
+        String[] modeNames = {"Mosaic", "Front", "Right", "Rear", "Left", "Raw"};
+        CameraDaemon.log("Stream view mode set to: " + (viewMode < modeNames.length ? modeNames[viewMode] : "Unknown"));
         
         JSONObject response = new JSONObject();
         response.put("success", true);
         response.put("viewMode", viewMode);
-        response.put("viewName", modeNames[viewMode]);
+        response.put("viewName", viewMode < modeNames.length ? modeNames[viewMode] : "Unknown");
         HttpResponse.sendJson(out, response.toString());
     }
     
@@ -263,12 +252,12 @@ public class StreamingApiHandler {
         GpuSurveillancePipeline pipeline = CameraDaemon.getGpuPipeline();
         
         int viewMode = (pipeline != null) ? pipeline.getStreamViewMode() : -1;
-        String[] modeNames = {"Mosaic", "Front", "Right", "Rear", "Left"};
+        String[] modeNames = {"Mosaic", "Front", "Right", "Rear", "Left", "Raw"};
         
         JSONObject response = new JSONObject();
         response.put("success", true);
         response.put("viewMode", viewMode);
-        response.put("viewName", viewMode >= 0 && viewMode <= 4 ? modeNames[viewMode] : "Unknown");
+        response.put("viewName", viewMode >= 0 && viewMode < modeNames.length ? modeNames[viewMode] : "Unknown");
         HttpResponse.sendJson(out, response.toString());
     }
     

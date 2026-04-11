@@ -259,8 +259,10 @@ public class TcpCommandServer {
             // ==================== SURVEILLANCE COMMANDS ====================
             
             case "enableSurveillance":
-                CameraDaemon.enableSurveillance();
                 com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(true);
+                if (!com.overdrive.app.monitor.AccMonitor.isAccOn()) {
+                    CameraDaemon.enableSurveillance();
+                }
                 response.put("status", "ok");
                 response.put("surveillance", CameraDaemon.getSurveillanceStatus());
                 break;

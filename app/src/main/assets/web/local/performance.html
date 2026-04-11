@@ -645,6 +645,10 @@
                             <span class="ev-power-val" id="evPower">-- kW</span>
                         </div>
                     </div>
+                    <div class="ev-soh-row" id="evSohRow" style="display:none;">
+                        <span class="ev-soh-label">SOH</span>
+                        <span class="ev-soh-val" id="evSohValue">--%</span>
+                    </div>
                     <div class="ev-personalized-range" id="evPersonalizedRow" style="display:none;">
                         <span class="ev-personalized-label">⚡ Personalized</span>
                         <span class="ev-personalized-val" id="evPersonalizedRange">-- km</span>
@@ -680,6 +684,105 @@
             </header>
 
             <div class="page-body">
+                <!-- SOC History Chart (Persistent - 3 days) -->
+                <div class="chart-card soc-chart-card">
+                    <div class="chart-header">
+                        <div class="chart-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;margin-right:8px;stroke:var(--success);">
+                                <rect x="6" y="7" width="12" height="10" rx="1"/><path d="M6 10H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h2"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/>
+                            </svg>
+                            Battery SOC History
+                        </div>
+                        <div class="soc-time-selector">
+                            <button class="time-btn" data-hours="24" onclick="BYD.performance.setSocTimeRange(24)">24h</button>
+                            <button class="time-btn active" data-hours="72" onclick="BYD.performance.setSocTimeRange(72)">3 Days</button>
+                            <button class="time-btn" data-hours="168" onclick="BYD.performance.setSocTimeRange(168)">7 Days</button>
+                        </div>
+                    </div>
+                    <div class="soc-stats-row">
+                        <div class="soc-stat"><span class="soc-stat-value" id="socCurrent">--%</span><span class="soc-stat-label">Current</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="socKwh">-- kWh</span><span class="soc-stat-label">Energy</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="socMin">--%</span><span class="soc-stat-label">Min</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="socMax">--%</span><span class="soc-stat-label">Max</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="socAvg">--%</span><span class="soc-stat-label">Avg</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="chargingSessions">--</span><span class="soc-stat-label">Charges</span></div>
+                    </div>
+                    <div class="chart-container" style="height: 250px;">
+                        <canvas id="socChart" class="chart-canvas"></canvas>
+                    </div>
+                    <div class="chart-legend" style="margin-top:12px;justify-content:center;">
+                        <div class="legend-item"><span class="legend-dot" style="background:var(--success);"></span>SOC %</div>
+                        <div class="legend-item"><span class="legend-dot" style="background:var(--brand-secondary);"></span>Charging</div>
+                    </div>
+                </div>
+
+                <!-- 12V Battery History Chart -->
+                <div class="chart-card soc-chart-card" id="voltageChartCard">
+                    <div class="chart-header">
+                        <div class="chart-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;margin-right:8px;stroke:#fbbf24;">
+                                <rect x="6" y="7" width="12" height="10" rx="1"/><path d="M6 10H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h2"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/>
+                            </svg>
+                            12V Battery History
+                        </div>
+                        <div class="soc-time-selector">
+                            <button class="time-btn" onclick="BYD.performance.setBatteryTimeRange(24)">24h</button>
+                            <button class="time-btn active" onclick="BYD.performance.setBatteryTimeRange(72)">3 Days</button>
+                            <button class="time-btn" onclick="BYD.performance.setBatteryTimeRange(168)">7 Days</button>
+                        </div>
+                    </div>
+                    <div class="soc-stats-row">
+                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vCurrent">--V</span><span class="soc-stat-label">Current</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vMin">--V</span><span class="soc-stat-label">Min</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vMax">--V</span><span class="soc-stat-label">Max</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vAvg">--V</span><span class="soc-stat-label">Avg</span></div>
+                    </div>
+                    <div class="chart-container" style="height: 200px;">
+                        <canvas id="voltageChart" class="chart-canvas"></canvas>
+                    </div>
+                    <div class="chart-hint">Touch or hover to see values</div>
+                    <div class="chart-legend" style="margin-top:8px;justify-content:center;">
+                        <div class="legend-item"><span class="legend-dot" style="background:#fbbf24;"></span>12V Voltage</div>
+                        <div class="legend-item"><span class="legend-dot" style="background:rgba(239,68,68,0.5);"></span>Warning (11.5V)</div>
+                        <div class="legend-item"><span class="legend-dot" style="background:rgba(14,165,233,0.3);"></span>Charging</div>
+                    </div>
+                </div>
+
+                <!-- Battery Health Card -->
+                <div class="chart-card soc-chart-card" id="batteryHealthCard">
+                    <div class="chart-header">
+                        <div class="chart-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;margin-right:8px;stroke:#a855f7;">
+                                <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+                            </svg>
+                            Battery Health
+                        </div>
+                        <div class="soc-time-selector">
+                            <button class="time-btn" onclick="BYD.performance.setHealthTimeRange(24)">24h</button>
+                            <button class="time-btn active" onclick="BYD.performance.setHealthTimeRange(72)">3 Days</button>
+                            <button class="time-btn" onclick="BYD.performance.setHealthTimeRange(168)">7 Days</button>
+                        </div>
+                    </div>
+                    <div class="soc-stats-row">
+                        <div class="soc-stat"><span class="soc-stat-value" id="sohValue" style="color:#a855f7;">--%</span><span class="soc-stat-label">SOH</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="estCapacity">-- kWh</span><span class="soc-stat-label">Est. Cap</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="tempHighVal">--°C</span><span class="soc-stat-label">Temp Hi</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="tempLowVal">--°C</span><span class="soc-stat-label">Temp Lo</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="tempDeltaVal">--°C</span><span class="soc-stat-label">Δ Temp</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="thermalStatus">--</span><span class="soc-stat-label">Status</span></div>
+                    </div>
+                    <div class="chart-container" style="height: 220px;">
+                        <canvas id="thermalChart" class="chart-canvas"></canvas>
+                    </div>
+                    <div class="chart-hint">Touch or hover to see values</div>
+                    <div class="chart-legend" style="margin-top:8px;justify-content:center;">
+                        <div class="legend-item"><span class="legend-dot" style="background:#ef4444;"></span>High</div>
+                        <div class="legend-item"><span class="legend-dot" style="background:#22c55e;"></span>Low</div>
+                        <div class="legend-item"><span class="legend-dot" style="background:#3b82f6;"></span>Average</div>
+                        <div class="legend-item"><span class="legend-dot" style="background:rgba(14,165,233,0.3);"></span>Charging</div>
+                    </div>
+                </div>
+
                 <!-- Quick Stats Grid -->
                 <div class="metrics-grid">
                     <!-- CPU Card -->
@@ -807,6 +910,7 @@
                                 </svg>
                                 EV Battery
                             </div>
+                            <span class="gpu-status-badge" id="sohBadge" style="display:none;"></span>
                         </div>
                         <div class="metric-value"><span id="evSocValue">--</span><span class="unit">%</span></div>
                         <div class="metric-subtitle"><span id="evKwhValue">--</span> kWh remaining</div>
@@ -815,6 +919,10 @@
                             <div class="stat-item">
                                 <span class="stat-label">Range</span>
                                 <span class="stat-value" id="evRangeValue">-- km</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">SOH</span>
+                                <span class="stat-value" id="evSohValue">--%</span>
                             </div>
                             <div class="stat-item">
                                 <span class="stat-label">Status</span>
@@ -866,55 +974,6 @@
                     </div>
                 </div>
 
-                <!-- SOC History Chart (Persistent - 3 days) -->
-                <div class="chart-card soc-chart-card">
-                    <div class="chart-header">
-                        <div class="chart-title">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;margin-right:8px;stroke:var(--success);">
-                                <rect x="6" y="7" width="12" height="10" rx="1"/><path d="M6 10H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h2"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/>
-                            </svg>
-                            Battery SOC History
-                        </div>
-                        <div class="soc-time-selector">
-                            <button class="time-btn" data-hours="24" onclick="BYD.performance.setSocTimeRange(24)">24h</button>
-                            <button class="time-btn active" data-hours="72" onclick="BYD.performance.setSocTimeRange(72)">3 Days</button>
-                            <button class="time-btn" data-hours="168" onclick="BYD.performance.setSocTimeRange(168)">7 Days</button>
-                        </div>
-                    </div>
-                    <div class="soc-stats-row">
-                        <div class="soc-stat">
-                            <span class="soc-stat-value" id="socCurrent">--%</span>
-                            <span class="soc-stat-label">Current</span>
-                        </div>
-                        <div class="soc-stat">
-                            <span class="soc-stat-value" id="socKwh">-- kWh</span>
-                            <span class="soc-stat-label">Energy</span>
-                        </div>
-                        <div class="soc-stat">
-                            <span class="soc-stat-value" id="socMin">--%</span>
-                            <span class="soc-stat-label">Min</span>
-                        </div>
-                        <div class="soc-stat">
-                            <span class="soc-stat-value" id="socMax">--%</span>
-                            <span class="soc-stat-label">Max</span>
-                        </div>
-                        <div class="soc-stat">
-                            <span class="soc-stat-value" id="socAvg">--%</span>
-                            <span class="soc-stat-label">Avg</span>
-                        </div>
-                        <div class="soc-stat">
-                            <span class="soc-stat-value" id="chargingSessions">--</span>
-                            <span class="soc-stat-label">Charges</span>
-                        </div>
-                    </div>
-                    <div class="chart-container" style="height: 250px;">
-                        <canvas id="socChart" class="chart-canvas"></canvas>
-                    </div>
-                    <div class="chart-legend" style="margin-top:12px;justify-content:center;">
-                        <div class="legend-item"><span class="legend-dot" style="background:var(--success);"></span>SOC %</div>
-                        <div class="legend-item"><span class="legend-dot" style="background:var(--brand-secondary);"></span>Charging</div>
-                    </div>
-                </div>
             </div>
         </main>
     </div>

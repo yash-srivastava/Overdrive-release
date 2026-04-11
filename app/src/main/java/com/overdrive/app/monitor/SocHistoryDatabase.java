@@ -63,6 +63,9 @@ public class SocHistoryDatabase {
     private long lastRecordTime = 0;
     private double lastRecordedSoc = -1;
     
+    // SohEstimator reference (set externally)
+    private volatile com.overdrive.app.abrp.SohEstimator sohEstimator;
+    
     private SocHistoryDatabase() {
         // Load the H2 JDBC driver (pure Java - always works)
         try {
@@ -187,6 +190,21 @@ public class SocHistoryDatabase {
                 stmt.execute("ALTER TABLE " + TABLE_SOC + " ADD COLUMN IF NOT EXISTS remaining_kwh REAL DEFAULT 0;");
             } catch (Exception ignored) {
                 // Column may already exist
+            }
+            
+            // Migration: add battery health columns
+            String[] newColumns = {
+                "hv_temp_high REAL DEFAULT -999",
+                "hv_temp_low REAL DEFAULT -999",
+                "hv_temp_avg REAL DEFAULT -999",
+                "cell_volt_high REAL DEFAULT -999",
+                "cell_volt_low REAL DEFAULT -999",
+                "soh_percent REAL DEFAULT -999"
+            };
+            for (String col : newColumns) {
+                try {
+                    stmt.execute("ALTER TABLE " + TABLE_SOC + " ADD COLUMN IF NOT EXISTS " + col + ";");
+                } catch (Exception ignored) {}
             }
             
             // Index for fast time-based queries
@@ -332,6 +350,79 @@ public class SocHistoryDatabase {
                 logger.debug("Failed to get remaining kWh: " + e.getMessage());
             }
             
+            // SOTA: Update SOH estimate from instantaneous readings
+            // This ensures SOH is calculated even if ABRP is not enabled
+            if (remainingKwh > 0 && soc > 0) {
+                try {
+                    com.overdrive.app.abrp.SohEstimator sohEst = getSohEstimator();
+                    if (sohEst != null) {
+                        sohEst.updateFromInstantaneous(remainingKwh, soc);
+                    }
+                } catch (Exception e) {
+                    logger.debug("SOH update failed: " + e.getMessage());
+                }
+            }
+            
+            // HV battery thermal data — from BydDataCollector (has real cell temps via Integer.TYPE)
+            double hvTempHigh = -999, hvTempLow = -999, hvTempAvg = -999;
+            double cellVoltHigh = -999, cellVoltLow = -999;
+            try {
+                com.overdrive.app.byd.BydDataCollector collector = com.overdrive.app.byd.BydDataCollector.getInstance();
+                if (collector.isInitialized()) {
+                    com.overdrive.app.byd.BydVehicleData vd = collector.getData();
+                    if (vd != null) {
+                        if (!Double.isNaN(vd.highCellTempC)) hvTempHigh = vd.highCellTempC;
+                        if (!Double.isNaN(vd.lowCellTempC)) hvTempLow = vd.lowCellTempC;
+                        if (!Double.isNaN(vd.avgCellTempC)) hvTempAvg = vd.avgCellTempC;
+                        if (!Double.isNaN(vd.highCellVoltage)) cellVoltHigh = vd.highCellVoltage;
+                        if (!Double.isNaN(vd.lowCellVoltage)) cellVoltLow = vd.lowCellVoltage;
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("Failed to get collector data: " + e.getMessage());
+            }
+            // Fallback to VehicleDataMonitor if collector didn't have temps
+            if (hvTempHigh == -999 && hvTempLow == -999 && hvTempAvg == -999) {
+                BatteryThermalData thermalData = monitor.getBatteryThermal();
+                if (thermalData != null && thermalData.hasData()) {
+                    if (!Double.isNaN(thermalData.highestTempC)) hvTempHigh = thermalData.highestTempC;
+                    if (!Double.isNaN(thermalData.lowestTempC)) hvTempLow = thermalData.lowestTempC;
+                    if (!Double.isNaN(thermalData.averageTempC)) hvTempAvg = thermalData.averageTempC;
+                }
+            }
+            
+            // SOH from SohEstimator (via AbrpTelemetryService)
+            double sohPercent = -999;
+            try {
+                com.overdrive.app.abrp.SohEstimator sohEst = getSohEstimator();
+                if (sohEst != null && sohEst.hasEstimate()) {
+                    sohPercent = sohEst.getCurrentSoh();
+                    logger.debug("SOH from estimator: " + sohPercent + "%");
+                } else {
+                    // Fallback: read from persisted file
+                    logger.info("SOH estimator " + (sohEst == null ? "is null" : "has no estimate") + ", trying persisted file fallback");
+                    java.io.File sohFile = new java.io.File("/data/local/tmp/abrp_soh_estimate.properties");
+                    if (sohFile.exists()) {
+                        java.util.Properties props = new java.util.Properties();
+                        try (java.io.FileInputStream fis = new java.io.FileInputStream(sohFile)) {
+                            props.load(fis);
+                        }
+                        String sohStr = props.getProperty("soh_percent");
+                        if (sohStr != null) {
+                            double soh = Double.parseDouble(sohStr);
+                            if (soh > 0 && soh <= 110) {
+                                sohPercent = soh;
+                                logger.info("SOH from persisted file fallback: " + soh + "%");
+                            }
+                        }
+                    } else {
+                        logger.info("SOH persisted file not found at /data/local/tmp/abrp_soh_estimate.properties");
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("Failed to get SOH: " + e.getMessage());
+            }
+            
             long now = System.currentTimeMillis();
             
             // Record at least once every 10 minutes regardless of SOC change
@@ -360,10 +451,11 @@ public class SocHistoryDatabase {
                 return;
             }
             
-            // Insert with remaining_kwh
+            // Insert with all battery health columns
             String sql = "INSERT INTO " + TABLE_SOC + 
-                " (timestamp, soc_percent, is_charging, charging_power_kw, voltage_v, range_km, remaining_kwh) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?);";
+                " (timestamp, soc_percent, is_charging, charging_power_kw, voltage_v, range_km, remaining_kwh," +
+                " hv_temp_high, hv_temp_low, hv_temp_avg, cell_volt_high, cell_volt_low, soh_percent) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
             
             try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
                 pstmt.setLong(1, now);
@@ -373,6 +465,12 @@ public class SocHistoryDatabase {
                 pstmt.setDouble(5, voltage);
                 pstmt.setInt(6, range);
                 pstmt.setDouble(7, remainingKwh);
+                pstmt.setDouble(8, hvTempHigh);
+                pstmt.setDouble(9, hvTempLow);
+                pstmt.setDouble(10, hvTempAvg);
+                pstmt.setDouble(11, cellVoltHigh);
+                pstmt.setDouble(12, cellVoltLow);
+                pstmt.setDouble(13, sohPercent);
                 pstmt.executeUpdate();
             }
             
@@ -479,7 +577,10 @@ public class SocHistoryDatabase {
                 "  MAX(is_charging) as charging, " +
                 "  AVG(charging_power_kw) as power, " +
                 "  AVG(range_km) as range, " +
-                "  AVG(remaining_kwh) as kwh " +
+                "  AVG(remaining_kwh) as kwh, " +
+                "  AVG(CASE WHEN voltage_v > 0 THEN voltage_v END) as volt, " +
+                "  AVG(CASE WHEN hv_temp_avg > -999 THEN hv_temp_avg END) as temp, " +
+                "  AVG(CASE WHEN soh_percent > 0 THEN soh_percent END) as soh " +
                 "FROM " + TABLE_SOC + " " +
                 "WHERE timestamp >= ? " +
                 "GROUP BY (timestamp / ?) " +
@@ -500,6 +601,12 @@ public class SocHistoryDatabase {
                         row.put("power", Math.round(rs.getDouble("power") * 100) / 100.0);
                         row.put("range", (int) rs.getDouble("range"));
                         row.put("kwh", Math.round(rs.getDouble("kwh") * 10) / 10.0);
+                        double volt = rs.getDouble("volt");
+                        if (!rs.wasNull() && volt > 0) row.put("volt", Math.round(volt * 100) / 100.0);
+                        double temp = rs.getDouble("temp");
+                        if (!rs.wasNull()) row.put("temp", Math.round(temp * 10) / 10.0);
+                        double soh = rs.getDouble("soh");
+                        if (!rs.wasNull() && soh > 0) row.put("soh", Math.round(soh * 10) / 10.0);
                         results.put(row);
                     }
                 }
@@ -641,6 +748,13 @@ public class SocHistoryDatabase {
                 livePoint.put("power", chargingData != null ? chargingData.chargingPowerKW : 0);
                 livePoint.put("range", rangeData != null ? rangeData.elecRangeKm : 0);
                 livePoint.put("kwh", monitor.getBatteryRemainPowerKwh());
+                
+                // Include SOH in live point
+                com.overdrive.app.abrp.SohEstimator sohEst = getSohEstimator();
+                if (sohEst != null && sohEst.hasEstimate()) {
+                    livePoint.put("soh", Math.round(sohEst.getCurrentSoh() * 10) / 10.0);
+                }
+                
                 history.put(livePoint);
             }
             
@@ -663,6 +777,238 @@ public class SocHistoryDatabase {
             
         } catch (Exception e) {
             logger.error("Failed to create full report", e);
+        }
+        
+        return report;
+    }
+    
+    /**
+     * Set the SohEstimator reference for recording SOH alongside battery data.
+     */
+    public void setSohEstimator(com.overdrive.app.abrp.SohEstimator estimator) {
+        this.sohEstimator = estimator;
+    }
+    
+    public com.overdrive.app.abrp.SohEstimator getSohEstimator() {
+        return sohEstimator;
+    }
+    
+    // ==================== BATTERY HEALTH QUERIES ====================
+    
+    /**
+     * Get 12V battery voltage history for charting.
+     */
+    public JSONArray getBatteryVoltageHistory(int hoursBack, int maxPoints) {
+        JSONArray results = new JSONArray();
+        if (!isInitialized || connection == null) return results;
+        
+        try {
+            long now = System.currentTimeMillis();
+            int hours = Math.min(hoursBack, 168);
+            long startTime = now - (hours * 60 * 60 * 1000L);
+            long timeRangeMs = hours * 60 * 60 * 1000L;
+            long bucketMs = Math.max(120_000L, timeRangeMs / maxPoints);
+            
+            String sql = 
+                "SELECT MIN(timestamp) as t, AVG(voltage_v) as voltage, " +
+                "  MAX(is_charging) as charging " +
+                "FROM " + TABLE_SOC + " WHERE timestamp >= ? AND voltage_v > 0 " +
+                "GROUP BY (timestamp / ?) ORDER BY t ASC LIMIT ?;";
+            
+            try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+                pstmt.setLong(1, startTime);
+                pstmt.setLong(2, bucketMs);
+                pstmt.setInt(3, maxPoints);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    while (rs.next()) {
+                        JSONObject row = new JSONObject();
+                        row.put("t", rs.getLong("t"));
+                        row.put("voltage", Math.round(rs.getDouble("voltage") * 100) / 100.0);
+                        row.put("charging", rs.getInt("charging") == 1);
+                        results.put(row);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Failed to get voltage history", e);
+            reconnect();
+        }
+        return results;
+    }
+    
+    /**
+     * Get HV battery thermal history for charting.
+     */
+    public JSONArray getThermalHistory(int hoursBack, int maxPoints) {
+        JSONArray results = new JSONArray();
+        if (!isInitialized || connection == null) return results;
+        
+        try {
+            long now = System.currentTimeMillis();
+            int hours = Math.min(hoursBack, 168);
+            long startTime = now - (hours * 60 * 60 * 1000L);
+            long timeRangeMs = hours * 60 * 60 * 1000L;
+            long bucketMs = Math.max(120_000L, timeRangeMs / maxPoints);
+            
+            String sql = 
+                "SELECT MIN(timestamp) as t, " +
+                "  AVG(CASE WHEN hv_temp_high > -999 THEN hv_temp_high END) as temp_high, " +
+                "  AVG(CASE WHEN hv_temp_low > -999 THEN hv_temp_low END) as temp_low, " +
+                "  AVG(CASE WHEN hv_temp_avg > -999 THEN hv_temp_avg END) as temp_avg, " +
+                "  MAX(is_charging) as charging " +
+                "FROM " + TABLE_SOC + " WHERE timestamp >= ? " +
+                "AND (hv_temp_high > -999 OR hv_temp_low > -999 OR hv_temp_avg > -999) " +
+                "GROUP BY (timestamp / ?) ORDER BY t ASC LIMIT ?;";
+            
+            try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+                pstmt.setLong(1, startTime);
+                pstmt.setLong(2, bucketMs);
+                pstmt.setInt(3, maxPoints);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    while (rs.next()) {
+                        JSONObject row = new JSONObject();
+                        row.put("t", rs.getLong("t"));
+                        double h = rs.getDouble("temp_high");
+                        boolean hNull = rs.wasNull();
+                        double l = rs.getDouble("temp_low");
+                        boolean lNull = rs.wasNull();
+                        double a = rs.getDouble("temp_avg");
+                        boolean aNull = rs.wasNull();
+                        if (!hNull) row.put("high", Math.round(h * 10) / 10.0);
+                        if (!lNull) row.put("low", Math.round(l * 10) / 10.0);
+                        if (!aNull) row.put("avg", Math.round(a * 10) / 10.0);
+                        row.put("charging", rs.getInt("charging") == 1);
+                        results.put(row);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Failed to get thermal history", e);
+            reconnect();
+        }
+        return results;
+    }
+    
+    /**
+     * Get battery health report — current state + historical stats.
+     */
+    public JSONObject getBatteryHealthReport(int hoursBack, int maxPoints) {
+        JSONObject report = new JSONObject();
+        
+        try {
+            VehicleDataMonitor monitor = VehicleDataMonitor.getInstance();
+            
+            // Current live data
+            JSONObject current = new JSONObject();
+            
+            BatteryPowerData powerData = monitor.getBatteryPower();
+            if (powerData != null) {
+                current.put("voltage12v", powerData.voltageVolts);
+                current.put("voltageStatus", powerData.getHealthStatus());
+            }
+            
+            BatterySocData socData = monitor.getBatterySoc();
+            if (socData != null) {
+                current.put("soc", socData.socPercent);
+            }
+            
+            BatteryThermalData thermalData = monitor.getBatteryThermal();
+            if (thermalData != null && thermalData.hasData()) {
+                if (!Double.isNaN(thermalData.highestTempC)) current.put("tempHigh", thermalData.highestTempC);
+                if (!Double.isNaN(thermalData.lowestTempC)) current.put("tempLow", thermalData.lowestTempC);
+                if (!Double.isNaN(thermalData.averageTempC)) current.put("tempAvg", thermalData.averageTempC);
+                if (!Double.isNaN(thermalData.deltaC)) current.put("tempDelta", thermalData.deltaC);
+                current.put("thermalStatus", thermalData.getStatus());
+            }
+            
+            com.overdrive.app.abrp.SohEstimator sohEst = getSohEstimator();
+            if (sohEst != null && sohEst.hasEstimate()) {
+                current.put("soh", Math.round(sohEst.getCurrentSoh() * 10) / 10.0);
+                current.put("estimatedCapacityKwh", Math.round(sohEst.getEstimatedCapacityKwh() * 10) / 10.0);
+                current.put("nominalCapacityKwh", sohEst.getNominalCapacityKwh());
+            } else {
+                // Fallback: read persisted SOH from file if estimator reference not wired yet
+                logger.info("SOH estimator " + (sohEst == null ? "is null" : "has no estimate") + " for health report, trying persisted file fallback");
+                try {
+                    java.io.File sohFile = new java.io.File("/data/local/tmp/abrp_soh_estimate.properties");
+                    if (sohFile.exists()) {
+                        java.util.Properties props = new java.util.Properties();
+                        try (java.io.FileInputStream fis = new java.io.FileInputStream(sohFile)) {
+                            props.load(fis);
+                        }
+                        String sohStr = props.getProperty("soh_percent");
+                        if (sohStr != null) {
+                            double soh = Double.parseDouble(sohStr);
+                            if (soh > 0 && soh <= 110) {
+                                current.put("soh", Math.round(soh * 10) / 10.0);
+                                logger.info("SOH from persisted file fallback (health report): " + soh + "%");
+                            }
+                        }
+                    } else {
+                        logger.info("SOH persisted file not found for health report");
+                    }
+                } catch (Exception e) {
+                    logger.debug("Failed to read persisted SOH for health report: " + e.getMessage());
+                }
+            }
+            
+            double remainingKwh = monitor.getBatteryRemainPowerKwh();
+            if (remainingKwh > 0) current.put("remainingKwh", Math.round(remainingKwh * 10) / 10.0);
+            
+            DrivingRangeData rangeData = monitor.getDrivingRange();
+            if (rangeData != null) current.put("rangeKm", rangeData.elecRangeKm);
+            
+            report.put("current", current);
+            
+            // Historical data
+            report.put("voltageHistory", getBatteryVoltageHistory(hoursBack, maxPoints));
+            report.put("thermalHistory", getThermalHistory(hoursBack, maxPoints));
+            
+            // 12V voltage stats
+            if (isInitialized && connection != null) {
+                long startTime = System.currentTimeMillis() - (hoursBack * 60 * 60 * 1000L);
+                String statsSql = "SELECT MIN(voltage_v), MAX(voltage_v), AVG(voltage_v) " +
+                    "FROM " + TABLE_SOC + " WHERE timestamp >= ? AND voltage_v > 0;";
+                try (PreparedStatement pstmt = connection.prepareStatement(statsSql)) {
+                    pstmt.setLong(1, startTime);
+                    try (ResultSet rs = pstmt.executeQuery()) {
+                        if (rs.next()) {
+                            JSONObject voltStats = new JSONObject();
+                            voltStats.put("min", Math.round(rs.getDouble(1) * 100) / 100.0);
+                            voltStats.put("max", Math.round(rs.getDouble(2) * 100) / 100.0);
+                            voltStats.put("avg", Math.round(rs.getDouble(3) * 100) / 100.0);
+                            report.put("voltageStats", voltStats);
+                        }
+                    }
+                }
+                
+                // SOH history (last N samples where soh > 0)
+                String sohSql = "SELECT MIN(timestamp) as t, AVG(soh_percent) as soh " +
+                    "FROM " + TABLE_SOC + " WHERE timestamp >= ? AND soh_percent > 0 " +
+                    "GROUP BY (timestamp / ?) ORDER BY t ASC LIMIT ?;";
+                long sohBucketMs = Math.max(120_000L, (long)(hoursBack) * 60 * 60 * 1000L / maxPoints);
+                JSONArray sohHistory = new JSONArray();
+                try (PreparedStatement pstmt = connection.prepareStatement(sohSql)) {
+                    pstmt.setLong(1, startTime);
+                    pstmt.setLong(2, sohBucketMs);
+                    pstmt.setInt(3, maxPoints);
+                    try (ResultSet rs = pstmt.executeQuery()) {
+                        while (rs.next()) {
+                            JSONObject row = new JSONObject();
+                            row.put("t", rs.getLong("t"));
+                            row.put("soh", Math.round(rs.getDouble("soh") * 10) / 10.0);
+                            sohHistory.put(row);
+                        }
+                    }
+                }
+                report.put("sohHistory", sohHistory);
+            }
+            
+            report.put("hoursBack", hoursBack);
+            report.put("timestamp", System.currentTimeMillis());
+            
+        } catch (Exception e) {
+            logger.error("Failed to create battery health report", e);
         }
         
         return report;

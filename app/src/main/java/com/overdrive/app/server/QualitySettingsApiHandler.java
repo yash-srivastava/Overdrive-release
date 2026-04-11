@@ -349,8 +349,19 @@ public class QualitySettingsApiHandler {
                 unified.put("version", 1);
             }
             
-            // Update the specified section
-            unified.put(section, data);
+            // SOTA: Merge into existing section (not replace) to preserve keys
+            // that are set independently (e.g. surveillanceEnabled is set via toggle,
+            // not via the detection settings form). Replacing would wipe it.
+            JSONObject existingSection = unified.optJSONObject(section);
+            if (existingSection == null) {
+                existingSection = new JSONObject();
+            }
+            java.util.Iterator<String> keys = data.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                existingSection.put(key, data.get(key));
+            }
+            unified.put(section, existingSection);
             unified.put("lastModified", System.currentTimeMillis());
             
             // Write back

@@ -82,6 +82,25 @@ input, select { font-family: inherit; }
     bottom: 0;
     z-index: 100;
     transition: transform 0.3s ease;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.sidebar::-webkit-scrollbar {
+    width: 4px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+    background: var(--border-subtle);
+    border-radius: 4px;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
 }
 
 .sidebar-header {
@@ -90,7 +109,13 @@ input, select { font-family: inherit; }
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    background: var(--bg-surface);
+    z-index: 1;
 }
+
 
 .sidebar-close {
     display: none;
@@ -157,11 +182,11 @@ input, select { font-family: inherit; }
 
 /* === SIDEBAR NAV === */
 .sidebar-nav {
-    flex: 1;
     padding: 16px 12px;
     display: flex;
     flex-direction: column;
     gap: 4px;
+    flex-shrink: 0; /* Nav links never shrink — always fully visible */
 }
 
 .nav-link {
@@ -2450,6 +2475,32 @@ input, select { font-family: inherit; }
     font-size: 14px;
     font-weight: 700;
     color: var(--brand-primary);
+}
+
+/* SOH Row */
+.ev-soh-row {
+    margin-top: 8px;
+    padding: 6px 10px;
+    background: rgba(168, 85, 247, 0.08);
+    border: 1px solid rgba(168, 85, 247, 0.15);
+    border-radius: var(--radius-sm);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.ev-soh-label {
+    font-size: 11px;
+    color: #a855f7;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.ev-soh-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 700;
+    color: #22c55e;
 }
 
 /* Status icon in label */

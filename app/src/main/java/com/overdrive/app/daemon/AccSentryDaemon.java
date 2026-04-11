@@ -713,6 +713,13 @@ public class AccSentryDaemon {
         inSentryMode = true;
         log("=== ENTERING SENTRY MODE ===");
 
+        // CRITICAL: Always notify CameraDaemon that ACC is OFF immediately.
+        // enableSurveillance() may skip the IPC if surveillanceEnabled is already true
+        // or if the user has surveillance disabled in config, which would leave
+        // AccMonitor stuck showing ACC ON (e.g. when parked in a safe zone).
+        // This mirrors exitSentryMode() which also calls notifyAccState() first.
+        notifyAccState(true);  // accOff=true → ACC is OFF
+
         // Background thread for setup
         new Thread(() -> {
             try {
@@ -1763,20 +1770,22 @@ public class AccSentryDaemon {
     private static void disableSurveillance() {
         if (!surveillanceEnabled) return;
 
-        log("Disabling surveillance...");
+        log("Disabling surveillance (session only — preserving user preference)...");
 
         try {
-            // Send config with accOff=false and enabled=false
+            // Only send accOff=false to signal ACC ON.
+            // Do NOT send enabled=false — that would overwrite the user's
+            // surveillance preference in UnifiedConfigManager, preventing
+            // auto-start on the next ACC OFF cycle.
             JSONObject cmd = new JSONObject();
             cmd.put("command", "SET_CONFIG");
             JSONObject config = new JSONObject();
             config.put("accOff", false);
-            config.put("enabled", false);
             cmd.put("config", config);
             
             sendSurveillanceCommandRaw(cmd);
             surveillanceEnabled = false;
-            log("Surveillance DISABLED");
+            log("Surveillance session STOPPED (user preference preserved)");
         } catch (Exception e) {
             log("WARN: Failed to disable surveillance: " + e.getMessage());
         }
@@ -1988,11 +1997,11 @@ public class AccSentryDaemon {
 
     private static Context getSystemContext() {
         try {
-            Class<?> activityThread = Class.forName("android.app.ActivityThread");
-            Method systemMain = activityThread.getMethod("systemMain");
-            Object at = systemMain.invoke(null);
-            Method getSystemContext = activityThread.getMethod("getSystemContext");
-            return (Context) getSystemContext.invoke(at);
+            Class<?> activityThreadClass = Class.forName("android.app.ActivityThread");
+            Object activityThread = resolveActivityThread(activityThreadClass);
+            if (activityThread == null) return null;
+            Method getSystemContext = activityThreadClass.getMethod("getSystemContext");
+            return (Context) getSystemContext.invoke(activityThread);
         } catch (Exception e) {
             log("getSystemContext failed: " + e.getMessage());
             return null;
@@ -2002,42 +2011,79 @@ public class AccSentryDaemon {
     private static Context createAppContext() {
         try {
             Class<?> activityThreadClass = Class.forName("android.app.ActivityThread");
-            Object activityThread;
-
-            try {
-                Method currentActivityThread = activityThreadClass.getMethod("currentActivityThread");
-                activityThread = currentActivityThread.invoke(null);
-            } catch (Exception e) {
-                activityThread = null;
-            }
+            Object activityThread = resolveActivityThread(activityThreadClass);
 
             if (activityThread == null) {
-                Method systemMain = activityThreadClass.getMethod("systemMain");
-                activityThread = systemMain.invoke(null);
+                log("createAppContext: all strategies failed, using null-safe fallback");
+                return new PermissionBypassContext(null);
             }
-
-            if (activityThread == null) return null;
 
             Method getSystemContext = activityThreadClass.getMethod("getSystemContext");
             Context systemContext = (Context) getSystemContext.invoke(activityThread);
+            if (systemContext == null) return new PermissionBypassContext(null);
 
             String packageName = APP_PACKAGE_NAME();
             Context appContext = systemContext.createPackageContext(packageName,
                     Context.CONTEXT_INCLUDE_CODE | Context.CONTEXT_IGNORE_SECURITY);
             
-            // Wrap with permission bypass for BYD hardware access
             return new PermissionBypassContext(appContext);
 
         } catch (Exception e) {
             log("createAppContext failed: " + e.getMessage());
-            return null;
+            return new PermissionBypassContext(null);
         }
     }
+
+    private static Object resolveActivityThread(Class<?> activityThreadClass) {
+        try {
+            Method cur = activityThreadClass.getMethod("currentActivityThread");
+            Object at = cur.invoke(null);
+            if (at != null) return at;
+        } catch (Exception ignored) {}
+        
+        final Object[] result = new Object[1];
+        try {
+            Thread t = new Thread(() -> {
+                try {
+                    Method systemMain = activityThreadClass.getMethod("systemMain");
+                    result[0] = systemMain.invoke(null);
+                } catch (Exception ignored) {}
+            }, "SystemMainInit");
+            t.setDaemon(true);
+            t.start();
+            t.join(10_000);
+            if (t.isAlive()) {
+                log("resolveActivityThread: systemMain timed out");
+                t.interrupt();
+                try {
+                    Method cur = activityThreadClass.getMethod("currentActivityThread");
+                    Object at = cur.invoke(null);
+                    if (at != null) return at;
+                } catch (Exception ignored) {}
+            } else if (result[0] != null) {
+                return result[0];
+            }
+        } catch (Exception ignored) {}
+        
+        try {
+            try { android.os.Looper.prepareMainLooper(); } catch (Exception ignored) {}
+            java.lang.reflect.Constructor<?> ctor = activityThreadClass.getDeclaredConstructor();
+            ctor.setAccessible(true);
+            Object at = ctor.newInstance();
+            try {
+                java.lang.reflect.Field f = activityThreadClass.getDeclaredField("sCurrentActivityThread");
+                f.setAccessible(true);
+                f.set(null, at);
+            } catch (Exception ignored) {}
+            log("resolveActivityThread: manual creation succeeded");
+            return at;
+        } catch (Exception e) {
+            log("resolveActivityThread: manual creation failed: " + e.getMessage());
+        }
+        
+        return null;
+    }
     
-    /**
-     * Context wrapper that bypasses permission checks.
-     * Required for accessing BYD hardware services without signature permissions.
-     */
     private static class PermissionBypassContext extends android.content.ContextWrapper {
         public PermissionBypassContext(Context base) { super(base); }
         
@@ -2052,6 +2098,27 @@ public class AccSentryDaemon {
         }
         @Override public int checkSelfPermission(String permission) {
             return android.content.pm.PackageManager.PERMISSION_GRANTED;
+        }
+        @Override public Context getApplicationContext() {
+            try { return super.getApplicationContext(); } catch (NullPointerException e) { return this; }
+        }
+        @Override public String getPackageName() {
+            try { return super.getPackageName(); } catch (NullPointerException e) { return APP_PACKAGE_NAME(); }
+        }
+        @Override public Object getSystemService(String name) {
+            try { return super.getSystemService(name); } catch (NullPointerException e) { return null; }
+        }
+        @Override public android.content.pm.ApplicationInfo getApplicationInfo() {
+            try { return super.getApplicationInfo(); } catch (NullPointerException e) { return new android.content.pm.ApplicationInfo(); }
+        }
+        @Override public android.content.ContentResolver getContentResolver() {
+            try { return super.getContentResolver(); } catch (NullPointerException e) { return null; }
+        }
+        @Override public android.content.res.Resources getResources() {
+            try { return super.getResources(); } catch (NullPointerException e) { return null; }
+        }
+        @Override public Context createPackageContext(String packageName, int flags) {
+            try { return super.createPackageContext(packageName, flags); } catch (Exception e) { return this; }
         }
     }
 

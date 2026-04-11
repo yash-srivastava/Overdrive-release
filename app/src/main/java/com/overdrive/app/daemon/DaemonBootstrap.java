@@ -100,39 +100,73 @@ public final class DaemonBootstrap {
             Class<?> activityThreadClass = Class.forName("android.app.ActivityThread");
             Object activityThread = null;
             
-            // Try to get existing ActivityThread
+            // Strategy 1: existing thread
             try {
                 Method currentActivityThread = activityThreadClass.getMethod("currentActivityThread");
                 activityThread = currentActivityThread.invoke(null);
             } catch (Exception ignored) {}
             
-            // If none exists, create one via systemMain
+            // Strategy 2: systemMain with timeout
             if (activityThread == null) {
-                Method systemMain = activityThreadClass.getMethod("systemMain");
-                activityThread = systemMain.invoke(null);
+                final Object[] result = new Object[1];
+                Thread t = new Thread(() -> {
+                    try {
+                        Method systemMain = activityThreadClass.getMethod("systemMain");
+                        result[0] = systemMain.invoke(null);
+                    } catch (Exception ignored) {}
+                }, "SystemMainInit");
+                t.setDaemon(true);
+                t.start();
+                t.join(10_000);
+                if (t.isAlive()) {
+                    log("createAppContext: systemMain timed out (10s)");
+                    t.interrupt();
+                    try {
+                        Method cur = activityThreadClass.getMethod("currentActivityThread");
+                        activityThread = cur.invoke(null);
+                    } catch (Exception ignored) {}
+                } else {
+                    activityThread = result[0];
+                }
+            }
+            
+            // Strategy 3: manual creation
+            if (activityThread == null) {
+                try {
+                    try { android.os.Looper.prepareMainLooper(); } catch (Exception ignored) {}
+                    java.lang.reflect.Constructor<?> ctor = activityThreadClass.getDeclaredConstructor();
+                    ctor.setAccessible(true);
+                    activityThread = ctor.newInstance();
+                    try {
+                        java.lang.reflect.Field f = activityThreadClass.getDeclaredField("sCurrentActivityThread");
+                        f.setAccessible(true);
+                        f.set(null, activityThread);
+                    } catch (Exception ignored) {}
+                    log("createAppContext: manual ActivityThread creation succeeded");
+                } catch (Exception e) {
+                    log("createAppContext: manual creation failed: " + e.getMessage());
+                }
             }
             
             if (activityThread == null) {
-                log("Failed to get ActivityThread");
-                return null;
+                log("Failed to get ActivityThread, using null-safe fallback");
+                return new PermissionBypassContext(null);
             }
             
-            // Get system context
             Method getSystemContext = activityThreadClass.getMethod("getSystemContext");
             Context systemContext = (Context) getSystemContext.invoke(activityThread);
+            if (systemContext == null) return new PermissionBypassContext(null);
             
-            // Create package context for our app
             Context packageContext = systemContext.createPackageContext(
                 BOOTSTRAP_PACKAGE,
                 Context.CONTEXT_INCLUDE_CODE | Context.CONTEXT_IGNORE_SECURITY
             );
             
-            // Wrap with permission bypass
             return new PermissionBypassContext(packageContext);
             
         } catch (Exception e) {
             log("createAppContext failed: " + e.getMessage());
-            return null;
+            return new PermissionBypassContext(null);
         }
     }
     
@@ -192,6 +226,29 @@ public final class DaemonBootstrap {
         @Override 
         public int checkSelfPermission(String permission) {
             return android.content.pm.PackageManager.PERMISSION_GRANTED;
+        }
+        
+        // Null-safe overrides for fallback mode
+        @Override public Context getApplicationContext() {
+            try { return super.getApplicationContext(); } catch (NullPointerException e) { return this; }
+        }
+        @Override public String getPackageName() {
+            try { return super.getPackageName(); } catch (NullPointerException e) { return BOOTSTRAP_PACKAGE; }
+        }
+        @Override public Object getSystemService(String name) {
+            try { return super.getSystemService(name); } catch (NullPointerException e) { return null; }
+        }
+        @Override public android.content.pm.ApplicationInfo getApplicationInfo() {
+            try { return super.getApplicationInfo(); } catch (NullPointerException e) { return new android.content.pm.ApplicationInfo(); }
+        }
+        @Override public android.content.ContentResolver getContentResolver() {
+            try { return super.getContentResolver(); } catch (NullPointerException e) { return null; }
+        }
+        @Override public android.content.res.Resources getResources() {
+            try { return super.getResources(); } catch (NullPointerException e) { return null; }
+        }
+        @Override public Context createPackageContext(String packageName, int flags) {
+            try { return super.createPackageContext(packageName, flags); } catch (Exception e) { return this; }
         }
     }
 }

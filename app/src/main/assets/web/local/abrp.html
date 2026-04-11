@@ -214,6 +214,10 @@
                             <span class="ev-power-val" id="evPower">-- kW</span>
                         </div>
                     </div>
+                    <div class="ev-soh-row" id="evSohRow" style="display:none;">
+                        <span class="ev-soh-label">SOH</span>
+                        <span class="ev-soh-val" id="evSohValue">--%</span>
+                    </div>
                     <div class="ev-personalized-range" id="evPersonalizedRow" style="display:none;">
                         <span class="ev-personalized-label">⚡ Personalized</span>
                         <span class="ev-personalized-val" id="evPersonalizedRange">-- km</span>
@@ -268,7 +272,10 @@
                                     <span id="vehicleSpeed" style="font-family:'JetBrains Mono',monospace;color:var(--text-primary);">-- km/h</span>
                                 </div>
                                 <div style="font-size:13px;color:var(--text-secondary);">
-                                    <span id="vehicleTemp" style="font-family:'JetBrains Mono',monospace;color:var(--text-primary);">-- °C</span>
+                                    <span id="vehicleTemp" style="font-family:'JetBrains Mono',monospace;color:var(--text-primary);">-- °C</span> ext
+                                </div>
+                                <div style="font-size:13px;color:var(--text-secondary);">
+                                    <span id="vehicleBattTemp" style="font-family:'JetBrains Mono',monospace;color:#fbbf24;">-- °C</span> battery
                                 </div>
                             </div>
                         </div>
@@ -361,6 +368,7 @@
                             <tr><td>elevation</td><td id="tlm_elevation">-- m</td></tr>
                             <tr><td>heading</td><td id="tlm_heading">--°</td></tr>
                             <tr><td>ext_temp</td><td id="tlm_ext_temp">-- °C</td></tr>
+                            <tr><td>batt_temp</td><td id="tlm_batt_temp">-- °C</td></tr>
                             <tr><td>odometer</td><td id="tlm_odometer">-- km</td></tr>
                             <tr><td>soh</td><td id="tlm_soh">--%</td></tr>
                             <tr><td>capacity</td><td id="tlm_capacity">-- kWh</td></tr>

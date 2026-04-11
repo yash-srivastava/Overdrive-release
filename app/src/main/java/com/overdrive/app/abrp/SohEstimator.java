@@ -8,7 +8,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.lang.reflect.Method;
-import java.util.LinkedList;
 import java.util.Properties;
 
 /**
@@ -28,7 +27,6 @@ public class SohEstimator {
 
     private double nominalCapacityKwh = 60.48;
     private static final String SOH_FILE = "/data/local/tmp/abrp_soh_estimate.properties";
-    private static final int WINDOW_SIZE = 10;
 
     private static final String PROP_SOH_PERCENT = "soh_percent";
     private static final String PROP_ESTIMATION_METHOD = "estimation_method";
@@ -41,7 +39,6 @@ public class SohEstimator {
     private double currentSoh = -1;
     private String estimationMethod = METHOD_INSTANTANEOUS;
     private int sampleCount = 0;
-    private final LinkedList<Double> rollingWindow = new LinkedList<>();
 
     public void setNominalCapacityKwh(double capacityKwh) {
         if (capacityKwh > 10 && capacityKwh < 200) {
@@ -151,58 +148,141 @@ public class SohEstimator {
                 currentSoh = -1;
                 sampleCount = 0;
             } else {
-                // Prime the rolling window with saved value to prevent jumps on reboot
-                rollingWindow.clear();
-                int primeCount = Math.min(Math.max(1, sampleCount), WINDOW_SIZE);
-                for (int i = 0; i < primeCount; i++) {
-                    rollingWindow.add(currentSoh);
-                }
-                logger.info("Restored SOH: " + currentSoh + "% (window primed: " + primeCount + " samples)");
+                // EMA doesn't need window priming — the persisted value IS the EMA state
+                logger.info("Restored SOH: " + currentSoh + "% (samples: " + sampleCount + ")");
             }
         } catch (Exception e) {
             logger.error("Failed to load SOH: " + e.getMessage());
         }
     }
 
-    // ==================== SOH UPDATES ====================
+    // ==================== SOTA SOH UPDATES ====================
 
-    public void updateFromInstantaneous(double remainingKwh, double socPercent) {
-        if (socPercent <= 0 || socPercent > 100.0) return;
+    /**
+     * BYD Display SOC correction factor.
+     * BYD hides ~2.5% at bottom and ~2.5% at top for battery protection.
+     * Display 0-100% maps to approximately Absolute 2.5-97.5%.
+     * absoluteSoc ≈ displaySoc * 0.95 + 2.5
+     */
+    private static double correctDisplaySoc(double displaySoc) {
+        return displaySoc * 0.95 + 2.5;
+    }
 
-        double currentTotalCap = remainingKwh / (socPercent / 100.0);
+    /**
+     * Confidence-Weighted Exponential Moving Average (EMA).
+     * Replaces the naive rolling window. Prevents volatile swings from noisy readings
+     * while allowing high-confidence calibration data to shift the estimate quickly.
+     *
+     * @param newSohEstimate The new SOH value to incorporate
+     * @param confidenceWeight How much this reading should influence the average (0.0 - 1.0)
+     */
+    private void applyWeightedSoh(double newSohEstimate, double confidenceWeight) {
+        if (newSohEstimate < 50.0 || newSohEstimate > 110.0) return;
+
+        if (currentSoh < 0) {
+            // First estimate — accept directly
+            currentSoh = newSohEstimate;
+        } else {
+            // EMA: current = (new * weight) + (current * (1 - weight))
+            currentSoh = (newSohEstimate * confidenceWeight) + (currentSoh * (1.0 - confidenceWeight));
+        }
+
+        sampleCount++;
+        persistEstimate();
+    }
+
+    /**
+     * Update SOH from instantaneous remainingKwh / SOC readings.
+     *
+     * LFP batteries have flat voltage curves in the 20-90% range, making BMS
+     * capacity estimates unreliable in that zone. We only trust readings near
+     * the "knees" of the voltage curve (below 15% or above 90%) where the BMS
+     * has real voltage delta to work with.
+     *
+     * In the flat zone (15-90%), we still accept readings but with very low
+     * confidence weight (0.01) so they barely nudge the estimate.
+     *
+     * SOC is corrected from Display SOC to approximate Absolute SOC before math.
+     *
+     * @param remainingKwh Battery remaining energy from BMS
+     * @param displaySocPercent Display SOC from dashboard (0-100)
+     */
+    public void updateFromInstantaneous(double remainingKwh, double displaySocPercent) {
+        if (displaySocPercent <= 0 || displaySocPercent > 100.0) return;
+        if (remainingKwh <= 0) return;
+
+        // Correct Display SOC to approximate Absolute SOC
+        double absSoc = correctDisplaySoc(displaySocPercent);
+
+        double currentTotalCap = remainingKwh / (absSoc / 100.0);
         double instantaneousSoh = (currentTotalCap / nominalCapacityKwh) * 100.0;
 
         if (instantaneousSoh < 50.0 || instantaneousSoh > 110.0) return;
 
-        rollingWindow.addLast(instantaneousSoh);
-        if (rollingWindow.size() > WINDOW_SIZE) {
-            rollingWindow.removeFirst();
+        // Confidence weight based on SOC zone:
+        // - Near knees (<15% or >90%): 0.05 — BMS has good voltage reference
+        // - Flat zone (15-90%): 0.01 — BMS estimate is unreliable for LFP
+        double weight;
+        if (absSoc < 15.0 || absSoc > 90.0) {
+            weight = 0.05;  // ~20 consistent readings to fully shift
+        } else {
+            weight = 0.01;  // ~100 consistent readings to fully shift
         }
 
-        double sum = 0;
-        for (double val : rollingWindow) sum += val;
-        currentSoh = sum / rollingWindow.size();
+        applyWeightedSoh(instantaneousSoh, weight);
         estimationMethod = METHOD_INSTANTANEOUS;
-        sampleCount = rollingWindow.size();
-
-        persistEstimate();
     }
 
-    public void updateFromCalibration(double energyChargedKwh, double socDelta) {
-        if (socDelta < 10.0) return;
+    /**
+     * Update SOH from a charge calibration session.
+     *
+     * Deep charge sessions are the gold standard for SOH estimation because
+     * the energy metered into the battery can be directly compared to the SOC delta.
+     *
+     * LFP chemistry requires larger deltas for accuracy due to flat voltage curves.
+     * Minimum 25% delta (practical for daily charging), with confidence scaling by delta size.
+     *
+     * IMPORTANT: energyEnteredBatteryKwh must be the energy that entered the battery pack,
+     * NOT the wall charger reading. If using charger data, multiply by charging efficiency
+     * (~0.90 for BYD AC charging) to avoid inflated SOH from counting heat loss as stored energy.
+     *
+     * @param energyEnteredBatteryKwh Energy that entered the battery (after charging losses)
+     * @param socDelta SOC change during charge session (Display SOC delta)
+     */
+    public void updateFromCalibration(double energyEnteredBatteryKwh, double socDelta) {
+        // Reject shallow charges — LFP flat voltage curve makes them unreliable
+        if (socDelta < 25.0) {
+            logger.debug("Calibration rejected: SOC delta " + String.format("%.1f", socDelta) +
+                "% < 25% minimum for LFP accuracy");
+            return;
+        }
 
-        double actualCapacity = energyChargedKwh / (socDelta / 100.0);
-        double soh = (actualCapacity / nominalCapacityKwh) * 100.0;
+        // Correct the SOC delta from Display to Absolute scale
+        // A 50% display delta ≈ 47.5% absolute delta (0.95 factor)
+        double absSocDelta = socDelta * 0.95;
 
-        currentSoh = soh;
+        double actualCapacity = energyEnteredBatteryKwh / (absSocDelta / 100.0);
+        double calibratedSoh = (actualCapacity / nominalCapacityKwh) * 100.0;
+
+        if (calibratedSoh < 50.0 || calibratedSoh > 110.0) {
+            logger.warn("Calibration SOH out of range: " + String.format("%.1f", calibratedSoh) + "% — rejected");
+            return;
+        }
+
+        // Dynamic confidence weight based on charge delta size:
+        // 25% delta → 0.15 weight (moderate confidence)
+        // 50% delta → 0.30 weight (good confidence)
+        // 75%+ delta → 0.50 weight (high confidence)
+        double confidenceWeight = 0.15 + (((Math.min(socDelta, 75.0) - 25.0) / 50.0) * 0.35);
+
+        applyWeightedSoh(calibratedSoh, confidenceWeight);
         estimationMethod = METHOD_CALIBRATION;
-        rollingWindow.clear();
-        for (int i = 0; i < WINDOW_SIZE; i++) rollingWindow.add(soh);
-        sampleCount = WINDOW_SIZE;
 
-        logger.info("Calibration SOH: " + String.format("%.1f", soh) + "% (" +
-            String.format("%.1f", energyChargedKwh) + " kWh / " + String.format("%.1f", socDelta) + "% delta)");
-        persistEstimate();
+        logger.info("Calibration SOH: " + String.format("%.1f", calibratedSoh) + "% " +
+            "(weight=" + String.format("%.2f", confidenceWeight) + ") " +
+            "[" + String.format("%.1f", energyEnteredBatteryKwh) + " kWh / " +
+            String.format("%.1f", socDelta) + "% display delta → " +
+            String.format("%.1f", absSocDelta) + "% absolute]");
     }
 
     // ==================== GETTERS ====================

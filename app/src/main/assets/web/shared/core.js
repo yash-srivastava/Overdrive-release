@@ -77,9 +77,14 @@ BYD.core = {
             // Surveillance status
             const survEl = document.getElementById('survStatus');
             if (survEl) {
-                const active = status.gpuSurveillance || false;
-                survEl.textContent = active ? 'ON' : 'OFF';
-                survEl.className = 'status-value ' + (active ? 'on' : 'off');
+                if (status.safeZoneSuppressed || status.inSafeZone) {
+                    survEl.textContent = '🏠 Safe';
+                    survEl.className = 'status-value safe';
+                } else {
+                    const active = status.gpuSurveillance || false;
+                    survEl.textContent = active ? 'ON' : 'OFF';
+                    survEl.className = 'status-value ' + (active ? 'on' : 'off');
+                }
             }
 
             // Network status (WiFi SSID + IP or Mobile Data)
@@ -243,6 +248,15 @@ BYD.core = {
             }
         } else {
             evCard.classList.remove('charging');
+        }
+
+        // SOH display
+        const evSohEl = document.getElementById('evSohValue');
+        const evSohRow = document.getElementById('evSohRow');
+        if (evSohEl && status.soh && status.soh.percent > 0) {
+            evSohEl.textContent = status.soh.percent.toFixed(1) + '%';
+            evSohEl.style.color = status.soh.percent >= 90 ? '#22c55e' : status.soh.percent >= 80 ? '#00D4AA' : status.soh.percent >= 70 ? '#fbbf24' : '#ef4444';
+            if (evSohRow) evSohRow.style.display = '';
         }
 
         // Personalized range from trip analytics

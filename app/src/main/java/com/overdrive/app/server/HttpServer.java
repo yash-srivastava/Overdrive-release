@@ -498,6 +498,15 @@ public class HttpServer {
         status.put("battery", BatteryMonitor.getBatteryInfo());
         status.put("acc", AccMonitor.isAccOn());
         
+        // Safe zone status (so UI can show suppressed state)
+        com.overdrive.app.surveillance.SafeLocationManager safeMgr =
+            com.overdrive.app.surveillance.SafeLocationManager.getInstance();
+        status.put("safeZoneSuppressed", CameraDaemon.isSafeZoneSuppressed());
+        status.put("inSafeZone", safeMgr.isInSafeZone());
+        if (safeMgr.getCurrentZoneName() != null) {
+            status.put("safeZoneName", safeMgr.getCurrentZoneName());
+        }
+        
         // Vehicle data (charging state and power)
         try {
             com.overdrive.app.monitor.VehicleDataMonitor vehicleMonitor =
@@ -539,9 +548,46 @@ public class HttpServer {
             // Vehicle data not available
         }
         
-        // GPU surveillance status
+        // SOH from SohEstimator (persisted file fallback if estimator not available)
+        try {
+            JSONObject soh = new JSONObject();
+            boolean hasSoh = false;
+            
+            com.overdrive.app.monitor.SocHistoryDatabase socDb = com.overdrive.app.monitor.SocHistoryDatabase.getInstance();
+            com.overdrive.app.abrp.SohEstimator sohEst = socDb != null ? socDb.getSohEstimator() : null;
+            if (sohEst != null && sohEst.hasEstimate()) {
+                soh.put("percent", Math.round(sohEst.getCurrentSoh() * 10) / 10.0);
+                soh.put("estimatedCapacityKwh", Math.round(sohEst.getEstimatedCapacityKwh() * 10) / 10.0);
+                soh.put("nominalCapacityKwh", sohEst.getNominalCapacityKwh());
+                hasSoh = true;
+            } else {
+                // Fallback: read from persisted file
+                java.io.File sohFile = new java.io.File("/data/local/tmp/abrp_soh_estimate.properties");
+                if (sohFile.exists()) {
+                    java.util.Properties props = new java.util.Properties();
+                    try (java.io.FileInputStream fis = new java.io.FileInputStream(sohFile)) {
+                        props.load(fis);
+                    }
+                    String sohStr = props.getProperty("soh_percent");
+                    if (sohStr != null) {
+                        double sohVal = Double.parseDouble(sohStr);
+                        if (sohVal > 0 && sohVal <= 110) {
+                            soh.put("percent", Math.round(sohVal * 10) / 10.0);
+                            hasSoh = true;
+                        }
+                    }
+                }
+            }
+            
+            if (hasSoh) status.put("soh", soh);
+        } catch (Exception e) {
+            // SOH not available
+        }
+        
+        // GPU surveillance status — only true when actually in sentry/surveillance mode,
+        // not when pipeline is running for normal recording (CONTINUOUS, PROXIMITY_GUARD)
         com.overdrive.app.surveillance.GpuSurveillancePipeline pipeline = CameraDaemon.getGpuPipeline();
-        status.put("gpuSurveillance", pipeline != null && pipeline.isRunning());
+        status.put("gpuSurveillance", pipeline != null && pipeline.isSurveillanceMode());
         
         // GPS location
         com.overdrive.app.monitor.GpsMonitor gps = com.overdrive.app.monitor.GpsMonitor.getInstance();

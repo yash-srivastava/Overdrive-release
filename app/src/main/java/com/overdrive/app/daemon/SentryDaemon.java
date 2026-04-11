@@ -521,11 +521,11 @@ public class SentryDaemon {
     
     private static Context getSystemContext() {
         try {
-            Class<?> activityThread = Class.forName("android.app.ActivityThread");
-            Method systemMain = activityThread.getMethod("systemMain");
-            Object at = systemMain.invoke(null);
-            Method getSystemContext = activityThread.getMethod("getSystemContext");
-            return (Context) getSystemContext.invoke(at);
+            Class<?> activityThreadClass = Class.forName("android.app.ActivityThread");
+            Object activityThread = resolveActivityThread(activityThreadClass);
+            if (activityThread == null) return null;
+            Method getSystemContext = activityThreadClass.getMethod("getSystemContext");
+            return (Context) getSystemContext.invoke(activityThread);
         } catch (Exception e) {
             log("getSystemContext failed: " + e.getMessage());
             return null;
@@ -535,24 +535,16 @@ public class SentryDaemon {
     private static Context createAppContext() {
         try {
             Class<?> activityThreadClass = Class.forName("android.app.ActivityThread");
-            Object activityThread;
-            
-            try {
-                Method currentActivityThread = activityThreadClass.getMethod("currentActivityThread");
-                activityThread = currentActivityThread.invoke(null);
-            } catch (Exception e) {
-                activityThread = null;
-            }
+            Object activityThread = resolveActivityThread(activityThreadClass);
             
             if (activityThread == null) {
-                Method systemMain = activityThreadClass.getMethod("systemMain");
-                activityThread = systemMain.invoke(null);
+                log("createAppContext: all strategies failed, using null-safe fallback");
+                return new PermissionBypassContext(null);
             }
-            
-            if (activityThread == null) return null;
             
             Method getSystemContext = activityThreadClass.getMethod("getSystemContext");
             Context systemContext = (Context) getSystemContext.invoke(activityThread);
+            if (systemContext == null) return new PermissionBypassContext(null);
             
             String packageName = APP_PACKAGE_NAME();
             Context appContext = systemContext.createPackageContext(packageName, 
@@ -562,8 +554,68 @@ public class SentryDaemon {
             
         } catch (Exception e) {
             log("createAppContext failed: " + e.getMessage());
-            return null;
+            return new PermissionBypassContext(null);
         }
+    }
+    
+    /**
+     * Resolve ActivityThread using 3 strategies:
+     * 1. currentActivityThread() — fastest, works when app process is running
+     * 2. systemMain() with timeout — works on some boot conditions, can deadlock
+     * 3. Manual constructor + Looper.prepareMainLooper — reliable fallback
+     */
+    private static Object resolveActivityThread(Class<?> activityThreadClass) {
+        // Strategy 1: existing thread
+        try {
+            Method cur = activityThreadClass.getMethod("currentActivityThread");
+            Object at = cur.invoke(null);
+            if (at != null) return at;
+        } catch (Exception ignored) {}
+        
+        // Strategy 2: systemMain with timeout
+        final Object[] result = new Object[1];
+        try {
+            Thread t = new Thread(() -> {
+                try {
+                    Method systemMain = activityThreadClass.getMethod("systemMain");
+                    result[0] = systemMain.invoke(null);
+                } catch (Exception ignored) {}
+            }, "SystemMainInit");
+            t.setDaemon(true);
+            t.start();
+            t.join(10_000);
+            if (t.isAlive()) {
+                log("resolveActivityThread: systemMain timed out");
+                t.interrupt();
+                // Check if it partially initialized
+                try {
+                    Method cur = activityThreadClass.getMethod("currentActivityThread");
+                    Object at = cur.invoke(null);
+                    if (at != null) return at;
+                } catch (Exception ignored) {}
+            } else if (result[0] != null) {
+                return result[0];
+            }
+        } catch (Exception ignored) {}
+        
+        // Strategy 3: manual creation
+        try {
+            try { android.os.Looper.prepareMainLooper(); } catch (Exception ignored) {}
+            java.lang.reflect.Constructor<?> ctor = activityThreadClass.getDeclaredConstructor();
+            ctor.setAccessible(true);
+            Object at = ctor.newInstance();
+            try {
+                java.lang.reflect.Field f = activityThreadClass.getDeclaredField("sCurrentActivityThread");
+                f.setAccessible(true);
+                f.set(null, at);
+            } catch (Exception ignored) {}
+            log("resolveActivityThread: manual creation succeeded");
+            return at;
+        } catch (Exception e) {
+            log("resolveActivityThread: manual creation failed: " + e.getMessage());
+        }
+        
+        return null;
     }
     
     private static class PermissionBypassContext extends android.content.ContextWrapper {
@@ -580,6 +632,28 @@ public class SentryDaemon {
         }
         @Override public int checkSelfPermission(String permission) {
             return android.content.pm.PackageManager.PERMISSION_GRANTED;
+        }
+        // Null-safe overrides for fallback mode (base=null)
+        @Override public Context getApplicationContext() {
+            try { return super.getApplicationContext(); } catch (NullPointerException e) { return this; }
+        }
+        @Override public String getPackageName() {
+            try { return super.getPackageName(); } catch (NullPointerException e) { return APP_PACKAGE_NAME(); }
+        }
+        @Override public Object getSystemService(String name) {
+            try { return super.getSystemService(name); } catch (NullPointerException e) { return null; }
+        }
+        @Override public android.content.pm.ApplicationInfo getApplicationInfo() {
+            try { return super.getApplicationInfo(); } catch (NullPointerException e) { return new android.content.pm.ApplicationInfo(); }
+        }
+        @Override public android.content.ContentResolver getContentResolver() {
+            try { return super.getContentResolver(); } catch (NullPointerException e) { return null; }
+        }
+        @Override public android.content.res.Resources getResources() {
+            try { return super.getResources(); } catch (NullPointerException e) { return null; }
+        }
+        @Override public Context createPackageContext(String packageName, int flags) {
+            try { return super.createPackageContext(packageName, flags); } catch (Exception e) { return this; }
         }
     }
     

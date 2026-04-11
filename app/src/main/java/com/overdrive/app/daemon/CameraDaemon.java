@@ -227,8 +227,27 @@ public class CameraDaemon {
         // Initialize Safe Location Manager (geofence zones)
         com.overdrive.app.surveillance.SafeLocationManager.getInstance().init();
 
-        // Initialize Vehicle Data Monitor for EV battery/charging data (reuses same context)
+        // Initialize SohEstimator (load persisted SOH — capacity detection deferred until collector is ready)
+        try {
+            sohEstimator = new SohEstimator();
+            sohEstimator.init();
+        } catch (Exception e) {
+            log("SohEstimator init error: " + e.getMessage());
+        }
+
+        // Initialize Vehicle Data Monitor + BydDataCollector
         initVehicleDataMonitor();
+
+        // Now that BydDataCollector is ready, detect car model for accurate capacity
+        try {
+            if (sohEstimator != null) {
+                sohEstimator.autoDetectCarModel(sharedAppContext);
+                log("SohEstimator: " + (sohEstimator.hasEstimate() ? sohEstimator.getCurrentSoh() + "%" : "no estimate") +
+                    " (capacity: " + sohEstimator.getNominalCapacityKwh() + " KWh)");
+            }
+        } catch (Exception e) {
+            log("SohEstimator autoDetect error: " + e.getMessage());
+        }
 
         // Initialize ABRP Telemetry Service
         try {
@@ -236,12 +255,8 @@ public class CameraDaemon {
             AbrpConfig abrpConfig = new AbrpConfig();
             abrpConfig.load();
             
-            sohEstimator = new SohEstimator();
-            sohEstimator.init();
-            sohEstimator.autoDetectCarModel(sharedAppContext);
-            
             // Auto-set car_model in ABRP config if not already set
-            if (abrpConfig.getCarModel() == null || abrpConfig.getCarModel().isEmpty()) {
+            if (sohEstimator != null && (abrpConfig.getCarModel() == null || abrpConfig.getCarModel().isEmpty())) {
                 double cap = sohEstimator.getNominalCapacityKwh();
                 String model = capacityToModelName(cap);
                 if (model != null) {
@@ -252,7 +267,7 @@ public class CameraDaemon {
             }
             
             abrpTelemetryService = new AbrpTelemetryService(abrpConfig, sohEstimator);
-            abrpTelemetryService.init(sharedAppContext); // context may be null in daemon mode, that's OK
+            abrpTelemetryService.init(sharedAppContext);
             
             // Set IPC references so SurveillanceIpcServer can access ABRP
             SurveillanceIpcServer.setAbrpReferences(abrpConfig, abrpTelemetryService);
@@ -273,6 +288,24 @@ public class CameraDaemon {
             tripAnalyticsManager = new com.overdrive.app.trips.TripAnalyticsManager();
             tripAnalyticsManager.init(sharedAppContext, telemetryDataCollector, sohEstimator);
             log("Trip Analytics initialized (enabled=" + tripAnalyticsManager.isEnabled() + ")");
+
+            // AUTO-START: If gear is already in a driving position (not P), start trip
+            // recording immediately. This handles the case where CameraDaemon restarts
+            // mid-drive (e.g., EGL crash watchdog, manual restart) or starts after the
+            // driver has already shifted out of P.
+            if (tripAnalyticsManager.isEnabled()) {
+                try {
+                    int currentGear = com.overdrive.app.monitor.GearMonitor.getInstance().getCurrentGear();
+                    if (currentGear != com.overdrive.app.monitor.GearMonitor.GEAR_P) {
+                        log("Trip Analytics: non-P gear detected at startup (gear="
+                                + com.overdrive.app.monitor.GearMonitor.gearToString(currentGear)
+                                + ") — auto-starting trip recording");
+                        tripAnalyticsManager.onGearChanged(currentGear);
+                    }
+                } catch (Exception e) {
+                    log("Trip Analytics gear probe error: " + e.getMessage());
+                }
+            }
         } catch (Exception e) {
             log("Trip Analytics init error: " + e.getMessage());
         }
@@ -487,12 +520,44 @@ public class CameraDaemon {
             fileLock = channel.tryLock();
             
             if (fileLock == null) {
-                // Another process holds the lock
-                lockFile.close();
-                return false;
+                // Another process holds the lock — check if it's actually alive
+                try {
+                    String pidStr = lockFile.readLine();
+                    if (pidStr != null && !pidStr.trim().isEmpty()) {
+                        int pid = Integer.parseInt(pidStr.trim());
+                        File procDir = new File("/proc/" + pid);
+                        if (!procDir.exists()) {
+                            // Process is dead — stale lock. Force cleanup and retry.
+                            log("Stale lock from dead PID " + pid + " — cleaning up");
+                            lockFile.close();
+                            lockFileObj.delete();
+                            
+                            // Retry lock acquisition
+                            lockFile = new java.io.RandomAccessFile(lockFileObj, "rw");
+                            channel = lockFile.getChannel();
+                            fileLock = channel.tryLock();
+                            
+                            if (fileLock == null) {
+                                lockFile.close();
+                                return false;
+                            }
+                            // Fall through to write PID and register shutdown hook
+                        } else {
+                            lockFile.close();
+                            return false;
+                        }
+                    } else {
+                        lockFile.close();
+                        return false;
+                    }
+                } catch (Exception e) {
+                    lockFile.close();
+                    return false;
+                }
             }
             
             // Write our PID to the lock file for debugging
+            lockFile.seek(0);
             lockFile.setLength(0);
             lockFile.writeBytes(String.valueOf(android.os.Process.myPid()));
             
@@ -1218,6 +1283,18 @@ public class CameraDaemon {
         status.put("inSafeZone", safeMgr.isInSafeZone());
         status.put("safeZoneName", safeMgr.getCurrentZoneName());
         
+        // SOTA: BYD camera coordinator status
+        if (gpuPipeline != null && gpuPipeline.getCamera() != null) {
+            com.overdrive.app.camera.BydCameraCoordinator coordinator = 
+                gpuPipeline.getCamera().getCameraCoordinator();
+            if (coordinator != null) {
+                status.put("cameraServiceRegistered", coordinator.isRegistered());
+                status.put("cameraYielded", coordinator.isYielded());
+                status.put("nativeAppActive", coordinator.isNativeAppActive());
+                status.put("cameraEventCallback", coordinator.isEventCallbackActive());
+            }
+        }
+        
         return status;
     }
     
@@ -1667,6 +1744,10 @@ public class CameraDaemon {
             
             log("GPS Monitor initialized with Context mode");
             
+            // Initialize NetworkMonitor for WiFi/Mobile Data status in sidebar
+            com.overdrive.app.monitor.NetworkMonitor.init(sharedAppContext);
+            log("Network Monitor initialized");
+            
         } catch (Exception e) {
             log("Failed to initialize GPS Monitor with context: " + e.getMessage());
             log("Falling back to daemon mode (shell commands)");
@@ -1731,6 +1812,16 @@ public class CameraDaemon {
             
             log("Vehicle Data Monitor initialized successfully");
             
+            // Initialize Universal BYD Data Collector (runs alongside existing monitors)
+            try {
+                com.overdrive.app.byd.BydDataCollector collector = com.overdrive.app.byd.BydDataCollector.getInstance();
+                collector.init(sharedAppContext);
+                collector.logSummary();
+                log("BYD Data Collector initialized (" + collector.getData().availableDevices.length + " devices)");
+            } catch (Exception e) {
+                log("BYD Data Collector init error (non-fatal): " + e.getMessage());
+            }
+            
             // Initialize Gear Monitor for PROXIMITY_GUARD mode
             com.overdrive.app.monitor.GearMonitor gearMonitor =
                 com.overdrive.app.monitor.GearMonitor.getInstance();
@@ -1750,6 +1841,7 @@ public class CameraDaemon {
             // Initialize SOC History Database for persistent battery tracking
             com.overdrive.app.monitor.SocHistoryDatabase socDb =
                 com.overdrive.app.monitor.SocHistoryDatabase.getInstance();
+            socDb.setSohEstimator(sohEstimator);
             socDb.init();
             socDb.start();
             
@@ -1770,6 +1862,7 @@ public class CameraDaemon {
             Class<?> activityThreadClass = Class.forName("android.app.ActivityThread");
             Object activityThread;
 
+            // Strategy 1: Get existing ActivityThread (works if app process is running)
             try {
                 java.lang.reflect.Method currentActivityThread = activityThreadClass.getMethod("currentActivityThread");
                 activityThread = currentActivityThread.invoke(null);
@@ -1779,16 +1872,76 @@ public class CameraDaemon {
                 activityThread = null;
             }
 
+            // Strategy 2: systemMain() with timeout — this can deadlock on some firmware
             if (activityThread == null) {
-                log("createAppContext: Trying systemMain...");
-                java.lang.reflect.Method systemMain = activityThreadClass.getMethod("systemMain");
-                activityThread = systemMain.invoke(null);
-                log("createAppContext: systemMain = " + activityThread);
+                log("createAppContext: Trying systemMain with 10s timeout...");
+                final Object[] result = new Object[1];
+                final Exception[] error = new Exception[1];
+                Thread systemMainThread = new Thread(() -> {
+                    try {
+                        java.lang.reflect.Method systemMain = activityThreadClass.getMethod("systemMain");
+                        result[0] = systemMain.invoke(null);
+                    } catch (Exception e) {
+                        error[0] = e;
+                    }
+                }, "SystemMainInit");
+                systemMainThread.setDaemon(true);
+                systemMainThread.start();
+                systemMainThread.join(10_000); // 10 second timeout
+                
+                if (systemMainThread.isAlive()) {
+                    log("createAppContext: systemMain TIMED OUT (10s)");
+                    systemMainThread.interrupt();
+                    try {
+                        java.lang.reflect.Method currentActivityThread = activityThreadClass.getMethod("currentActivityThread");
+                        activityThread = currentActivityThread.invoke(null);
+                        log("createAppContext: post-timeout currentActivityThread = " + activityThread);
+                    } catch (Exception e2) {
+                        log("createAppContext: post-timeout currentActivityThread also failed");
+                    }
+                } else if (error[0] != null) {
+                    log("createAppContext: systemMain failed: " + error[0].getMessage());
+                } else {
+                    activityThread = result[0];
+                    log("createAppContext: systemMain = " + activityThread);
+                }
+            }
+            
+            // Strategy 3: Prepare looper manually + create ActivityThread via constructor
+            if (activityThread == null) {
+                log("createAppContext: Trying manual ActivityThread creation...");
+                try {
+                    // Ensure main looper exists (idempotent if already prepared)
+                    try { android.os.Looper.prepareMainLooper(); } catch (Exception ignored) {}
+                    
+                    // Create ActivityThread via default constructor
+                    java.lang.reflect.Constructor<?> ctor = activityThreadClass.getDeclaredConstructor();
+                    ctor.setAccessible(true);
+                    activityThread = ctor.newInstance();
+                    
+                    // Set as the current thread via sCurrentActivityThread field
+                    try {
+                        java.lang.reflect.Field sField = activityThreadClass.getDeclaredField("sCurrentActivityThread");
+                        sField.setAccessible(true);
+                        sField.set(null, activityThread);
+                    } catch (NoSuchFieldException e) {
+                        // Some Android versions use different field name
+                        try {
+                            java.lang.reflect.Field sField = activityThreadClass.getDeclaredField("sMainThreadHandler");
+                            // If we got here, the field layout is different — just proceed
+                        } catch (Exception ignored) {}
+                    }
+                    
+                    log("createAppContext: manual ActivityThread = " + activityThread);
+                } catch (Exception e) {
+                    log("createAppContext: manual creation failed: " + e.getMessage());
+                }
             }
 
             if (activityThread == null) {
-                log("createAppContext: activityThread is null, returning null");
-                return null;
+                // Strategy 4: Last resort — get system context directly via ContextImpl
+                log("createAppContext: All ActivityThread strategies failed, trying ContextImpl...");
+                return createFallbackContext();
             }
 
             java.lang.reflect.Method getSystemContext = activityThreadClass.getMethod("getSystemContext");
@@ -1796,8 +1949,8 @@ public class CameraDaemon {
             log("createAppContext: systemContext = " + systemContext);
             
             if (systemContext == null) {
-                log("createAppContext: systemContext is null, returning null");
-                return null;
+                log("createAppContext: systemContext is null, trying fallback...");
+                return createFallbackContext();
             }
 
             String packageName = APP_PACKAGE_NAME();
@@ -1807,25 +1960,73 @@ public class CameraDaemon {
             log("createAppContext: appContext = " + appContext);
             
             if (appContext == null) {
-                log("createAppContext: appContext is null, returning null");
-                return null;
+                log("createAppContext: appContext is null, trying fallback...");
+                return createFallbackContext();
             }
             
-            // Wrap with permission bypass for BYD hardware access
             PermissionBypassContext wrapped = new PermissionBypassContext(appContext);
             log("createAppContext: Success, returning PermissionBypassContext");
             return wrapped;
 
         } catch (Exception e) {
-            log("createAppContext failed: " + e.getMessage());
-            e.printStackTrace();
-            return null;
+            log("createAppContext failed: " + e.getMessage() + ", trying fallback...");
+            return createFallbackContext();
         }
     }
     
     /**
-     * Context wrapper that bypasses permission checks.
+     * Fallback context creation when ActivityThread is completely unavailable.
+     * Creates a minimal context via ContextImpl reflection that's enough for
+     * BYD device getInstance() calls (they just need enforceCallingOrSelfPermission to not NPE).
+     */
+    private static android.content.Context createFallbackContext() {
+        try {
+            // Try to create ContextImpl directly
+            Class<?> contextImplClass = Class.forName("android.app.ContextImpl");
+            
+            // Try createSystemContext() — available on most Android versions
+            try {
+                java.lang.reflect.Method createSystemContext = contextImplClass.getDeclaredMethod("createSystemContext", 
+                    Class.forName("android.app.ActivityThread"));
+                createSystemContext.setAccessible(true);
+                // Pass null ActivityThread — some versions tolerate this
+                android.content.Context ctx = (android.content.Context) createSystemContext.invoke(null, (Object) null);
+                if (ctx != null) {
+                    log("createFallbackContext: ContextImpl.createSystemContext succeeded");
+                    return new PermissionBypassContext(ctx);
+                }
+            } catch (Exception e) {
+                log("createFallbackContext: createSystemContext failed: " + e.getMessage());
+            }
+            
+            // Try createAppContext with minimal params
+            try {
+                java.lang.reflect.Method[] methods = contextImplClass.getDeclaredMethods();
+                for (java.lang.reflect.Method m : methods) {
+                    if (m.getName().equals("createAppContext") && m.getParameterTypes().length == 2) {
+                        m.setAccessible(true);
+                        // Can't call without valid params, skip
+                        break;
+                    }
+                }
+            } catch (Exception ignored) {}
+            
+            // Last resort: use a bare PermissionBypassContext with a dummy base
+            // This creates a context that returns PERMISSION_GRANTED for all checks
+            // and delegates everything else to the system
+            log("createFallbackContext: Using null-safe PermissionBypassContext as last resort");
+            return new PermissionBypassContext(null);
+            
+        } catch (Exception e) {
+            log("createFallbackContext failed completely: " + e.getMessage());
+            return new PermissionBypassContext(null);
+        }
+    }
+    
+    /**
+     * Context wrapper that bypasses permission checks and handles null base context.
      * Required for accessing BYD hardware services without signature permissions.
+     * When base is null (fallback mode), provides safe defaults for methods BYD devices call.
      */
     private static class PermissionBypassContext extends android.content.ContextWrapper {
         public PermissionBypassContext(android.content.Context base) { super(base); }
@@ -1841,6 +2042,29 @@ public class CameraDaemon {
         }
         @Override public int checkSelfPermission(String permission) {
             return android.content.pm.PackageManager.PERMISSION_GRANTED;
+        }
+        
+        // Null-safe overrides for when base context is null (fallback mode)
+        @Override public android.content.Context getApplicationContext() {
+            try { return super.getApplicationContext(); } catch (NullPointerException e) { return this; }
+        }
+        @Override public String getPackageName() {
+            try { return super.getPackageName(); } catch (NullPointerException e) { return APP_PACKAGE_NAME(); }
+        }
+        @Override public Object getSystemService(String name) {
+            try { return super.getSystemService(name); } catch (NullPointerException e) { return null; }
+        }
+        @Override public android.content.pm.ApplicationInfo getApplicationInfo() {
+            try { return super.getApplicationInfo(); } catch (NullPointerException e) { return new android.content.pm.ApplicationInfo(); }
+        }
+        @Override public android.content.ContentResolver getContentResolver() {
+            try { return super.getContentResolver(); } catch (NullPointerException e) { return null; }
+        }
+        @Override public android.content.res.Resources getResources() {
+            try { return super.getResources(); } catch (NullPointerException e) { return null; }
+        }
+        @Override public android.content.Context createPackageContext(String packageName, int flags) {
+            try { return super.createPackageContext(packageName, flags); } catch (Exception e) { return this; }
         }
     }
 }

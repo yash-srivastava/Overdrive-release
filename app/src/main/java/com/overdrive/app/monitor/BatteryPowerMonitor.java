@@ -17,7 +17,7 @@ public class BatteryPowerMonitor extends BaseDeviceMonitor<BatteryPowerData> {
     private Object device;  // Real BYDAutoOtaDevice from system
     private final AtomicReference<BatteryPowerData> cachedData = new AtomicReference<>();
     private Thread pollThread;
-    private static final long POLL_INTERVAL_MS = 60000; // Poll every 1 min
+    private static final long POLL_INTERVAL_MS = 300000; // Poll every 5 min (collector handles frequent reads)
     
     public BatteryPowerMonitor() {
         super("BatteryPowerMonitor");

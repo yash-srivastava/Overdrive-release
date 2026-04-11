@@ -91,6 +91,22 @@ public class PanoramicCameraGpu {
     private Thread watchdogThread;
     private static final long GL_THREAD_TIMEOUT_MS = 3000;
     
+    // SOTA: BYD camera coordinator for cooperative sharing and error recovery
+    private BydCameraCoordinator cameraCoordinator;
+    private volatile boolean cameraYielded = false;
+    
+    // Camera health monitor — detects stalled frames and triggers recovery
+    private static final long FRAME_STALL_THRESHOLD_MS = 2000;  // 2 seconds without frames
+    
+    // SOTA: Pre-yield listener — pipeline registers this to finalize recordings before yield
+    public interface CameraYieldListener {
+        /** Called BEFORE camera is yielded. Finalize any active recording to prevent corruption. */
+        void onPreYield();
+        /** Called AFTER camera is re-acquired. Resume recording if needed. */
+        void onPostReacquire();
+    }
+    private CameraYieldListener yieldListener;
+    
     // CPU usage monitoring
     private long lastCpuCheckTime = 0;
     private static final long CPU_CHECK_INTERVAL_MS = 10000;  // Every 10 seconds
@@ -133,6 +149,64 @@ public class PanoramicCameraGpu {
         logger.info( "Starting GPU camera pipeline...");
         startTime = System.currentTimeMillis();
         
+        // SOTA: Initialize BYD camera coordinator for cooperative sharing
+        if (cameraCoordinator == null) {
+            cameraCoordinator = new BydCameraCoordinator();
+            cameraCoordinator.setYieldCallback(new BydCameraCoordinator.CameraYieldCallback() {
+                @Override
+                public void onYieldCamera() {
+                    // Contention detected — yield on GL thread
+                    logger.info("YIELD: Contention detected — releasing camera for native app");
+                    cameraYielded = true;
+                    if (glHandler != null) {
+                        glHandler.post(() -> yieldCameraInternal());
+                    }
+                }
+
+                @Override
+                public void onReacquireCamera() {
+                    // Native app released camera after contention yield — re-acquire
+                    logger.info("REACQUIRE: Native app released camera — reopening");
+                    cameraYielded = false;
+                    if (glHandler != null) {
+                        glHandler.post(() -> {
+                            try {
+                                startCamera();
+                                if (cameraCoordinator != null && cameraObj != null) {
+                                    cameraCoordinator.resetEventCallbackState();
+                                    cameraCoordinator.setupEventCallback(cameraObj);
+                                }
+                                
+                                // SOTA: Notify pipeline to resume recording
+                                if (yieldListener != null) {
+                                    try {
+                                        yieldListener.onPostReacquire();
+                                        logger.info("Post-reacquire: recording resumed");
+                                    } catch (Exception e) {
+                                        logger.warn("Post-reacquire callback error: " + e.getMessage());
+                                    }
+                                }
+                                
+                                logger.info("Camera re-acquired after contention yield");
+                            } catch (Exception e) {
+                                logger.error("Failed to re-acquire camera: " + e.getMessage());
+                            }
+                        });
+                    }
+                }
+
+                @Override
+                public void onCameraError(int eventType) {
+                    // Camera HAL error — trigger full restart cycle
+                    logger.error("CAMERA ERROR: event=" + eventType + " — restarting camera");
+                    if (glHandler != null) {
+                        glHandler.post(() -> restartCameraAfterError());
+                    }
+                }
+            });
+            cameraCoordinator.register();
+        }
+        
         // Start GL thread
         glThread = new HandlerThread("GL-RenderLoop");
         glThread.start();
@@ -143,6 +217,12 @@ public class PanoramicCameraGpu {
             try {
                 initializeGl();
                 startCamera();
+                
+                // SOTA: Setup event callback for HAL error detection (-10086, 8)
+                if (cameraCoordinator != null && cameraObj != null) {
+                    cameraCoordinator.setupEventCallback(cameraObj);
+                }
+                
                 running = true;
                 
                 // Start render loop
@@ -305,6 +385,11 @@ public class PanoramicCameraGpu {
         
         logger.info("Camera started (" + width + "x" + height + 
             ", id=" + cameraId + ", surfaceMode=" + cameraSurfaceMode + ")");
+        
+        // SOTA: Update coordinator with actual camera ID
+        if (cameraCoordinator != null) {
+            cameraCoordinator.setActiveCameraId(cameraId);
+        }
     }
     
     /**
@@ -340,6 +425,12 @@ public class PanoramicCameraGpu {
 
             // Update watchdog heartbeat
             lastGlThreadHeartbeat = System.currentTimeMillis();
+
+            // SOTA: Skip frame processing if camera is yielded to native app
+            if (cameraYielded || cameraObj == null) {
+                // GL thread stays alive but doesn't touch camera — waiting for re-acquire
+                return;
+            }
 
             // CRITICAL: Always consume camera texture FIRST to keep the camera HAL's
             // BufferQueue flowing. If we don't call updateTexImage() promptly, the HAL
@@ -386,19 +477,18 @@ public class PanoramicCameraGpu {
                             cameraIdOverride = 1;
                             frameCounter = 0;
                             lastGlThreadHeartbeat = System.currentTimeMillis();
-                            try {
-                                Class<?> avmClass = Class.forName("android.hardware.AVMCamera");
-                                Method mStop = avmClass.getDeclaredMethod("stopPreview");
-                                mStop.setAccessible(true);
-                                mStop.invoke(cameraObj);
-                                Method mClose = avmClass.getDeclaredMethod("close");
-                                mClose.setAccessible(true);
-                                mClose.invoke(cameraObj);
-                            } catch (Exception closeEx) {
-                                logger.warn("Error closing camera for probe: " + closeEx.getMessage());
+                            // SOTA: Proper cleanup order via BydCameraCoordinator
+                            BydCameraCoordinator.closeCamera(cameraObj, cameraSurfaceMode);
+                            cameraObj = null;
+                            if (cameraCoordinator != null) {
+                                cameraCoordinator.resetEventCallbackState();
                             }
                             lastGlThreadHeartbeat = System.currentTimeMillis();
                             startCamera();
+                            // Re-register event callback on new camera instance
+                            if (cameraCoordinator != null && cameraObj != null) {
+                                cameraCoordinator.setupEventCallback(cameraObj);
+                            }
                         } else {
                             logger.warn("Auto-probe: camera ID 0 and 1 both failed — giving up");
                             autoProbeCameras = false;
@@ -531,6 +621,39 @@ public class PanoramicCameraGpu {
                         System.exit(0);
                     }
                     
+                    // SOTA: Frame health monitor — detect stalled camera feed
+                    // If GL thread is alive but no new frames for FRAME_STALL_THRESHOLD_MS,
+                    // the camera HAL may be starved or dead.
+                    // Decision is contention-aware: if native app is active, yield.
+                    // If native app is NOT active, restart camera (HAL issue).
+                    if (!cameraYielded && lastFrameTime > 0 && 
+                        timeSinceHeartbeat < GL_THREAD_TIMEOUT_MS) {
+                        long timeSinceFrame = now - lastFrameTime;
+                        if (timeSinceFrame > FRAME_STALL_THRESHOLD_MS) {
+                            logger.warn("FRAME STALL: No frames for " + timeSinceFrame + "ms");
+                            // Reset lastFrameTime to prevent repeated triggers
+                            lastFrameTime = now;
+                            
+                            if (cameraCoordinator != null) {
+                                // Ask coordinator: is this contention or a HAL issue?
+                                boolean didYield = cameraCoordinator.onFrameStallDetected();
+                                if (!didYield) {
+                                    // Not contention — restart camera
+                                    logger.info("Frame stall is HAL issue — restarting camera");
+                                    if (glHandler != null) {
+                                        glHandler.post(() -> restartCameraAfterError());
+                                    }
+                                }
+                                // If yielded, coordinator will handle re-acquire via onCloseCamera
+                            } else {
+                                // No coordinator — just restart
+                                if (glHandler != null) {
+                                    glHandler.post(() -> restartCameraAfterError());
+                                }
+                            }
+                        }
+                    }
+                    
                 } catch (InterruptedException e) {
                     break;
                 }
@@ -540,7 +663,107 @@ public class PanoramicCameraGpu {
         watchdogThread.setDaemon(true);
         watchdogThread.start();
         
-        logger.info( "GL thread watchdog started (timeout=" + GL_THREAD_TIMEOUT_MS + "ms)");
+        logger.info( "GL thread watchdog started (timeout=" + GL_THREAD_TIMEOUT_MS + "ms, " +
+            "frameStall=" + FRAME_STALL_THRESHOLD_MS + "ms)");
+    }
+    
+    /**
+     * SOTA: Yields the camera to the native BYD AVM app.
+     * 
+     * Called on GL thread when contention is detected (frame stall while native
+     * app is active). Finalizes any active recording FIRST to prevent MP4 corruption,
+     * then does a clean camera close.
+     * 
+     * The GL render loop continues running but skips frame processing while yielded.
+     * Camera is re-acquired when onCloseCamera fires from IBYDCameraService.
+     */
+    private void yieldCameraInternal() {
+        logger.info("Yielding camera to native AVM app...");
+        
+        // CRITICAL: Finalize active recording BEFORE closing camera.
+        // If we close the camera while the encoder is writing, the MP4 moov atom
+        // won't be written and the file will be corrupt.
+        if (yieldListener != null) {
+            try {
+                yieldListener.onPreYield();
+                logger.info("Pre-yield: recording finalized");
+            } catch (Exception e) {
+                logger.warn("Pre-yield callback error: " + e.getMessage());
+            }
+        }
+        
+        if (cameraObj != null) {
+            BydCameraCoordinator.closeCamera(cameraObj, cameraSurfaceMode);
+            cameraObj = null;
+            if (cameraCoordinator != null) {
+                cameraCoordinator.resetEventCallbackState();
+            }
+            logger.info("Camera yielded — GL pipeline idle, waiting for onCloseCamera");
+        }
+    }
+    
+    /**
+     * SOTA: Restarts the camera after a HAL error event or frame stall.
+     * 
+     * Called on GL thread. Does a full close→reopen cycle with proper cleanup.
+     * This is faster than the watchdog kill+restart because it doesn't require
+     * a full process restart — just a camera reopen.
+     */
+    private void restartCameraAfterError() {
+        logger.info("Restarting camera after error/stall...");
+        
+        try {
+            // CRITICAL: Finalize active recording BEFORE closing camera.
+            // If the encoder is still consuming frames when we destroy the camera's
+            // native mutex, we get a FORTIFY abort (pthread_mutex_lock on destroyed mutex).
+            if (yieldListener != null) {
+                try {
+                    yieldListener.onPreYield();
+                    logger.info("Pre-restart: recording finalized");
+                } catch (Exception e) {
+                    logger.warn("Pre-restart callback error: " + e.getMessage());
+                }
+            }
+            
+            // Close with proper cleanup
+            if (cameraObj != null) {
+                BydCameraCoordinator.closeCamera(cameraObj, cameraSurfaceMode);
+                cameraObj = null;
+                if (cameraCoordinator != null) {
+                    cameraCoordinator.resetEventCallbackState();
+                }
+            }
+            
+            // Brief pause to let HAL settle
+            Thread.sleep(500);
+            
+            // Update heartbeat so watchdog doesn't kill us during restart
+            lastGlThreadHeartbeat = System.currentTimeMillis();
+            
+            // Reopen
+            startCamera();
+            
+            // Re-register event callback
+            if (cameraCoordinator != null && cameraObj != null) {
+                cameraCoordinator.setupEventCallback(cameraObj);
+            }
+            
+            // Resume recording/surveillance after camera restart
+            if (yieldListener != null) {
+                try {
+                    yieldListener.onPostReacquire();
+                    logger.info("Post-restart: recording/surveillance resumed");
+                } catch (Exception e) {
+                    logger.warn("Post-restart callback error: " + e.getMessage());
+                }
+            }
+            
+            logger.info("Camera restarted successfully after error");
+            
+        } catch (Exception e) {
+            logger.error("Camera restart failed: " + e.getMessage());
+            // If restart fails, the watchdog will eventually kill the process
+        }
     }
     
     /**
@@ -556,20 +779,16 @@ public class PanoramicCameraGpu {
             watchdogThread = null;
         }
         
-        // Stop camera
-        try {
-            if (cameraObj != null) {
-                Class<?> avmClass = Class.forName("android.hardware.AVMCamera");
-                Method mStop = avmClass.getDeclaredMethod("stopPreview");
-                mStop.setAccessible(true);
-                mStop.invoke(cameraObj);
-                
-                Method mClose = avmClass.getDeclaredMethod("close");
-                mClose.setAccessible(true);
-                mClose.invoke(cameraObj);
-            }
-        } catch (Exception e) {
-            logger.error( "Error stopping camera", e);
+        // SOTA: Unregister from IBYDCameraService
+        if (cameraCoordinator != null) {
+            cameraCoordinator.unregister();
+        }
+        
+        // SOTA: Proper cleanup order — disablePreviewCallback → stopPreview → close
+        // Skipping disablePreviewCallback leaves the HAL dirty and triggers micro system update
+        if (cameraObj != null) {
+            BydCameraCoordinator.closeCamera(cameraObj, cameraSurfaceMode);
+            cameraObj = null;
         }
         
         // Cleanup on GL thread
@@ -620,23 +839,25 @@ public class PanoramicCameraGpu {
         logger.info("Reopening AVMCamera (delay=" + delayMs + "ms)...");
 
         try {
+            // SOTA: Proper cleanup order via BydCameraCoordinator
             if (cameraObj != null) {
-                Class<?> avmClass = Class.forName("android.hardware.AVMCamera");
-                Method mStop = avmClass.getDeclaredMethod("stopPreview");
-                mStop.setAccessible(true);
-                mStop.invoke(cameraObj);
-
-                Method mClose = avmClass.getDeclaredMethod("close");
-                mClose.setAccessible(true);
-                mClose.invoke(cameraObj);
+                BydCameraCoordinator.closeCamera(cameraObj, cameraSurfaceMode);
                 cameraObj = null;
-
-                logger.info("Camera closed, waiting for BYD native app...");
+                if (cameraCoordinator != null) {
+                    cameraCoordinator.resetEventCallbackState();
+                }
+                logger.info("Camera closed (proper cleanup), waiting for BYD native app...");
             }
 
             Thread.sleep(delayMs);
 
             startCamera();
+            
+            // SOTA: Re-register event callback on new camera instance
+            if (cameraCoordinator != null && cameraObj != null) {
+                cameraCoordinator.setupEventCallback(cameraObj);
+            }
+            
             logger.info("Camera reopened successfully");
 
         } catch (Exception e) {
@@ -645,6 +866,9 @@ public class PanoramicCameraGpu {
                 if (cameraObj == null) {
                     logger.warn("Retry camera open...");
                     startCamera();
+                    if (cameraCoordinator != null && cameraObj != null) {
+                        cameraCoordinator.setupEventCallback(cameraObj);
+                    }
                 }
             } catch (Exception e2) {
                 logger.error("Camera retry failed: " + e2.getMessage());
@@ -776,6 +1000,29 @@ public class PanoramicCameraGpu {
      */
     public long getLastFrameTime() {
         return lastFrameTime;
+    }
+    
+    /**
+     * SOTA: Gets the BYD camera coordinator for status queries.
+     */
+    public BydCameraCoordinator getCameraCoordinator() {
+        return cameraCoordinator;
+    }
+    
+    /**
+     * SOTA: Sets the yield listener for recording finalization during camera yield.
+     * The pipeline registers this to ensure recordings are properly closed before
+     * the camera is released, and resumed after re-acquisition.
+     */
+    public void setCameraYieldListener(CameraYieldListener listener) {
+        this.yieldListener = listener;
+    }
+    
+    /**
+     * SOTA: Returns true if camera is currently yielded to native BYD app.
+     */
+    public boolean isCameraYielded() {
+        return cameraYielded;
     }
     
     /**

@@ -4,6 +4,7 @@ import android.content.Context;
 
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.monitor.BatterySocData;
+import com.overdrive.app.monitor.BatteryThermalData;
 import com.overdrive.app.monitor.ChargingStateData;
 import com.overdrive.app.monitor.GearMonitor;
 import com.overdrive.app.monitor.GpsMonitor;
@@ -159,96 +160,11 @@ public class AbrpTelemetryService {
     }
 
     /**
-     * Initialize reflection-based device access using PermissionBypassContext.
-     * Each device is initialized independently — if one fails, others still work.
+     * Initialize ABRP telemetry service.
+     * Device access is now handled by BydDataCollector — no per-device reflection needed here.
      */
     public void init(Context context) {
-        logger.info("Initializing reflection-based device access...");
-
-        Context permissiveContext = createPermissiveContext(context);
-        if (permissiveContext == null) {
-            logger.error("Failed to create permissive context, reflection devices unavailable");
-            return;
-        }
-
-        // BYDAutoEngineDevice — for getEnginePower()
-        try {
-            Class<?> deviceClass = Class.forName("android.hardware.bydauto.engine.BYDAutoEngineDevice");
-            Method getInstance = deviceClass.getMethod("getInstance", Context.class);
-            engineDevice = getInstance.invoke(null, permissiveContext);
-            getEnginePowerMethod = deviceClass.getMethod("getEnginePower");
-            logger.info("BYDAutoEngineDevice initialized");
-        } catch (Exception e) {
-            logger.warn("BYDAutoEngineDevice unavailable: " + e.getMessage());
-        }
-
-        // BYDAutoChargingDevice — for getChargingGunState()
-        try {
-            Class<?> deviceClass = Class.forName("android.hardware.bydauto.charging.BYDAutoChargingDevice");
-            Method getInstance = deviceClass.getMethod("getInstance", Context.class);
-            chargingDevice = getInstance.invoke(null, permissiveContext);
-            getChargingGunStateMethod = deviceClass.getMethod("getChargingGunState");
-            logger.info("BYDAutoChargingDevice initialized");
-        } catch (Exception e) {
-            logger.warn("BYDAutoChargingDevice unavailable: " + e.getMessage());
-        }
-
-        // BYDAutoInstrumentDevice — for getOutCarTemperature()
-        try {
-            Class<?> deviceClass = Class.forName("android.hardware.bydauto.instrument.BYDAutoInstrumentDevice");
-            Method getInstance = deviceClass.getMethod("getInstance", Context.class);
-            instrumentDevice = getInstance.invoke(null, permissiveContext);
-            getOutCarTemperatureMethod = deviceClass.getMethod("getOutCarTemperature");
-            logger.info("BYDAutoInstrumentDevice initialized");
-        } catch (Exception e) {
-            logger.warn("BYDAutoInstrumentDevice unavailable: " + e.getMessage());
-        }
-
-        // BYDAutoStatisticDevice — for getTotalMileageValue()
-        try {
-            Class<?> deviceClass = Class.forName("android.hardware.bydauto.statistic.BYDAutoStatisticDevice");
-            Method getInstance = deviceClass.getMethod("getInstance", Context.class);
-            statisticDevice = getInstance.invoke(null, permissiveContext);
-            getTotalMileageValueMethod = deviceClass.getMethod("getTotalMileageValue");
-            logger.info("BYDAutoStatisticDevice initialized");
-        } catch (Exception e) {
-            logger.warn("BYDAutoStatisticDevice unavailable: " + e.getMessage());
-        }
-
-        // BYDAutoSpeedDevice — for getCurrentSpeed()
-        try {
-            Class<?> deviceClass = Class.forName("android.hardware.bydauto.speed.BYDAutoSpeedDevice");
-            Method getInstance = deviceClass.getMethod("getInstance", Context.class);
-            speedDevice = getInstance.invoke(null, permissiveContext);
-            getCurrentSpeedMethod = deviceClass.getMethod("getCurrentSpeed");
-            logger.info("BYDAutoSpeedDevice initialized");
-        } catch (Exception e) {
-            logger.warn("BYDAutoSpeedDevice unavailable: " + e.getMessage());
-        }
-
-        // BYDAutoAcDevice — for getTemprature(int) as fallback for ext_temp
-        try {
-            Class<?> deviceClass = Class.forName("android.hardware.bydauto.ac.BYDAutoAcDevice");
-            Method getInstance = deviceClass.getMethod("getInstance", Context.class);
-            acDevice = getInstance.invoke(null, permissiveContext);
-            getTempratureMethod = deviceClass.getMethod("getTemprature", int.class);
-            logger.info("BYDAutoAcDevice initialized");
-        } catch (Exception e) {
-            logger.warn("BYDAutoAcDevice unavailable: " + e.getMessage());
-        }
-
-        // BYDAutoGearboxDevice — for getGearboxAutoModeType()
-        try {
-            Class<?> deviceClass = Class.forName("android.hardware.bydauto.gearbox.BYDAutoGearboxDevice");
-            Method getInstance = deviceClass.getMethod("getInstance", Context.class);
-            gearboxDevice = getInstance.invoke(null, permissiveContext);
-            getGearboxAutoModeTypeMethod = deviceClass.getMethod("getGearboxAutoModeType");
-            logger.info("BYDAutoGearboxDevice initialized");
-        } catch (Exception e) {
-            logger.warn("BYDAutoGearboxDevice unavailable: " + e.getMessage());
-        }
-
-        logger.info("Device initialization complete");
+        logger.info("ABRP telemetry service initialized (using BydDataCollector for vehicle data)");
     }
 
     // ==================== TELEMETRY COLLECTION ====================
@@ -261,208 +177,120 @@ public class AbrpTelemetryService {
         JSONObject payload = new JSONObject();
 
         try {
-            // utc — current Unix timestamp in SECONDS
+            // Refresh collector data
+            com.overdrive.app.byd.BydDataCollector collector = com.overdrive.app.byd.BydDataCollector.getInstance();
+            if (collector.isInitialized()) collector.collectAll();
+            com.overdrive.app.byd.BydVehicleData vd = collector.isInitialized() ? collector.getData() : null;
+
+            // utc
             payload.put("utc", System.currentTimeMillis() / 1000);
 
-            // soc — battery State of Charge percentage
-            BatterySocData socData = vehicleDataMonitor.getBatterySoc();
+            // soc
             double soc = -1;
-            if (socData != null) {
-                soc = socData.socPercent;
-                payload.put("soc", soc);
+            if (vd != null && !Double.isNaN(vd.socPercent)) {
+                soc = vd.socPercent;
+            } else {
+                BatterySocData socData = vehicleDataMonitor.getBatterySoc();
+                if (socData != null) soc = socData.socPercent;
             }
+            if (soc >= 0) payload.put("soc", soc);
 
-            // power — net battery power in kW (raw from BYD, no conversion)
-            // Only reject garbage values (|value| > 300 kW is impossible for this car)
-            // Fallback: ChargingStateMonitor for charging power when engine device returns 0
+            // power — from collector's enginePowerKw, fallback to charging monitor
             try {
-                double powerKw = 0;
-                boolean gotEnginePower = false;
-
-                if (engineDevice != null && getEnginePowerMethod != null) {
-                    Object rawPower = getEnginePowerMethod.invoke(engineDevice);
-                    if (rawPower instanceof Number) {
-                        powerKw = ((Number) rawPower).doubleValue();
-                        if (Math.abs(powerKw) > 300) {
-                            logger.warn("Power garbage: " + powerKw + " kW, omitting");
-                        } else {
-                            gotEnginePower = true;
-                        }
-                    }
+                boolean powerSet = false;
+                if (vd != null && !Double.isNaN(vd.enginePowerKw) && Math.abs(vd.enginePowerKw) <= 300) {
+                    payload.put("power", vd.enginePowerKw);
+                    powerSet = true;
                 }
-
-                if (gotEnginePower) {
-                    payload.put("power", powerKw);
-                } else {
-                    // Garbage value or unavailable — send 0 (ABRP needs this field)
+                if (!powerSet) {
                     ChargingStateData chargingData = vehicleDataMonitor.getChargingState();
-                    boolean isCharging = chargingData != null &&
-                        chargingData.status == ChargingStateData.ChargingStatus.CHARGING;
+                    boolean isChg = chargingData != null && chargingData.status == ChargingStateData.ChargingStatus.CHARGING;
                     double monitorPower = chargingData != null ? chargingData.chargingPowerKW : 0;
-                    if (isCharging && monitorPower > 0.1) {
-                        payload.put("power", -monitorPower);
-                    } else {
-                        payload.put("power", 0);
-                    }
+                    payload.put("power", isChg && monitorPower > 0.1 ? -monitorPower : 0);
                 }
             } catch (Exception e) {
-                logger.debug("Failed to get power: " + e.getMessage());
+                payload.put("power", 0);
             }
 
-            // speed — prefer BYDAutoSpeedDevice, fallback to GPS
-            try {
-                boolean speedSet = false;
-                if (speedDevice != null && getCurrentSpeedMethod != null) {
-                    Object speedResult = getCurrentSpeedMethod.invoke(speedDevice);
-                    double speedKmh;
-                    if (speedResult instanceof Integer) {
-                        speedKmh = ((Integer) speedResult).doubleValue();
-                    } else if (speedResult instanceof Double) {
-                        speedKmh = (Double) speedResult;
-                    } else if (speedResult instanceof Number) {
-                        speedKmh = ((Number) speedResult).doubleValue();
-                    } else {
-                        speedKmh = 0;
-                    }
-                    payload.put("speed", speedKmh);
-                    speedSet = true;
-                }
-                if (!speedSet && gpsMonitor.hasLocation()) {
-                    // GpsMonitor.getSpeed() returns m/s, convert to km/h
-                    double speedKmh = gpsMonitor.getSpeed() * 3.6;
-                    payload.put("speed", speedKmh);
-                }
-            } catch (Exception e) {
-                logger.debug("Failed to get speed: " + e.getMessage());
+            // speed — from collector, fallback to GPS
+            if (vd != null && !Double.isNaN(vd.speedKmh)) {
+                payload.put("speed", vd.speedKmh);
+            } else if (gpsMonitor.hasLocation()) {
+                payload.put("speed", gpsMonitor.getSpeed() * 3.6);
             }
 
-            // lat, lon — GPS coordinates (only if valid location)
+            // lat, lon
             if (gpsMonitor.hasLocation()) {
                 payload.put("lat", gpsMonitor.getLatitude());
                 payload.put("lon", gpsMonitor.getLongitude());
             }
 
-            // is_charging — 1 if charging, 0 otherwise
+            // is_charging
             ChargingStateData chargingState = vehicleDataMonitor.getChargingState();
-            boolean isCharging = false;
-            if (chargingState != null) {
-                isCharging = (chargingState.status == ChargingStateData.ChargingStatus.CHARGING);
-                payload.put("is_charging", isCharging ? 1 : 0);
+            boolean isCharging = chargingState != null && chargingState.status == ChargingStateData.ChargingStatus.CHARGING;
+            payload.put("is_charging", isCharging ? 1 : 0);
+
+            // is_dcfc — gun state from collector
+            if (vd != null && vd.chargingGunState != com.overdrive.app.byd.BydVehicleData.UNAVAILABLE) {
+                payload.put("is_dcfc", vd.chargingGunState == 3 ? 1 : 0);
+                if (vd.chargingGunState == 4) payload.put("is_charging", 0); // V2L
             }
 
-            // is_dcfc — 1 if DC fast charging (gun state == 3), 0 otherwise
-            // Gun states: 1=AC slow, 2=AC fast, 3=DC, 4=V2L discharge
-            try {
-                if (chargingDevice != null && getChargingGunStateMethod != null) {
-                    int gunState = (Integer) getChargingGunStateMethod.invoke(chargingDevice);
-                    payload.put("is_dcfc", gunState == 3 ? 1 : 0);
-                    // V2L discharge — override is_charging to 0
-                    if (gunState == 4) {
-                        payload.put("is_charging", 0);
-                    }
-                }
-            } catch (Exception e) {
-                logger.debug("Failed to get charging gun state: " + e.getMessage());
-            }
-
-            // is_parked — 1 if gear is P (value 1), 0 otherwise
+            // is_parked — gear from collector
             boolean isParked = false;
-            try {
-                if (gearboxDevice != null && getGearboxAutoModeTypeMethod != null) {
-                    int gear = (Integer) getGearboxAutoModeTypeMethod.invoke(gearboxDevice);
-                    isParked = (gear == GearMonitor.GEAR_P);
-                    payload.put("is_parked", isParked ? 1 : 0);
-                } else {
-                    // Fallback to GearMonitor
-                    int gear = gearMonitor.getCurrentGear();
-                    isParked = (gear == GearMonitor.GEAR_P);
-                    payload.put("is_parked", isParked ? 1 : 0);
-                }
-            } catch (Exception e) {
-                logger.debug("Failed to get gear state: " + e.getMessage());
-                // Fallback to GearMonitor
-                int gear = gearMonitor.getCurrentGear();
-                isParked = (gear == GearMonitor.GEAR_P);
-                payload.put("is_parked", isParked ? 1 : 0);
+            if (vd != null && vd.gearMode != com.overdrive.app.byd.BydVehicleData.UNAVAILABLE) {
+                isParked = vd.gearMode == GearMonitor.GEAR_P;
+            } else {
+                isParked = gearMonitor.getCurrentGear() == GearMonitor.GEAR_P;
             }
+            payload.put("is_parked", isParked ? 1 : 0);
 
-            // elevation — GPS altitude (only if > 0)
+            // elevation, heading
             if (gpsMonitor.hasLocation()) {
-                double altitude = gpsMonitor.getAltitude();
-                if (altitude > 0) {
-                    payload.put("elevation", altitude);
-                }
-            }
-
-            // heading — GPS heading in degrees
-            if (gpsMonitor.hasLocation()) {
+                double alt = gpsMonitor.getAltitude();
+                if (alt > 0) payload.put("elevation", alt);
                 payload.put("heading", gpsMonitor.getHeading());
             }
 
-            // ext_temp — external temperature in °C
-            // Primary: BYD sensor (only if raw value is reasonable, i.e. -50 to 60)
-            // Fallback: Open-Meteo weather API (GPS-based, cached 10 min)
-            try {
-                boolean tempSet = false;
-                
-                // Try BYD sensor first
-                if (instrumentDevice != null && getOutCarTemperatureMethod != null) {
-                    int rawTemp = (Integer) getOutCarTemperatureMethod.invoke(instrumentDevice);
-                    if (rawTemp >= -50 && rawTemp <= 60) {
-                        payload.put("ext_temp", rawTemp);
-                        tempSet = true;
-                        logger.debug("ext_temp: BYD sensor = " + rawTemp + "°C");
-                    } else {
-                        logger.debug("ext_temp: BYD sensor garbage (raw=" + rawTemp + "), trying weather API");
-                    }
-                }
-                
-                // Fallback: weather API if sensor gave garbage
-                if (!tempSet && gpsMonitor.hasLocation()) {
-                    double weatherTemp = getWeatherTemperature(
-                        gpsMonitor.getLatitude(), gpsMonitor.getLongitude());
-                    if (!Double.isNaN(weatherTemp)) {
-                        payload.put("ext_temp", weatherTemp);
-                        tempSet = true;
-                    }
-                }
-            } catch (Exception e) {
-                logger.debug("Failed to get external temperature: " + e.getMessage());
+            // ext_temp — from collector, fallback to weather API
+            boolean tempSet = false;
+            if (vd != null && !Double.isNaN(vd.outsideTempC)) {
+                payload.put("ext_temp", vd.outsideTempC);
+                tempSet = true;
+            }
+            if (!tempSet && gpsMonitor.hasLocation()) {
+                double weatherTemp = getWeatherTemperature(gpsMonitor.getLatitude(), gpsMonitor.getLongitude());
+                if (!Double.isNaN(weatherTemp)) payload.put("ext_temp", weatherTemp);
             }
 
-            // odometer — total mileage in km
-            // BYD getTotalMileageValue() returns int, typically in km
-            // Some models return in 0.1 km — auto-detect based on magnitude
-            try {
-                if (statisticDevice != null && getTotalMileageValueMethod != null) {
-                    int rawOdometer = (Integer) getTotalMileageValueMethod.invoke(statisticDevice);
-                    double odometerKm;
-                    if (rawOdometer > 1_000_000) {
-                        // Likely in 0.1 km (e.g. 75800 = 7580.0 km)
-                        odometerKm = rawOdometer / 10.0;
-                    } else {
-                        odometerKm = rawOdometer;
-                    }
-                    payload.put("odometer", odometerKm);
-                }
-            } catch (Exception e) {
-                logger.debug("Failed to get odometer: " + e.getMessage());
+            // odometer — from collector
+            if (vd != null && vd.totalMileageKm != com.overdrive.app.byd.BydVehicleData.UNAVAILABLE) {
+                int raw = vd.totalMileageKm;
+                payload.put("odometer", raw > 1_000_000 ? raw / 10.0 : (double) raw);
             }
 
-            // soh — State of Health percentage
+            // soh
             if (sohEstimator.hasEstimate()) {
                 payload.put("soh", sohEstimator.getCurrentSoh());
             }
 
-            // capacity — estimated full battery capacity: remainingKwh / (soc / 100)
-            // Also feed SohEstimator with instantaneous readings
-            double remainingKwh = vehicleDataMonitor.getBatteryRemainPowerKwh();
+            // capacity + feed SohEstimator
+            double remainingKwh = vd != null && !Double.isNaN(vd.remainKwh) ? vd.remainKwh : vehicleDataMonitor.getBatteryRemainPowerKwh();
             if (remainingKwh > 0 && soc > 0) {
-                double capacity = remainingKwh / (soc / 100.0);
-                payload.put("capacity", capacity);
-
-                // Feed SohEstimator
+                payload.put("capacity", remainingKwh / (soc / 100.0));
                 sohEstimator.updateFromInstantaneous(remainingKwh, soc);
+            }
+
+            // batt_temp — from collector (real cell temps), fallback to thermal monitor
+            if (vd != null && !Double.isNaN(vd.getBestBatteryTemp())) {
+                double battTemp = vd.getBestBatteryTemp();
+                if (battTemp >= -40 && battTemp <= 80) payload.put("batt_temp", battTemp);
+            } else {
+                BatteryThermalData thermalData = vehicleDataMonitor.getBatteryThermal();
+                if (thermalData != null && thermalData.hasData()) {
+                    double battTemp = thermalData.getBestTemperature();
+                    if (!Double.isNaN(battTemp) && battTemp >= -40 && battTemp <= 80) payload.put("batt_temp", battTemp);
+                }
             }
 
         } catch (Exception e) {

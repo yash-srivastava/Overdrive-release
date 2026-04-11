@@ -1363,7 +1363,7 @@ class DaemonLauncher(
      */
     private fun killDaemonViaPrivilegedShell(processName: String, callback: LaunchCallback) {
         val killCmd = if (processName == CAMERA_DAEMON_PROCESS) {
-            "pkill -9 -f '$processName'; pkill -9 -f 'start_cam_daemon'; rm -f /data/local/tmp/start_cam_daemon.sh"
+            "pkill -9 -f 'start_cam_daemon'; rm -f /data/local/tmp/start_cam_daemon.sh; sleep 1; pkill -9 -f '$processName'; rm -f /data/local/tmp/camera_daemon.lock"
         } else {
             "pkill -9 -f '$processName'"
         }
@@ -1399,11 +1399,14 @@ class DaemonLauncher(
             "rm -f /data/local/tmp/start_acc_sentry.sh 2>/dev/null; " +
             "echo done"
         } else if (processName == CAMERA_DAEMON_PROCESS) {
-            // Kill daemon + wrapper script process, then delete script to prevent restart
-            "pkill -9 -f '$processName' 2>/dev/null; " +
+            // CRITICAL: Kill watchdog FIRST, wait, then kill daemon, then clean up
+            // If we kill daemon first, watchdog respawns it before we can kill the watchdog
             "pkill -9 -f 'start_cam_daemon' 2>/dev/null; " +
-            "killall -9 $processName 2>/dev/null; " +
             "rm -f /data/local/tmp/start_cam_daemon.sh 2>/dev/null; " +
+            "sleep 1; " +
+            "pkill -9 -f '$processName' 2>/dev/null; " +
+            "killall -9 $processName 2>/dev/null; " +
+            "rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null; " +
             "echo done"
         } else {
             "pkill -9 -f '$processName' 2>/dev/null; killall -9 $processName 2>/dev/null; echo done"
@@ -1434,7 +1437,7 @@ class DaemonLauncher(
     private fun killDaemonViaBothShells(processName: String, callback: LaunchCallback) {
         // First try privileged shell
         val privKillCmd = if (processName == CAMERA_DAEMON_PROCESS) {
-            "pkill -9 -f '$processName'; pkill -9 -f 'start_cam_daemon'; rm -f /data/local/tmp/start_cam_daemon.sh"
+            "pkill -9 -f 'start_cam_daemon'; rm -f /data/local/tmp/start_cam_daemon.sh; sleep 1; pkill -9 -f '$processName'; rm -f /data/local/tmp/camera_daemon.lock"
         } else {
             "pkill -9 -f '$processName'"
         }
@@ -1447,10 +1450,12 @@ class DaemonLauncher(
             "rm -f /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null; " +
             "rm -f /data/local/tmp/start_acc_sentry.sh 2>/dev/null"
         } else if (processName == CAMERA_DAEMON_PROCESS) {
-            "pkill -9 -f '$processName' 2>/dev/null; " +
             "pkill -9 -f 'start_cam_daemon' 2>/dev/null; " +
+            "rm -f /data/local/tmp/start_cam_daemon.sh 2>/dev/null; " +
+            "sleep 1; " +
+            "pkill -9 -f '$processName' 2>/dev/null; " +
             "killall -9 $processName 2>/dev/null; " +
-            "rm -f /data/local/tmp/start_cam_daemon.sh 2>/dev/null"
+            "rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null"
         } else {
             "pkill -9 -f '$processName' 2>/dev/null; killall -9 $processName 2>/dev/null"
         }

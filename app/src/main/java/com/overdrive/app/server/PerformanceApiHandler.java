@@ -94,6 +94,11 @@ public class PerformanceApiHandler {
             return handleSocHistory(path, out);
         }
         
+        // GET /api/performance/battery - Battery health report
+        if (path.startsWith("/api/performance/battery") && method.equals("GET")) {
+            return handleBatteryHealth(path, out);
+        }
+        
         return false;
     }
     
@@ -371,6 +376,51 @@ public class PerformanceApiHandler {
             return true;
         } catch (Exception e) {
             logger.error("Failed to get SOC history", e);
+            HttpResponse.sendJson(out, "{\"error\": \"" + e.getMessage() + "\"}");
+            return true;
+        }
+    }
+    
+    /**
+     * Handle battery health requests.
+     * GET /api/performance/battery?hours=72&points=200 - Full battery health report
+     * GET /api/performance/battery/voltage?hours=24&points=200 - 12V voltage history
+     * GET /api/performance/battery/thermal?hours=24&points=200 - HV thermal history
+     */
+    private static boolean handleBatteryHealth(String path, OutputStream out) throws Exception {
+        try {
+            SocHistoryDatabase socDb = SocHistoryDatabase.getInstance();
+            
+            int hours = 72;
+            int points = 200;
+            
+            if (path.contains("?")) {
+                String query = path.substring(path.indexOf("?") + 1);
+                for (String param : query.split("&")) {
+                    String[] kv = param.split("=");
+                    if (kv.length == 2) {
+                        switch (kv[0]) {
+                            case "hours": hours = Integer.parseInt(kv[1]); break;
+                            case "points": points = Integer.parseInt(kv[1]); break;
+                        }
+                    }
+                }
+            }
+            
+            String basePath = path.contains("?") ? path.substring(0, path.indexOf("?")) : path;
+            
+            if (basePath.equals("/api/performance/battery/voltage")) {
+                HttpResponse.sendJson(out, socDb.getBatteryVoltageHistory(hours, points).toString());
+            } else if (basePath.equals("/api/performance/battery/thermal")) {
+                HttpResponse.sendJson(out, socDb.getThermalHistory(hours, points).toString());
+            } else {
+                // Default: full battery health report
+                HttpResponse.sendJson(out, socDb.getBatteryHealthReport(hours, points).toString());
+            }
+            
+            return true;
+        } catch (Exception e) {
+            logger.error("Failed to get battery health", e);
             HttpResponse.sendJson(out, "{\"error\": \"" + e.getMessage() + "\"}");
             return true;
         }

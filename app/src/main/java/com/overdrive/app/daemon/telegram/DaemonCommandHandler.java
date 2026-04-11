@@ -172,8 +172,11 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         
         // For camera daemon, also kill the restart wrapper script and delete it
         if ("byd_cam_daemon".equals(processName)) {
-            ctx.execShell("pkill -9 -f start_cam_daemon 2>/dev/null");
+            // Kill watchdog FIRST so it doesn't respawn the daemon
+            ctx.execShell("pkill -9 -f 'start_cam_daemon' 2>/dev/null");
             ctx.execShell("rm -f /data/local/tmp/start_cam_daemon.sh 2>/dev/null");
+            // Wait for watchdog to fully die before killing daemon
+            try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
             ctx.execShell("rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null");
         }
         
@@ -209,7 +212,9 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
     }
     
     /**
-     * Start daemon using app_process.
+     * Start daemon using the same flow as DaemonLauncher.kt.
+     * For CameraDaemon: deploys watchdog script with bmmcamera.jar, native libs, proxy args.
+     * For other daemons: uses the appropriate launch pattern.
      */
     private boolean startDaemon(String className, CommandContext ctx) {
         ctx.log("Starting daemon: " + className);
@@ -222,15 +227,191 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         }
         apkPath = apkPath.trim();
         
-        String fullClass = "com.overdrive.app.daemon." + className;
-        String cmd = String.format("CLASSPATH=%s app_process / %s &", apkPath, fullClass);
+        if ("CameraDaemon".equals(className)) {
+            return startCameraDaemonWithWatchdog(apkPath, ctx);
+        } else if ("AccSentryDaemon".equals(className)) {
+            return startAccSentryDaemonWithWatchdog(apkPath, ctx);
+        } else {
+            // Generic daemon launch (SentryDaemon etc.)
+            String fullClass = "com.overdrive.app.daemon." + className;
+            String cmd = String.format(
+                "nohup CLASSPATH=%s app_process /system/bin --nice-name=%s %s > /data/local/tmp/%s.log 2>&1 &",
+                apkPath, className.toLowerCase(), fullClass, className.toLowerCase());
+            ctx.execShell(cmd);
+            try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
+            return true;
+        }
+    }
+    
+    /**
+     * Replicates DaemonLauncher.launchCameraDaemonInternal() exactly.
+     * Step 1: Kill old processes and clean up
+     * Step 2: Write watchdog script with bmmcamera.jar, native libs, proxy args
+     * Step 3: Launch watchdog script
+     * Step 4: Verify daemon is running
+     */
+    private boolean startCameraDaemonWithWatchdog(String apkPath, CommandContext ctx) {
+        String scriptPath = "/data/local/tmp/start_cam_daemon.sh";
+        String logFile = "/data/local/tmp/cam_daemon.log";
+        String processName = "byd_cam_daemon";
+        String outputDir = "/sdcard/DCIM/BYDCam";
         
-        ctx.execShell(cmd);
+        // Detect native lib directory from APK path
+        String nativeLibDir = apkPath.replace("/base.apk", "/lib/arm64");
+        String libCheck = ctx.execShell("test -d '" + nativeLibDir + "' && echo yes || echo no");
+        if (libCheck == null || !libCheck.trim().equals("yes")) {
+            // Try common fallback paths
+            String[] fallbacks = {
+                "/data/app/~~*/com.overdrive.app-*/lib/arm64",
+                "/data/app/com.overdrive.app-1/lib/arm64",
+                "/data/app/com.overdrive.app-2/lib/arm64"
+            };
+            for (String fb : fallbacks) {
+                String found = ctx.execShell("ls -d " + fb + " 2>/dev/null | head -1");
+                if (found != null && !found.trim().isEmpty()) {
+                    nativeLibDir = found.trim();
+                    break;
+                }
+            }
+        }
+        ctx.log("Native lib dir: " + nativeLibDir);
         
-        // Wait and verify
+        // Detect proxy (same as DaemonLauncher.getProxyArgs())
+        String proxyArgs = "";
+        String proxyCheck = ctx.execShell("settings get global http_proxy 2>/dev/null");
+        if (proxyCheck != null && !proxyCheck.trim().isEmpty() && !"null".equals(proxyCheck.trim())) {
+            String[] parts = proxyCheck.trim().split(":");
+            if (parts.length >= 1) {
+                String host = parts[0];
+                String port = parts.length > 1 ? parts[1] : "8080";
+                proxyArgs = "-Dhttp.proxyHost=" + host + " " +
+                           "-Dhttp.proxyPort=" + port + " " +
+                           "-Dhttps.proxyHost=" + host + " " +
+                           "-Dhttps.proxyPort=" + port + " " +
+                           "-Dhttp.nonProxyHosts=\"localhost|127.*|[::1]\" ";
+                ctx.log("Proxy: " + host + ":" + port);
+            }
+        }
+        
+        // Step 1: Kill old processes and clean up (same as DaemonLauncher)
+        ctx.log("Cleaning up old processes...");
+        // Kill watchdog script FIRST, then daemon, then clean lock
+        // Use multiple kill patterns to catch all variants
+        ctx.execShell("pkill -9 -f 'start_cam_daemon' 2>/dev/null");
+        ctx.execShell("pkill -9 -f 'start_cam_daemon.sh' 2>/dev/null");
+        try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+        // Now kill the daemon itself
+        ctx.execShell("pkill -9 -f '" + processName + "' 2>/dev/null");
+        ctx.execShell("killall -9 " + processName + " 2>/dev/null");
+        ctx.execShell("rm -f " + scriptPath + " 2>/dev/null");
+        ctx.execShell("rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null");
+        // Wait for everything to fully die
+        try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
+        
+        // Verify nothing is still running
+        boolean stillRunning = isDaemonRunning(processName, ctx);
+        if (stillRunning) {
+            ctx.log("WARNING: Daemon still running after kill — retrying...");
+            ctx.execShell("pkill -9 -f '" + processName + "' 2>/dev/null");
+            try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+        }
+        
+        // Step 2: Write watchdog script (exact same content as DaemonLauncher.writeCamDaemonScript)
+        ctx.log("Writing watchdog script...");
+        String appProcessCmd = "CLASSPATH=/system/framework/bmmcamera.jar:" + apkPath + " app_process " +
+            "-Djava.library.path=" + nativeLibDir + ":/system/lib64:/vendor/lib64:/product/lib64:/odm/lib64 " +
+            proxyArgs + "/system/bin " +
+            "--nice-name=" + processName + " " +
+            "com.overdrive.app.daemon.CameraDaemon " +
+            outputDir + " " + nativeLibDir + " >> \"$LOG_FILE\" 2>&1";
+        
+        // Write script line by line using echo (same approach as DaemonLauncher)
+        ctx.execShell("echo '#!/system/bin/sh' > " + scriptPath);
+        ctx.execShell("echo '# CameraDaemon Watchdog Script' >> " + scriptPath);
+        ctx.execShell("echo 'LOG_FILE=\"" + logFile + "\"' >> " + scriptPath);
+        ctx.execShell("echo '' >> " + scriptPath);
+        ctx.execShell("echo 'while true; do' >> " + scriptPath);
+        ctx.execShell("echo '  echo \"[$(date)] Starting CameraDaemon...\" >> \"$LOG_FILE\"' >> " + scriptPath);
+        ctx.execShell("echo '' >> " + scriptPath);
+        // The app_process line — write via heredoc to avoid escaping hell
+        ctx.execShell("cat >> " + scriptPath + " << 'EOFLINE'\n  " + appProcessCmd + "\nEOFLINE");
+        ctx.execShell("echo '' >> " + scriptPath);
+        ctx.execShell("echo '  EXIT_CODE=$?' >> " + scriptPath);
+        ctx.execShell("echo '  if [ $EXIT_CODE -ne 0 ]; then' >> " + scriptPath);
+        ctx.execShell("echo '    echo \"[$(date)] Daemon exited with code $EXIT_CODE, NOT restarting.\" >> \"$LOG_FILE\"' >> " + scriptPath);
+        ctx.execShell("echo '    break' >> " + scriptPath);
+        ctx.execShell("echo '  fi' >> " + scriptPath);
+        ctx.execShell("echo '  echo \"[$(date)] Daemon exited with code 0, restarting in 3s...\" >> \"$LOG_FILE\"' >> " + scriptPath);
+        ctx.execShell("echo '  sleep 3' >> " + scriptPath);
+        ctx.execShell("echo 'done' >> " + scriptPath);
+        ctx.execShell("chmod 755 " + scriptPath);
+        
+        // Verify script exists
+        String verify = ctx.execShell("test -f " + scriptPath + " && wc -l < " + scriptPath);
+        if (verify == null || verify.trim().isEmpty() || "0".equals(verify.trim())) {
+            ctx.log("Failed to write watchdog script");
+            return false;
+        }
+        ctx.log("Script written (" + verify.trim() + " lines)");
+        
+        // Step 3: Launch watchdog script (same as DaemonLauncher.launchCamDaemonScript)
+        ctx.log("Launching watchdog...");
+        ctx.execShell("nohup sh " + scriptPath + " > /dev/null 2>&1 &");
+        
+        // Step 4: Verify daemon is running
+        try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
+        boolean running = isDaemonRunning(processName, ctx);
+        ctx.log("CameraDaemon " + (running ? "started with watchdog ✓" : "FAILED to start"));
+        return running;
+    }
+    
+    /**
+     * Replicates DaemonLauncher.launchAccSentryDaemon() flow.
+     */
+    private boolean startAccSentryDaemonWithWatchdog(String apkPath, CommandContext ctx) {
+        String scriptPath = "/data/local/tmp/start_acc_sentry.sh";
+        String logFile = "/data/local/tmp/acc_sentry_daemon.log";
+        String processName = "acc_sentry_daemon";
+        
+        // Step 1: Kill old processes
+        ctx.log("Cleaning up old processes...");
+        ctx.execShell("pkill -9 -f '" + processName + "' 2>/dev/null");
+        ctx.execShell("pkill -9 -f 'start_acc_sentry' 2>/dev/null");
+        ctx.execShell("rm -f " + scriptPath + " 2>/dev/null");
+        ctx.execShell("rm -f /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null");
         try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
         
-        return true; // Assume success - verification is tricky for background processes
+        // Step 2: Write watchdog script
+        ctx.log("Writing watchdog script...");
+        String appProcessCmd = "CLASSPATH=" + apkPath + " app_process /system/bin " +
+            "--nice-name=" + processName + " " +
+            "com.overdrive.app.daemon.AccSentryDaemon >> \"$LOG_FILE\" 2>&1";
+        
+        ctx.execShell("echo '#!/system/bin/sh' > " + scriptPath);
+        ctx.execShell("echo 'LOG_FILE=\"" + logFile + "\"' >> " + scriptPath);
+        ctx.execShell("echo '' >> " + scriptPath);
+        ctx.execShell("echo 'while true; do' >> " + scriptPath);
+        ctx.execShell("echo '  echo \"[$(date)] Starting AccSentryDaemon...\" >> \"$LOG_FILE\"' >> " + scriptPath);
+        ctx.execShell("cat >> " + scriptPath + " << 'EOFLINE'\n  " + appProcessCmd + "\nEOFLINE");
+        ctx.execShell("echo '  EXIT_CODE=$?' >> " + scriptPath);
+        ctx.execShell("echo '  if [ $EXIT_CODE -ne 0 ]; then' >> " + scriptPath);
+        ctx.execShell("echo '    echo \"[$(date)] Exited with code $EXIT_CODE, NOT restarting.\" >> \"$LOG_FILE\"' >> " + scriptPath);
+        ctx.execShell("echo '    break' >> " + scriptPath);
+        ctx.execShell("echo '  fi' >> " + scriptPath);
+        ctx.execShell("echo '  echo \"[$(date)] Exited with code 0, restarting in 3s...\" >> \"$LOG_FILE\"' >> " + scriptPath);
+        ctx.execShell("echo '  sleep 3' >> " + scriptPath);
+        ctx.execShell("echo 'done' >> " + scriptPath);
+        ctx.execShell("chmod 755 " + scriptPath);
+        
+        // Step 3: Launch
+        ctx.log("Launching watchdog...");
+        ctx.execShell("nohup sh " + scriptPath + " > /dev/null 2>&1 &");
+        
+        // Step 4: Verify
+        try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
+        boolean running = isDaemonRunning(processName, ctx);
+        ctx.log("AccSentryDaemon " + (running ? "started with watchdog ✓" : "FAILED to start"));
+        return running;
     }
     
     /**
@@ -276,32 +457,69 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 break;
                 
             case "zrok":
-                // Zrok tunnel - IMPORTANT: Only enable if identity file is missing!
-                // Free tier has 5-device limit. `enable` uses a slot, `share` is unlimited.
+                // Zrok tunnel — use RESERVED mode with saved token (same as app UI)
+                // Falls back to public mode only if no reserved token exists
                 String identityCheck = ctx.execShell("test -f /data/local/tmp/.zrok/environment.json && echo yes || echo no");
                 if (identityCheck == null || !identityCheck.trim().equals("yes")) {
-                    // Need to enable - THIS COUNTS AGAINST THE 5-DEVICE LIMIT!
+                    // Need to enable — read token from saved file (set via app UI)
+                    String enableToken = ctx.execShell("cat /data/local/tmp/.zrok/enable_token 2>/dev/null");
+                    if (enableToken == null || enableToken.trim().isEmpty() || enableToken.contains("No such file")) {
+                        ctx.log("❌ No zrok enable token found. Set it from the app UI first.");
+                        return false;
+                    }
+                    enableToken = enableToken.trim();
                     ctx.log("⚠️ Device not enabled. Registering now (uses 1 of 5 slots)...");
                     String enableCmd = "HOME=/data/local/tmp " +
                         "ALL_PROXY=socks5://127.0.0.1:8119 " +
                         "HTTP_PROXY=socks5://127.0.0.1:8119 " +
                         "HTTPS_PROXY=socks5://127.0.0.1:8119 " +
                         "NO_PROXY=localhost,127.0.0.1 " +
-                        "/data/local/tmp/zrok enable 0QBZzB74VgX7 --headless 2>&1";
+                        "/data/local/tmp/zrok enable " + enableToken + " --headless 2>&1";
                     String enableResult = ctx.execShell(enableCmd);
                     ctx.log("Enable result: " + enableResult);
                     try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
                 } else {
-                    ctx.log("✅ Device already enabled. Skipping registration.");
+                    ctx.log("✅ Device already enabled.");
                 }
-                // Start zrok share (SAFE - unlimited restarts)
-                cmd = "nohup sh -c 'HOME=/data/local/tmp " +
-                      "ALL_PROXY=socks5://127.0.0.1:8119 " +
-                      "HTTP_PROXY=socks5://127.0.0.1:8119 " +
-                      "HTTPS_PROXY=socks5://127.0.0.1:8119 " +
-                      "NO_PROXY=localhost,127.0.0.1 " +
-                      "/data/local/tmp/zrok share public http://localhost:8080 --headless' " +
-                      "> /data/local/tmp/zrok.log 2>&1 &";
+                
+                // Check for saved reserved token (from app UI's zrok reserve)
+                String reservedToken = null;
+                String tokenRead = ctx.execShell("cat /data/local/tmp/.zrok/reserved_token 2>/dev/null");
+                if (tokenRead != null && !tokenRead.trim().isEmpty() && !tokenRead.contains("No such file")) {
+                    reservedToken = tokenRead.trim();
+                }
+                
+                // Also read saved unique name for logging
+                String savedName = null;
+                String nameRead = ctx.execShell("cat /data/local/tmp/.zrok/unique_name 2>/dev/null");
+                if (nameRead != null && !nameRead.trim().isEmpty() && !nameRead.contains("No such file")) {
+                    savedName = nameRead.trim();
+                }
+                
+                if (reservedToken != null) {
+                    // RESERVED mode — permanent URL, same as app UI
+                    ctx.log("Using reserved token: " + reservedToken);
+                    if (savedName != null) {
+                        ctx.log("Permanent URL: https://" + savedName + ".share.zrok.io");
+                    }
+                    cmd = "nohup sh -c 'HOME=/data/local/tmp " +
+                          "ALL_PROXY=socks5://127.0.0.1:8119 " +
+                          "HTTP_PROXY=socks5://127.0.0.1:8119 " +
+                          "HTTPS_PROXY=socks5://127.0.0.1:8119 " +
+                          "NO_PROXY=localhost,127.0.0.1 " +
+                          "/data/local/tmp/zrok share reserved " + reservedToken + " --headless' " +
+                          "> /data/local/tmp/zrok.log 2>&1 &";
+                } else {
+                    // PUBLIC mode fallback — random URL (no reserved token found)
+                    ctx.log("⚠️ No reserved token found — using public mode (random URL)");
+                    cmd = "nohup sh -c 'HOME=/data/local/tmp " +
+                          "ALL_PROXY=socks5://127.0.0.1:8119 " +
+                          "HTTP_PROXY=socks5://127.0.0.1:8119 " +
+                          "HTTPS_PROXY=socks5://127.0.0.1:8119 " +
+                          "NO_PROXY=localhost,127.0.0.1 " +
+                          "/data/local/tmp/zrok share public http://localhost:8080 --headless' " +
+                          "> /data/local/tmp/zrok.log 2>&1 &";
+                }
                 processName = "zrok";
                 break;
                 

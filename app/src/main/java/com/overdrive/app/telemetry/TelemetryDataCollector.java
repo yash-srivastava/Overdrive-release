@@ -265,7 +265,8 @@ public class TelemetryDataCollector {
             }
 
             // Staleness detection: if speed value is identical for 10+ seconds, force reconnect
-            if (speedKmh == prevSpeedForStaleCheck) {
+            // SOTA: Skip when speed=0 and car is stationary (gear P) — that's expected, not stale
+            if (speedKmh == prevSpeedForStaleCheck && !(speedKmh == 0 && lastGearMode == 1)) {
                 staleSpeedCount++;
                 if (staleSpeedCount >= STALE_THRESHOLD) {
                     logger.warn("Speed device appears stale (same value " + speedKmh + " for " + (staleSpeedCount / 5) + "s), reconnecting");

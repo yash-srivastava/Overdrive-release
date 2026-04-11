@@ -95,12 +95,16 @@ public class SurveillanceIpcServer implements Runnable {
                 
                 case "START":
                     // Start surveillance (from Telegram /start command)
-                    CameraDaemon.enableSurveillance();
                     com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(true);
-                    logger.info("Surveillance started via Telegram IPC");
+                    if (!com.overdrive.app.monitor.AccMonitor.isAccOn()) {
+                        CameraDaemon.enableSurveillance();
+                        logger.info("Surveillance started via Telegram IPC");
+                    } else {
+                        logger.info("Surveillance preference saved via Telegram — will activate on ACC OFF");
+                    }
                     response.put("success", true);
                     response.put("enabled", true);
-                    response.put("message", "Surveillance started");
+                    response.put("message", "Surveillance enabled");
                     break;
                     
                 case "STOP":

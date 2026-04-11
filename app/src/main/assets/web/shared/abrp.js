@@ -155,6 +155,7 @@ const ABRP = {
             tlm_elevation:   t.elevation != null ? t.elevation.toFixed(1) + ' m' : '-- m',
             tlm_heading:     t.heading != null ? t.heading.toFixed(1) + '°' : '--°',
             tlm_ext_temp:    t.ext_temp != null ? t.ext_temp.toFixed(1) + ' °C' : '-- °C',
+            tlm_batt_temp:   t.batt_temp != null ? t.batt_temp.toFixed(1) + ' °C' : '-- °C',
             tlm_odometer:    t.odometer != null ? t.odometer.toFixed(1) + ' km' : '-- km',
             tlm_soh:         t.soh != null ? t.soh.toFixed(1) + '%' : '--%',
             tlm_capacity:    t.capacity != null ? t.capacity.toFixed(2) + ' kWh' : '-- kWh'
@@ -187,6 +188,9 @@ const ABRP = {
 
         // Ext temp
         setEl('vehicleTemp', t.ext_temp != null ? t.ext_temp.toFixed(1) + ' °C' : '-- °C');
+
+        // Battery temp
+        setEl('vehicleBattTemp', t.batt_temp != null ? t.batt_temp.toFixed(1) + ' °C' : '-- °C');
 
         // Odometer
         setEl('vehicleOdometer', t.odometer != null ? t.odometer.toFixed(0) + ' km' : '-- km');

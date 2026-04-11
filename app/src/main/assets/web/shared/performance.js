@@ -88,8 +88,14 @@ BYD.performance = {
         // Fetch initial SOC data
         await this.fetchSocHistory();
         
+        // Fetch initial battery health data
+        await this.fetchBatteryHealth();
+        
         // Start SOC polling (less frequent)
         this.socPollInterval = setInterval(() => this.fetchSocHistory(), this.SOC_UPDATE_INTERVAL);
+        
+        // Battery health polling (every 2 minutes — same as SOC)
+        this.batteryHealthPollInterval = setInterval(() => this.fetchBatteryHealth(), this.SOC_UPDATE_INTERVAL);
         
         // Handle resize
         window.addEventListener('resize', () => this.resizeCharts());
@@ -224,6 +230,45 @@ BYD.performance = {
         this.charts.mem = this.createChart('memChart', 'mem');
         this.charts.gpu = this.createChart('gpuChart', 'gpu');
         this.charts.soc = this.createChart('socChart', 'soc');
+        this.charts.voltage = this.createChart('voltageChart', 'voltage');
+        this.charts.thermal = this.createChart('thermalChart', 'thermal');
+
+        // Setup IntersectionObserver for charts that may be below the fold on mobile
+        this._setupVisibilityObserver();
+    },
+
+    /**
+     * Track canvases that need re-rendering when they become visible.
+     * On mobile, charts below the fold have 0x0 dimensions at render time.
+     */
+    _pendingVisibilityRenders: {},
+
+    _setupVisibilityObserver() {
+        if (!('IntersectionObserver' in window)) return;
+
+        this._visibilityObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const canvasId = entry.target.id;
+                    const chartType = this._pendingVisibilityRenders[canvasId];
+                    if (chartType) {
+                        delete this._pendingVisibilityRenders[canvasId];
+                        // Small delay to ensure layout is complete
+                        requestAnimationFrame(() => this.renderChartByType(chartType));
+                    }
+                }
+            });
+        }, { threshold: 0.1 });
+    },
+
+    _scheduleVisibilityRender(canvasId, chartType) {
+        if (this._pendingVisibilityRenders[canvasId]) return; // already scheduled
+        this._pendingVisibilityRenders[canvasId] = chartType;
+
+        const canvas = document.getElementById(canvasId);
+        if (canvas && this._visibilityObserver) {
+            this._visibilityObserver.observe(canvas);
+        }
     },
     
     createChart(canvasId, chartType) {
@@ -333,6 +378,22 @@ BYD.performance = {
             
             // Find closest data point
             dataIndex = this.findClosestTimeIndex(history, targetTime);
+        } else if (chartType === 'voltage') {
+            const d = this.batteryHealthData;
+            if (!d || !d.voltageHistory || d.voltageHistory.length < 2) return;
+            const history = d.voltageHistory;
+            const timeStart = history[0].t;
+            const timeEnd = history[history.length - 1].t;
+            const targetTime = timeStart + (relativeX / chartWidth) * (timeEnd - timeStart);
+            dataIndex = this.findClosestTimeIndex(history, targetTime);
+        } else if (chartType === 'thermal') {
+            const d = this.batteryHealthData;
+            if (!d || !d.thermalHistory || d.thermalHistory.length < 2) return;
+            const history = d.thermalHistory;
+            const timeStart = history[0].t;
+            const timeEnd = history[history.length - 1].t;
+            const targetTime = timeStart + (relativeX / chartWidth) * (timeEnd - timeStart);
+            dataIndex = this.findClosestTimeIndex(history, targetTime);
         } else {
             // Real-time charts use index-based positioning
             const data = this.getChartData(chartType);
@@ -409,17 +470,30 @@ BYD.performance = {
             case 'soc':
                 this.renderSocChart();
                 break;
+            case 'voltage':
+                this.renderVoltageChart();
+                break;
+            case 'thermal':
+                this.renderThermalChart();
+                break;
         }
     },
     
     resizeCharts() {
         Object.keys(this.charts).forEach(key => {
-            if (this.charts[key]) {
-                this.charts[key] = this.createChart(key + 'Chart', key);
+            const canvasId = key === 'cpu' ? 'cpuChart' : key === 'mem' ? 'memChart' : key === 'gpu' ? 'gpuChart' : key === 'soc' ? 'socChart' : key === 'voltage' ? 'voltageChart' : key === 'thermal' ? 'thermalChart' : key + 'Chart';
+            const canvas = document.getElementById(canvasId);
+            if (canvas) {
+                const rect = canvas.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                    this.charts[key] = this.createChart(canvasId, key);
+                }
             }
         });
         this.renderAllCharts();
         this.renderSocChart();
+        this.renderVoltageChart();
+        this.renderThermalChart();
     },
     
     startPolling() {
@@ -435,6 +509,10 @@ BYD.performance = {
         if (this.socPollInterval) {
             clearInterval(this.socPollInterval);
             this.socPollInterval = null;
+        }
+        if (this.batteryHealthPollInterval) {
+            clearInterval(this.batteryHealthPollInterval);
+            this.batteryHealthPollInterval = null;
         }
         // SOTA: Disconnect from backend when stopping
         this.disconnect();
@@ -1129,6 +1207,31 @@ BYD.performance = {
             if (current < 15) evCard.classList.add('danger');
             else if (current < 30) evCard.classList.add('warning');
         }
+        
+        // SOH from latest history point (fallback when battery health API hasn't loaded yet)
+        if (this.socData.history && this.socData.history.length > 0) {
+            const latest = this.socData.history[this.socData.history.length - 1];
+            if (latest.soh && latest.soh > 0) {
+                const sohEl = document.getElementById('evSohValue');
+                if (sohEl && sohEl.textContent === '--%') {
+                    sohEl.textContent = latest.soh.toFixed(1) + '%';
+                }
+                // Also update battery health card if not yet populated
+                const sohValEl = document.getElementById('sohValue');
+                if (sohValEl && sohValEl.textContent === '--%') {
+                    sohValEl.textContent = latest.soh.toFixed(1) + '%';
+                }
+                const badge = document.getElementById('sohBadge');
+                if (badge && badge.style.display === 'none') {
+                    badge.style.display = '';
+                    badge.textContent = 'SOH ' + latest.soh.toFixed(0) + '%';
+                    if (latest.soh >= 90) badge.className = 'gpu-status-badge efficient';
+                    else if (latest.soh >= 80) badge.className = 'gpu-status-badge optimal';
+                    else if (latest.soh >= 70) badge.className = 'gpu-status-badge heavy';
+                    else badge.className = 'gpu-status-badge critical';
+                }
+            }
+        }
     },
     
     updateElement(id, value) {
@@ -1528,5 +1631,476 @@ BYD.performance = {
         }
         
         return labels;
+    },
+
+    // ==================== BATTERY HEALTH ====================
+
+    batteryTimeRange: 72,
+    healthTimeRange: 72,
+    batteryHealthData: null,
+
+    setBatteryTimeRange(hours) {
+        this.batteryTimeRange = hours;
+        this.fetchBatteryHealth();
+    },
+
+    setHealthTimeRange(hours) {
+        this.healthTimeRange = hours;
+        this.fetchBatteryHealth();
+    },
+
+    async fetchBatteryHealth() {
+        try {
+            const hours = Math.max(this.batteryTimeRange, this.healthTimeRange);
+            const res = await fetch(`/api/performance/battery?hours=${hours}&points=300`);
+            if (!res.ok) return;
+            
+            this.batteryHealthData = await res.json();
+            this.updateBatteryHealthUI();
+            this.renderVoltageChart();
+            this.renderThermalChart();
+        } catch (e) {
+            console.error('[Performance] Battery health fetch error:', e);
+        }
+    },
+
+    updateBatteryHealthUI() {
+        const d = this.batteryHealthData;
+        if (!d) return;
+
+        const c = d.current || {};
+        const vs = d.voltageStats || {};
+
+        // 12V stats
+        this.updateElement('volt12vCurrent', c.voltage12v ? c.voltage12v.toFixed(2) + 'V' : '--V');
+        this.updateElement('volt12vMin', vs.min ? vs.min.toFixed(2) + 'V' : '--V');
+        this.updateElement('volt12vMax', vs.max ? vs.max.toFixed(2) + 'V' : '--V');
+        this.updateElement('volt12vAvg', vs.avg ? vs.avg.toFixed(2) + 'V' : '--V');
+
+        // SOH
+        const soh = c.soh;
+        this.updateElement('sohValue', soh != null ? soh.toFixed(1) + '%' : '--%');
+        this.updateElement('evSohValue', soh != null ? soh.toFixed(1) + '%' : '--%');
+        this.updateElement('estCapacity', c.estimatedCapacityKwh ? c.estimatedCapacityKwh.toFixed(1) + ' kWh' : '-- kWh');
+
+        // SOH badge
+        const badge = document.getElementById('sohBadge');
+        if (badge && soh != null) {
+            badge.style.display = '';
+            badge.textContent = 'SOH ' + soh.toFixed(0) + '%';
+            if (soh >= 90) { badge.className = 'gpu-status-badge efficient'; }
+            else if (soh >= 80) { badge.className = 'gpu-status-badge optimal'; }
+            else if (soh >= 70) { badge.className = 'gpu-status-badge heavy'; }
+            else { badge.className = 'gpu-status-badge critical'; }
+        }
+
+        // Thermal
+        this.updateElement('tempHighVal', c.tempHigh != null ? c.tempHigh.toFixed(1) + '°C' : '--°C');
+        this.updateElement('tempLowVal', c.tempLow != null ? c.tempLow.toFixed(1) + '°C' : '--°C');
+        this.updateElement('tempDeltaVal', c.tempDelta != null ? c.tempDelta.toFixed(1) + '°C' : '--°C');
+        
+        const status = c.thermalStatus || '--';
+        const statusEl = document.getElementById('thermalStatus');
+        if (statusEl) {
+            statusEl.textContent = status;
+            statusEl.style.color = status === 'CRITICAL' ? '#ef4444' : status === 'WARNING' ? '#fbbf24' : status === 'NORMAL' ? '#22c55e' : 'var(--text-muted)';
+        }
+    },
+
+    renderVoltageChart() {
+        const d = this.batteryHealthData;
+        if (!d || !d.voltageHistory || d.voltageHistory.length < 2) return;
+
+        const canvas = document.getElementById('voltageChart');
+        if (!canvas) return;
+
+        // Skip rendering if canvas is not visible (mobile: below fold)
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) {
+            // Schedule re-render when visible
+            this._scheduleVisibilityRender('voltageChart', 'voltage');
+            return;
+        }
+
+        // Re-create chart to get correct dimensions
+        this.charts.voltage = this.createChart('voltageChart', 'voltage');
+        if (!this.charts.voltage) return;
+
+        const ctx = this.charts.voltage.ctx;
+        const W = this.charts.voltage.width;
+        const H = this.charts.voltage.height;
+
+        ctx.clearRect(0, 0, W, H);
+
+        const history = d.voltageHistory;
+        const padding = { top: 20, right: 20, bottom: 30, left: 50 };
+        const cW = W - padding.left - padding.right;
+        const cH = H - padding.top - padding.bottom;
+
+        const timeStart = history[0].t;
+        const timeEnd = history[history.length - 1].t;
+        const timeRange = timeEnd - timeStart || 1;
+
+        let minV = Infinity, maxV = -Infinity;
+        history.forEach(p => { if (p.voltage < minV) minV = p.voltage; if (p.voltage > maxV) maxV = p.voltage; });
+        minV = Math.floor(minV * 2) / 2 - 0.5;
+        maxV = Math.ceil(maxV * 2) / 2 + 0.5;
+        if (minV > 10.5) minV = 10.5;
+        const vRange = maxV - minV || 1;
+
+        // Grid
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.lineWidth = 1;
+        for (let v = Math.ceil(minV); v <= maxV; v += 0.5) {
+            const y = padding.top + cH - ((v - minV) / vRange) * cH;
+            ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(W - padding.right, y); ctx.stroke();
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.font = '11px Inter';
+            ctx.textAlign = 'right';
+            ctx.fillText(v.toFixed(1) + 'V', padding.left - 6, y + 4);
+        }
+
+        // Warning threshold
+        const warnY = padding.top + cH - ((11.5 - minV) / vRange) * cH;
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.4)';
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(padding.left, warnY); ctx.lineTo(W - padding.right, warnY); ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Charging regions
+        this.drawChargingHighlight(ctx, history, padding, cW, cH, timeStart, timeRange);
+
+        // Voltage line
+        ctx.strokeStyle = '#fbbf24';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        history.forEach((p, i) => {
+            const x = padding.left + ((p.t - timeStart) / timeRange) * cW;
+            const y = padding.top + cH - ((p.voltage - minV) / vRange) * cH;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+
+        // Time labels
+        const labels = this.getTimeLabels(timeStart, timeEnd, this.batteryTimeRange);
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.font = '11px Inter';
+        ctx.textAlign = 'center';
+        labels.forEach(l => {
+            const x = padding.left + ((l.time - timeStart) / timeRange) * cW;
+            ctx.fillText(l.text, x, H - 6);
+        });
+
+        // Crosshair tooltip (same pattern as SOC chart)
+        if (this.tooltip.visible && this.tooltip.chartId === 'voltage') {
+            this.drawVoltageCrosshair(ctx, history, padding, cW, cH, timeStart, timeRange, minV, vRange, W);
+        }
+    },
+
+    renderThermalChart() {
+        const d = this.batteryHealthData;
+        if (!d || !d.thermalHistory || d.thermalHistory.length < 2) return;
+
+        const canvas = document.getElementById('thermalChart');
+        if (!canvas) return;
+
+        // Skip rendering if canvas is not visible (mobile: below fold)
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) {
+            this._scheduleVisibilityRender('thermalChart', 'thermal');
+            return;
+        }
+
+        // Re-create chart to get correct dimensions
+        this.charts.thermal = this.createChart('thermalChart', 'thermal');
+        if (!this.charts.thermal) return;
+
+        const ctx = this.charts.thermal.ctx;
+        const W = this.charts.thermal.width;
+        const H = this.charts.thermal.height;
+
+        ctx.clearRect(0, 0, W, H);
+
+        const history = d.thermalHistory;
+        const padding = { top: 20, right: 20, bottom: 30, left: 50 };
+        const cW = W - padding.left - padding.right;
+        const cH = H - padding.top - padding.bottom;
+
+        const timeStart = history[0].t;
+        const timeEnd = history[history.length - 1].t;
+        const timeRange = timeEnd - timeStart || 1;
+
+        // Auto-scale Y
+        let minT = Infinity, maxT = -Infinity;
+        history.forEach(p => {
+            [p.high, p.low, p.avg].forEach(v => {
+                if (v != null) { if (v < minT) minT = v; if (v > maxT) maxT = v; }
+            });
+        });
+        minT = Math.floor(minT / 5) * 5 - 5;
+        maxT = Math.ceil(maxT / 5) * 5 + 5;
+        const tRange = maxT - minT || 1;
+
+        // Grid
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.lineWidth = 1;
+        for (let t = Math.ceil(minT / 5) * 5; t <= maxT; t += 5) {
+            const y = padding.top + cH - ((t - minT) / tRange) * cH;
+            ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(W - padding.right, y); ctx.stroke();
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.font = '11px Inter';
+            ctx.textAlign = 'right';
+            ctx.fillText(t + '°C', padding.left - 6, y + 4);
+        }
+
+        // Charging regions (background highlight)
+        this.drawChargingHighlight(ctx, history, padding, cW, cH, timeStart, timeRange);
+
+        // Draw lines: high (red), low (green), avg (blue)
+        const series = [
+            { key: 'high', color: '#ef4444' },
+            { key: 'low', color: '#22c55e' },
+            { key: 'avg', color: '#3b82f6' }
+        ];
+
+        series.forEach(s => {
+            ctx.strokeStyle = s.color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            let started = false;
+            history.forEach(p => {
+                if (p[s.key] == null) return;
+                const x = padding.left + ((p.t - timeStart) / timeRange) * cW;
+                const y = padding.top + cH - ((p[s.key] - minT) / tRange) * cH;
+                if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); }
+            });
+            ctx.stroke();
+        });
+
+        // Time labels
+        const labels = this.getTimeLabels(timeStart, timeEnd, this.healthTimeRange);
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.font = '11px Inter';
+        ctx.textAlign = 'center';
+        labels.forEach(l => {
+            const x = padding.left + ((l.time - timeStart) / timeRange) * cW;
+            ctx.fillText(l.text, x, H - 6);
+        });
+
+        // Crosshair tooltip (same pattern as SOC chart)
+        if (this.tooltip.visible && this.tooltip.chartId === 'thermal') {
+            this.drawThermalCrosshair(ctx, history, padding, cW, cH, timeStart, timeRange, minT, tRange, W);
+        }
+    },
+
+    /**
+     * Draw crosshair and tooltip for voltage chart (matches SOC chart style).
+     */
+    drawVoltageCrosshair(ctx, history, padding, cW, cH, timeStart, timeRange, minV, vRange, width) {
+        const idx = this.tooltip.dataIndex;
+        if (idx < 0 || idx >= history.length) return;
+        const point = history[idx];
+        const x = padding.left + ((point.t - timeStart) / timeRange) * cW;
+        const y = padding.top + cH - ((point.voltage - minV) / vRange) * cH;
+
+        // Vertical crosshair
+        ctx.beginPath();
+        ctx.strokeStyle = this.colors.crosshair;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.moveTo(x, padding.top);
+        ctx.lineTo(x, padding.top + cH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Highlighted dot
+        ctx.beginPath();
+        ctx.arc(x, y, 7, 0, Math.PI * 2);
+        ctx.fillStyle = '#fbbf24';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(x, y, 9, 0, Math.PI * 2);
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Tooltip box
+        const date = new Date(point.t);
+        const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        const boxPadding = 10;
+        const lineHeight = 16;
+        const boxWidth = 130;
+        const lines = 3 + (point.charging ? 1 : 0);
+        const boxHeight = boxPadding * 2 + lineHeight * lines;
+
+        let tooltipX = x + 15;
+        if (tooltipX + boxWidth > width - padding.right) tooltipX = x - boxWidth - 15;
+        let tooltipY = Math.max(padding.top + 10, y - boxHeight / 2);
+
+        ctx.fillStyle = this.colors.tooltipBg;
+        ctx.strokeStyle = this.colors.tooltipBorder;
+        ctx.lineWidth = 1;
+        this._drawRoundRect(ctx, tooltipX, tooltipY, boxWidth, boxHeight, 6);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = this.colors.text;
+        ctx.font = '10px Inter, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(dateStr + ' ' + timeStr, tooltipX + boxPadding, tooltipY + boxPadding + 10);
+
+        ctx.fillStyle = '#fbbf24';
+        ctx.font = 'bold 16px JetBrains Mono, monospace';
+        ctx.fillText(point.voltage.toFixed(2) + 'V', tooltipX + boxPadding, tooltipY + boxPadding + 30);
+
+        let yOff = 48;
+        if (point.charging) {
+            ctx.fillStyle = this.colors.charging || '#0ea5e9';
+            ctx.font = '11px Inter, sans-serif';
+            ctx.fillText('⚡ Charging', tooltipX + boxPadding, tooltipY + boxPadding + yOff);
+            yOff += 16;
+        }
+        ctx.fillStyle = point.voltage < 11.5 ? '#ef4444' : '#22c55e';
+        ctx.font = '11px Inter, sans-serif';
+        ctx.fillText(point.voltage < 11.5 ? '⚠ Low voltage' : '● Normal', tooltipX + boxPadding, tooltipY + boxPadding + yOff);
+    },
+
+    /**
+     * Draw crosshair and tooltip for thermal chart (matches SOC chart style).
+     */
+    drawThermalCrosshair(ctx, history, padding, cW, cH, timeStart, timeRange, minT, tRange, width) {
+        const idx = this.tooltip.dataIndex;
+        if (idx < 0 || idx >= history.length) return;
+        const point = history[idx];
+        const x = padding.left + ((point.t - timeStart) / timeRange) * cW;
+
+        // Vertical crosshair
+        ctx.beginPath();
+        ctx.strokeStyle = this.colors.crosshair;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.moveTo(x, padding.top);
+        ctx.lineTo(x, padding.top + cH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Dots on each line
+        const series = [
+            { key: 'high', color: '#ef4444' },
+            { key: 'low', color: '#22c55e' },
+            { key: 'avg', color: '#3b82f6' }
+        ];
+        series.forEach(s => {
+            if (point[s.key] == null) return;
+            const y = padding.top + cH - ((point[s.key] - minT) / tRange) * cH;
+            ctx.beginPath();
+            ctx.arc(x, y, 5, 0, Math.PI * 2);
+            ctx.fillStyle = s.color;
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(x, y, 7, 0, Math.PI * 2);
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        });
+
+        // Tooltip box
+        const date = new Date(point.t);
+        const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        const boxPadding = 10;
+        const lineHeight = 16;
+        const boxWidth = 140;
+        let lineCount = 1; // header
+        if (point.high != null) lineCount++;
+        if (point.low != null) lineCount++;
+        if (point.avg != null) lineCount++;
+        if (point.charging) lineCount++;
+        const boxHeight = boxPadding * 2 + lineHeight * lineCount + 4;
+
+        let tooltipX = x + 15;
+        if (tooltipX + boxWidth > width - padding.right) tooltipX = x - boxWidth - 15;
+        let tooltipY = padding.top + 10;
+
+        ctx.fillStyle = this.colors.tooltipBg;
+        ctx.strokeStyle = this.colors.tooltipBorder;
+        ctx.lineWidth = 1;
+        this._drawRoundRect(ctx, tooltipX, tooltipY, boxWidth, boxHeight, 6);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = this.colors.text;
+        ctx.font = '10px Inter, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(dateStr + ' ' + timeStr, tooltipX + boxPadding, tooltipY + boxPadding + 10);
+
+        let yOff = 28;
+        if (point.high != null) {
+            ctx.fillStyle = '#ef4444';
+            ctx.font = '12px JetBrains Mono, monospace';
+            ctx.fillText('Hi: ' + point.high.toFixed(1) + '°C', tooltipX + boxPadding, tooltipY + boxPadding + yOff);
+            yOff += lineHeight;
+        }
+        if (point.low != null) {
+            ctx.fillStyle = '#22c55e';
+            ctx.font = '12px JetBrains Mono, monospace';
+            ctx.fillText('Lo: ' + point.low.toFixed(1) + '°C', tooltipX + boxPadding, tooltipY + boxPadding + yOff);
+            yOff += lineHeight;
+        }
+        if (point.avg != null) {
+            ctx.fillStyle = '#3b82f6';
+            ctx.font = '12px JetBrains Mono, monospace';
+            ctx.fillText('Avg: ' + point.avg.toFixed(1) + '°C', tooltipX + boxPadding, tooltipY + boxPadding + yOff);
+            yOff += lineHeight;
+        }
+        if (point.charging) {
+            ctx.fillStyle = this.colors.charging || '#0ea5e9';
+            ctx.font = '11px Inter, sans-serif';
+            ctx.fillText('⚡ Charging', tooltipX + boxPadding, tooltipY + boxPadding + yOff);
+        }
+    },
+
+    /**
+     * Draw a rounded rectangle path (compatible with older WebViews that lack ctx.roundRect).
+     */
+    _drawRoundRect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+    },
+
+    /**
+     * Draw charging regions as highlighted background areas on any chart.
+     * Expects history points to have a `charging` boolean field.
+     */
+    drawChargingHighlight(ctx, history, padding, chartWidth, chartHeight, timeStart, timeRange) {
+        let inCharging = false;
+        let startX = 0;
+
+        history.forEach(p => {
+            const x = padding.left + ((p.t - timeStart) / timeRange) * chartWidth;
+            if (p.charging && !inCharging) {
+                inCharging = true;
+                startX = x;
+            } else if (!p.charging && inCharging) {
+                inCharging = false;
+                ctx.fillStyle = 'rgba(14, 165, 233, 0.1)';
+                ctx.fillRect(startX, padding.top, x - startX, chartHeight);
+            }
+        });
+
+        if (inCharging) {
+            ctx.fillStyle = 'rgba(14, 165, 233, 0.1)';
+            ctx.fillRect(startX, padding.top, padding.left + chartWidth - startX, chartHeight);
+        }
     }
 };

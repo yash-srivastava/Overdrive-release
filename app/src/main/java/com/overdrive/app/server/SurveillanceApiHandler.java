@@ -76,7 +76,8 @@ public class SurveillanceApiHandler {
             }
         }
         
-        config.put("enabled", CameraDaemon.isSurveillanceEnabled());
+        // Read persisted preference (not runtime state) for the UI toggle
+        config.put("enabled", com.overdrive.app.config.UnifiedConfigManager.isSurveillanceEnabled());
         
         if (sentryConfig != null) {
             config.put("sadThreshold", sentry != null ? sentry.getSadThreshold() : 0.05f);
@@ -444,8 +445,17 @@ public class SurveillanceApiHandler {
     }
     
     private static void handleEnable(OutputStream out) throws Exception {
-        CameraDaemon.enableSurveillance();
+        // SOTA: Only persist the preference. Surveillance should only activate on ACC OFF.
+        // Starting motion detection while driving wastes CPU/GPU and is meaningless.
         com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(true);
+        
+        // Only actually start surveillance if ACC is currently OFF (sentry mode)
+        boolean accIsOn = com.overdrive.app.monitor.AccMonitor.isAccOn();
+        if (!accIsOn) {
+            CameraDaemon.enableSurveillance();
+        } else {
+            CameraDaemon.log("Surveillance preference saved — will activate on next ACC OFF");
+        }
         HttpResponse.sendJsonSuccess(out);
     }
     
