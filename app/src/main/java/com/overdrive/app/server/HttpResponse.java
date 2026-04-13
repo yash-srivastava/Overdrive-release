@@ -128,8 +128,15 @@ public class HttpResponse {
         }
         
         long fileLength = file.length();
+        if (start < 0 || start >= fileLength) {
+            sendError(out, 416, "Range Not Satisfiable");
+            return;
+        }
         if (end < 0 || end >= fileLength) {
             end = fileLength - 1;
+        }
+        if (end < start) {
+            end = start;
         }
         long contentLength = end - start + 1;
         

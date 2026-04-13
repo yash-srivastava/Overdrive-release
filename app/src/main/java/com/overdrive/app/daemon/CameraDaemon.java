@@ -242,6 +242,7 @@ public class CameraDaemon {
         try {
             if (sohEstimator != null) {
                 sohEstimator.autoDetectCarModel(sharedAppContext);
+                sohEstimator.seedInitialEstimate();
                 log("SohEstimator: " + (sohEstimator.hasEstimate() ? sohEstimator.getCurrentSoh() + "%" : "no estimate") +
                     " (capacity: " + sohEstimator.getNominalCapacityKwh() + " KWh)");
             }
@@ -935,11 +936,34 @@ public class CameraDaemon {
             
             // ACC OFF - Start pipeline for sentry mode
             try {
+                // CRITICAL: FORCE remount SD card when ACC goes off — BEFORE any early returns.
+                // Even if surveillance is disabled or suppressed by safe zone, the SD card must stay
+                // mounted so the HTTP server can serve existing recordings/events/trips.
+                // Android/BYD system unmounts SD card when ACC is off, so we MUST force remount.
+                com.overdrive.app.storage.StorageManager storage = 
+                    com.overdrive.app.storage.StorageManager.getInstance();
+                boolean anyStorageOnSd = 
+                    storage.getSurveillanceStorageType() == com.overdrive.app.storage.StorageManager.StorageType.SD_CARD ||
+                    storage.getRecordingsStorageType() == com.overdrive.app.storage.StorageManager.StorageType.SD_CARD ||
+                    storage.getTripsStorageType() == com.overdrive.app.storage.StorageManager.StorageType.SD_CARD;
+                if (anyStorageOnSd) {
+                    log("FORCE mounting SD card (ACC OFF, SD card configured for storage)...");
+                    if (storage.ensureSdCardMounted(true)) {
+                        log("SD card force mounted");
+                    } else {
+                        log("WARNING: SD card mount failed - using internal storage");
+                    }
+                    // Start watchdog to keep SD card mounted while ACC is off.
+                    // BYD system may repeatedly unmount it — watchdog keeps it alive
+                    // so recordings/events/trips remain accessible via HTTP.
+                    storage.startSdCardWatchdog();
+                }
+                
                 // Check if user has enabled surveillance in config
                 boolean userEnabled = com.overdrive.app.config.UnifiedConfigManager.isSurveillanceEnabled();
                 if (!userEnabled) {
                     log("Surveillance NOT enabled in config — skipping auto-start on ACC OFF");
-                    return;
+                    return;  // SD card is mounted + watchdog running
                 }
                 
                 // Safe zone check — don't start surveillance if parked at home/work
@@ -950,24 +974,7 @@ public class CameraDaemon {
                         + " (dist=" + Math.round(safeMgr.getDistanceToNearestZone()) + "m)");
                     surveillanceEnabled = true;   // Mark intent so it auto-starts when leaving zone
                     safeZoneSuppressed = true;
-                    return;
-                }
-                
-                // CRITICAL: FORCE remount SD card when ACC goes off
-                // Android/BYD system unmounts SD card when ACC is off, so we MUST force remount
-                com.overdrive.app.storage.StorageManager storage = 
-                    com.overdrive.app.storage.StorageManager.getInstance();
-                if (storage.getSurveillanceStorageType() == 
-                    com.overdrive.app.storage.StorageManager.StorageType.SD_CARD) {
-                    log("FORCE mounting SD card for sentry mode...");
-                    if (storage.ensureSdCardMounted(true)) {  // force=true to always remount
-                        log("SD card force mounted for surveillance");
-                    } else {
-                        log("WARNING: SD card mount failed - using internal storage");
-                    }
-                    // Start watchdog to keep SD card mounted throughout sentry mode
-                    // BYD system may repeatedly unmount it while ACC is off
-                    storage.startSdCardWatchdog();
+                    return;  // SD card is mounted + watchdog running, just skip surveillance
                 }
                 
                 if (!gpuPipeline.isRunning()) {

@@ -209,13 +209,17 @@ public class BydDataCollector {
             Object vin = BydDeviceHelper.callGetter(bodyworkDevice, "getAutoVIN");
             if (vin instanceof String) b.vin((String) vin);
 
-            // Battery SOC (raw / 10.0)
-            Object socRaw = BydDeviceHelper.callGetter(bodyworkDevice, "getBatteryPowerValue");
-            if (socRaw instanceof Number) {
-                double rawVal = ((Number) socRaw).doubleValue();
-                // Some models return raw * 10 (e.g., 410 = 41%), others return direct percentage
-                double soc = rawVal > 100 ? rawVal / 10.0 : rawVal;
-                if (soc > 0 && soc <= 100) b.socPercent(soc);
+            // 12V auxiliary battery voltage (0-255 → 0-25.5V)
+            // NOTE: getBatteryPowerValue() returns 12V battery voltage, NOT traction battery SOC.
+            // SOC comes from StatisticDevice.getElecPercentageValue() — see collectStatistic().
+            Object battPowerRaw = BydDeviceHelper.callGetter(bodyworkDevice, "getBatteryPowerValue");
+            if (battPowerRaw instanceof Number) {
+                double rawVal = ((Number) battPowerRaw).doubleValue();
+                double voltage12v = rawVal > 100 ? rawVal / 10.0 : rawVal;
+                // Only treat as 12V voltage if it's in a plausible range (8-16V)
+                if (voltage12v >= 8.0 && voltage12v <= 16.0 && Double.isNaN(b.voltage12v)) {
+                    b.voltage12v(voltage12v);
+                }
             }
 
             // Battery SOC HEV — getBatteryPowerHEV() as kWh remaining, not percentage
@@ -336,8 +340,8 @@ public class BydDataCollector {
             if (evMileage instanceof Number) b.evMileageKm(((Number) evMileage).intValue());
 
             Object elecPct = BydDeviceHelper.callGetter(statisticDevice, "getElecPercentageValue");
-            // This is the SOC from statistic device — use if bodywork didn't provide it
-            if (elecPct instanceof Number && Double.isNaN(b.socPercent)) {
+            // This is the primary SOC source — StatisticDevice.getElecPercentageValue() returns display SOC %
+            if (elecPct instanceof Number) {
                 double soc = ((Number) elecPct).doubleValue();
                 if (soc >= 0 && soc <= 100) b.socPercent(soc);
             }
@@ -624,7 +628,7 @@ public class BydDataCollector {
             Object opMode = BydDeviceHelper.callGetter(energyDevice, "getOperationMode");
             if (opMode instanceof Number) b.operationMode(((Number) opMode).intValue());
             
-            // SOC fallback: EnergyDevice.getElecPercentageValue() — try if bodywork and statistic didn't provide SOC
+            // SOC fallback: EnergyDevice.getElecPercentageValue() — try if statistic didn't provide SOC
             if (Double.isNaN(b.socPercent)) {
                 Object elecPct = BydDeviceHelper.callGetter(energyDevice, "getElecPercentageValue");
                 if (elecPct instanceof Number) {
@@ -715,7 +719,7 @@ public class BydDataCollector {
         logger.info("=== BYD Vehicle Data Summary ===");
         if (d.vin != null) logger.info("  VIN: " + d.vin);
         if (!Double.isNaN(d.socPercent)) logger.info("  SOC: " + d.socPercent + "%");
-        else logger.warn("  SOC: UNAVAILABLE (bodywork/statistic/energy all returned blank)");
+        else logger.warn("  SOC: UNAVAILABLE (statistic/energy devices returned blank)");
         if (!Double.isNaN(d.voltage12v)) logger.info("  12V: " + d.voltage12v + "V");
         if (!Double.isNaN(d.remainKwh)) logger.info("  Remaining: " + d.remainKwh + " kWh");
         if (!Double.isNaN(d.speedKmh)) logger.info("  Speed: " + d.speedKmh + " km/h");

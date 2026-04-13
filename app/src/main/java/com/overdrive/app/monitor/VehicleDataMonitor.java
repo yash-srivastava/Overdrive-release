@@ -149,7 +149,14 @@ public class VehicleDataMonitor {
         BydVehicleData vd = getVd();
         if (vd != null && vd.chargingState != BydVehicleData.UNAVAILABLE) {
             ChargingStateData data = new ChargingStateData(vd.chargingState);
-            if (!Double.isNaN(vd.chargingPowerKw)) data.updateChargingPower(vd.chargingPowerKw);
+            // Prefer externalChargingPowerKw (from InstrumentDevice) — this is the real
+            // charger-reported power. ChargingDevice.getChargingPower() is broken on most
+            // BYD models and always returns 0.
+            if (!Double.isNaN(vd.externalChargingPowerKw) && vd.externalChargingPowerKw > 0) {
+                data.updateChargingPower(vd.externalChargingPowerKw);
+            } else if (!Double.isNaN(vd.chargingPowerKw)) {
+                data.updateChargingPower(vd.chargingPowerKw);
+            }
             return data;
         }
         return null;
@@ -220,7 +227,12 @@ public class VehicleDataMonitor {
             // Charging state (old format)
             if (vd != null && vd.chargingState != BydVehicleData.UNAVAILABLE) {
                 ChargingStateData cs = new ChargingStateData(vd.chargingState);
-                if (!Double.isNaN(vd.chargingPowerKw)) cs.updateChargingPower(vd.chargingPowerKw);
+                // Prefer externalChargingPowerKw (InstrumentDevice) over chargingPowerKw (ChargingDevice)
+                if (!Double.isNaN(vd.externalChargingPowerKw) && vd.externalChargingPowerKw > 0) {
+                    cs.updateChargingPower(vd.externalChargingPowerKw);
+                } else if (!Double.isNaN(vd.chargingPowerKw)) {
+                    cs.updateChargingPower(vd.chargingPowerKw);
+                }
                 JSONObject csJson = new JSONObject();
                 csJson.put("stateCode", cs.stateCode);
                 csJson.put("stateName", cs.stateName);

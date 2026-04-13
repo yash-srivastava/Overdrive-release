@@ -638,6 +638,11 @@ public class HardwareEventRecorderGpu {
         isWritingToFile = false;
         recording = false;
         
+        // CRITICAL: Stop drainer thread BEFORE touching the muxer.
+        // The drainer may be in the middle of muxer.writeSampleData() — 
+        // calling muxer.stop() concurrently corrupts the MP4 (broken moov atom).
+        stopDrainerThread();
+        
         // Stop muxer (may throw if no frames were written)
         try {
             if (muxerStarted) {
@@ -694,6 +699,10 @@ public class HardwareEventRecorderGpu {
         segmentStartTime = 0;
         segmentNumber = 0;
         segmentBasePath = null;
+        
+        // Restart drainer thread — encoder is still alive, just not writing to file.
+        // Pre-record buffer and streaming still need draining.
+        startDrainerThread();
         
         if (fileClosedCallback != null) {
             fileClosedCallback.run();

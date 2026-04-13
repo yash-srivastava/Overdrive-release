@@ -334,7 +334,7 @@ public class RecordingsApiHandler {
                 scanDirectory(legacyDir, "normal", recordings, dateFilter);
             }
             
-            // CRITICAL: Also scan the other storage location (internal vs SD card)
+            // Also scan the other storage location (internal vs SD card)
             // Files may exist in both locations due to storage fallback during recording
             StorageManager sm = StorageManager.getInstance();
             if (sm.isSdCardAvailable() && sm.getSdCardPath() != null) {
@@ -758,46 +758,8 @@ public class RecordingsApiHandler {
             return;
         }
         
-        // Find the file
-        File file = null;
-        
-        // Check new recordings location
-        File normalFile = new File(getRecordingsDir(), filename);
-        if (normalFile.exists()) {
-            file = normalFile;
-        }
-        
-        // Check new sentry location
-        if (file == null) {
-            File sentryFile = new File(getSentryDir(), filename);
-            if (sentryFile.exists()) {
-                file = sentryFile;
-            }
-        }
-        
-        // Check proximity location
-        if (file == null) {
-            File proximityFile = new File(StorageManager.getInstance().getProximityPath(), filename);
-            if (proximityFile.exists()) {
-                file = proximityFile;
-            }
-        }
-        
-        // Check legacy recordings location
-        if (file == null) {
-            File legacyFile = new File(LEGACY_RECORDINGS_DIR, filename);
-            if (legacyFile.exists()) {
-                file = legacyFile;
-            }
-        }
-        
-        // Check legacy sentry location
-        if (file == null) {
-            File legacySentryFile = new File(LEGACY_SENTRY_DIR, filename);
-            if (legacySentryFile.exists()) {
-                file = legacySentryFile;
-            }
-        }
+        // Use shared findVideoFile which checks ALL storage locations
+        File file = findVideoFile(filename);
         
         if (file == null) {
             HttpResponse.sendError(out, 404, "Recording not found: " + filename);
@@ -805,14 +767,29 @@ public class RecordingsApiHandler {
         }
         
         // Handle Range request for video seeking
-        if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
-            String rangeSpec = rangeHeader.substring(6);
-            String[] parts = rangeSpec.split("-");
-            long start = Long.parseLong(parts[0]);
-            long end = parts.length > 1 && !parts[1].isEmpty() ? Long.parseLong(parts[1]) : -1;
-            HttpResponse.sendVideoRange(out, file, start, end);
-        } else {
-            HttpResponse.sendVideo(out, file);
+        try {
+            if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+                String rangeSpec = rangeHeader.substring(6);
+                String[] parts = rangeSpec.split("-");
+                long start = parts[0].isEmpty() ? 0 : Long.parseLong(parts[0]);
+                long end = parts.length > 1 && !parts[1].isEmpty() ? Long.parseLong(parts[1]) : -1;
+                
+                // Validate range
+                long fileLength = file.length();
+                if (start < 0 || start >= fileLength) {
+                    HttpResponse.sendError(out, 416, "Range Not Satisfiable");
+                    return;
+                }
+                
+                HttpResponse.sendVideoRange(out, file, start, end);
+            } else {
+                HttpResponse.sendVideo(out, file);
+            }
+        } catch (NumberFormatException e) {
+            HttpResponse.sendError(out, 400, "Invalid Range header");
+        } catch (java.io.FileNotFoundException e) {
+            // File disappeared between check and read (SD card unmount)
+            HttpResponse.sendError(out, 410, "File no longer accessible");
         }
     }
     
@@ -826,45 +803,8 @@ public class RecordingsApiHandler {
             return;
         }
         
-        File file = null;
-        
-        // Check new recordings location
-        File normalFile = new File(getRecordingsDir(), filename);
-        if (normalFile.exists()) {
-            file = normalFile;
-        }
-        
-        // Check new sentry location
-        if (file == null) {
-            File sentryFile = new File(getSentryDir(), filename);
-            if (sentryFile.exists()) {
-                file = sentryFile;
-            }
-        }
-        
-        // Check proximity location
-        if (file == null) {
-            File proximityFile = new File(StorageManager.getInstance().getProximityPath(), filename);
-            if (proximityFile.exists()) {
-                file = proximityFile;
-            }
-        }
-        
-        // Check legacy recordings location
-        if (file == null) {
-            File legacyFile = new File(LEGACY_RECORDINGS_DIR, filename);
-            if (legacyFile.exists()) {
-                file = legacyFile;
-            }
-        }
-        
-        // Check legacy sentry location
-        if (file == null) {
-            File legacySentryFile = new File(LEGACY_SENTRY_DIR, filename);
-            if (legacySentryFile.exists()) {
-                file = legacySentryFile;
-            }
-        }
+        // Use shared findVideoFile which checks ALL storage locations
+        File file = findVideoFile(filename);
         
         if (file == null) {
             HttpResponse.sendJsonError(out, "Recording not found");

@@ -1804,8 +1804,14 @@ public class StorageManager {
      * Call this when entering sentry mode with SD card storage selected.
      */
     public void startSdCardWatchdog() {
-        if (surveillanceStorageType != StorageType.SD_CARD) {
-            logDebug("SD watchdog not needed - using internal storage");
+        // Start watchdog if ANY storage type uses SD card (not just surveillance).
+        // The watchdog keeps the SD card mounted so recordings, events, and trips
+        // remain accessible via the HTTP server even when surveillance is suppressed.
+        boolean anyOnSd = surveillanceStorageType == StorageType.SD_CARD ||
+                          recordingsStorageType == StorageType.SD_CARD ||
+                          tripsStorageType == StorageType.SD_CARD;
+        if (!anyOnSd) {
+            logDebug("SD watchdog not needed - no storage type uses SD card");
             return;
         }
 
