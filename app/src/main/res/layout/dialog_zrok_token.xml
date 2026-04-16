@@ -31,4 +31,32 @@
         android:textColor="@color/text_muted"
         android:textSize="12sp" />
 
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="16dp"
+        android:background="@color/card_border" />
+
+    <TextView
+        android:id="@+id/btnResetZrokEnvironment"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="⚠️ Reset Zrok Environment"
+        android:textColor="#EF4444"
+        android:textSize="14sp"
+        android:fontFamily="sans-serif-medium"
+        android:padding="8dp"
+        android:background="?attr/selectableItemBackground"
+        android:clickable="true"
+        android:focusable="true" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="Removes environment and token. You will need to re-enable with your token (uses a device slot)."
+        android:textColor="@color/text_muted"
+        android:textSize="11sp" />
+
 </LinearLayout>

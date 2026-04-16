@@ -1115,10 +1115,13 @@ BYD.performance = {
     setSocTimeRange(hours) {
         this.socTimeRange = hours;
         
-        // Update button states
-        document.querySelectorAll('.time-btn').forEach(btn => {
-            btn.classList.toggle('active', parseInt(btn.dataset.hours) === hours);
-        });
+        // Update button states — scoped to SOC chart only
+        const selector = document.getElementById('socTimeSelector');
+        if (selector) {
+            selector.querySelectorAll('.time-btn').forEach(btn => {
+                btn.classList.toggle('active', parseInt(btn.dataset.hours) === hours);
+            });
+        }
         
         // Fetch new data
         this.fetchSocHistory();
@@ -1641,11 +1644,29 @@ BYD.performance = {
 
     setBatteryTimeRange(hours) {
         this.batteryTimeRange = hours;
+        
+        // Update button states — scoped to voltage chart only
+        const selector = document.getElementById('voltageTimeSelector');
+        if (selector) {
+            selector.querySelectorAll('.time-btn').forEach(btn => {
+                btn.classList.toggle('active', parseInt(btn.dataset.hours) === hours);
+            });
+        }
+        
         this.fetchBatteryHealth();
     },
 
     setHealthTimeRange(hours) {
         this.healthTimeRange = hours;
+        
+        // Update button states — scoped to health chart only
+        const selector = document.getElementById('healthTimeSelector');
+        if (selector) {
+            selector.querySelectorAll('.time-btn').forEach(btn => {
+                btn.classList.toggle('active', parseInt(btn.dataset.hours) === hours);
+            });
+        }
+        
         this.fetchBatteryHealth();
     },
 
@@ -1732,7 +1753,10 @@ BYD.performance = {
 
         ctx.clearRect(0, 0, W, H);
 
-        const history = d.voltageHistory;
+        // Filter data to this chart's own time range
+        const cutoff = Date.now() - this.batteryTimeRange * 3600 * 1000;
+        const history = d.voltageHistory.filter(p => p.t >= cutoff);
+        if (history.length < 2) return;
         const padding = { top: 20, right: 20, bottom: 30, left: 50 };
         const cW = W - padding.left - padding.right;
         const cH = H - padding.top - padding.bottom;
@@ -1821,7 +1845,10 @@ BYD.performance = {
 
         ctx.clearRect(0, 0, W, H);
 
-        const history = d.thermalHistory;
+        // Filter data to this chart's own time range
+        const cutoff = Date.now() - this.healthTimeRange * 3600 * 1000;
+        const history = d.thermalHistory.filter(p => p.t >= cutoff);
+        if (history.length < 2) return;
         const padding = { top: 20, right: 20, bottom: 30, left: 50 };
         const cW = W - padding.left - padding.right;
         const cH = H - padding.top - padding.bottom;

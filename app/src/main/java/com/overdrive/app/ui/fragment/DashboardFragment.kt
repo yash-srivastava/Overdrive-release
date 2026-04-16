@@ -17,6 +17,7 @@ import androidx.navigation.fragment.findNavController
 import com.overdrive.app.auth.AuthManager
 import com.overdrive.app.client.CameraDaemonClient
 import com.overdrive.app.ui.model.DaemonStatus
+import com.overdrive.app.ui.model.DaemonType
 import com.overdrive.app.ui.util.QrCodeGenerator
 import com.overdrive.app.ui.viewmodel.DaemonsViewModel
 import com.overdrive.app.ui.viewmodel.MainViewModel
@@ -130,7 +131,7 @@ class DashboardFragment : Fragment() {
             // Update placeholder text based on mode
             if (mainViewModel.currentUrl.value.isNullOrEmpty()) {
                 tvQrPlaceholder.text = when (mode) {
-                    com.overdrive.app.ui.model.AccessMode.PRIVATE -> "Waiting for tunnel...\nCloudflared is starting"
+                    com.overdrive.app.ui.model.AccessMode.PRIVATE -> getTunnelPlaceholderText()
                     com.overdrive.app.ui.model.AccessMode.PUBLIC -> "Loading VPS URL..."
                 }
             }
@@ -141,6 +142,11 @@ class DashboardFragment : Fragment() {
             val running = states.values.count { it.status == DaemonStatus.RUNNING }
             val total = states.size
             tvDaemonsStatus.text = "$running/$total Running"
+            
+            // Update tunnel placeholder if no URL yet
+            if (mainViewModel.currentUrl.value.isNullOrEmpty()) {
+                tvQrPlaceholder.text = getTunnelPlaceholderText()
+            }
         }
         
         // Observe recording state
@@ -180,8 +186,25 @@ class DashboardFragment : Fragment() {
         ivQrCode.setImageDrawable(null)
         ivQrCode.visibility = View.VISIBLE
         tvQrPlaceholder.visibility = View.VISIBLE
-        tvQrPlaceholder.text = "Waiting for tunnel...\nCloudflared is starting"
+        tvQrPlaceholder.text = getTunnelPlaceholderText()
         tvUrl.visibility = View.GONE
+    }
+    
+    /**
+     * Get appropriate placeholder text based on tunnel daemon state.
+     */
+    private fun getTunnelPlaceholderText(): String {
+        val states = daemonsViewModel.daemonStates.value ?: return "No tunnel running"
+        val cfState = states[DaemonType.CLOUDFLARED_TUNNEL]
+        val zrokState = states[DaemonType.ZROK_TUNNEL]
+        
+        return when {
+            zrokState?.status == DaemonStatus.STARTING -> "Starting Zrok tunnel..."
+            cfState?.status == DaemonStatus.STARTING -> "Starting Cloudflared tunnel..."
+            zrokState?.status == DaemonStatus.RUNNING -> "Waiting for tunnel URL..."
+            cfState?.status == DaemonStatus.RUNNING -> "Waiting for tunnel URL..."
+            else -> "No tunnel running"
+        }
     }
     
     // ==================== AUTH UI METHODS ====================

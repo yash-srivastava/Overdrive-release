@@ -324,6 +324,24 @@ public class TripDetector {
             }
         }
 
+        // Last resort: straight-line haversine from start to end GPS coordinates
+        // This underestimates actual distance but prevents valid trips from being
+        // discarded when both odometer and recorder distance are unavailable
+        if (activeTrip.distanceKm <= 0
+                && activeTrip.startLat != 0 && activeTrip.startLon != 0
+                && activeTrip.endLat != 0 && activeTrip.endLon != 0) {
+            double straightLine = haversineKm(
+                    activeTrip.startLat, activeTrip.startLon,
+                    activeTrip.endLat, activeTrip.endLon);
+            if (straightLine > 0) {
+                // Apply 1.3x multiplier to approximate road distance from straight-line
+                activeTrip.distanceKm = straightLine * 1.3;
+                logger.info("Distance from straight-line GPS (last resort): "
+                        + String.format("%.2f", activeTrip.distanceKm) + " km"
+                        + " (straight=" + String.format("%.2f", straightLine) + " km)");
+            }
+        }
+
         // Compute efficiency if we have distance
         if (activeTrip.distanceKm > 0) {
             // Prefer kWh-based efficiency (direct BMS measurement)
@@ -368,6 +386,8 @@ public class TripDetector {
         // Trip is valid — notify listener
         TripRecord completedTrip = activeTrip;
         activeTrip = null;
+        startOdometerKm = -1;
+        parkStartTime = 0;
         state = State.IDLE;
 
         if (listener != null) {
@@ -431,12 +451,13 @@ public class TripDetector {
 
     /**
      * Check for orphaned trips on init (trip with startTime but no endTime).
-     * For now, just log a warning. Actual DB check will be added when TripDatabase is wired in.
+     * If the daemon crashed mid-trip, the DB may have a trip with endTime == 0.
+     * Finalize it using the last recorded telemetry timestamp or current time.
      */
     private void checkForOrphanedTrips() {
-        logger.info("Checking for orphaned trips (DB check not yet wired)");
-        // TODO: When TripDatabase is available, query for trips with endTime == 0
-        // and finalize them using the last recorded telemetry timestamp.
+        logger.info("Checking for orphaned trips...");
+        // Actual DB recovery is done in TripAnalyticsManager.initComponents()
+        // since TripDatabase isn't available at TripDetector construction time.
     }
 
     // ==================== UTILITY ====================
@@ -450,6 +471,21 @@ public class TripDetector {
                 || gear == GearMonitor.GEAR_N
                 || gear == GearMonitor.GEAR_M
                 || gear == GearMonitor.GEAR_S;
+    }
+
+    /**
+     * Haversine distance between two GPS coordinates in km.
+     * Used as last-resort distance estimate when odometer and recorder both fail.
+     */
+    private static double haversineKm(double lat1, double lon1, double lat2, double lon2) {
+        final double R = 6371.0; // Earth radius in km
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLon = Math.toRadians(lon2 - lon1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
+                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
     }
 
     // ==================== GETTERS ====================

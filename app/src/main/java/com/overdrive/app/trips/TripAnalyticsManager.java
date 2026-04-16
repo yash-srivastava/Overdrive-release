@@ -133,12 +133,27 @@ public class TripAnalyticsManager {
 
     /**
      * Called when ACC comes ON (car powering up).
-     * Trip detection resumes automatically via gear change callbacks —
-     * no explicit action needed here, but log for traceability.
+     * Probe current gear and auto-start trip if already in a driving gear.
+     * This handles the case where gear changed to D before the GearMonitor
+     * listener was re-registered, or where the gear event was lost during
+     * the ACC transition.
      */
     public void onAccOn() {
         if (!enabled) return;
         logger.info("ACC ON — trip detection ready (waiting for gear D/R)");
+
+        // Safety net: probe current gear in case we missed the gear change event
+        // during the ACC OFF→ON transition
+        try {
+            int currentGear = GearMonitor.getInstance().getCurrentGear();
+            if (currentGear != GearMonitor.GEAR_P && detector != null && !detector.isTripActive()) {
+                logger.info("ACC ON + gear already " + GearMonitor.gearToString(currentGear)
+                        + " — auto-starting trip");
+                detector.onGearChanged(currentGear);
+            }
+        } catch (Exception e) {
+            logger.warn("ACC ON gear probe failed: " + e.getMessage());
+        }
     }
 
     // ==================== RUNTIME CONFIG ====================
@@ -225,6 +240,15 @@ public class TripAnalyticsManager {
         // Database
         database = new TripDatabase();
         database.init();
+        
+        // Clean up orphaned trips from previous daemon crashes
+        // (trips with no end_time that are older than 24 hours)
+        try {
+            long cutoff = System.currentTimeMillis() - 24 * 60 * 60 * 1000L;
+            database.deleteOrphanedTrips(cutoff);
+        } catch (Exception e) {
+            logger.warn("Orphaned trip cleanup failed: " + e.getMessage());
+        }
         
         // Backfill route_id for existing trips (idempotent — skips already-assigned trips)
         database.backfillRouteIds();

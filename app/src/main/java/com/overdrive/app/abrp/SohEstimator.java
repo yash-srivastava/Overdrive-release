@@ -25,7 +25,10 @@ public class SohEstimator {
     private static final String TAG = "SohEstimator";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
-    private double nominalCapacityKwh = 60.48;
+    // Nominal capacity — 0 means "not detected yet". SOH estimation is blocked until
+    // autoDetectCarModel() successfully identifies the pack size from the BYD SDK.
+    // No hardcoded default — wrong nominal capacity produces wrong SOH.
+    private double nominalCapacityKwh = 0;
     private static final String SOH_FILE = "/data/local/tmp/abrp_soh_estimate.properties";
 
     private static final String PROP_SOH_PERCENT = "soh_percent";
@@ -53,8 +56,27 @@ public class SohEstimator {
 
     // ==================== AUTO-DETECT ====================
 
+    /**
+     * Detect nominal battery capacity from BYD SDK data.
+     *
+     * Priority order:
+     * 1. SOC heuristic: remainKwh / SOC → snap to nearest known pack.
+     *    Works on every vehicle that reports both values. At high SOC (>95%),
+     *    remainKwh ≈ nominal capacity directly.
+     * 2. BMS direct: getBatteryCapacity() Ah → mapAhToKwh() lookup.
+     *    Fallback for vehicles where remainKwh isn't available.
+     * 3. Model string: ro.product.model → table lookup. Last resort.
+     */
     public void autoDetectCarModel(android.content.Context context) {
-        // Method 1: BMS direct — getBatteryCapacity() returns Ah
+        // Priority order (changed: BMS first, SOC heuristic second):
+        // 1. BMS direct: getBatteryCapacity() Ah -> mapAhToKwh() lookup (deterministic, reliable)
+        // 2. SOC heuristic: remainKwh / SOC -> snap to nearest known pack (unreliable on PHEVs)
+        // 3. Model string: ro.product.model -> table lookup (last resort)
+        //
+        // BMS is prioritized because on PHEVs the remainKwh value can be stale/stuck,
+        // causing the SOC heuristic to match the wrong pack size.
+
+        // Method 1: BMS direct
         if (context != null) {
             try {
                 Class<?> cls = Class.forName("android.hardware.bydauto.bodywork.BYDAutoBodyworkDevice");
@@ -66,15 +88,18 @@ public class SohEstimator {
                     if (capacityRaw > 0) {
                         double capacityKwh = 0;
                         if (capacityRaw > 1000) {
-                            capacityKwh = capacityRaw / 1000.0;  // Wh
-                        } else if (capacityRaw >= 100 && capacityRaw <= 300) {
-                            capacityKwh = mapAhToKwh(capacityRaw);  // Ah
+                            capacityKwh = capacityRaw / 1000.0;
                         } else {
-                            capacityKwh = capacityRaw;  // KWh direct
+                            double fromAh = mapAhToKwh(capacityRaw);
+                            if (fromAh > 0) {
+                                capacityKwh = fromAh;
+                            } else if (capacityRaw >= 10 && capacityRaw <= 120) {
+                                capacityKwh = capacityRaw;
+                            }
                         }
                         if (capacityKwh > 10 && capacityKwh < 200) {
                             setNominalCapacityKwh(capacityKwh);
-                            logger.info("BMS Capacity: " + capacityKwh + " KWh (Raw: " + capacityRaw + " Ah)");
+                            logger.info("BMS Capacity: " + capacityKwh + " kWh (raw=" + capacityRaw + ")");
                             return;
                         }
                     }
@@ -84,26 +109,32 @@ public class SohEstimator {
             }
         }
 
-        // Method 2: SOC heuristic — remainingKwh / SOC → match nearest
+        // Method 2: SOC heuristic (fallback when BMS unavailable)
         try {
             VehicleDataMonitor vdm = VehicleDataMonitor.getInstance();
             double remainingKwh = vdm.getBatteryRemainPowerKwh();
             BatterySocData socData = vdm.getBatterySoc();
-            if (remainingKwh > 10 && socData != null && socData.socPercent > 30) {
+            if (remainingKwh > 5 && socData != null && socData.socPercent > 20) {
                 double estimatedCapacity = remainingKwh / (socData.socPercent / 100.0);
-                double matched = matchNearestCapacity(estimatedCapacity);
-                if (matched > 0) {
-                    setNominalCapacityKwh(matched);
-                    logger.info("SOC-Estimated Capacity: " + String.format("%.1f", estimatedCapacity) +
-                        " KWh -> Matched to " + matched + " KWh");
-                    return;
+                double ratio = remainingKwh / socData.socPercent;
+                if (ratio > 0.8 && ratio < 1.2) {
+                    logger.info("SOC heuristic skipped: remainKwh looks like SOC percentage");
+                } else {
+                    double matched = matchNearestCapacity(estimatedCapacity);
+                    if (matched > 0) {
+                        setNominalCapacityKwh(matched);
+                        logger.info("SOC-Estimated Capacity: " + String.format("%.1f", estimatedCapacity)
+                            + " kWh, matched to " + matched + " kWh"
+                            + " (SOC=" + String.format("%.1f", socData.socPercent) + "%, remain="
+                            + String.format("%.1f", remainingKwh) + " kWh)");
+                        return;
+                    }
                 }
             }
         } catch (Exception e) {
-            logger.debug("SOC estimation failed: " + e.getMessage());
+            logger.debug("SOC heuristic failed: " + e.getMessage());
         }
-
-        // Method 3: System property model string
+        // Method 3: System property model string — last resort
         try {
             String carType = (String) Class.forName("android.os.SystemProperties")
                 .getMethod("get", String.class, String.class)
@@ -112,13 +143,13 @@ public class SohEstimator {
                 double mapped = mapCarTypeToCapacity(carType);
                 if (mapped > 0) {
                     setNominalCapacityKwh(mapped);
-                    logger.info("Model-Mapped Capacity (" + carType + "): " + mapped + " KWh");
+                    logger.info("Model-Mapped Capacity (" + carType + "): " + mapped + " kWh");
                     return;
                 }
             }
         } catch (Exception e) { /* ignore */ }
 
-        logger.warn("Capacity detection failed. Using default: " + nominalCapacityKwh + " KWh");
+        logger.warn("Capacity detection failed — SOH estimation disabled until capacity is identified");
     }
 
     /**
@@ -128,17 +159,35 @@ public class SohEstimator {
      */
     public void seedInitialEstimate() {
         if (hasEstimate()) return;  // Already have an estimate from persisted file
+        if (nominalCapacityKwh <= 0) return;  // Need capacity first
 
         try {
             VehicleDataMonitor vdm = VehicleDataMonitor.getInstance();
             double remainingKwh = vdm.getBatteryRemainPowerKwh();
             BatterySocData socData = vdm.getBatterySoc();
-            if (remainingKwh > 0 && socData != null && socData.socPercent > 0) {
-                updateFromInstantaneous(remainingKwh, socData.socPercent);
-                if (hasEstimate()) {
-                    logger.info("Seeded initial SOH: " + String.format("%.1f", currentSoh) + 
-                        "% (from " + String.format("%.1f", remainingKwh) + " kWh / " + 
-                        String.format("%.1f", socData.socPercent) + "% SOC)");
+            if (socData != null && socData.socPercent > 20 && socData.socPercent <= 85) {
+                // Try raw kWh first
+                if (remainingKwh > 0) {
+                    updateFromInstantaneous(remainingKwh, socData.socPercent);
+                }
+                // If raw kWh didn't produce an estimate (stale/stuck value on PHEVs),
+                // seed directly from SOC × nominal capacity.
+                // This gives SOH = 100% as a starting point, which is reasonable for
+                // a new install — calibration charges will refine it over time.
+                if (!hasEstimate()) {
+                    double computedKwh = (socData.socPercent / 100.0) * nominalCapacityKwh;
+                    logger.info("Raw kWh (" + String.format("%.1f", remainingKwh) +
+                        ") gave no estimate — seeding SOH from SOC × nominal: " +
+                        String.format("%.1f", socData.socPercent) + "% × " +
+                        String.format("%.1f", nominalCapacityKwh) + " = " +
+                        String.format("%.1f", computedKwh) + " kWh");
+                    // This will compute SOH ≈ 100% (since computedKwh/SOC = nominal)
+                    // which is the correct starting assumption
+                    currentSoh = 100.0;
+                    sampleCount = 1;
+                    estimationMethod = METHOD_INSTANTANEOUS;
+                    persistEstimate();
+                    logger.info("SOH seeded at 100% (nominal baseline — will refine from charge calibration)");
                 }
             }
         } catch (Exception e) {
@@ -167,9 +216,10 @@ public class SohEstimator {
             String countStr = props.getProperty(PROP_SAMPLE_COUNT);
             if (countStr != null) sampleCount = Integer.parseInt(countStr);
 
-            // Sanity check
-            if (currentSoh > 110.0 || currentSoh < 50.0) {
-                logger.info("Clearing invalid SOH: " + currentSoh + "%");
+            // Sanity check — reject persisted values outside realistic range
+            // Allow up to 110% for factory over-provisioned new packs
+            if (currentSoh > 110.0 || currentSoh < 60.0) {
+                logger.info("Clearing invalid persisted SOH: " + currentSoh + "%");
                 currentSoh = -1;
                 sampleCount = 0;
             } else {
@@ -202,7 +252,10 @@ public class SohEstimator {
      * @param confidenceWeight How much this reading should influence the average (0.0 - 1.0)
      */
     private void applyWeightedSoh(double newSohEstimate, double confidenceWeight) {
-        if (newSohEstimate < 50.0 || newSohEstimate > 110.0) return;
+        // Allow 60-110% to track factory over-provisioning degradation curve.
+        // A brand-new BYD pack is typically 102-104% of rated nominal capacity.
+        // Clamping to 100% would hide the first 2+ years of degradation.
+        if (newSohEstimate < 60.0 || newSohEstimate > 110.0) return;
 
         if (currentSoh < 0) {
             // First estimate — accept directly
@@ -219,63 +272,107 @@ public class SohEstimator {
     /**
      * Update SOH from instantaneous remainingKwh / SOC readings.
      *
-     * LFP batteries have flat voltage curves in the 20-90% range, making BMS
-     * capacity estimates unreliable in that zone. We only trust readings near
-     * the "knees" of the voltage curve (below 15% or above 90%) where the BMS
-     * has real voltage delta to work with.
-     *
-     * In the flat zone (15-90%), we still accept readings but with very low
-     * confidence weight (0.01) so they barely nudge the estimate.
-     *
-     * SOC is corrected from Display SOC to approximate Absolute SOC before math.
+     * This method is ONLY used for the initial seed when no SOH estimate
+     * exists yet. Once we have an estimate (from this seed or from calibration),
+     * further instantaneous readings are ignored — they're too noisy for a value
+     * that changes 1-2% per year. Ongoing SOH updates come exclusively from
+     * charge session calibration (updateFromCalibration).
      *
      * @param remainingKwh Battery remaining energy from BMS
      * @param displaySocPercent Display SOC from dashboard (0-100)
      */
     public void updateFromInstantaneous(double remainingKwh, double displaySocPercent) {
-        if (displaySocPercent <= 0 || displaySocPercent > 100.0) return;
-        if (remainingKwh <= 0) return;
+        // Once we have an estimate, stop accepting instantaneous readings.
+        // SOH should only change from calibration data (charge sessions).
+        if (hasEstimate()) return;
 
-        // Correct Display SOC to approximate Absolute SOC
+        // Need nominal capacity to compute SOH — skip if not yet detected
+        if (nominalCapacityKwh <= 0) return;
+
+        if (displaySocPercent <= 5 || displaySocPercent > 100.0) return;
+        if (remainingKwh <= 1.0) return;
+
+        // Prefer mid-range SOC (20-85%) where BMS readings are most stable.
+        // Extremes (<20% or >85%) have nonlinear voltage curves on LFP.
+        if (displaySocPercent < 20 || displaySocPercent > 85) {
+            return;
+        }
+
+        // Sanity check: implied capacity must be in a plausible range for ANY BYD model.
+        // Use absolute bounds (25-120 kWh) rather than nominal-relative bounds,
+        // because nominal detection may have failed (wrong default).
+        // Also check against nominal capacity — if implied is >2x or <0.5x nominal,
+        // the remainKwh reading is likely garbage (PHEV returning SOC as kWh).
+        double impliedCapacity = remainingKwh / (displaySocPercent / 100.0);
+        if (impliedCapacity < 10.0 || impliedCapacity > 120.0) {
+            logger.debug("Rejecting seed: implied capacity " + String.format("%.1f", impliedCapacity) +
+                " kWh outside BYD range (10-120 kWh)");
+            return;
+        }
+        if (nominalCapacityKwh > 0) {
+            double ratio = impliedCapacity / nominalCapacityKwh;
+            if (ratio < 0.5 || ratio > 1.5) {
+                logger.debug("Rejecting seed: implied capacity " + String.format("%.1f", impliedCapacity) +
+                    " kWh is " + String.format("%.0f", ratio * 100) + "% of nominal " +
+                    String.format("%.1f", nominalCapacityKwh) + " kWh — likely bad remainKwh reading");
+                return;
+            }
+        }
+
         double absSoc = correctDisplaySoc(displaySocPercent);
-
         double currentTotalCap = remainingKwh / (absSoc / 100.0);
         double instantaneousSoh = (currentTotalCap / nominalCapacityKwh) * 100.0;
 
-        if (instantaneousSoh < 50.0 || instantaneousSoh > 110.0) return;
+        if (instantaneousSoh < 60.0 || instantaneousSoh > 110.0) return;
 
-        // Confidence weight based on SOC zone:
-        // - Near knees (<15% or >90%): 0.05 — BMS has good voltage reference
-        // - Flat zone (15-90%): 0.01 — BMS estimate is unreliable for LFP
-        double weight;
-        if (absSoc < 15.0 || absSoc > 90.0) {
-            weight = 0.05;  // ~20 consistent readings to fully shift
-        } else {
-            weight = 0.01;  // ~100 consistent readings to fully shift
-        }
-
-        applyWeightedSoh(instantaneousSoh, weight);
+        // Accept as initial seed
+        currentSoh = instantaneousSoh;
+        sampleCount = 1;
         estimationMethod = METHOD_INSTANTANEOUS;
+        persistEstimate();
+        logger.info("SOH seeded: " + String.format("%.1f", currentSoh) + "% (from " +
+            String.format("%.1f", remainingKwh) + " kWh / " +
+            String.format("%.1f", displaySocPercent) + "% SOC, implied cap=" +
+            String.format("%.1f", impliedCapacity) + " kWh)");
     }
 
     /**
-     * Update SOH from a charge calibration session.
+     * SOTA: Update SOH from a charge calibration session.
      *
-     * Deep charge sessions are the gold standard for SOH estimation because
-     * the energy metered into the battery can be directly compared to the SOC delta.
-     *
-     * LFP chemistry requires larger deltas for accuracy due to flat voltage curves.
-     * Minimum 25% delta (practical for daily charging), with confidence scaling by delta size.
-     *
-     * IMPORTANT: energyEnteredBatteryKwh must be the energy that entered the battery pack,
-     * NOT the wall charger reading. If using charger data, multiply by charging efficiency
-     * (~0.90 for BYD AC charging) to avoid inflated SOH from counting heat loss as stored energy.
+     * Only accepts slow AC charging at optimal battery temperatures.
+     * DC Fast Charging introduces thermal loss and early voltage tapering,
+     * making Coulomb-counting unreliable. Cold temperatures temporarily
+     * reduce available chemical capacity, skewing SOH low.
      *
      * @param energyEnteredBatteryKwh Energy that entered the battery (after charging losses)
      * @param socDelta SOC change during charge session (Display SOC delta)
+     * @param packTempCelsius Average battery temperature during the charge
+     * @param isAcCharge True if using slow AC charging, False if DC Fast Charging
      */
-    public void updateFromCalibration(double energyEnteredBatteryKwh, double socDelta) {
-        // Reject shallow charges — LFP flat voltage curve makes them unreliable
+    public void updateFromCalibration(double energyEnteredBatteryKwh, double socDelta,
+                                      double packTempCelsius, boolean isAcCharge) {
+        // Need nominal capacity to compute SOH
+        if (nominalCapacityKwh <= 0) {
+            logger.debug("Calibration rejected: nominal capacity not yet detected");
+            return;
+        }
+
+        // 1. DC Fast Charging introduces thermal loss and early voltage tapering.
+        //    It is not reliable for Coulomb-counting SOH.
+        if (!isAcCharge) {
+            logger.debug("Calibration rejected: DC Fast Charging is too volatile for accurate SOH math.");
+            return;
+        }
+
+        // 2. Cold temperatures temporarily reduce available chemical capacity.
+        //    Only accept calibration at optimal chemical temperatures (15°C to 35°C).
+        if (packTempCelsius < 15.0 || packTempCelsius > 35.0) {
+            logger.debug("Calibration rejected: Pack temperature (" +
+                String.format("%.1f", packTempCelsius) + "°C) outside optimal SOH window (15-35°C).");
+            return;
+        }
+
+        // 3. Reject shallow charges — LFP flat voltage curve makes them unreliable
         if (socDelta < 25.0) {
             logger.debug("Calibration rejected: SOC delta " + String.format("%.1f", socDelta) +
                 "% < 25% minimum for LFP accuracy");
@@ -289,7 +386,7 @@ public class SohEstimator {
         double actualCapacity = energyEnteredBatteryKwh / (absSocDelta / 100.0);
         double calibratedSoh = (actualCapacity / nominalCapacityKwh) * 100.0;
 
-        if (calibratedSoh < 50.0 || calibratedSoh > 110.0) {
+        if (calibratedSoh < 60.0 || calibratedSoh > 110.0) {
             logger.warn("Calibration SOH out of range: " + String.format("%.1f", calibratedSoh) + "% — rejected");
             return;
         }
@@ -304,10 +401,19 @@ public class SohEstimator {
         estimationMethod = METHOD_CALIBRATION;
 
         logger.info("Calibration SOH: " + String.format("%.1f", calibratedSoh) + "% " +
-            "(weight=" + String.format("%.2f", confidenceWeight) + ") " +
+            "(weight=" + String.format("%.2f", confidenceWeight) + ", temp=" +
+            String.format("%.1f", packTempCelsius) + "°C) " +
             "[" + String.format("%.1f", energyEnteredBatteryKwh) + " kWh / " +
             String.format("%.1f", socDelta) + "% display delta → " +
             String.format("%.1f", absSocDelta) + "% absolute]");
+    }
+
+    /**
+     * Legacy overload for callers that don't have temperature/charge type info.
+     * Assumes AC charging at optimal temperature (backward compatible).
+     */
+    public void updateFromCalibration(double energyEnteredBatteryKwh, double socDelta) {
+        updateFromCalibration(energyEnteredBatteryKwh, socDelta, 25.0, true);
     }
 
     // ==================== GETTERS ====================
@@ -342,25 +448,52 @@ public class SohEstimator {
 
     private static double mapAhToKwh(int ah) {
         switch (ah) {
-            case 150: return 60.48;   // Atto 3
-            case 153: return 82.56;   // Seal
-            case 140: return 71.8;    // Seal U
-            case 166: return 85.44;   // Han
+            case 150: return 60.48;   // Atto 3 / Yuan Plus
+            case 153: return 82.56;   // Seal Premium/Performance
+            case 157: return 61.44;   // Seal Dynamic RWD
+            case 140: return 71.8;    // Seal U (71.8 kWh variant)
+            case 170: return 87.0;    // Seal U (87 kWh variant)
+            case 166: return 85.44;   // Han EV
             case 120: return 44.9;    // Dolphin Standard
-            case 100: return 38.0;    // Seagull
+            case 135: return 60.48;   // Dolphin Extended
+            case 100: return 38.0;    // Seagull (38 kWh variant)
+            case 80:  return 30.08;   // Seagull (30 kWh) / Atto 1 Essential
             case 200: return 108.8;   // Tang
-            case 176: return 56.4;    // Qin
+            case 176: return 56.4;    // Qin Plus EV
+            case 180: return 91.3;    // Sealion 7
+            case 110: return 43.2;    // Atto 1 Premium / Atto 2
+            case 50:  return 18.3;    // Sealion 6 DM-i (PHEV)
+            case 56:  return 18.3;    // Sealion 6 DM-i (PHEV) — some units report 56 Ah
             default:  return 0;       // Unknown — don't guess
         }
     }
 
     private static double matchNearestCapacity(double estimated) {
-        double[] known = { 38.0, 44.9, 56.4, 60.48, 71.8, 82.56, 85.44, 108.8 };
+        double[] known = {
+            18.3,   // Sealion 6 DM-i (PHEV)
+            30.08,  // Seagull 30 / Atto 1 Essential
+            38.0,   // Seagull 38
+            43.2,   // Atto 1 Premium
+            44.9,   // Dolphin Standard / Atto 2
+            56.4,   // Qin Plus EV
+            60.48,  // Atto 3 / Dolphin Extended
+            61.44,  // Seal Dynamic RWD
+            71.7,   // E6
+            71.8,   // Seal U / Song Plus EV
+            82.56,  // Seal
+            85.44,  // Han EV
+            87.0,   // Seal U (87 kWh)
+            91.3,   // Sealion 7
+            108.8   // Tang
+        };
         double bestMatch = 0;
         double bestDiff = Double.MAX_VALUE;
         for (double k : known) {
             double diff = Math.abs(estimated - k);
-            if (diff / k < 0.10 && diff < bestDiff) {
+            // Use 20% tolerance for small packs (<40 kWh) because BMS readings
+            // on PHEVs have higher relative error at low SOC. Standard 10% for larger packs.
+            double tolerance = k < 40 ? 0.20 : 0.10;
+            if (diff / k < tolerance && diff < bestDiff) {
                 bestDiff = diff;
                 bestMatch = k;
             }
@@ -370,15 +503,23 @@ public class SohEstimator {
 
     private static double mapCarTypeToCapacity(String carType) {
         String ct = carType.toUpperCase();
-        if (ct.contains("SEAL") && !ct.contains("SEAL U") && !ct.contains("SEALU") && !ct.contains("SEAL-U")) return 82.56;
+        // Order matters: check more specific patterns first
+        if (ct.contains("SEALION 6") || ct.contains("SEALION6") || ct.contains("SEA LION 6")) return 18.3;
+        if (ct.contains("SEALION") || ct.contains("SEA LION")) return 91.3;  // Sealion 7
         if (ct.contains("SEAL U") || ct.contains("SEALU") || ct.contains("SEAL-U") || ct.contains("S7")) return 71.8;
+        if (ct.contains("SEAL")) return 82.56;
         if (ct.contains("HAN") || ct.contains("DM-P")) return 85.44;
         if (ct.contains("TANG")) return 108.8;
-        if (ct.contains("ATTO") || ct.contains("YUAN") || ct.contains("S1")) return 60.48;
-        if (ct.contains("DOLPHIN") || ct.contains("EA1")) return 60.48;
-        if (ct.contains("SEAGULL") || ct.contains("DOLPHIN MINI")) return 38.0;
+        if (ct.contains("ATTO 3") || ct.contains("ATTO3") || ct.contains("YUAN PLUS")) return 60.48;
+        if (ct.contains("ATTO 2") || ct.contains("ATTO2")) return 44.9;
+        if (ct.contains("ATTO 1") || ct.contains("ATTO1")) return 30.08;  // Essential (safer default)
+        if (ct.contains("YUAN PRO")) return 38.0;
+        if (ct.contains("YUAN")) return 60.48;  // Yuan Plus fallback
+        if (ct.contains("DOLPHIN MINI") || ct.contains("SEAGULL")) return 38.0;
+        if (ct.contains("DOLPHIN")) return 44.9;  // Standard range default
         if (ct.contains("E6")) return 71.7;
         if (ct.contains("SONG")) return 71.8;
+        if (ct.contains("QIN")) return 56.4;
         return 0;
     }
 }

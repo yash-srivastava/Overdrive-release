@@ -26,6 +26,10 @@ public class TripRecord {
     public String currency;            // Currency symbol (₹, $, €, £)
     public double tripCost;            // Total trip cost (energyUsed × rate)
     public String kinematicState;      // HEAVY_GRIDLOCK, URBAN_FLOW, HIGHWAY_CRUISING
+    public String gradientProfile;     // FLAT, HILLY, MOUNTAIN (terrain classification)
+    public double elevationGainM;      // Cumulative meters gained (uphill)
+    public double elevationLossM;      // Cumulative meters lost (downhill)
+    public double avgGradientPercent;  // Average gradient over the trip
     public double startLat, startLon;
     public double endLat, endLon;
     public int extTempC;
@@ -84,6 +88,10 @@ public class TripRecord {
             json.put("currency", currency != null ? currency : "");
             json.put("tripCost", tripCost);
             json.put("kinematicState", kinematicState != null ? kinematicState : "");
+            json.put("gradientProfile", gradientProfile != null ? gradientProfile : "");
+            json.put("elevationGainM", elevationGainM);
+            json.put("elevationLossM", elevationLossM);
+            json.put("avgGradientPercent", avgGradientPercent);
             json.put("startLat", startLat);
             json.put("startLon", startLon);
             json.put("endLat", endLat);
@@ -127,6 +135,10 @@ public class TripRecord {
             json.put("currency", currency != null ? currency : "");
             json.put("tripCost", tripCost);
             json.put("kinematicState", kinematicState != null ? kinematicState : "");
+            json.put("gradientProfile", gradientProfile != null ? gradientProfile : "");
+            json.put("elevationGainM", elevationGainM);
+            json.put("elevationLossM", elevationLossM);
+            json.put("avgGradientPercent", avgGradientPercent);
             json.put("startLat", startLat);
             json.put("startLon", startLon);
             json.put("endLat", endLat);

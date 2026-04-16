@@ -87,6 +87,32 @@
                 app:tint="@color/text_muted"
                 android:contentDescription="Expand" />
 
+            <!-- Configure button (only visible for configurable daemons like Zrok) -->
+            <ImageView
+                android:id="@+id/ivConfigure"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginEnd="8dp"
+                android:padding="4dp"
+                android:src="@drawable/ic_settings"
+                android:visibility="gone"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                app:tint="@color/text_muted"
+                android:contentDescription="Configure" />
+
+            <!-- Download log button (only visible in debug builds) -->
+            <ImageView
+                android:id="@+id/ivDownloadLog"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginEnd="8dp"
+                android:padding="4dp"
+                android:src="@drawable/ic_download_log"
+                android:visibility="gone"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                app:tint="@color/text_muted"
+                android:contentDescription="Download log" />
+
             <!-- Toggle Switch -->
             <com.google.android.material.switchmaterial.SwitchMaterial
                 android:id="@+id/switchDaemon"

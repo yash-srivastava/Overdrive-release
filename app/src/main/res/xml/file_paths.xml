@@ -9,4 +9,9 @@
     <external-path
         name="external"
         path="." />
+    
+    <!-- Cache directory for sharing log files -->
+    <cache-path
+        name="logs"
+        path="logs/" />
 </paths>

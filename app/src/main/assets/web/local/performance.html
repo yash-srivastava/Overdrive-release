@@ -525,6 +525,16 @@
                     </svg>
                     <span>ABRP</span>
                 </a>
+                <a href="mqtt.html" class="nav-link">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                        <circle cx="12" cy="12" r="2"/>
+                        <path d="M8.46 15.54A5 5 0 0 1 7 12a5 5 0 0 1 1.46-3.54"/>
+                        <path d="M15.54 8.46A5 5 0 0 1 17 12a5 5 0 0 1-1.46 3.54"/>
+                        <path d="M5.64 18.36A9 9 0 0 1 3 12a9 9 0 0 1 2.64-6.36"/>
+                        <path d="M18.36 5.64A9 9 0 0 1 21 12a9 9 0 0 1-2.64 6.36"/>
+                    </svg>
+                    <span>MQTT</span>
+                </a>
                 <a href="trips.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 17h2v-7l4 4 4-4 4 4 4-4v7h2"/>
@@ -693,7 +703,7 @@
                             </svg>
                             Battery SOC History
                         </div>
-                        <div class="soc-time-selector">
+                        <div class="soc-time-selector" id="socTimeSelector">
                             <button class="time-btn" data-hours="24" onclick="BYD.performance.setSocTimeRange(24)">24h</button>
                             <button class="time-btn active" data-hours="72" onclick="BYD.performance.setSocTimeRange(72)">3 Days</button>
                             <button class="time-btn" data-hours="168" onclick="BYD.performance.setSocTimeRange(168)">7 Days</button>
@@ -725,10 +735,10 @@
                             </svg>
                             12V Battery History
                         </div>
-                        <div class="soc-time-selector">
-                            <button class="time-btn" onclick="BYD.performance.setBatteryTimeRange(24)">24h</button>
-                            <button class="time-btn active" onclick="BYD.performance.setBatteryTimeRange(72)">3 Days</button>
-                            <button class="time-btn" onclick="BYD.performance.setBatteryTimeRange(168)">7 Days</button>
+                        <div class="soc-time-selector" id="voltageTimeSelector">
+                            <button class="time-btn" data-hours="24" onclick="BYD.performance.setBatteryTimeRange(24)">24h</button>
+                            <button class="time-btn active" data-hours="72" onclick="BYD.performance.setBatteryTimeRange(72)">3 Days</button>
+                            <button class="time-btn" data-hours="168" onclick="BYD.performance.setBatteryTimeRange(168)">7 Days</button>
                         </div>
                     </div>
                     <div class="soc-stats-row">
@@ -757,10 +767,10 @@
                             </svg>
                             Battery Health
                         </div>
-                        <div class="soc-time-selector">
-                            <button class="time-btn" onclick="BYD.performance.setHealthTimeRange(24)">24h</button>
-                            <button class="time-btn active" onclick="BYD.performance.setHealthTimeRange(72)">3 Days</button>
-                            <button class="time-btn" onclick="BYD.performance.setHealthTimeRange(168)">7 Days</button>
+                        <div class="soc-time-selector" id="healthTimeSelector">
+                            <button class="time-btn" data-hours="24" onclick="BYD.performance.setHealthTimeRange(24)">24h</button>
+                            <button class="time-btn active" data-hours="72" onclick="BYD.performance.setHealthTimeRange(72)">3 Days</button>
+                            <button class="time-btn" data-hours="168" onclick="BYD.performance.setHealthTimeRange(168)">7 Days</button>
                         </div>
                     </div>
                     <div class="soc-stats-row">

@@ -154,8 +154,27 @@ public class VehicleDataMonitor {
             // BYD models and always returns 0.
             if (!Double.isNaN(vd.externalChargingPowerKw) && vd.externalChargingPowerKw > 0) {
                 data.updateChargingPower(vd.externalChargingPowerKw);
-            } else if (!Double.isNaN(vd.chargingPowerKw)) {
+            } else if (!Double.isNaN(vd.chargingPowerKw) && vd.chargingPowerKw > 0) {
                 data.updateChargingPower(vd.chargingPowerKw);
+            } else if (data.status == ChargingStateData.ChargingStatus.CHARGING) {
+                // Both power sources returned 0 but charging is active (common on PHEVs).
+                // Estimate power from SOC change rate: deltaSOC% x nominal / deltaTime
+                try {
+                    com.overdrive.app.abrp.SohEstimator soh =
+                        com.overdrive.app.monitor.SocHistoryDatabase.getInstance().getSohEstimator();
+                    if (soh != null && soh.getNominalCapacityKwh() > 0) {
+                        // Use a conservative estimate: PHEV AC charging is typically 3.3-7 kW
+                        // We can't compute exact rate without time delta, so use nominal-based hint
+                        double nominal = soh.getNominalCapacityKwh();
+                        if (nominal < 30) {
+                            // PHEV: typical AC charge rate is 3.3 kW (single phase)
+                            data.updateChargingPower(3.3);
+                        } else {
+                            // BEV: typical AC charge rate is 7 kW
+                            data.updateChargingPower(7.0);
+                        }
+                    }
+                } catch (Exception e) { /* leave as 0 */ }
             }
             return data;
         }
@@ -188,7 +207,42 @@ public class VehicleDataMonitor {
     
     public double getBatteryRemainPowerKwh() {
         BydVehicleData vd = getVd();
-        if (vd != null && !Double.isNaN(vd.remainKwh)) return vd.remainKwh;
+        if (vd == null) return 0.0;
+
+        double soc = Double.isNaN(vd.socPercent) ? 0 : vd.socPercent;
+        double rawKwh = Double.isNaN(vd.remainKwh) ? 0 : vd.remainKwh;
+
+        try {
+            com.overdrive.app.abrp.SohEstimator soh =
+                com.overdrive.app.monitor.SocHistoryDatabase.getInstance().getSohEstimator();
+            if (soh != null && soh.getNominalCapacityKwh() > 0 && soc > 0) {
+                double nominal = soh.getNominalCapacityKwh();
+                boolean isPhev = nominal < 30.0; // PHEVs have packs under 30 kWh
+
+                if (isPhev) {
+                    // PHEV: raw kWh from getBatteryPowerHEV() is stuck/stale.
+                    // Always compute from SOC x nominal.
+                    return (soc / 100.0) * nominal;
+                }
+                // BEV: prefer raw BMS value (more accurate, accounts for SOH).
+                // Fall through to raw value below.
+            }
+        } catch (Exception e) { /* fall through to raw */ }
+
+        // BEV path or SohEstimator not ready: use raw BMS value
+        if (rawKwh > 0) return rawKwh;
+
+        // Last resort: compute from SOC if raw is unavailable
+        if (soc > 0) {
+            try {
+                com.overdrive.app.abrp.SohEstimator soh =
+                    com.overdrive.app.monitor.SocHistoryDatabase.getInstance().getSohEstimator();
+                if (soh != null && soh.getNominalCapacityKwh() > 0) {
+                    return (soc / 100.0) * soh.getNominalCapacityKwh();
+                }
+            } catch (Exception e) { /* unavailable */ }
+        }
+
         return 0.0;
     }
     

@@ -157,10 +157,58 @@ class WebViewFragment : Fragment() {
                 ): WebResourceResponse? {
                     val url = request?.url?.toString() ?: return null
 
-                    // FILTER: Only intercept our local server
-                    if (!url.contains("127.0.0.1:${CameraDaemon.HTTP_PORT}") &&
-                        !url.contains("localhost:${CameraDaemon.HTTP_PORT}")) {
+                    // FILTER: Only intercept our local server and external map/CDN resources
+                    val isLocalServer = url.contains("127.0.0.1:${CameraDaemon.HTTP_PORT}") ||
+                        url.contains("localhost:${CameraDaemon.HTTP_PORT}")
+                    
+                    // Bypass proxy for map tiles and CDN resources (sing-box proxy blocks these)
+                    val isMapTile = url.contains("tile.openstreetmap.org") ||
+                        url.contains("unpkg.com") ||
+                        url.contains("cdn.jsdelivr.net") ||
+                        url.contains("fonts.googleapis.com") ||
+                        url.contains("fonts.gstatic.com")
+                    
+                    if (!isLocalServer && !isMapTile) {
                         return super.shouldInterceptRequest(view, request)
+                    }
+                    
+                    // For map tiles/CDN: bypass proxy with direct connection
+                    if (isMapTile) {
+                        try {
+                            val connection = java.net.URL(url).openConnection(java.net.Proxy.NO_PROXY) as java.net.HttpURLConnection
+                            connection.connectTimeout = 5000
+                            connection.readTimeout = 10000
+                            request?.requestHeaders?.forEach { (key, value) ->
+                                connection.setRequestProperty(key, value)
+                            }
+                            connection.connect()
+                            
+                            val stream = if (connection.responseCode in 200..399) {
+                                connection.inputStream
+                            } else {
+                                return super.shouldInterceptRequest(view, request)
+                            }
+                            
+                            val rawContentType = connection.contentType ?: "application/octet-stream"
+                            val mime = rawContentType.split(";").first().trim()
+                            val encoding = if (rawContentType.contains("charset=")) {
+                                rawContentType.substringAfter("charset=").trim()
+                            } else null
+                            
+                            val response = WebResourceResponse(mime, encoding, stream)
+                            response.setStatusCodeAndReasonPhrase(connection.responseCode, connection.responseMessage ?: "OK")
+                            
+                            val headers = mutableMapOf<String, String>()
+                            connection.headerFields?.forEach { (k, v) ->
+                                if (k != null && v.isNotEmpty()) headers[k] = v.last()
+                            }
+                            headers["Access-Control-Allow-Origin"] = "*"
+                            response.responseHeaders = headers
+                            return response
+                        } catch (e: Exception) {
+                            android.util.Log.w("WebViewProxy", "Map tile bypass failed: ${e.message}")
+                            return super.shouldInterceptRequest(view, request)
+                        }
                     }
 
                     // LOGGING: Check if we are seeing the video request

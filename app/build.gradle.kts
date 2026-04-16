@@ -193,10 +193,10 @@ tasks.register("extractWebAssets") {
 android {
     signingConfigs {
         create("release") {
-            storeFile = file(System.getenv("KEYSTORE_FILE") ?: "release.jks")
-            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
-            keyPassword = System.getenv("KEY_PASSWORD") ?: ""
-            keyAlias = System.getenv("KEY_ALIAS") ?: "key0"
+            storeFile = file("/Users/yashsriv/champ.jks")
+            storePassword = "SriPass123!@#"
+            keyPassword = "SriPass123!@#"
+            keyAlias = "key0"
         }
     }
     namespace = "com.overdrive.app"
@@ -391,6 +391,10 @@ dependencies {
     // H2 Database - Pure Java embedded SQL (no native dependencies, no .so files)
     // Works for UID 2000 because it's 100% Java bytecode - no Android framework needed
     implementation("com.h2database:h2:2.2.224")
+
+    // Eclipse Paho MQTT - Pure Java MQTT client (no native dependencies)
+    // Supports MQTT 3.1.1, TLS, automatic reconnect, QoS 0/1/2
+    implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

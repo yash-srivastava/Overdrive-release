@@ -275,7 +275,8 @@ public class AbrpTelemetryService {
             }
 
             // capacity + feed SohEstimator
-            double remainingKwh = vd != null && !Double.isNaN(vd.remainKwh) ? vd.remainKwh : vehicleDataMonitor.getBatteryRemainPowerKwh();
+            // Use getBatteryRemainPowerKwh() which handles PHEV stuck values
+            double remainingKwh = vehicleDataMonitor.getBatteryRemainPowerKwh();
             if (remainingKwh > 0 && soc > 0) {
                 payload.put("capacity", remainingKwh / (soc / 100.0));
                 sohEstimator.updateFromInstantaneous(remainingKwh, soc);

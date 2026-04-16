@@ -515,8 +515,38 @@ public class SocHistoryDatabase {
                 logger.info("Charging session started at " + soc + "%");
                 
             } else if (!isCharging && wasCharging) {
-                // Charging ended
-                double energyAdded = (soc - chargingStartSoc) * 0.6; // Rough estimate
+                // Charging ended — compute energy added and update SOH
+                double socDelta = soc - chargingStartSoc;
+                
+                // Compute energy added using nominal capacity if available,
+                // otherwise fall back to rough estimate
+                double energyAdded = 0;
+                boolean isAcCharge = true; // Assume AC unless peak power > 20 kW
+                double packTemp = 25.0;    // Default — updated below if available
+                
+                com.overdrive.app.abrp.SohEstimator sohEst = getSohEstimator();
+                double nominalKwh = sohEst != null ? sohEst.getNominalCapacityKwh() : 0;
+                
+                if (nominalKwh > 0 && socDelta > 0) {
+                    // Use nominal capacity for energy estimate: socDelta% × nominalKwh
+                    // Apply display-to-absolute correction (BYD hides ~5% total)
+                    energyAdded = (socDelta * 0.95 / 100.0) * nominalKwh;
+                } else {
+                    energyAdded = socDelta * 0.6; // Rough fallback
+                }
+                
+                // Get battery temperature for calibration quality check
+                try {
+                    VehicleDataMonitor monitor = VehicleDataMonitor.getInstance();
+                    BatteryThermalData thermal = monitor.getBatteryThermal();
+                    if (thermal != null && thermal.hasData() && !Double.isNaN(thermal.averageTempC)) {
+                        packTemp = thermal.averageTempC;
+                    }
+                } catch (Exception e) { /* use default */ }
+                
+                // Detect DC fast charging from peak power
+                // AC charging is typically < 11 kW (single phase) or < 22 kW (three phase)
+                if (power > 20) isAcCharge = false;
                 
                 String sql = "UPDATE " + TABLE_CHARGING + 
                     " SET end_time = ?, end_soc = ?, energy_added_kwh = ? " +
@@ -531,7 +561,19 @@ public class SocHistoryDatabase {
                 }
                 
                 logger.info("Charging session ended at " + soc + "% (+" + 
-                    String.format("%.1f", soc - chargingStartSoc) + "%)");
+                    String.format("%.1f", socDelta) + "%, ~" +
+                    String.format("%.1f", energyAdded) + " kWh, " +
+                    (isAcCharge ? "AC" : "DC") + ", " +
+                    String.format("%.0f", packTemp) + "°C)");
+                
+                // Feed calibration data to SohEstimator for ongoing SOH tracking
+                if (sohEst != null && socDelta > 0 && energyAdded > 0) {
+                    try {
+                        sohEst.updateFromCalibration(energyAdded, socDelta, packTemp, isAcCharge);
+                    } catch (Exception e) {
+                        logger.debug("SOH calibration update failed: " + e.getMessage());
+                    }
+                }
             }
             
             wasCharging = isCharging;
@@ -738,8 +780,9 @@ public class SocHistoryDatabase {
             DrivingRangeData rangeData = monitor.getDrivingRange();
             ChargingStateData chargingData = monitor.getChargingState();
             
-            // If we have live SOC data but no history, create a synthetic history point
-            if (history.length() == 0 && currentSocData != null) {
+            // Always append a live data point at the end so the "current" kWh/SOC
+            // display is fresh from the monitor, not averaged from old DB records
+            if (currentSocData != null) {
                 JSONObject livePoint = new JSONObject();
                 livePoint.put("t", System.currentTimeMillis());
                 livePoint.put("soc", currentSocData.socPercent);
@@ -749,7 +792,6 @@ public class SocHistoryDatabase {
                 livePoint.put("range", rangeData != null ? rangeData.elecRangeKm : 0);
                 livePoint.put("kwh", monitor.getBatteryRemainPowerKwh());
                 
-                // Include SOH in live point
                 com.overdrive.app.abrp.SohEstimator sohEst = getSohEstimator();
                 if (sohEst != null && sohEst.hasEstimate()) {
                     livePoint.put("soh", Math.round(sohEst.getCurrentSoh() * 10) / 10.0);
@@ -787,6 +829,34 @@ public class SocHistoryDatabase {
      */
     public void setSohEstimator(com.overdrive.app.abrp.SohEstimator estimator) {
         this.sohEstimator = estimator;
+    }
+    
+    /**
+     * Clean up old remaining_kwh records that have a stuck/stale value.
+     * Called after PHEV capacity is correctly detected to fix historical data.
+     * Updates records where remaining_kwh doesn't match SOC x nominal within 30%.
+     */
+    public void fixStaleRemainingKwh(double nominalCapacityKwh) {
+        if (!isInitialized || connection == null || nominalCapacityKwh <= 0) return;
+        try {
+            // Update records where remaining_kwh deviates >30% from SOC-derived value
+            String sql = "UPDATE " + TABLE_SOC + 
+                " SET remaining_kwh = (soc_percent / 100.0) * ? " +
+                "WHERE soc_percent > 0 AND remaining_kwh > 0 " +
+                "AND ABS(remaining_kwh - (soc_percent / 100.0) * ?) / ((soc_percent / 100.0) * ?) > 0.30";
+            try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+                pstmt.setDouble(1, nominalCapacityKwh);
+                pstmt.setDouble(2, nominalCapacityKwh);
+                pstmt.setDouble(3, nominalCapacityKwh);
+                int updated = pstmt.executeUpdate();
+                if (updated > 0) {
+                    logger.info("Fixed " + updated + " stale remaining_kwh records (nominal=" + 
+                        String.format("%.1f", nominalCapacityKwh) + " kWh)");
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Failed to fix stale remaining_kwh: " + e.getMessage());
+        }
     }
     
     public com.overdrive.app.abrp.SohEstimator getSohEstimator() {

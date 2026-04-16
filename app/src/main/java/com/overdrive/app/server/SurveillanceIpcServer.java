@@ -38,6 +38,13 @@ public class SurveillanceIpcServer implements Runnable {
         abrpConfig = config;
         abrpService = service;
     }
+
+    // MQTT integration reference (set by CameraDaemon)
+    private static volatile com.overdrive.app.mqtt.MqttConnectionManager mqttManager;
+
+    public static void setMqttManager(com.overdrive.app.mqtt.MqttConnectionManager manager) {
+        mqttManager = manager;
+    }
     
     public SurveillanceIpcServer(int port) {
         this.port = port;
@@ -305,6 +312,31 @@ public class SurveillanceIpcServer implements Runnable {
 
                 case "DELETE_ABRP_TOKEN":
                     handleDeleteAbrpToken(response);
+                    break;
+
+                // ==================== MQTT COMMANDS ====================
+                case "GET_MQTT_CONNECTIONS":
+                    handleGetMqttConnections(response);
+                    break;
+
+                case "ADD_MQTT_CONNECTION":
+                    handleAddMqttConnection(request, response);
+                    break;
+
+                case "UPDATE_MQTT_CONNECTION":
+                    handleUpdateMqttConnection(request, response);
+                    break;
+
+                case "DELETE_MQTT_CONNECTION":
+                    handleDeleteMqttConnection(request, response);
+                    break;
+
+                case "GET_MQTT_STATUS":
+                    handleGetMqttStatus(response);
+                    break;
+
+                case "GET_MQTT_TELEMETRY":
+                    handleGetMqttTelemetry(response);
                     break;
 
                 // ==================== TELEMETRY OVERLAY COMMANDS ====================
@@ -1120,6 +1152,103 @@ public class SurveillanceIpcServer implements Runnable {
 
         response.put("success", true);
         response.put("message", "ABRP token deleted");
+    }
+
+    // ==================== MQTT HANDLER METHODS ====================
+
+    private void handleGetMqttConnections(JSONObject response) throws Exception {
+        if (mqttManager == null) {
+            response.put("success", false);
+            response.put("error", "MQTT not initialized");
+            return;
+        }
+        response.put("success", true);
+        response.put("connections", mqttManager.getAllStatus());
+        response.put("maxConnections", com.overdrive.app.mqtt.MqttConnectionStore.MAX_CONNECTIONS);
+    }
+
+    private void handleAddMqttConnection(JSONObject request, JSONObject response) throws Exception {
+        if (mqttManager == null) {
+            response.put("success", false);
+            response.put("error", "MQTT not initialized");
+            return;
+        }
+
+        com.overdrive.app.mqtt.MqttConnectionConfig added = mqttManager.addConnection(request);
+        if (added != null) {
+            response.put("success", true);
+            response.put("connection", added.toSafeJson());
+            response.put("message", "MQTT connection added");
+        } else {
+            response.put("success", false);
+            response.put("error", "Max connections reached (" + com.overdrive.app.mqtt.MqttConnectionStore.MAX_CONNECTIONS + ")");
+        }
+    }
+
+    private void handleUpdateMqttConnection(JSONObject request, JSONObject response) throws Exception {
+        if (mqttManager == null) {
+            response.put("success", false);
+            response.put("error", "MQTT not initialized");
+            return;
+        }
+
+        String id = request.optString("id", null);
+        if (id == null || id.isEmpty()) {
+            response.put("success", false);
+            response.put("error", "Missing connection ID");
+            return;
+        }
+
+        boolean updated = mqttManager.updateConnection(id, request);
+        response.put("success", updated);
+        if (updated) {
+            response.put("message", "MQTT connection updated");
+        } else {
+            response.put("error", "Connection not found: " + id);
+        }
+    }
+
+    private void handleDeleteMqttConnection(JSONObject request, JSONObject response) throws Exception {
+        if (mqttManager == null) {
+            response.put("success", false);
+            response.put("error", "MQTT not initialized");
+            return;
+        }
+
+        String id = request.optString("id", null);
+        if (id == null || id.isEmpty()) {
+            response.put("success", false);
+            response.put("error", "Missing connection ID");
+            return;
+        }
+
+        boolean deleted = mqttManager.deleteConnection(id);
+        response.put("success", deleted);
+        if (deleted) {
+            response.put("message", "MQTT connection deleted");
+        } else {
+            response.put("error", "Connection not found: " + id);
+        }
+    }
+
+    private void handleGetMqttStatus(JSONObject response) throws Exception {
+        if (mqttManager == null) {
+            response.put("success", false);
+            response.put("error", "MQTT not initialized");
+            return;
+        }
+        response.put("success", true);
+        response.put("connections", mqttManager.getAllStatus());
+    }
+
+    private void handleGetMqttTelemetry(JSONObject response) throws Exception {
+        if (mqttManager == null) {
+            response.put("success", false);
+            response.put("error", "MQTT not initialized");
+            return;
+        }
+        response.put("success", true);
+        response.put("telemetry", mqttManager.getLatestTelemetry());
     }
 
     public void stop() {

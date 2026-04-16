@@ -342,7 +342,8 @@ public class AccSentryDaemon {
                 startStatusMonitoring();
                 
                 // Disable BYD traffic monitor app (consumes data/battery in background)
-                disableBydTrafficMonitor();
+                // NOTE: Removed automatic disable — user can now toggle this from the app drawer menu
+                // disableBydTrafficMonitor();
                 
                 // Note: VehicleDataMonitor is initialized in CameraDaemon (separate process)
                 // which handles the HTTP API for vehicle data

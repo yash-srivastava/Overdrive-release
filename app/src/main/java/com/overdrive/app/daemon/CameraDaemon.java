@@ -109,6 +109,9 @@ public class CameraDaemon {
     private static AbrpTelemetryService abrpTelemetryService;
     private static com.overdrive.app.abrp.SohEstimator sohEstimator;
     
+    // ==================== MQTT CONNECTIONS ====================
+    private static com.overdrive.app.mqtt.MqttConnectionManager mqttConnectionManager;
+    
     // ==================== TRIP ANALYTICS ====================
     private static com.overdrive.app.trips.TripAnalyticsManager tripAnalyticsManager;
     
@@ -283,12 +286,36 @@ public class CameraDaemon {
             log("ABRP init error: " + e.getMessage());
         }
 
+        // Initialize MQTT Connection Manager
+        try {
+            log("Initializing MQTT connections...");
+            mqttConnectionManager = new com.overdrive.app.mqtt.MqttConnectionManager();
+            mqttConnectionManager.init(deviceId, sohEstimator);
+
+            // Set IPC reference so SurveillanceIpcServer can access MQTT
+            SurveillanceIpcServer.setMqttManager(mqttConnectionManager);
+
+            // Start all enabled connections
+            mqttConnectionManager.startAll();
+            log("MQTT initialized (" + mqttConnectionManager.getActiveCount() + " active connections)");
+        } catch (Exception e) {
+            log("MQTT init error: " + e.getMessage());
+        }
+
         // Initialize Trip Analytics
         try {
             log("Initializing Trip Analytics...");
             tripAnalyticsManager = new com.overdrive.app.trips.TripAnalyticsManager();
             tripAnalyticsManager.init(sharedAppContext, telemetryDataCollector, sohEstimator);
             log("Trip Analytics initialized (enabled=" + tripAnalyticsManager.isEnabled() + ")");
+
+            // Clear poisoned consumption buckets if this is a PHEV
+            // (old trips may have been recorded with wrong nominal capacity)
+            if (sohEstimator != null && sohEstimator.getNominalCapacityKwh() > 0
+                    && sohEstimator.getNominalCapacityKwh() < 30.0
+                    && tripAnalyticsManager.getDatabase() != null) {
+                tripAnalyticsManager.getDatabase().clearConsumptionBuckets();
+            }
 
             // AUTO-START: If gear is already in a driving position (not P), start trip
             // recording immediately. This handles the case where CameraDaemon restarts
@@ -496,6 +523,7 @@ public class CameraDaemon {
         
         if (tripAnalyticsManager != null) tripAnalyticsManager.shutdown();
         if (abrpTelemetryService != null) abrpTelemetryService.stop();
+        if (mqttConnectionManager != null) mqttConnectionManager.stopAll();
         if (tcpServer != null) tcpServer.stop();
         if (httpServer != null) httpServer.stop();
         if (ipcServer != null) ipcServer.stop();
@@ -911,6 +939,20 @@ public class CameraDaemon {
         // Update AccMonitor state for HTTP API responses
         com.overdrive.app.monitor.AccMonitor.setAccState(!accIsOff);
         
+        // ALWAYS notify TripAnalyticsManager regardless of GPU pipeline state.
+        // Trip detection depends on ACC events and must not be blocked by pipeline readiness.
+        if (tripAnalyticsManager != null) {
+            try {
+                if (accIsOff) {
+                    tripAnalyticsManager.onAccOff();
+                } else {
+                    tripAnalyticsManager.onAccOn();
+                }
+            } catch (Exception e) {
+                log("Trip Analytics ACC " + (accIsOff ? "OFF" : "ON") + " error: " + e.getMessage());
+            }
+        }
+        
         if (gpuPipeline == null) {
             if (accIsOff) {
                 log("ACC OFF but GPU pipeline not ready — queuing for when pipeline initializes");
@@ -925,15 +967,6 @@ public class CameraDaemon {
         log("ACC state changed: " + (accIsOff ? "OFF (entering sentry)" : "ON (exiting sentry)"));
         
         if (accIsOff) {
-            // ACC OFF — Finalize any active trip immediately (car is powering down)
-            if (tripAnalyticsManager != null) {
-                try {
-                    tripAnalyticsManager.onAccOff();
-                } catch (Exception e) {
-                    log("Trip Analytics ACC OFF error: " + e.getMessage());
-                }
-            }
-            
             // ACC OFF - Start pipeline for sentry mode
             try {
                 // CRITICAL: FORCE remount SD card when ACC goes off — BEFORE any early returns.
@@ -1296,6 +1329,7 @@ public class CameraDaemon {
                 gpuPipeline.getCamera().getCameraCoordinator();
             if (coordinator != null) {
                 status.put("cameraServiceRegistered", coordinator.isRegistered());
+                status.put("cameraUserRegistered", coordinator.isRegisteredAsUser());
                 status.put("cameraYielded", coordinator.isYielded());
                 status.put("nativeAppActive", coordinator.isNativeAppActive());
                 status.put("cameraEventCallback", coordinator.isEventCallbackActive());
@@ -1851,6 +1885,13 @@ public class CameraDaemon {
             socDb.setSohEstimator(sohEstimator);
             socDb.init();
             socDb.start();
+            
+            // Fix stale kWh records from before PHEV capacity was correctly detected
+            if (sohEstimator != null && sohEstimator.getNominalCapacityKwh() > 0
+                    && sohEstimator.getNominalCapacityKwh() < 30.0) {
+                log("Fixing stale kWh records for PHEV (nominal=" + sohEstimator.getNominalCapacityKwh() + " kWh)");
+                socDb.fixStaleRemainingKwh(sohEstimator.getNominalCapacityKwh());
+            }
             
             log("SOC History Database initialized successfully");
             

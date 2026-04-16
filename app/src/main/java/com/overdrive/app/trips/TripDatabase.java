@@ -202,6 +202,10 @@ public class TripDatabase {
                 stmt.execute("ALTER TABLE trips ADD COLUMN IF NOT EXISTS currency VARCHAR(8) DEFAULT ''");
                 stmt.execute("ALTER TABLE trips ADD COLUMN IF NOT EXISTS trip_cost REAL DEFAULT 0");
                 stmt.execute("ALTER TABLE trips ADD COLUMN IF NOT EXISTS kinematic_state VARCHAR(32) DEFAULT ''");
+                stmt.execute("ALTER TABLE trips ADD COLUMN IF NOT EXISTS gradient_profile VARCHAR(16) DEFAULT ''");
+                stmt.execute("ALTER TABLE trips ADD COLUMN IF NOT EXISTS elevation_gain_m REAL DEFAULT 0");
+                stmt.execute("ALTER TABLE trips ADD COLUMN IF NOT EXISTS elevation_loss_m REAL DEFAULT 0");
+                stmt.execute("ALTER TABLE trips ADD COLUMN IF NOT EXISTS avg_gradient_pct REAL DEFAULT 0");
                 // Rollup migrations
                 stmt.execute("ALTER TABLE weekly_rollups ADD COLUMN IF NOT EXISTS total_energy_kwh REAL DEFAULT 0");
                 stmt.execute("ALTER TABLE weekly_rollups ADD COLUMN IF NOT EXISTS total_cost REAL DEFAULT 0");
@@ -301,11 +305,13 @@ public class TripDatabase {
 
         String sql = "INSERT INTO trips (start_time, end_time, distance_km, duration_seconds, " +
                 "avg_speed_kmh, max_speed_kmh, soc_start, soc_end, kwh_start, kwh_end, energy_per_km, " +
-                "electricity_rate, currency, trip_cost, kinematic_state, efficiency_soc_per_km, " +
+                "electricity_rate, currency, trip_cost, kinematic_state, " +
+                "gradient_profile, elevation_gain_m, elevation_loss_m, avg_gradient_pct, " +
+                "efficiency_soc_per_km, " +
                 "start_lat, start_lon, end_lat, end_lon, ext_temp_c, " +
                 "anticipation_score, smoothness_score, speed_discipline_score, " +
                 "efficiency_score, consistency_score, micro_moments_json, telemetry_file_path) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             setTripParams(pstmt, trip);
@@ -334,7 +340,9 @@ public class TripDatabase {
 
         String sql = "UPDATE trips SET start_time=?, end_time=?, distance_km=?, duration_seconds=?, " +
                 "avg_speed_kmh=?, max_speed_kmh=?, soc_start=?, soc_end=?, kwh_start=?, kwh_end=?, energy_per_km=?, " +
-                "electricity_rate=?, currency=?, trip_cost=?, kinematic_state=?, efficiency_soc_per_km=?, " +
+                "electricity_rate=?, currency=?, trip_cost=?, kinematic_state=?, " +
+                "gradient_profile=?, elevation_gain_m=?, elevation_loss_m=?, avg_gradient_pct=?, " +
+                "efficiency_soc_per_km=?, " +
                 "start_lat=?, start_lon=?, end_lat=?, end_lon=?, ext_temp_c=?, " +
                 "anticipation_score=?, smoothness_score=?, speed_discipline_score=?, " +
                 "efficiency_score=?, consistency_score=?, micro_moments_json=?, telemetry_file_path=?, " +
@@ -343,8 +351,8 @@ public class TripDatabase {
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             setTripParams(pstmt, trip);
-            pstmt.setObject(29, trip.routeId > 0 ? trip.routeId : null);
-            pstmt.setLong(30, trip.id);
+            pstmt.setObject(33, trip.routeId > 0 ? trip.routeId : null);
+            pstmt.setLong(34, trip.id);
             pstmt.executeUpdate();
             logger.debug("Updated trip id=" + trip.id);
         } catch (Exception e) {
@@ -888,6 +896,21 @@ public class TripDatabase {
     }
 
     /**
+     * Clear all consumption buckets. Called when nominal capacity changes
+     * significantly (e.g., wrong capacity was detected previously) to prevent
+     * poisoned consumption rates from corrupting range estimates.
+     */
+    public void clearConsumptionBuckets() {
+        if (!ensureConnection()) return;
+        try (Statement stmt = connection.createStatement()) {
+            int deleted = stmt.executeUpdate("DELETE FROM consumption_buckets");
+            logger.info("Cleared " + deleted + " consumption buckets (capacity changed)");
+        } catch (Exception e) {
+            logger.error("Failed to clear consumption buckets", e);
+        }
+    }
+
+    /**
      * Get the overall average across all consumption buckets.
      * Aggregates: sum all sums / sum all counts.
      */
@@ -942,6 +965,10 @@ public class TripDatabase {
         trip.currency = rs.getString("currency");
         trip.tripCost = rs.getDouble("trip_cost");
         trip.kinematicState = rs.getString("kinematic_state");
+        try { trip.gradientProfile = rs.getString("gradient_profile"); } catch (Exception e) { trip.gradientProfile = ""; }
+        try { trip.elevationGainM = rs.getDouble("elevation_gain_m"); } catch (Exception e) { trip.elevationGainM = 0; }
+        try { trip.elevationLossM = rs.getDouble("elevation_loss_m"); } catch (Exception e) { trip.elevationLossM = 0; }
+        try { trip.avgGradientPercent = rs.getDouble("avg_gradient_pct"); } catch (Exception e) { trip.avgGradientPercent = 0; }
         trip.efficiencySocPerKm = rs.getDouble("efficiency_soc_per_km");
         trip.startLat = rs.getDouble("start_lat");
         trip.startLon = rs.getDouble("start_lon");
@@ -978,19 +1005,23 @@ public class TripDatabase {
         pstmt.setString(13, trip.currency != null ? trip.currency : "");
         pstmt.setDouble(14, trip.tripCost);
         pstmt.setString(15, trip.kinematicState != null ? trip.kinematicState : "");
-        pstmt.setDouble(16, trip.efficiencySocPerKm);
-        pstmt.setDouble(17, trip.startLat);
-        pstmt.setDouble(18, trip.startLon);
-        pstmt.setDouble(19, trip.endLat);
-        pstmt.setDouble(20, trip.endLon);
-        pstmt.setInt(21, trip.extTempC);
-        pstmt.setInt(22, trip.anticipationScore);
-        pstmt.setInt(23, trip.smoothnessScore);
-        pstmt.setInt(24, trip.speedDisciplineScore);
-        pstmt.setInt(25, trip.efficiencyScore);
-        pstmt.setInt(26, trip.consistencyScore);
-        pstmt.setString(27, trip.microMomentsJson);
-        pstmt.setString(28, trip.telemetryFilePath);
+        pstmt.setString(16, trip.gradientProfile != null ? trip.gradientProfile : "");
+        pstmt.setDouble(17, trip.elevationGainM);
+        pstmt.setDouble(18, trip.elevationLossM);
+        pstmt.setDouble(19, trip.avgGradientPercent);
+        pstmt.setDouble(20, trip.efficiencySocPerKm);
+        pstmt.setDouble(21, trip.startLat);
+        pstmt.setDouble(22, trip.startLon);
+        pstmt.setDouble(23, trip.endLat);
+        pstmt.setDouble(24, trip.endLon);
+        pstmt.setInt(25, trip.extTempC);
+        pstmt.setInt(26, trip.anticipationScore);
+        pstmt.setInt(27, trip.smoothnessScore);
+        pstmt.setInt(28, trip.speedDisciplineScore);
+        pstmt.setInt(29, trip.efficiencyScore);
+        pstmt.setInt(30, trip.consistencyScore);
+        pstmt.setString(31, trip.microMomentsJson);
+        pstmt.setString(32, trip.telemetryFilePath);
     }
 
     /**
@@ -1073,6 +1104,27 @@ public class TripDatabase {
      */
     private double runningAvg(double oldAvg, int oldCount, double newValue) {
         return (oldAvg * oldCount + newValue) / (oldCount + 1);
+    }
+
+    /**
+     * Delete orphaned trips — trips with end_time == 0 or duration_seconds == 0
+     * that are older than the given cutoff. These are leftovers from daemon crashes
+     * mid-trip. Returns the number of deleted rows.
+     */
+    public int deleteOrphanedTrips(long olderThanMs) {
+        if (!ensureConnection()) return 0;
+        try (PreparedStatement pstmt = connection.prepareStatement(
+                "DELETE FROM trips WHERE (end_time = 0 OR duration_seconds = 0) AND start_time < ?")) {
+            pstmt.setLong(1, olderThanMs);
+            int deleted = pstmt.executeUpdate();
+            if (deleted > 0) {
+                logger.info("Cleaned up " + deleted + " orphaned trip(s)");
+            }
+            return deleted;
+        } catch (Exception e) {
+            logger.error("Failed to delete orphaned trips: " + e.getMessage());
+            return 0;
+        }
     }
 
     /**

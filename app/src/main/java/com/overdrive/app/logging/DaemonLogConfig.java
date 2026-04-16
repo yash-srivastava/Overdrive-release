@@ -167,6 +167,17 @@ public final class DaemonLogConfig {
     /** OverlayRenderer - telemetry overlay rendering */
     public static final boolean OVERLAY_RENDERER = false;
 
+    // ==================== MQTT ====================
+
+    /** MqttConnectionManager - MQTT connection orchestration */
+    public static final boolean MQTT_CONNECTION_MANAGER = false;
+
+    /** MqttPublisher - per-connection MQTT publishing */
+    public static final boolean MQTT_PUBLISHER = false;
+
+    /** MqttConnectionStore - MQTT config persistence */
+    public static final boolean MQTT_CONNECTION_STORE = false;
+
     // ==================== TRIP ANALYTICS ====================
     
     /** Trip analytics — trip detection, telemetry recording, scoring, range estimation */
@@ -217,6 +228,7 @@ public final class DaemonLogConfig {
         || SOC_HISTORY_DATABASE || WS_STREAM_SERVER || ABRP_TELEMETRY
         || ABRP_CONFIG || SOH_ESTIMATOR || TELEMETRY_DATA_COLLECTOR
         || OVERLAY_RENDERER || TRIP_ANALYTICS || STORAGE_MANAGER
+        || MQTT_CONNECTION_MANAGER || MQTT_PUBLISHER || MQTT_CONNECTION_STORE
         || EXTERNAL_STORAGE_CLEANER || HTTP_SERVER || SURVEILLANCE_IPC
         || ABRP_API_HANDLER || PERFORMANCE_API_HANDLER;
     
@@ -260,6 +272,9 @@ public final class DaemonLogConfig {
             if (SOH_ESTIMATOR)              ENABLED_TAGS.add("SohEstimator");
             if (TELEMETRY_DATA_COLLECTOR)   ENABLED_TAGS.add("TelemetryDataCollector");
             if (OVERLAY_RENDERER)           ENABLED_TAGS.add("OverlayRenderer");
+            if (MQTT_CONNECTION_MANAGER)    ENABLED_TAGS.add("MqttConnectionManager");
+            if (MQTT_PUBLISHER)             ENABLED_TAGS.add("MqttPublisher");
+            if (MQTT_CONNECTION_STORE)      ENABLED_TAGS.add("MqttConnectionStore");
             if (TRIP_ANALYTICS) {
                 ENABLED_TAGS.add("TripAnalyticsManager");
                 ENABLED_TAGS.add("TripDetector");

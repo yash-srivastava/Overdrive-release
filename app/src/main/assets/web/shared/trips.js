@@ -58,8 +58,8 @@ const TRIPS = {
         efficiency: {
             label: 'Efficiency',
             icon: '⚡',
-            desc: 'Your energy consumption per km compared to the optimal baseline for your vehicle and route.',
-            tip: 'Pre-condition the cabin while plugged in. Avoid full-throttle launches from stops.'
+            desc: 'Your energy consumption per km compared to the optimal baseline for your vehicle, route terrain, and conditions.',
+            tip: 'Pre-condition the cabin while plugged in. Scores adjust for terrain — hills won\'t penalize you unfairly.'
         },
         consistency: {
             label: 'Consistency',
@@ -228,8 +228,10 @@ const TRIPS = {
     updateLimitLabel(val) {
         const el = document.getElementById('storageLimitValue');
         const desc = document.getElementById('storageLimitDesc');
-        if (el) el.textContent = val + ' MB';
-        if (desc) desc.textContent = val + ' MB';
+        const v = parseInt(val);
+        const label = v >= 1000 ? (v / 1000) + ' GB' : v + ' MB';
+        if (el) el.textContent = label;
+        if (desc) desc.textContent = label;
     },
 
     showApplyNeeded() {
@@ -706,8 +708,8 @@ const TRIPS = {
         const scoreClass = avgScore >= 70 ? '' : avgScore >= 40 ? 'mid' : 'low';
         const eff = (trip.efficiencySocPerKm || trip.efficiency_soc_per_km || 0).toFixed(2);
         const avgSpd = Math.round(trip.avgSpeedKmh || trip.avg_speed_kmh || 0);
-        const socStart = (trip.socStart || trip.soc_start || 0).toFixed(0);
-        const socEnd = (trip.socEnd || trip.soc_end || 0).toFixed(0);
+        const socStart = (trip.socStart || trip.soc_start || 0).toFixed(1);
+        const socEnd = (trip.socEnd || trip.soc_end || 0).toFixed(1);
         const tripId = trip.id;
         const energyUsed = trip.energyUsedKwh || trip.energy_used_kwh || 0;
         const tripCost = trip.tripCost || trip.trip_cost || 0;
@@ -720,6 +722,11 @@ const TRIPS = {
             costStr = cur + (energyUsed * this.electricityRate).toFixed(1);
         }
 
+        const elevGain = trip.elevationGainM || trip.elevation_gain_m || 0;
+        const gradProfile = trip.gradientProfile || trip.gradient_profile || '';
+        const gradIcons = { FLAT: '🛣️', HILLY: '⛰️', MOUNTAIN_CLIMB: '🏔️', MOUNTAIN_DESCENT: '⬇️' };
+        const elevStr = elevGain > 0 ? (gradIcons[gradProfile] || '') + ' +' + Math.round(elevGain) + 'm' : '';
+
         card.innerHTML =
             '<div class="trip-card-top">' +
                 '<span class="trip-time" style="font-size: 18px;">' + timeStr + '</span>' +
@@ -730,6 +737,7 @@ const TRIPS = {
                 '<span class="trip-capsule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> ' + dur + '</span>' +
                 '<span class="trip-capsule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg> ' + (energyUsed > 0 ? energyUsed.toFixed(1) + ' kWh' : eff + ' %/km') + '</span>' +
                 '<span class="trip-capsule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="7" width="12" height="10" rx="1"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/></svg> ' + socStart + '→' + socEnd + '%</span>' +
+                (elevStr ? '<span class="trip-capsule" style="color:#0EA5E9;">' + elevStr + '</span>' : '') +
                 (costStr ? '<span class="trip-capsule" style="color:var(--warning);"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> ' + costStr + '</span>' : '') +
             '</div>' +
             '<button class="trip-delete-btn" onclick="event.stopPropagation(); TRIPS.deleteTrip(\'' + tripId + '\')" title="Delete trip">' +
@@ -783,12 +791,16 @@ const TRIPS = {
 
         let totalDist = 0, totalDur = 0, totalEnergy = 0, totalCost = 0;
         let scoreSum = 0;
+        let totalSocDelta = 0;
         trips.forEach(t => {
             totalDist += t.distanceKm || t.distance_km || 0;
             totalDur += t.durationSeconds || t.duration_seconds || 0;
             totalEnergy += t.energyUsedKwh || t.energy_used_kwh || 0;
             totalCost += t.tripCost || t.trip_cost || 0;
             scoreSum += this.getAvgScore(t);
+            const socStart = t.socStart || t.soc_start || 0;
+            const socEnd = t.socEnd || t.soc_end || 0;
+            if (socStart > socEnd) totalSocDelta += (socStart - socEnd);
         });
 
         this.setEl('summaryTrips', trips.length);
@@ -796,6 +808,22 @@ const TRIPS = {
         this.setEl('summaryTime', (totalDur / 3600).toFixed(1));
         this.setEl('summaryEfficiency', trips.length > 0 ? Math.floor(scoreSum / trips.length) : '--');
         this.setEl('summaryEnergy', totalEnergy > 0 ? totalEnergy.toFixed(1) : '--');
+
+        // Average consumption: kWh/100km (works for both BEV and PHEV)
+        // Prefer direct kWh measurement, fall back to SOC-based estimate
+        if (totalDist > 0.5) {
+            if (totalEnergy > 0) {
+                const kwhPer100km = (totalEnergy / totalDist) * 100;
+                this.setEl('summaryConsumption', kwhPer100km.toFixed(1));
+            } else if (totalSocDelta > 0) {
+                const socPer100km = (totalSocDelta / totalDist) * 100;
+                this.setEl('summaryConsumption', socPer100km.toFixed(1) + '%');
+            } else {
+                this.setEl('summaryConsumption', '--');
+            }
+        } else {
+            this.setEl('summaryConsumption', '--');
+        }
 
         if (totalCost > 0) {
             this.setEl('summaryCost', (this.currency || '$') + totalCost.toFixed(1));
@@ -1013,10 +1041,40 @@ const TRIPS = {
             // Show energy kWh or efficiency
             const detailEnergy = trip.energyUsedKwh || trip.energy_used_kwh || 0;
             this.setEl('detailEfficiency', detailEnergy > 0 ? detailEnergy.toFixed(1) + ' kWh' : (trip.efficiencySocPerKm || trip.efficiency_soc_per_km || 0).toFixed(2));
+            // Average consumption: kWh/100km or %/100km
+            const tripDist = trip.distanceKm || trip.distance_km || 0;
+            if (tripDist > 0.1 && detailEnergy > 0) {
+                this.setEl('detailConsumption', ((detailEnergy / tripDist) * 100).toFixed(1));
+            } else if (tripDist > 0.1) {
+                const socDelta = (trip.socStart || trip.soc_start || 0) - (trip.socEnd || trip.soc_end || 0);
+                if (socDelta > 0) {
+                    this.setEl('detailConsumption', ((socDelta / tripDist) * 100).toFixed(1) + '%');
+                } else {
+                    this.setEl('detailConsumption', '--');
+                }
+            } else {
+                this.setEl('detailConsumption', '--');
+            }
             this.setEl('detailAvgSpeed', Math.round(trip.avgSpeedKmh || trip.avg_speed_kmh || 0));
             this.setEl('detailMaxSpeed', trip.maxSpeedKmh || trip.max_speed_kmh || 0);
             this.setEl('detailSocStart', (trip.socStart || trip.soc_start || 0).toFixed(1) + '%');
             this.setEl('detailTemp', (trip.extTempC || trip.ext_temp_c || '--') + (trip.extTempC || trip.ext_temp_c ? '°C' : ''));
+            // Elevation data
+            const elevGain = trip.elevationGainM || trip.elevation_gain_m || 0;
+            const elevLoss = trip.elevationLossM || trip.elevation_loss_m || 0;
+            this.setEl('detailElevGain', elevGain > 0 ? '+' + Math.round(elevGain) + 'm' : '--');
+            this.setEl('detailElevLoss', elevLoss > 0 ? '-' + Math.round(elevLoss) + 'm' : '--');
+            // Gradient profile pill
+            const gradProfile = trip.gradientProfile || trip.gradient_profile || '';
+            const gradEl = document.getElementById('detailGradientPill');
+            if (gradEl && gradProfile) {
+                const gradLabels = { FLAT: '🛣️ Flat', HILLY: '⛰️ Hilly', MOUNTAIN_CLIMB: '🏔️ Climb', MOUNTAIN_DESCENT: '⬇️ Descent' };
+                const gradColors = { FLAT: 'rgba(34,197,94,0.15);color:#22C55E', HILLY: 'rgba(245,158,11,0.15);color:#F59E0B', MOUNTAIN_CLIMB: 'rgba(239,68,68,0.15);color:#EF4444', MOUNTAIN_DESCENT: 'rgba(14,165,233,0.15);color:#0EA5E9' };
+                gradEl.innerHTML = gradLabels[gradProfile] || gradProfile;
+                gradEl.style.cssText = 'display:inline-flex;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;background:' + (gradColors[gradProfile] || gradColors.FLAT);
+            } else if (gradEl) {
+                gradEl.style.display = 'none';
+            }
             // Trip cost
             const detailCost = trip.tripCost || trip.trip_cost || 0;
             const detailCurrency = trip.currency || this.currency || '$';
@@ -1892,8 +1950,8 @@ const TRIPS = {
             ctx.fillStyle = 'rgba(245,158,11,0.7)';
             ctx.font = '10px Inter, sans-serif';
             ctx.textAlign = 'right';
-            ctx.fillText(socStart.toFixed(0) + '%', w - 2, pad.top + ch - ((socStart - socMin) / socRange) * ch + 3);
-            ctx.fillText(socEnd.toFixed(0) + '%', w - 2, pad.top + ch - ((socEnd - socMin) / socRange) * ch + 3);
+            ctx.fillText(socStart.toFixed(1) + '%', w - 2, pad.top + ch - ((socStart - socMin) / socRange) * ch + 3);
+            ctx.fillText(socEnd.toFixed(1) + '%', w - 2, pad.top + ch - ((socEnd - socMin) / socRange) * ch + 3);
 
             // SoC line
             ctx.beginPath();

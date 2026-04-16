@@ -43,6 +43,11 @@
             android:title="ABRP" />
 
         <item
+            android:id="@+id/mqttFragment"
+            android:icon="@drawable/ic_mqtt"
+            android:title="MQTT" />
+
+        <item
             android:id="@+id/tripsFragment"
             android:icon="@drawable/ic_trips"
             android:title="Trips" />
@@ -51,6 +56,15 @@
             android:id="@+id/nav_check_update"
             android:icon="@drawable/ic_update"
             android:title="Check for Updates" />
+    </group>
+
+    <!-- Utilities -->
+    <group android:id="@+id/group_utilities">
+        <item
+            android:id="@+id/nav_traffic_monitor"
+            android:icon="@drawable/ic_traffic_monitor"
+            android:title="Traffic Monitor: Checking..."
+            android:checkable="false" />
     </group>
 
 </menu>

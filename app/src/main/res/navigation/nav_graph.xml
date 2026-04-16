@@ -88,6 +88,17 @@
     </fragment>
 
     <fragment
+        android:id="@+id/mqttFragment"
+        android:name="com.overdrive.app.ui.fragment.WebViewFragment"
+        android:label="MQTT"
+        tools:layout="@layout/fragment_webview">
+        <argument
+            android:name="page_path"
+            app:argType="string"
+            android:defaultValue="/mqtt" />
+    </fragment>
+
+    <fragment
         android:id="@+id/tripsFragment"
         android:name="com.overdrive.app.ui.fragment.WebViewFragment"
         android:label="Trips"

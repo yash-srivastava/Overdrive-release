@@ -360,6 +360,13 @@ public class PanoramicCameraGpu {
      * Starts the BYD camera via reflection.
      */
     private void startCamera() throws Exception {
+        // GATE: Don't open camera if yielded to native app via IBYDCameraUser callback
+        if (cameraCoordinator != null && cameraCoordinator.isCameraYielded()) {
+            logger.info("Camera yielded to native app — skipping open");
+            cameraYielded = true;
+            return;
+        }
+
         // Open physical camera via AVMCamera
         int cameraId = cameraIdOverride >= 0 ? cameraIdOverride : PHYSICAL_CAMERA_ID;
         Class<?> avmClass = Class.forName("android.hardware.AVMCamera");
@@ -383,10 +390,11 @@ public class PanoramicCameraGpu {
         mStart.setAccessible(true);
         mStart.invoke(cameraObj);
         
+        cameraYielded = false;
         logger.info("Camera started (" + width + "x" + height + 
             ", id=" + cameraId + ", surfaceMode=" + cameraSurfaceMode + ")");
         
-        // SOTA: Update coordinator with actual camera ID
+        // Update coordinator with actual camera ID
         if (cameraCoordinator != null) {
             cameraCoordinator.setActiveCameraId(cameraId);
         }
@@ -469,15 +477,13 @@ public class PanoramicCameraGpu {
                             probeCallback.onCameraFound(currentId, cameraSurfaceMode);
                         }
                     } else if (autoProbeCameras) {
-                        // Only try ID 0 and ID 1 with surfaceMode 0 — no cycling
-                        // Atto 3 works on ID 0, Seal works on ID 1
+                        // Only try ID 0 and ID 1 with surfaceMode 0
                         if (currentId == 0) {
                             logger.info("Auto-probe: camera ID 0 " + 
                                 (!hasData ? "blank" : "not panoramic") + ", trying ID 1...");
                             cameraIdOverride = 1;
                             frameCounter = 0;
                             lastGlThreadHeartbeat = System.currentTimeMillis();
-                            // SOTA: Proper cleanup order via BydCameraCoordinator
                             BydCameraCoordinator.closeCamera(cameraObj, cameraSurfaceMode);
                             cameraObj = null;
                             if (cameraCoordinator != null) {
@@ -485,7 +491,6 @@ public class PanoramicCameraGpu {
                             }
                             lastGlThreadHeartbeat = System.currentTimeMillis();
                             startCamera();
-                            // Re-register event callback on new camera instance
                             if (cameraCoordinator != null && cameraObj != null) {
                                 cameraCoordinator.setupEventCallback(cameraObj);
                             }
@@ -844,37 +849,88 @@ public class PanoramicCameraGpu {
      * get added as secondary consumer via addPreviewSurface.
      */
     public void reopenCamera() {
-        reopenCamera(8000); // Default 8 seconds for ACC ON boot
+        reopenCamera(15000);
     }
 
-    public void reopenCamera(long delayMs) {
+    public void reopenCamera(long maxWaitMs) {
         if (!running) {
             logger.warn("Cannot reopen camera - not running");
             return;
         }
 
-        logger.info("Reopening AVMCamera (delay=" + delayMs + "ms)...");
+        logger.info("Reopening AVMCamera...");
 
         try {
-            // SOTA: Proper cleanup order via BydCameraCoordinator
+            // Proper cleanup order via BydCameraCoordinator
             if (cameraObj != null) {
                 BydCameraCoordinator.closeCamera(cameraObj, cameraSurfaceMode);
                 cameraObj = null;
                 if (cameraCoordinator != null) {
                     cameraCoordinator.resetEventCallbackState();
                 }
-                logger.info("Camera closed (proper cleanup), waiting for BYD native app...");
+                logger.info("Camera closed (proper cleanup)");
             }
 
-            Thread.sleep(delayMs);
+            // If registered as camera user, the onCloseCamera callback handles reacquisition.
+            // We just need to wait for the native app to claim and then release the camera.
+            // The callback will fire onReacquireCamera → which calls restartCameraAfterError
+            // or reopenCamera again. So we only need a simple delay here.
+            if (cameraCoordinator != null && cameraCoordinator.isRegisteredAsUser()) {
+                logger.info("Registered as camera user — waiting for onCloseCamera callback " +
+                    "(native app will trigger reacquire)");
+                // Minimum wait for native app to boot and claim camera
+                Thread.sleep(3000);
+
+                // If native app hasn't claimed it yet (no onPreOpenCamera fired),
+                // just reopen — we're not contending
+                if (!cameraCoordinator.isCameraYielded()) {
+                    logger.info("No yield triggered — native app may not be running, reopening");
+                    startCamera();
+                    if (cameraCoordinator != null && cameraObj != null) {
+                        cameraCoordinator.setupEventCallback(cameraObj);
+                    }
+                    logger.info("Camera reopened (no contention detected)");
+                } else {
+                    logger.info("Camera yielded via callback — waiting for onCloseCamera to reacquire");
+                    // onCloseCamera → onCameraAvailable → onReacquireCamera will handle it
+                }
+                return;
+            }
+
+            // FALLBACK: No registerUser — use polling to detect native app
+            logger.info("No registerUser — using polling fallback (maxWait=" + maxWaitMs + "ms)");
+            long minWaitMs = 3000;
+            Thread.sleep(minWaitMs);
+
+            if (cameraCoordinator != null && cameraCoordinator.isRegistered()) {
+                long deadline = System.currentTimeMillis() + (maxWaitMs - minWaitMs);
+                boolean nativeAppDetected = false;
+
+                while (System.currentTimeMillis() < deadline) {
+                    if (cameraCoordinator.checkNativeAppActive()) {
+                        nativeAppDetected = true;
+                        logger.info("Native app claimed camera (polling) — waiting for release");
+                        Thread.sleep(500);
+                        break;
+                    }
+                    Thread.sleep(500);
+                }
+
+                if (!nativeAppDetected) {
+                    logger.info("Native app not detected after polling — reopening");
+                }
+            } else {
+                long remainingWait = maxWaitMs - minWaitMs;
+                logger.info("No service available — fixed delay (" + remainingWait + "ms)");
+                Thread.sleep(remainingWait);
+            }
 
             startCamera();
-            
-            // SOTA: Re-register event callback on new camera instance
+
             if (cameraCoordinator != null && cameraObj != null) {
                 cameraCoordinator.setupEventCallback(cameraObj);
             }
-            
+
             logger.info("Camera reopened successfully");
 
         } catch (Exception e) {

@@ -421,6 +421,11 @@ public class HttpServer {
             return AbrpApiHandler.handle(method, path, body, out);
         }
         
+        // MQTT API
+        if (path.startsWith("/api/mqtt/")) {
+            return MqttApiHandler.handle(method, path, body, out);
+        }
+        
         // Trip Analytics API
         if (path.startsWith("/api/trips")) {
             com.overdrive.app.trips.TripAnalyticsManager tam = CameraDaemon.getTripAnalyticsManager();

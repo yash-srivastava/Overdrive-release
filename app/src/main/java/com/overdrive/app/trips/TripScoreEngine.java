@@ -23,7 +23,7 @@ import java.util.List;
  * Scoring axes:
  *   - Anticipation: EV-aware coast gap detection (accel < 5% = regen lift-off)
  *   - Smoothness: Pedal jerk integral (sum of |Δaccel| + |Δbrake| per second)
- *   - Speed Discipline: Rolling-window speed stddev via Welford's online algorithm
+ *   - Speed Discipline: Rolling-window speed stddev via naive sum-of-squares variance
  *   - Efficiency: kWh/km with state-dependent baselines (falls back to SoC-based)
  *   - Consistency: Percentage deviation from rolling 10-trip average
  *
@@ -64,6 +64,22 @@ public class TripScoreEngine {
         HIGHWAY_CRUISING  // avgSpeed > 75, stopsPerKm <= 0.2
     }
 
+    // ==================== Gradient Profile ====================
+    // Orthogonal to KinematicState — classifies terrain, not traffic.
+    // Computed from cumulative elevation gain per km driven.
+
+    public enum GradientProfile {
+        FLAT,             // < 5 m gain/loss per km — flat or very gentle terrain
+        HILLY,            // 5–15 m gain or loss per km — rolling hills, moderate climbs
+        MOUNTAIN_CLIMB,   // > 15 m gain per km — steep sustained climbs
+        MOUNTAIN_DESCENT  // > 15 m loss per km — steep sustained descents (regen territory)
+    }
+
+    // Minimum altitude delta to count (filters GPS noise, ~2m accuracy)
+    private static final double ALT_NOISE_THRESHOLD = 2.0;
+    // Smoothing: minimum distance between altitude samples to reduce GPS jitter
+    private static final int ALT_SAMPLE_INTERVAL = 5; // Every 5th sample at 5Hz = 1 second
+
     // ==================== Public API ====================
 
     /**
@@ -97,6 +113,12 @@ public class TripScoreEngine {
         long sumSpeed = 0;
         int maxSpeed = 0;
 
+        // ── Accumulators: elevation (gradient profile) ──
+        double elevationGain = 0;
+        double elevationLoss = 0;
+        double lastValidAlt = Double.NaN;
+        int altSampleCounter = 0;
+
         // ── Accumulators: speed histogram ──
         int[] histCounts = new int[HISTOGRAM_BUCKET_COUNT];
 
@@ -119,7 +141,7 @@ public class TripScoreEngine {
         // ── State machine: coast-brake events (micro-moments) ──
         Long mmCoastStartTime = null;
 
-        // ── Rolling window: speed discipline (Welford's online variance) ──
+        // ── Rolling window: speed discipline (naive sum-of-squares variance) ──
         // We use a circular buffer of speed values for the window
         int[] sdWindowSpeeds = new int[SD_WINDOW_SIZE];
         boolean[] sdWindowIsDriving = new boolean[SD_WINDOW_SIZE];
@@ -163,6 +185,27 @@ public class TripScoreEngine {
                 wasMoving = false;
             }
 
+            // ── 3b. Elevation tracking (gradient profile) ──
+            // Sample every ALT_SAMPLE_INTERVAL to smooth GPS altitude noise
+            altSampleCounter++;
+            if (altSampleCounter >= ALT_SAMPLE_INTERVAL) {
+                altSampleCounter = 0;
+                double alt = s.altitude;
+                if (alt != 0.0 && !Double.isNaN(alt)) {
+                    if (!Double.isNaN(lastValidAlt)) {
+                        double delta = alt - lastValidAlt;
+                        // Only count if above noise threshold
+                        if (Math.abs(delta) >= ALT_NOISE_THRESHOLD) {
+                            if (delta > 0) elevationGain += delta;
+                            else elevationLoss += Math.abs(delta);
+                            lastValidAlt = alt;
+                        }
+                    } else {
+                        lastValidAlt = alt;
+                    }
+                }
+            }
+
             // ── 4. Pedal jerk (smoothness) ──
             if (i > 0) {
                 pedalJerkSum += Math.abs(accel - lastAccel) + Math.abs(brake - lastBrake);
@@ -170,9 +213,11 @@ public class TripScoreEngine {
 
             // ── 5. Coast gap detection (anticipation) ──
             // EV-aware: accel < 5% counts as lifting off (regen zone)
+            // Coasting ends when driver brakes OR re-applies power (one-pedal driving)
             if (accel < 5 && brake == 0 && speed > MIN_DRIVING_SPEED) {
                 if (coastStartTime == null) coastStartTime = s.timestampMs;
-            } else if (brake > 0 && coastStartTime != null) {
+            } else if ((brake > 0 || accel >= 15) && coastStartTime != null) {
+                // Coasting ended via friction brake OR re-applying power
                 long gapMs = s.timestampMs - coastStartTime;
                 double gapSec = gapMs / 1000.0;
                 if (gapSec > 0 && gapSec < MAX_COAST_GAP_SECONDS) {
@@ -180,7 +225,8 @@ public class TripScoreEngine {
                     coastGapCount++;
                 }
                 coastStartTime = null;
-            } else if (accel >= 5) {
+            } else if (accel >= 5 && accel < 15) {
+                // Light throttle re-application — not a full coast-end, just cancel coast tracking
                 coastStartTime = null;
             }
 
@@ -334,6 +380,67 @@ public class TripScoreEngine {
         }
         trip.kinematicState = kinState.name();
 
+        // ── Classify gradient profile ──
+        // Elevation gain/loss per km — standard metric for terrain difficulty.
+        // Climb and descent are separate profiles because the physics and
+        // optimal driving behavior are fundamentally different.
+        double gainPerKm = trip.distanceKm > 0 ? elevationGain / trip.distanceKm : 0;
+        double lossPerKm = trip.distanceKm > 0 ? elevationLoss / trip.distanceKm : 0;
+        GradientProfile gradProfile;
+        if (gainPerKm > 15) {
+            gradProfile = GradientProfile.MOUNTAIN_CLIMB;
+        } else if (lossPerKm > 15) {
+            gradProfile = GradientProfile.MOUNTAIN_DESCENT;
+        } else if (gainPerKm > 5 || lossPerKm > 5) {
+            gradProfile = GradientProfile.HILLY;
+        } else {
+            gradProfile = GradientProfile.FLAT;
+        }
+        trip.gradientProfile = gradProfile.name();
+        trip.elevationGainM = elevationGain;
+        trip.elevationLossM = elevationLoss;
+        trip.avgGradientPercent = trip.distanceKm > 0
+                ? (elevationGain - elevationLoss) / (trip.distanceKm * 1000) * 100 : 0;
+
+        // ── Gradient compensation factors ──
+        // These adjust thresholds based on terrain so drivers aren't penalized
+        // (or over-rewarded) for physics they can't control.
+        //
+        // CLIMB: more energy needed, more pedal variation, less coasting opportunity
+        // DESCENT: regen recovers energy (bestEff can go negative), driver modulates
+        //          regen via accelerator (higher jerk is expected), less coasting
+        //          because you're managing speed via regen, not coasting to a stop
+        double efficiencyBestAdjust;       // Added to bestEff (negative = regen baseline)
+        double efficiencyGradientFactor;   // Multiplier on worstEff (higher = more lenient)
+        double smoothnessGradientFactor;   // Multiplier on maxJerk (higher = more lenient)
+        double anticipationGradientFactor; // Multiplier on targetGapMs (lower = more lenient)
+        switch (gradProfile) {
+            case MOUNTAIN_CLIMB:
+                efficiencyBestAdjust = 0;
+                efficiencyGradientFactor = 1.6;    // 60% wider efficiency range
+                smoothnessGradientFactor = 1.4;    // 40% more jerk tolerance
+                anticipationGradientFactor = 0.6;   // 40% shorter coast gap expected
+                break;
+            case MOUNTAIN_DESCENT:
+                efficiencyBestAdjust = -0.05;       // Good driver should be net-negative kWh/km
+                efficiencyGradientFactor = 1.0;     // Normal worst-case (they shouldn't be consuming much)
+                smoothnessGradientFactor = 1.35;    // Regen modulation causes pedal variation
+                anticipationGradientFactor = 0.5;   // Very little coasting — managing speed via regen
+                break;
+            case HILLY:
+                efficiencyBestAdjust = 0;
+                efficiencyGradientFactor = 1.25;   // 25% wider efficiency range
+                smoothnessGradientFactor = 1.15;   // 15% more jerk tolerance
+                anticipationGradientFactor = 0.85;  // 15% shorter coast gap expected
+                break;
+            default: // FLAT
+                efficiencyBestAdjust = 0;
+                efficiencyGradientFactor = 1.0;
+                smoothnessGradientFactor = 1.0;
+                anticipationGradientFactor = 1.0;
+                break;
+        }
+
         // ── Populate avg/max speed ──
         trip.avgSpeedKmh = (double) sumSpeed / n;
         trip.maxSpeedKmh = maxSpeed;
@@ -343,12 +450,14 @@ public class TripScoreEngine {
         // ════════════════════════════════════════════════════════════
 
         // A. Anticipation — coast gap before braking
+        //    Gradient-adjusted: on steep terrain, less coasting is expected
         double targetGapMs;
         switch (kinState) {
             case HEAVY_GRIDLOCK:   targetGapMs = 800;  break;
             case HIGHWAY_CRUISING: targetGapMs = 1500; break;
             default:               targetGapMs = 2500; break;
         }
+        targetGapMs *= anticipationGradientFactor;
         if (coastGapCount >= MIN_COAST_TRANSITIONS) {
             double avgGapMs = (double) coastGapSumMs / coastGapCount;
             trip.anticipationScore = clamp((int) Math.round(avgGapMs / targetGapMs * 100), 0, 100);
@@ -357,7 +466,11 @@ public class TripScoreEngine {
         }
 
         // B. Smoothness — pedal jerk integral (lower = smoother)
-        double durationSec = n / 5.0; // 5Hz samples
+        //    Gradient-adjusted: steeper roads require more pedal variation
+        //    Use actual elapsed time from timestamps, not assumed 5Hz polling rate,
+        //    because Android CPU governor and GC cause polling jitter.
+        long actualDurationMs = samples.get(n - 1).timestampMs - samples.get(0).timestampMs;
+        double durationSec = actualDurationMs / 1000.0;
         if (durationSec < 1) durationSec = 1;
         double normalizedJerk = pedalJerkSum / durationSec;
         double maxJerk;
@@ -366,6 +479,7 @@ public class TripScoreEngine {
             case HIGHWAY_CRUISING: maxJerk = 8;  break;
             default:               maxJerk = 12; break;
         }
+        maxJerk *= smoothnessGradientFactor;
         trip.smoothnessScore = clamp((int) Math.round((1.0 - normalizedJerk / maxJerk) * 100), 0, 100);
 
         // C. Speed Discipline — rolling window stddev average
@@ -386,6 +500,8 @@ public class TripScoreEngine {
         }
 
         // D. Efficiency — kWh/km with realistic BYD EV baselines
+        //    Gradient-adjusted: uphill widens acceptable range, downhill shifts
+        //    bestEff below zero (good driver should be gaining battery on descent)
         double energyUsed = trip.getEnergyUsedKwh();
         if (energyUsed > 0 && trip.distanceKm >= MIN_EFFICIENCY_DISTANCE) {
             double kwhPerKm = energyUsed / trip.distanceKm;
@@ -395,6 +511,8 @@ public class TripScoreEngine {
                 case HIGHWAY_CRUISING: bestEff = 0.14; worstEff = 0.35; break;
                 default:               bestEff = 0.11; worstEff = 0.32; break;
             }
+            bestEff += efficiencyBestAdjust;
+            worstEff *= efficiencyGradientFactor;
             double score = (worstEff - kwhPerKm) / (worstEff - bestEff) * 100;
             trip.efficiencyScore = clamp((int) Math.round(score), 0, 100);
         } else if (trip.distanceKm >= MIN_EFFICIENCY_DISTANCE) {
@@ -416,8 +534,13 @@ public class TripScoreEngine {
         // ── Micro-moments ──
         trip.microMomentsJson = microMoments.toJson().toString();
 
-        logger.info("Scores [" + kinState + " avgSpd=" + String.format("%.0f", avgSpeedKmh)
-                + " stops/km=" + String.format("%.1f", stopsPerKm) + "] "
+        logger.info("Scores [" + kinState + "/" + gradProfile
+                + " avgSpd=" + String.format("%.0f", avgSpeedKmh)
+                + " stops/km=" + String.format("%.1f", stopsPerKm)
+                + " elev+" + String.format("%.0f", elevationGain)
+                + "/-" + String.format("%.0f", elevationLoss) + "m"
+                + " gain/km=" + String.format("%.1f", gainPerKm)
+                + " loss/km=" + String.format("%.1f", lossPerKm) + "] "
                 + "A=" + trip.anticipationScore + " S=" + trip.smoothnessScore
                 + " SD=" + trip.speedDisciplineScore + " E=" + trip.efficiencyScore
                 + " C=" + trip.consistencyScore);

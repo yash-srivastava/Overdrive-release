@@ -1,7 +1,7 @@
 /**
  * BYD Champ - Recording Settings Module
  * SOTA: Uses unified config for cross-UID access (app UI + web UI sync)
- * SOTA: Storage limits with auto-cleanup (100MB - 1000MB internal, up to 10GB SD card)
+ * SOTA: Storage limits with auto-cleanup (100MB - 100GB internal/SD card)
  * SOTA: Storage type selection (internal vs SD card)
  */
 
@@ -27,8 +27,8 @@ BYD.recording = {
         sdCardPath: null,
         sdCardFreeSpace: 0,
         sdCardTotalSpace: 0,
-        maxLimitMb: 1000,
-        maxLimitMbSdCard: 10000
+        maxLimitMb: 100000,
+        maxLimitMbSdCard: 100000
     },
     cdrInfo: null,
     savedConfig: null,
@@ -203,8 +203,8 @@ BYD.recording = {
                 this.storageInfo.sdCardPath = data.sdCardPath || null;
                 this.storageInfo.sdCardFreeSpace = data.sdCardFreeSpace || 0;
                 this.storageInfo.sdCardTotalSpace = data.sdCardTotalSpace || 0;
-                this.storageInfo.maxLimitMb = data.maxLimitMb || 1000;
-                this.storageInfo.maxLimitMbSdCard = data.maxLimitMbSdCard || 10000;
+                this.storageInfo.maxLimitMb = data.maxLimitMb || 100000;
+                this.storageInfo.maxLimitMbSdCard = data.maxLimitMbSdCard || 100000;
                 this.storageInfo.recordingsPath = data.recordingsPath || '';
                 
                 this.updateStorageLimitUI();
@@ -261,7 +261,10 @@ BYD.recording = {
             slider.max = maxLimit;
             slider.value = Math.min(this.config.recordingsLimitMb, maxLimit);
         }
-        if (value) value.textContent = this.config.recordingsLimitMb + ' MB';
+        if (value) {
+            const mb = this.config.recordingsLimitMb;
+            value.textContent = mb >= 1000 ? (mb / 1000) + ' GB' : mb + ' MB';
+        }
         
         // Update range labels
         const minLabel = document.getElementById('recLimitMin');
@@ -525,7 +528,8 @@ BYD.recording = {
     
     updateRecLimit(value) {
         this.config.recordingsLimitMb = parseInt(value);
-        document.getElementById('recLimitValue').textContent = value + ' MB';
+        const v = parseInt(value);
+        document.getElementById('recLimitValue').textContent = v >= 1000 ? (v / 1000) + ' GB' : v + ' MB';
         this.markChanged();
     },
 

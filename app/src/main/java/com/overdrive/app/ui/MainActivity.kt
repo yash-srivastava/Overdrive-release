@@ -148,6 +148,9 @@ class MainActivity : AppCompatActivity() {
         // Handle Location start intent (from SentryDaemon restart)
         handleLocationStartIntent(intent)
         
+        // Check traffic monitor status early so drawer shows correct state
+        checkTrafficMonitorStatus()
+        
         // Check for app updates (delayed to not block startup)
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             // Clean up any leftover update APK from previous install
@@ -542,6 +545,11 @@ class MainActivity : AppCompatActivity() {
                     checkForAppUpdateManual()
                     true
                 }
+                R.id.nav_traffic_monitor -> {
+                    drawerLayout.closeDrawers()
+                    onTrafficMonitorClicked()
+                    true
+                }
                 else -> {
                     // Let NavController handle navigation items
                     val handled = androidx.navigation.ui.NavigationUI.onNavDestinationSelected(menuItem, navController)
@@ -550,6 +558,16 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+        
+        // Check traffic monitor status when drawer opens
+        drawerLayout.addDrawerListener(object : DrawerLayout.DrawerListener {
+            override fun onDrawerOpened(drawerView: View) {
+                checkTrafficMonitorStatus()
+            }
+            override fun onDrawerSlide(drawerView: View, slideOffset: Float) {}
+            override fun onDrawerClosed(drawerView: View) {}
+            override fun onDrawerStateChanged(newState: Int) {}
+        })
         
         // Add LogsPanelFragment if not already added
         if (savedInstanceState == null) {
@@ -576,7 +594,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupCopyButton() {
         btnCopyUrl.setOnClickListener {
             val url = tvCurrentUrl.text.toString()
-            if (url.isNotEmpty() && url != "Connecting..." && url != "Waiting for tunnel...") {
+            if (url.isNotEmpty() && !url.startsWith("No tunnel") && !url.startsWith("Waiting") && !url.startsWith("Starting") && url != "Connecting...") {
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 val clip = ClipData.newPlainText("URL", url)
                 clipboard.setPrimaryClip(clip)
@@ -652,7 +670,17 @@ class MainActivity : AppCompatActivity() {
         
         // Both modes now use tunnel URL
         if (tunnelUrl.isNullOrEmpty()) {
-            tvCurrentUrl.text = "Waiting for tunnel..."
+            // Show context-aware message based on tunnel state
+            val states = daemonsViewModel.daemonStates.value
+            val cfState = states?.get(DaemonType.CLOUDFLARED_TUNNEL)
+            val zrokState = states?.get(DaemonType.ZROK_TUNNEL)
+            val message = when {
+                zrokState?.status == DaemonStatus.STARTING -> "Starting Zrok tunnel..."
+                cfState?.status == DaemonStatus.STARTING -> "Starting Cloudflared tunnel..."
+                zrokState?.status == DaemonStatus.RUNNING || cfState?.status == DaemonStatus.RUNNING -> "Waiting for tunnel URL..."
+                else -> "No tunnel running"
+            }
+            tvCurrentUrl.text = message
             urlStatusDot.setBackgroundResource(R.drawable.status_dot_offline)
             mainViewModel.setCurrentUrl(null)
         } else {
@@ -681,6 +709,144 @@ class MainActivity : AppCompatActivity() {
         } else {
             super.onBackPressed()
         }
+    }
+    
+    // ==================== Traffic Monitor Management ====================
+    
+    /** Track current traffic monitor state to show correct button */
+    private var trafficMonitorEnabled: Boolean? = null
+    
+    /**
+     * Check if BYD Traffic Monitor app is currently enabled or disabled.
+     * Updates the drawer menu item title accordingly.
+     */
+    private fun checkTrafficMonitorStatus() {
+        val adb = AdbDaemonLauncher(this)
+        adb.executeShellCommand(
+            "pm list packages -d 2>/dev/null | grep com.byd.trafficmonitor",
+            object : AdbDaemonLauncher.LaunchCallback {
+                override fun onLog(message: String) {
+                    // If the package appears in disabled list, it's disabled
+                    val isDisabled = message.contains("com.byd.trafficmonitor")
+                    runOnUiThread {
+                        trafficMonitorEnabled = !isDisabled
+                        updateTrafficMonitorMenuItem(!isDisabled)
+                    }
+                }
+                override fun onLaunched() {}
+                override fun onError(error: String) {
+                    runOnUiThread {
+                        updateTrafficMonitorMenuItemText("Traffic Monitor: Unknown")
+                    }
+                }
+            }
+        )
+    }
+    
+    private fun updateTrafficMonitorMenuItem(enabled: Boolean) {
+        val menuItem = navigationView.menu.findItem(R.id.nav_traffic_monitor)
+        if (enabled) {
+            menuItem?.title = "✅ Traffic Monitor: Enabled"
+        } else {
+            menuItem?.title = "⛔ Traffic Monitor: Disabled"
+        }
+    }
+    
+    private fun updateTrafficMonitorMenuItemText(text: String) {
+        val menuItem = navigationView.menu.findItem(R.id.nav_traffic_monitor)
+        menuItem?.title = text
+    }
+    
+    /**
+     * Handle traffic monitor menu item click.
+     * Shows confirmation dialog with appropriate enable/disable action.
+     */
+    private fun onTrafficMonitorClicked() {
+        val currentlyEnabled = trafficMonitorEnabled
+        if (currentlyEnabled == null) {
+            Toast.makeText(this, "Checking traffic monitor status...", Toast.LENGTH_SHORT).show()
+            checkTrafficMonitorStatus()
+            return
+        }
+        
+        if (currentlyEnabled) {
+            // Currently enabled — offer to disable
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Disable Traffic Monitor")
+                .setMessage(
+                    "The BYD Traffic Monitor app runs in the background consuming mobile data and battery.\n\n" +
+                    "Disabling it is recommended.\n\n" +
+                    "After disabling, please perform a hard reboot by pressing and holding the central console button for 5 seconds."
+                )
+                .setPositiveButton("Disable") { _, _ ->
+                    setTrafficMonitorEnabled(false)
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        } else {
+            // Currently disabled — offer to enable
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Enable Traffic Monitor")
+                .setMessage(
+                    "This will re-enable the BYD Traffic Monitor app.\n\n" +
+                    "Note: It will run in the background and may consume mobile data and battery.\n\n" +
+                    "After enabling, please perform a hard reboot by pressing and holding the central console button for 5 seconds."
+                )
+                .setPositiveButton("Enable") { _, _ ->
+                    setTrafficMonitorEnabled(true)
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+    }
+    
+    /**
+     * Enable or disable the BYD Traffic Monitor package via ADB shell.
+     */
+    private fun setTrafficMonitorEnabled(enable: Boolean) {
+        val cmd = if (enable) {
+            "pm enable com.byd.trafficmonitor 2>&1"
+        } else {
+            "pm disable-user --user 0 com.byd.trafficmonitor 2>&1"
+        }
+        
+        val action = if (enable) "Enabling" else "Disabling"
+        Toast.makeText(this, "$action traffic monitor...", Toast.LENGTH_SHORT).show()
+        
+        val adb = AdbDaemonLauncher(this)
+        adb.executeShellCommand(cmd, object : AdbDaemonLauncher.LaunchCallback {
+            override fun onLog(message: String) {
+                android.util.Log.i("TrafficMonitor", "$action result: $message")
+            }
+            
+            override fun onLaunched() {
+                runOnUiThread {
+                    trafficMonitorEnabled = enable
+                    updateTrafficMonitorMenuItem(enable)
+                    
+                    val state = if (enable) "enabled" else "disabled"
+                    logsViewModel.info("TrafficMonitor", "BYD Traffic Monitor $state")
+                    
+                    // Show reboot reminder
+                    android.app.AlertDialog.Builder(this@MainActivity)
+                        .setTitle("✅ Traffic Monitor ${state.replaceFirstChar { it.uppercase() }}")
+                        .setMessage(
+                            "The change has been applied.\n\n" +
+                            "Please perform a hard reboot now:\n" +
+                            "Press and hold the central console button for 5 seconds."
+                        )
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+            }
+            
+            override fun onError(error: String) {
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, "❌ Failed: $error", Toast.LENGTH_LONG).show()
+                    logsViewModel.error("TrafficMonitor", "Failed to ${if (enable) "enable" else "disable"}: $error")
+                }
+            }
+        })
     }
     
     override fun onDestroy() {

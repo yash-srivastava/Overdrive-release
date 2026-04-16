@@ -176,21 +176,45 @@ public class RecordingModeManager {
         accIsOn = isOn;
         
         if (isOn) {
-            // ACC is ON — full pipeline stop+restart to release camera EGL surface
-            // for BYD native dashcam app, then reacquire as secondary consumer.
+            // ACC is ON — full pipeline stop and restart to cleanly reacquire camera.
+            // The BYD native dashcam app starts on ACC ON and grabs the camera.
+            // A full restart ensures we get a working camera connection.
             if (pipeline.isRunning()) {
+                pipeline.onAccOn();
                 pipeline.stop();
             }
             
-            if (currentMode == Mode.DRIVE_MODE && !isDrivingGear(currentGear)) {
-                // Will activate on gear change (pipeline.start happens then)
-                logger.info("DRIVE_MODE waiting for driving gear (current=" + gearToString(currentGear) + ")");
-            } else if (currentMode == Mode.PROXIMITY_GUARD && currentGear == GEAR_P) {
-                // Will activate on gear change
-                logger.info("PROXIMITY_GUARD waiting for gear != P");
-            } else if (currentMode != Mode.NONE) {
-                activateMode(currentMode);
-            }
+            // Delay mode activation to let BYD native app finish camera init
+            final Mode modeToActivate = currentMode;
+            new Thread(() -> {
+                try {
+                    Thread.sleep(5000);
+                } catch (InterruptedException ignored) {}
+                
+                synchronized (RecordingModeManager.this) {
+                    if (!accIsOn) {
+                        logger.info("ACC turned OFF during reacquire delay — skipping mode activation");
+                        return;
+                    }
+                    
+                    // Use CURRENT gear, not the gear at ACC ON time — gear may have changed
+                    // during the 5-second delay (e.g., P→D or D→P)
+                    int gearNow = currentGear;
+                    
+                    if (modeToActivate == Mode.DRIVE_MODE && !isDrivingGear(gearNow)) {
+                        logger.info("DRIVE_MODE waiting for driving gear (current=" + gearToString(gearNow) + ")");
+                    } else if (modeToActivate == Mode.PROXIMITY_GUARD && gearNow == GEAR_P) {
+                        logger.info("PROXIMITY_GUARD waiting for gear != P");
+                    } else if (modeToActivate != Mode.NONE) {
+                        // Check if gear change already activated the mode during the delay
+                        if (pipeline.isRunning() && pipeline.isRecording()) {
+                            logger.info("Mode already activated by gear change during delay — skipping");
+                        } else {
+                            activateMode(modeToActivate);
+                        }
+                    }
+                }
+            }, "AccOnReacquire").start();
             
         } else if (!isOn && wasOn) {
             // ACC turned OFF - deactivate current mode
@@ -318,8 +342,10 @@ public class RecordingModeManager {
                 try {
                     if (!pipeline.isRunning()) {
                         logger.info("Starting pipeline for CONTINUOUS mode");
-                        pipeline.start(true);  // Auto-start recording
-                    } else {
+                        pipeline.start(false);
+                    }
+                    // Pipeline.start() blocks ~2s for GL init. Recorder should be ready.
+                    if (pipeline.isRunning() && !pipeline.isRecording()) {
                         pipeline.startRecording();
                     }
                 } catch (Exception e) {
@@ -329,13 +355,14 @@ public class RecordingModeManager {
                 
             case DRIVE_MODE:
                 // Start recording when driving (gear is D/R/S/M)
-                // Pipeline may already be running (kept alive from previous gear cycle)
                 try {
                     if (!pipeline.isRunning()) {
                         logger.info("Starting pipeline for DRIVE_MODE");
-                        pipeline.start(true);  // Auto-start recording
-                    } else if (!pipeline.isRecording()) {
-                        logger.info("Pipeline running, resuming DRIVE_MODE recording");
+                        pipeline.start(false);
+                    }
+                    // Pipeline.start() blocks ~2s for GL init. Recorder should be ready.
+                    if (pipeline.isRunning() && !pipeline.isRecording()) {
+                        logger.info("Starting DRIVE_MODE recording");
                         pipeline.startRecording();
                     }
                 } catch (Exception e) {

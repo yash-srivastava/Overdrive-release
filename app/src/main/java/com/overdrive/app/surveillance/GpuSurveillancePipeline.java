@@ -468,10 +468,10 @@ public class GpuSurveillancePipeline {
         camera = new PanoramicCameraGpu(cameraWidth, cameraHeight);
         camera.setConsumers(recorder, downscaler, sentry);
         
-        // Camera config: saved config → or first-launch probe (ID 0 then ID 1, no cycling).
+        // Camera config: saved config → or first-launch probe (ID 0 then ID 1).
         // Both Seal (ID 1) and Atto 3 (ID 0) output a 4-camera strip at 5120x960 with surfaceMode 0.
-        // CRITICAL: Never close/reopen the camera after opening — the Atto 3 HAL needs the
-        // camera to stay open for all 4 cameras to initialize in the strip.
+        // CRITICAL: Don't cycle through cameras — the Atto 3 HAL needs the camera to stay
+        // open for all 4 cameras to initialize in the strip.
         logger.info("Vehicle model: " + getVehicleModel());
         
         boolean configured = false;
@@ -486,14 +486,12 @@ public class GpuSurveillancePipeline {
                 camera.setCameraId(savedId);
                 camera.setCameraSurfaceMode(savedMode);
                 configured = true;
-                // No probing — saved config is trusted
             }
         } catch (Exception e) {
             logger.warn("Failed to load saved camera config: " + e.getMessage());
         }
         
         if (!configured) {
-            // First launch: try ID 0 (Atto 3), probe will try ID 1 (Seal) if BLACK, then save
             logger.info("No saved config — starting with id=0, surfaceMode=0 (probe enabled)");
             camera.setCameraId(0);
             camera.setCameraSurfaceMode(0);

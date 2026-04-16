@@ -22,7 +22,8 @@ import com.overdrive.app.R
  */
 class DaemonAdapter(
     private val onToggle: (DaemonType, Boolean) -> Unit,
-    private val onConfigureClick: ((DaemonType) -> Unit)? = null
+    private val onConfigureClick: ((DaemonType) -> Unit)? = null,
+    private val onDownloadLog: ((DaemonType) -> Unit)? = null
 ) : ListAdapter<DaemonState, DaemonAdapter.DaemonViewHolder>(DaemonDiffCallback()) {
     
     // Track expanded states
@@ -45,6 +46,8 @@ class DaemonAdapter(
         private val tvDaemonStatus: TextView = itemView.findViewById(R.id.tvDaemonStatus)
         private val switchDaemon: SwitchMaterial = itemView.findViewById(R.id.switchDaemon)
         private val ivExpand: ImageView = itemView.findViewById(R.id.ivExpand)
+        private val ivConfigure: ImageView = itemView.findViewById(R.id.ivConfigure)
+        private val ivDownloadLog: ImageView = itemView.findViewById(R.id.ivDownloadLog)
         private val mainRow: View = itemView.findViewById(R.id.mainRow)
         private val subprocessContainer: View = itemView.findViewById(R.id.subprocessContainer)
         private val subprocessList: LinearLayout = itemView.findViewById(R.id.subprocessList)
@@ -118,6 +121,24 @@ class DaemonAdapter(
             subprocessContainer.visibility = if (isExpanded && hasSubprocesses) View.VISIBLE else View.GONE
             ivExpand.rotation = if (isExpanded) 180f else 0f
             
+            // Show configure icon for configurable daemons (always visible for Zrok)
+            val isConfigurable = state.type == DaemonType.ZROK_TUNNEL && onConfigureClick != null
+            ivConfigure.visibility = if (isConfigurable) View.VISIBLE else View.GONE
+            if (isConfigurable) {
+                ivConfigure.setOnClickListener {
+                    onConfigureClick?.invoke(state.type)
+                }
+            }
+            
+            // Show download log button (only if callback provided — debug builds only)
+            val hasLog = onDownloadLog != null && hasLogFile(state.type)
+            ivDownloadLog.visibility = if (hasLog) View.VISIBLE else View.GONE
+            if (hasLog) {
+                ivDownloadLog.setOnClickListener {
+                    onDownloadLog?.invoke(state.type)
+                }
+            }
+            
             // Handle configuration click for daemons that need setup
             if (state.needsConfiguration && onConfigureClick != null) {
                 itemView.setOnClickListener {
@@ -172,6 +193,28 @@ class DaemonAdapter(
                 DaemonType.CLOUDFLARED_TUNNEL -> "☁️ Cloudflared Tunnel"
                 DaemonType.ZROK_TUNNEL -> "🌐 Zrok Tunnel"
                 DaemonType.TELEGRAM_DAEMON -> "📱 Telegram Bot"
+            }
+        }
+        
+        private fun hasLogFile(type: DaemonType): Boolean {
+            return getLogFilePath(type) != null
+        }
+    }
+    
+    companion object {
+        /**
+         * Map daemon types to their log file paths.
+         * Returns null for daemons without a known log file.
+         */
+        fun getLogFilePath(type: DaemonType): String? {
+            return when (type) {
+                DaemonType.CAMERA_DAEMON -> "/data/local/tmp/cam_daemon.log"
+                DaemonType.SENTRY_DAEMON -> "/data/local/tmp/sentry_daemon.log"
+                DaemonType.ACC_SENTRY_DAEMON -> "/data/local/tmp/acc_sentry_daemon.log"
+                DaemonType.CLOUDFLARED_TUNNEL -> "/data/local/tmp/cloudflared.log"
+                DaemonType.ZROK_TUNNEL -> "/data/local/tmp/zrok.log"
+                DaemonType.SINGBOX_PROXY -> "/data/local/tmp/singbox.log"
+                DaemonType.TELEGRAM_DAEMON -> "/data/local/tmp/telegrambotdaemon.log"
             }
         }
     }
