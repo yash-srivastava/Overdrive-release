@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
@@ -16,6 +17,7 @@ import androidx.fragment.app.activityViewModels
 import androidx.navigation.fragment.findNavController
 import com.overdrive.app.auth.AuthManager
 import com.overdrive.app.client.CameraDaemonClient
+import com.overdrive.app.ui.model.AccessMode
 import com.overdrive.app.ui.model.DaemonStatus
 import com.overdrive.app.ui.model.DaemonType
 import com.overdrive.app.ui.util.QrCodeGenerator
@@ -25,6 +27,7 @@ import com.overdrive.app.ui.viewmodel.RecordingViewModel
 import com.overdrive.app.util.DeviceIdGenerator
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
+import com.google.android.material.switchmaterial.SwitchMaterial
 import com.overdrive.app.R
 
 /**
@@ -42,10 +45,17 @@ class DashboardFragment : Fragment() {
     private lateinit var tvDaemonsStatus: TextView
     private lateinit var tvRecordingStatus: TextView
     private lateinit var tvDeviceId: TextView
-    private lateinit var tvAccessMode: TextView
     private lateinit var cardDaemons: MaterialCardView
     private lateinit var cardRecording: MaterialCardView
-    
+
+    // Remote Access card UI
+    private lateinit var urlStatusDot: View
+    private lateinit var tvCurrentUrl: TextView
+    private lateinit var btnCopyUrl: ImageButton
+    private lateinit var switchAccessMode: SwitchMaterial
+    private lateinit var tvAccessMode: TextView
+    private var isUpdatingSwitch = false
+
     // Auth UI elements
     private lateinit var tvDeviceToken: TextView
     private lateinit var btnToggleToken: ImageView
@@ -67,12 +77,10 @@ class DashboardFragment : Fragment() {
         
         initViews(view)
         setupClickListeners()
+        setupAccessModeToggle()
         observeViewModels()
-        
-        // Set device ID
+
         tvDeviceId.text = DeviceIdGenerator.generateDeviceId(requireContext())
-        
-        // Load auth state
         loadAuthState()
     }
     
@@ -83,10 +91,16 @@ class DashboardFragment : Fragment() {
         tvDaemonsStatus = view.findViewById(R.id.tvDaemonsStatus)
         tvRecordingStatus = view.findViewById(R.id.tvRecordingStatus)
         tvDeviceId = view.findViewById(R.id.tvDeviceId)
-        tvAccessMode = view.findViewById(R.id.tvAccessMode)
         cardDaemons = view.findViewById(R.id.cardDaemons)
         cardRecording = view.findViewById(R.id.cardRecording)
-        
+
+        // Remote Access card
+        urlStatusDot = view.findViewById(R.id.urlStatusDot)
+        tvCurrentUrl = view.findViewById(R.id.tvCurrentUrl)
+        btnCopyUrl = view.findViewById(R.id.btnCopyUrl)
+        switchAccessMode = view.findViewById(R.id.switchAccessMode)
+        tvAccessMode = view.findViewById(R.id.tvAccessMode)
+
         // Auth UI
         tvDeviceToken = view.findViewById(R.id.tvDeviceToken)
         btnToggleToken = view.findViewById(R.id.btnToggleToken)
@@ -117,33 +131,49 @@ class DashboardFragment : Fragment() {
         btnRegenerateToken.setOnClickListener {
             showRegenerateConfirmation()
         }
+
+        btnCopyUrl.setOnClickListener {
+            val url = mainViewModel.currentUrl.value
+            if (!url.isNullOrEmpty()) {
+                val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("Tunnel URL", url))
+                Toast.makeText(requireContext(), "URL copied", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun setupAccessModeToggle() {
+        switchAccessMode.setOnCheckedChangeListener { _, isChecked ->
+            if (isUpdatingSwitch) return@setOnCheckedChangeListener
+            val mode = if (isChecked) AccessMode.PUBLIC else AccessMode.PRIVATE
+            mainViewModel.setAccessMode(mode)
+            daemonsViewModel.daemonStartupManager?.onAccessModeChanged(mode)
+        }
     }
     
     private fun observeViewModels() {
-        // Observe current URL from MainViewModel (works for both PRIVATE and PUBLIC modes)
         mainViewModel.currentUrl.observe(viewLifecycleOwner) { url ->
             updateQrCode(url)
+            updateUrlDisplay(url)
         }
-        
-        // Observe access mode
+
         mainViewModel.accessMode.observe(viewLifecycleOwner) { mode ->
+            isUpdatingSwitch = true
+            switchAccessMode.isChecked = mode == AccessMode.PUBLIC
+            isUpdatingSwitch = false
             tvAccessMode.text = mode.name
-            // Update placeholder text based on mode
             if (mainViewModel.currentUrl.value.isNullOrEmpty()) {
                 tvQrPlaceholder.text = when (mode) {
-                    com.overdrive.app.ui.model.AccessMode.PRIVATE -> getTunnelPlaceholderText()
-                    com.overdrive.app.ui.model.AccessMode.PUBLIC -> "Loading VPS URL..."
+                    AccessMode.PRIVATE -> getTunnelPlaceholderText()
+                    AccessMode.PUBLIC -> "Loading VPS URL..."
                 }
             }
         }
-        
-        // Observe daemon states for quick status
+
         daemonsViewModel.daemonStates.observe(viewLifecycleOwner) { states ->
             val running = states.values.count { it.status == DaemonStatus.RUNNING }
             val total = states.size
             tvDaemonsStatus.text = "$running/$total Running"
-            
-            // Update tunnel placeholder if no URL yet
             if (mainViewModel.currentUrl.value.isNullOrEmpty()) {
                 tvQrPlaceholder.text = getTunnelPlaceholderText()
             }
@@ -190,6 +220,16 @@ class DashboardFragment : Fragment() {
         tvUrl.visibility = View.GONE
     }
     
+    private fun updateUrlDisplay(url: String?) {
+        if (url.isNullOrEmpty()) {
+            tvCurrentUrl.text = getTunnelPlaceholderText()
+            urlStatusDot.setBackgroundResource(R.drawable.status_dot_offline)
+        } else {
+            tvCurrentUrl.text = url
+            urlStatusDot.setBackgroundResource(R.drawable.status_dot_online)
+        }
+    }
+
     /**
      * Get appropriate placeholder text based on tunnel daemon state.
      */

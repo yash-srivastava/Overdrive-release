@@ -25,122 +25,25 @@
             app:title="@string/app_name"
             app:titleTextColor="@color/brand_primary">
 
-            <!-- Access Mode Toggle -->
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+            <View
+                android:id="@+id/statusIndicator"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
                 android:layout_gravity="end"
-                android:layout_marginEnd="8dp"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:background="@drawable/card_glow_border"
-                android:paddingHorizontal="12dp"
-                android:paddingVertical="6dp">
-
-                <View
-                    android:id="@+id/statusIndicator"
-                    android:layout_width="8dp"
-                    android:layout_height="8dp"
-                    android:background="@drawable/status_dot_offline" />
-
-                <TextView
-                    android:id="@+id/tvAccessMode"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:text="PRIVATE"
-                    android:textColor="@color/brand_primary"
-                    android:textSize="11sp"
-                    android:textStyle="bold" />
-
-                <com.google.android.material.switchmaterial.SwitchMaterial
-                    android:id="@+id/switchAccessMode"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp" />
-
-            </LinearLayout>
+                android:layout_marginEnd="16dp"
+                android:background="@drawable/status_dot_offline" />
 
         </com.google.android.material.appbar.MaterialToolbar>
 
-        <!-- URL Display Bar -->
-        <LinearLayout
-            android:id="@+id/urlBar"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@color/bg_elevated"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingHorizontal="16dp"
-            android:paddingVertical="12dp"
-            android:visibility="visible">
-
-            <View
-                android:id="@+id/urlStatusDot"
-                android:layout_width="8dp"
-                android:layout_height="8dp"
-                android:background="@drawable/status_dot_online" />
-
-            <TextView
-                android:id="@+id/tvUrlLabel"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="10dp"
-                android:text="URL:"
-                android:textColor="@color/text_muted"
-                android:textSize="11sp" />
-
-            <TextView
-                android:id="@+id/tvCurrentUrl"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:layout_weight="1"
-                android:ellipsize="middle"
-                android:singleLine="true"
-                android:text="Connecting..."
-                android:textColor="@color/brand_primary"
-                android:textIsSelectable="true"
-                android:textSize="12sp"
-                android:fontFamily="monospace" />
-
-            <ImageButton
-                android:id="@+id/btnCopyUrl"
-                android:layout_width="36dp"
-                android:layout_height="36dp"
-                android:layout_marginStart="8dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="Copy URL"
-                android:src="@drawable/ic_copy"
-                app:tint="@color/text_muted" />
-
-        </LinearLayout>
-
-        <!-- Content Area with Logs Panel -->
-        <LinearLayout
-            android:id="@+id/contentContainer"
+        <!-- Content Area -->
+        <androidx.fragment.app.FragmentContainerView
+            android:id="@+id/navHostFragment"
+            android:name="androidx.navigation.fragment.NavHostFragment"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:orientation="vertical">
-
-            <!-- Navigation Host -->
-            <androidx.fragment.app.FragmentContainerView
-                android:id="@+id/navHostFragment"
-                android:name="androidx.navigation.fragment.NavHostFragment"
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1"
-                app:defaultNavHost="true"
-                app:navGraph="@navigation/nav_graph" />
-
-            <!-- Logs Panel (Portrait - Bottom) -->
-            <androidx.fragment.app.FragmentContainerView
-                android:id="@+id/logsPanelContainer"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-
-        </LinearLayout>
+            app:defaultNavHost="true"
+            app:navGraph="@navigation/nav_graph" />
 
     </LinearLayout>
 

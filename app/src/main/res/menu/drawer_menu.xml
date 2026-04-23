@@ -53,6 +53,11 @@
             android:title="Trips" />
 
         <item
+            android:id="@+id/logsFragment"
+            android:icon="@drawable/ic_download_log"
+            android:title="Logs" />
+
+        <item
             android:id="@+id/nav_check_update"
             android:icon="@drawable/ic_update"
             android:title="Check for Updates" />

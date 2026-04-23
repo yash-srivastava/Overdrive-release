@@ -20,7 +20,6 @@ import androidx.navigation.ui.navigateUp
 import androidx.navigation.ui.setupWithNavController
 import com.overdrive.app.logging.LogLevel
 import com.overdrive.app.logging.LogManager
-import com.overdrive.app.shell.PrivilegedShellSetup
 import com.overdrive.app.storage.StorageSetup
 import com.overdrive.app.ui.daemon.DaemonStartupManager
 import com.overdrive.app.ui.model.AccessMode
@@ -57,16 +56,7 @@ class MainActivity : AppCompatActivity() {
     // UI elements
     private lateinit var toolbar: MaterialToolbar
     private lateinit var navigationView: NavigationView
-    private lateinit var switchAccessMode: SwitchMaterial
-    private lateinit var tvAccessMode: TextView
-    private lateinit var tvCurrentUrl: TextView
-    private lateinit var urlBar: View
     private lateinit var statusIndicator: View
-    private lateinit var urlStatusDot: View
-    private lateinit var btnCopyUrl: ImageButton
-    
-    // Flag to prevent recursive switch updates
-    private var isUpdatingSwitch = false
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -97,8 +87,6 @@ class MainActivity : AppCompatActivity() {
         
         initViews()
         setupNavigation(savedInstanceState)
-        setupAccessModeToggle()
-        setupCopyButton()
         setupLogListener()
         observeViewModels()
         
@@ -111,9 +99,6 @@ class MainActivity : AppCompatActivity() {
         
         // Log app start
         logsViewModel.info("App", "OverDrive started")
-        
-        // Setup privileged shell (UID 1000) - required for daemon management
-        // setupPrivilegedShell()
         
         // Start daemons and services
         // Device ID is already synced above via generateDeviceId() which writes to file async
@@ -449,55 +434,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    /**
-     * Setup the privileged shell (UID 1000) for daemon management.
-     * This must be done before starting any daemons that need elevated privileges.
-     */
-    private fun setupPrivilegedShell() {
-        logsViewModel.info("Shell", "Setting up privileged shell...")
-        
-        // Initialize with context
-        PrivilegedShellSetup.init(this)
-        
-        PrivilegedShellSetup.setup(object : PrivilegedShellSetup.SetupCallback {
-            override fun onSuccess() {
-                runOnUiThread {
-                    logsViewModel.info("Shell", "✓ Privileged shell ready (UID 1000)")
-                    
-                    // Now check all daemon statuses (auto-start is configurable in DaemonStartupManager)
-                    daemonStartupManager.checkAllDaemonStatuses()
-                }
-            }
-            
-            override fun onFailure(reason: String) {
-                runOnUiThread {
-                    logsViewModel.warn("Shell", "⚠ Privileged shell setup failed: $reason")
-                    logsViewModel.info("Shell", "Falling back to ADB shell for daemon management")
-                    
-                    // Still check daemon statuses - they might be running from previous session
-                    daemonStartupManager.checkAllDaemonStatuses()
-                }
-            }
-            
-            override fun onProgress(message: String) {
-                runOnUiThread {
-                    logsViewModel.debug("Shell", "→ $message")
-                }
-            }
-        })
-    }
-    
     private fun initViews() {
         drawerLayout = findViewById(R.id.drawerLayout)
         toolbar = findViewById(R.id.toolbar)
         navigationView = findViewById(R.id.navigationView)
-        switchAccessMode = findViewById(R.id.switchAccessMode)
-        tvAccessMode = findViewById(R.id.tvAccessMode)
-        tvCurrentUrl = findViewById(R.id.tvCurrentUrl)
-        urlBar = findViewById(R.id.urlBar)
         statusIndicator = findViewById(R.id.statusIndicator)
-        urlStatusDot = findViewById(R.id.urlStatusDot)
-        btnCopyUrl = findViewById(R.id.btnCopyUrl)
         
         // Populate nav header with version and device ID
         val headerView = navigationView.getHeaderView(0)
@@ -524,10 +465,15 @@ class MainActivity : AppCompatActivity() {
             .findFragmentById(R.id.navHostFragment) as NavHostFragment
         navController = navHostFragment.navController
         
-        // Define top-level destinations (no back button)
+        // All drawer destinations are top-level — always show hamburger, never a back arrow
         appBarConfiguration = AppBarConfiguration(
-            setOf(R.id.dashboardFragment, R.id.daemonsFragment, 
-                  R.id.recordingFragment, R.id.adbConsoleFragment),
+            setOf(
+                R.id.dashboardFragment, R.id.daemonsFragment,
+                R.id.recordingFragment, R.id.adbConsoleFragment,
+                R.id.eventsFragment, R.id.sentryConfigFragment,
+                R.id.telegramSettingsFragment, R.id.abrpSettingsFragment,
+                R.id.mqttFragment, R.id.tripsFragment, R.id.logsFragment
+            ),
             drawerLayout
         )
         
@@ -569,38 +515,6 @@ class MainActivity : AppCompatActivity() {
             override fun onDrawerStateChanged(newState: Int) {}
         })
         
-        // Add LogsPanelFragment if not already added
-        if (savedInstanceState == null) {
-            supportFragmentManager.beginTransaction()
-                .replace(R.id.logsPanelContainer, com.overdrive.app.ui.fragment.LogsPanelFragment())
-                .commit()
-        }
-    }
-    
-    private fun setupAccessModeToggle() {
-        switchAccessMode.setOnCheckedChangeListener { _, isChecked ->
-            if (!isUpdatingSwitch) {
-                val mode = if (isChecked) AccessMode.PUBLIC else AccessMode.PRIVATE
-                mainViewModel.setAccessMode(mode)
-                logsViewModel.info("App", "Access mode changed to ${mode.name}")
-                
-                // Handle cloudflared based on mode using startup manager
-                daemonStartupManager.onAccessModeChanged(mode)
-                updateUrlDisplay()
-            }
-        }
-    }
-    
-    private fun setupCopyButton() {
-        btnCopyUrl.setOnClickListener {
-            val url = tvCurrentUrl.text.toString()
-            if (url.isNotEmpty() && !url.startsWith("No tunnel") && !url.startsWith("Waiting") && !url.startsWith("Starting") && url != "Connecting...") {
-                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                val clip = ClipData.newPlainText("URL", url)
-                clipboard.setPrimaryClip(clip)
-                Toast.makeText(this, "URL copied!", Toast.LENGTH_SHORT).show()
-            }
-        }
     }
     
     private fun setupLogListener() {
@@ -620,37 +534,22 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun observeViewModels() {
-        // Observe access mode changes
-        mainViewModel.accessMode.observe(this) { mode ->
-            // Update switch without triggering listener
-            isUpdatingSwitch = true
-            switchAccessMode.isChecked = mode == AccessMode.PUBLIC
-            isUpdatingSwitch = false
-            
-            tvAccessMode.text = mode.name
-            updateUrlDisplay()
-        }
-        
-        // Observe tunnel URL from cloudflared controller
+        // Observe tunnel URL from cloudflared controller — keep mainViewModel in sync
         daemonsViewModel.cloudflaredController.tunnelUrl.observe(this) { url ->
             mainViewModel.setTunnelUrl(url)
-            updateUrlDisplay()
         }
-        
-        // Observe tunnel URL from zrok controller
+
+        // Zrok URL takes precedence if available
         daemonsViewModel.zrokController.tunnelUrl.observe(this) { url ->
-            // Zrok URL takes precedence if available
             if (!url.isNullOrEmpty()) {
                 mainViewModel.setTunnelUrl(url)
             }
-            updateUrlDisplay()
         }
-        
-        // Observe daemon states for tunnel status (cloudflared or zrok)
+
+        // Update the status dot in the toolbar
         daemonsViewModel.daemonStates.observe(this) { states ->
             val cloudflaredState = states[DaemonType.CLOUDFLARED_TUNNEL]
             val zrokState = states[DaemonType.ZROK_TUNNEL]
-            // Show online if either tunnel is running
             val tunnelStatus = when {
                 zrokState?.status == DaemonStatus.RUNNING -> DaemonStatus.RUNNING
                 cloudflaredState?.status == DaemonStatus.RUNNING -> DaemonStatus.RUNNING
@@ -658,35 +557,6 @@ class MainActivity : AppCompatActivity() {
                 else -> DaemonStatus.STOPPED
             }
             updateStatusIndicator(tunnelStatus)
-        }
-    }
-    
-    private fun updateUrlDisplay() {
-        val accessMode = mainViewModel.accessMode.value ?: AccessMode.PRIVATE
-        // Check both tunnel URLs - prefer zrok if available
-        val zrokUrl = daemonsViewModel.zrokController.tunnelUrl.value
-        val cloudflaredUrl = daemonsViewModel.cloudflaredController.tunnelUrl.value
-        val tunnelUrl = zrokUrl?.takeIf { it.isNotEmpty() } ?: cloudflaredUrl
-        
-        // Both modes now use tunnel URL
-        if (tunnelUrl.isNullOrEmpty()) {
-            // Show context-aware message based on tunnel state
-            val states = daemonsViewModel.daemonStates.value
-            val cfState = states?.get(DaemonType.CLOUDFLARED_TUNNEL)
-            val zrokState = states?.get(DaemonType.ZROK_TUNNEL)
-            val message = when {
-                zrokState?.status == DaemonStatus.STARTING -> "Starting Zrok tunnel..."
-                cfState?.status == DaemonStatus.STARTING -> "Starting Cloudflared tunnel..."
-                zrokState?.status == DaemonStatus.RUNNING || cfState?.status == DaemonStatus.RUNNING -> "Waiting for tunnel URL..."
-                else -> "No tunnel running"
-            }
-            tvCurrentUrl.text = message
-            urlStatusDot.setBackgroundResource(R.drawable.status_dot_offline)
-            mainViewModel.setCurrentUrl(null)
-        } else {
-            tvCurrentUrl.text = tunnelUrl
-            urlStatusDot.setBackgroundResource(R.drawable.status_dot_online)
-            mainViewModel.setCurrentUrl(tunnelUrl)
         }
     }
     
