@@ -14,6 +14,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
+import androidx.navigation.NavOptions
 import androidx.navigation.fragment.findNavController
 import com.overdrive.app.auth.AuthManager
 import com.overdrive.app.client.CameraDaemonClient
@@ -109,14 +110,17 @@ class DashboardFragment : Fragment() {
     }
     
     private fun setupClickListeners() {
-        // Navigate to daemons screen on card click
+        val drawerNavOptions = NavOptions.Builder()
+            .setLaunchSingleTop(true)
+            .setPopUpTo(R.id.nav_graph, false)
+            .build()
+
         cardDaemons.setOnClickListener {
-            findNavController().navigate(R.id.daemonsFragment)
+            findNavController().navigate(R.id.daemonsFragment, null, drawerNavOptions)
         }
-        
-        // Navigate to recording screen on card click
+
         cardRecording.setOnClickListener {
-            findNavController().navigate(R.id.recordingFragment)
+            findNavController().navigate(R.id.recordingFragment, null, drawerNavOptions)
         }
         
         // Auth UI click listeners
