@@ -58,11 +58,17 @@ public class OdometerReader {
             int rawOdometer = (Integer) getTotalMileageValueMethod.invoke(statisticDevice);
             if (rawOdometer <= 0) return -1;
             
-            // Auto-detect unit: if raw value > 1,000,000, it's in 0.1 km
+            // Auto-detect unit: if raw value > 1,000,000, it's in 0.1 km (or 0.1 miles)
+            double value;
             if (rawOdometer > 1_000_000) {
-                return rawOdometer / 10.0;
+                value = rawOdometer / 10.0;
+            } else {
+                value = rawOdometer;
             }
-            return rawOdometer;
+            
+            // Convert miles to km if the instrument cluster is set to miles
+            double factor = com.overdrive.app.byd.BydDataCollector.getInstance().getDistanceToKmFactor();
+            return value * factor;
         } catch (Exception e) {
             logger.debug("Failed to read odometer: " + e.getMessage());
             return -1;

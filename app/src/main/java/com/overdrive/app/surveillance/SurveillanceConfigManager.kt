@@ -54,6 +54,19 @@ class SurveillanceConfigManager(
         private const val KEY_DETECT_BIKE = "detectBike"
         private const val KEY_PRE_RECORD_SECONDS = "preRecordSeconds"
         private const val KEY_POST_RECORD_SECONDS = "postRecordSeconds"
+        
+        // V2 Pipeline keys
+        private const val KEY_ENVIRONMENT_PRESET = "environmentPreset"
+        private const val KEY_SENSITIVITY_LEVEL = "sensitivityLevel"
+        private const val KEY_DETECTION_ZONE = "detectionZone"
+        private const val KEY_LOITERING_TIME = "loiteringTimeSeconds"
+        private const val KEY_CAMERA_FRONT = "cameraFront"
+        private const val KEY_CAMERA_RIGHT = "cameraRight"
+        private const val KEY_CAMERA_LEFT = "cameraLeft"
+        private const val KEY_CAMERA_REAR = "cameraRear"
+        private const val KEY_MOTION_HEATMAP = "motionHeatmap"
+        private const val KEY_FILTER_DEBUG_LOG = "filterDebugLog"
+        private const val KEY_SHADOW_FILTER = "shadowFilterMode"
     }
     
     /**
@@ -155,6 +168,20 @@ class SurveillanceConfigManager(
             put(KEY_DETECT_BIKE, config.isDetectBike)
             put(KEY_PRE_RECORD_SECONDS, config.preRecordSeconds)
             put(KEY_POST_RECORD_SECONDS, config.postRecordSeconds)
+            
+            // V2 Pipeline settings
+            put(KEY_ENVIRONMENT_PRESET, config.environmentPreset)
+            put(KEY_SENSITIVITY_LEVEL, config.sensitivityLevel)
+            put(KEY_DETECTION_ZONE, config.detectionZone)
+            put(KEY_LOITERING_TIME, config.loiteringTimeSeconds)
+            val cameras = config.cameraEnabled
+            put(KEY_CAMERA_FRONT, cameras[0])
+            put(KEY_CAMERA_RIGHT, cameras[1])
+            put(KEY_CAMERA_LEFT, cameras[2])
+            put(KEY_CAMERA_REAR, cameras[3])
+            put(KEY_MOTION_HEATMAP, config.isMotionHeatmapEnabled)
+            put(KEY_FILTER_DEBUG_LOG, config.isFilterDebugLogEnabled)
+            put(KEY_SHADOW_FILTER, config.shadowFilterMode)
         }
     }
     
@@ -187,6 +214,19 @@ class SurveillanceConfigManager(
         if (json.has(KEY_DETECT_BIKE)) config.setDetectBike(json.optBoolean(KEY_DETECT_BIKE, false))
         if (json.has(KEY_PRE_RECORD_SECONDS)) config.setPreRecordSeconds(json.optInt(KEY_PRE_RECORD_SECONDS, 5))
         if (json.has(KEY_POST_RECORD_SECONDS)) config.setPostRecordSeconds(json.optInt(KEY_POST_RECORD_SECONDS, 10))
+        
+        // V2 Pipeline settings
+        if (json.has(KEY_ENVIRONMENT_PRESET)) config.setEnvironmentPreset(json.optString(KEY_ENVIRONMENT_PRESET, "outdoor"))
+        if (json.has(KEY_SENSITIVITY_LEVEL)) config.setSensitivityLevel(json.optInt(KEY_SENSITIVITY_LEVEL, 3))
+        if (json.has(KEY_DETECTION_ZONE)) config.setDetectionZone(json.optString(KEY_DETECTION_ZONE, "normal"))
+        if (json.has(KEY_LOITERING_TIME)) config.setLoiteringTimeSeconds(json.optInt(KEY_LOITERING_TIME, 3))
+        if (json.has(KEY_CAMERA_FRONT)) config.setCameraEnabled(0, json.optBoolean(KEY_CAMERA_FRONT, true))
+        if (json.has(KEY_CAMERA_RIGHT)) config.setCameraEnabled(1, json.optBoolean(KEY_CAMERA_RIGHT, true))
+        if (json.has(KEY_CAMERA_LEFT)) config.setCameraEnabled(2, json.optBoolean(KEY_CAMERA_LEFT, true))
+        if (json.has(KEY_CAMERA_REAR)) config.setCameraEnabled(3, json.optBoolean(KEY_CAMERA_REAR, true))
+        if (json.has(KEY_MOTION_HEATMAP)) config.setMotionHeatmapEnabled(json.optBoolean(KEY_MOTION_HEATMAP, false))
+        if (json.has(KEY_FILTER_DEBUG_LOG)) config.setFilterDebugLogEnabled(json.optBoolean(KEY_FILTER_DEBUG_LOG, false))
+        if (json.has(KEY_SHADOW_FILTER)) config.setShadowFilterMode(json.optInt(KEY_SHADOW_FILTER, 2))
         
         return config
     }

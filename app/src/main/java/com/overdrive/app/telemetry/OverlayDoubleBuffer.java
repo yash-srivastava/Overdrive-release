@@ -37,7 +37,10 @@ class OverlayDoubleBuffer {
 
     /**
      * If swapReady, atomically swaps front/back references and returns the new front.
-     * If not ready, returns the current front bitmap.
+     * If not ready, returns null (no new content to upload).
+     * 
+     * Returning null when no swap occurred allows the GL thread to skip the
+     * expensive texImage2D upload — the previously uploaded texture is still valid.
      */
     public synchronized Bitmap swapAndGetFront() {
         if (swapReady) {
@@ -45,7 +48,16 @@ class OverlayDoubleBuffer {
             frontBitmap = backBitmap;
             backBitmap = temp;
             swapReady = false;
+            return frontBitmap;
         }
+        return null;
+    }
+
+    /**
+     * Returns the current front bitmap without swapping.
+     * Used when the GL thread needs the bitmap reference but no new content is available.
+     */
+    public Bitmap getFront() {
         return frontBitmap;
     }
 

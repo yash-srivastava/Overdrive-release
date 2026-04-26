@@ -19,7 +19,12 @@ public class TelemetryDataCollector {
     private static final String TAG = "TelemetryDataCollector";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
-    private static final long POLL_INTERVAL_MS = 200; // 5 Hz
+    private static final long POLL_INTERVAL_MS = 200; // 5 Hz — only used when overlay recording is active
+    private static final long SLOW_POLL_INTERVAL_MS = 1000; // 1 Hz fallback when not recording
+
+    // Slow-path sub-polling: turn signals and seatbelts don't change at 5Hz.
+    // Poll them at 1Hz (every 5th fast poll) to save 4 reflection calls per cycle.
+    private static final int SLOW_FIELD_DIVISOR = 5; // every 5th poll = 1Hz at 200ms base
 
     // BYDAutoSpeedDevice
     private Object speedDevice;
@@ -47,6 +52,10 @@ public class TelemetryDataCollector {
     // Polling
     private ScheduledExecutorService executor;
     private volatile TelemetrySnapshot latestSnapshot;
+    
+    // Recording mode: when true, polls at 200ms (5Hz) for overlay.
+    // When false, polls at 1000ms (1Hz) for trip telemetry / ABRP only.
+    private volatile boolean overlayRecordingActive = false;
     
     // Reference counting: polling stays alive as long as any consumer needs it
     // (pipeline overlay, trip recorder, etc.)
@@ -143,7 +152,10 @@ public class TelemetryDataCollector {
     }
 
     /**
-     * Start polling BYD device APIs at 5 Hz on a background thread.
+     * Start polling BYD device APIs on a background thread.
+     * Rate depends on overlayRecordingActive:
+     *   true  → 200ms (5Hz) for video overlay — only polls speed/accel/brake/gear fast
+     *   false → 1000ms (1Hz) for trip telemetry / ABRP
      * Uses reference counting — multiple callers can request polling,
      * and it only stops when ALL callers have called stopPolling().
      */
@@ -153,17 +165,49 @@ public class TelemetryDataCollector {
             logger.info("Polling already running (refCount=" + refs + ")");
             return;
         }
+        long interval = overlayRecordingActive ? POLL_INTERVAL_MS : SLOW_POLL_INTERVAL_MS;
         executor = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "TelemetryPoller");
             t.setDaemon(true);
             return t;
         });
-        executor.scheduleAtFixedRate(this::poll, 0, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
-        logger.info("Telemetry polling started at 5 Hz (refCount=" + refs + ")");
+        executor.scheduleAtFixedRate(this::poll, 0, interval, TimeUnit.MILLISECONDS);
+        logger.info("Telemetry polling started at " + (1000 / interval) + " Hz (overlay=" + overlayRecordingActive + ", refCount=" + refs + ")");
+    }
+
+    /**
+     * Set overlay recording mode. When active, polling runs at 5Hz.
+     * When inactive, drops to 1Hz. Restarts the scheduler if the rate changes.
+     */
+    public void setOverlayRecordingActive(boolean active) {
+        if (this.overlayRecordingActive == active) return;
+        this.overlayRecordingActive = active;
+        logger.info("Overlay recording " + (active ? "ACTIVE (5Hz)" : "INACTIVE (1Hz)"));
+        // Restart scheduler at new rate if currently running
+        restartAtCurrentRate();
+    }
+
+    /**
+     * Restarts the polling scheduler at the rate matching the current overlayRecordingActive state.
+     * No-op if the scheduler is not running.
+     */
+    private void restartAtCurrentRate() {
+        if (executor == null || executor.isShutdown()) return;
+        executor.shutdown();
+        executor = null;
+        long interval = overlayRecordingActive ? POLL_INTERVAL_MS : SLOW_POLL_INTERVAL_MS;
+        executor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "TelemetryPoller");
+            t.setDaemon(true);
+            return t;
+        });
+        executor.scheduleAtFixedRate(this::poll, 0, interval, TimeUnit.MILLISECONDS);
+        logger.info("Telemetry polling restarted at " + (1000 / interval) + " Hz");
     }
 
     /**
      * Request to stop polling. Only actually stops when all consumers have released.
+     * If overlay recording was deactivated but other consumers remain, downgrades to 1Hz.
      */
     public void stopPolling() {
         int refs = pollingRefCount.decrementAndGet();
@@ -173,6 +217,10 @@ public class TelemetryDataCollector {
         }
         if (refs > 0) {
             logger.info("Polling stop requested but still needed (refCount=" + refs + ")");
+            // If overlay just stopped but trip recorder still needs polling, downgrade rate
+            if (!overlayRecordingActive) {
+                restartAtCurrentRate();
+            }
             return;
         }
         if (executor != null) {
@@ -226,6 +274,10 @@ public class TelemetryDataCollector {
         boolean rightTurn = lastRightTurn;
         boolean[] seatbelts = lastSeatbelts;
 
+        // ── FAST PATH: speed, accel, brake, gear (every poll) ──
+        // These are the only fields that change rapidly during driving
+        // and are needed for the video overlay at 5Hz.
+
         // Speed device: getCurrentSpeed(), getAccelerateDeepness(), getBrakeDeepness()
         if (speedDevice != null) {
             boolean deviceFailed = false;
@@ -255,24 +307,19 @@ public class TelemetryDataCollector {
             if (deviceFailed) {
                 boolean reconnected = tryReconnectSpeedDevice();
                 if (reconnected) {
-                    // Reconnect succeeded and verified — use the fresh values it obtained
                     speedKmh = lastSpeedKmh;
                     accelPercent = lastAccelPercent;
                     brakePercent = lastBrakePercent;
                 }
-                // If reconnect failed, values stay at whatever was read (partial success)
-                // or at last-known-good from the top of pollInner()
             }
 
             // Staleness detection: if speed value is identical for 10+ seconds, force reconnect
-            // SOTA: Skip when speed=0 and car is stationary (gear P) — that's expected, not stale
             if (speedKmh == prevSpeedForStaleCheck && !(speedKmh == 0 && lastGearMode == 1)) {
                 staleSpeedCount++;
                 if (staleSpeedCount >= STALE_THRESHOLD) {
                     logger.warn("Speed device appears stale (same value " + speedKmh + " for " + (staleSpeedCount / 5) + "s), reconnecting");
                     boolean reconnected = tryReconnectSpeedDevice();
                     if (reconnected) {
-                        // Use fresh values from reconnect
                         speedKmh = lastSpeedKmh;
                         accelPercent = lastAccelPercent;
                         brakePercent = lastBrakePercent;
@@ -286,7 +333,7 @@ public class TelemetryDataCollector {
             }
         }
 
-        // Gearbox device: getGearboxAutoModeType(), getBrakePedalState()
+        // Gearbox: gear mode (every poll — changes on shift)
         if (gearboxDevice != null) {
             try {
                 gearMode = (int) getGearboxAutoModeTypeMethod.invoke(gearboxDevice);
@@ -294,71 +341,67 @@ public class TelemetryDataCollector {
             } catch (Exception e) {
                 logger.warn("Failed to read gear mode: " + e.getMessage());
             }
-            try {
-                int brakeState = (int) getBrakePedalStateMethod.invoke(gearboxDevice);
-                brakePedalPressed = brakeState == 1;
-                lastBrakePedalPressed = brakePedalPressed;
-            } catch (Exception e) {
-                logger.warn("Failed to read brake pedal state: " + e.getMessage());
+        }
+
+        // ── SLOW PATH: turn signals, brake pedal state, seatbelts (every 5th poll = 1Hz) ──
+        // These change infrequently and don't need 5Hz resolution.
+        boolean doSlowFields = (pollCount % SLOW_FIELD_DIVISOR == 0);
+
+        if (doSlowFields) {
+            // Brake pedal pressed state (binary, not the depth %)
+            if (gearboxDevice != null) {
+                try {
+                    int brakeState = (int) getBrakePedalStateMethod.invoke(gearboxDevice);
+                    brakePedalPressed = brakeState == 1;
+                    lastBrakePedalPressed = brakePedalPressed;
+                } catch (Exception e) {
+                    logger.warn("Failed to read brake pedal state: " + e.getMessage());
+                }
             }
-        }
 
-        // Light device: getTurnLightFlashState()
-        // BYD turn signals blink at ~1.5Hz, polling at 5Hz may miss the "on" phase
-        // Use sticky detection: if signal seen on, keep it on for 10 polls (2 seconds)
-        if (lightDevice != null && getTurnLightFlashStateMethod != null) {
-            try {
-                int flashState = (int) getTurnLightFlashStateMethod.invoke(lightDevice);
-                
-                // BYD Seal mapping (discovered from raw dump):
-                // 1 = off (idle)
-                // 2 = left turn signal (TBD - needs verification)
-                // 3 = left turn signal (TBD - needs verification)
-                // 4 = right turn signal
-                // Other values may indicate hazard
-                boolean leftNow = (flashState == 2 || flashState == 3);
-                boolean rightNow = (flashState == 4 || flashState == 5);
-                boolean hazardNow = (flashState == 6 || flashState == 7);
-                
-                if (hazardNow) { leftNow = true; rightNow = true; }
-                
-                // Sticky: if seen on, keep on for 10 polls (2 sec at 5Hz)
-                if (leftNow) leftTurnStickyCount = 10;
-                if (rightNow) rightTurnStickyCount = 10;
-                
-                leftTurn = leftTurnStickyCount > 0;
-                rightTurn = rightTurnStickyCount > 0;
-                
-                if (leftTurnStickyCount > 0) leftTurnStickyCount--;
-                if (rightTurnStickyCount > 0) rightTurnStickyCount--;
-                
-                lastLeftTurn = leftTurn;
-                lastRightTurn = rightTurn;
-                
-
-            } catch (Exception e) {
-                logger.warn("Failed to read turn signal: " + e.getMessage());
+            // Turn signals
+            if (lightDevice != null && getTurnLightFlashStateMethod != null) {
+                try {
+                    int flashState = (int) getTurnLightFlashStateMethod.invoke(lightDevice);
+                    
+                    boolean leftNow = (flashState == 2 || flashState == 3);
+                    boolean rightNow = (flashState == 4 || flashState == 5);
+                    boolean hazardNow = (flashState == 6 || flashState == 7);
+                    
+                    if (hazardNow) { leftNow = true; rightNow = true; }
+                    
+                    if (leftNow) leftTurnStickyCount = 10;
+                    if (rightNow) rightTurnStickyCount = 10;
+                    
+                    leftTurn = leftTurnStickyCount > 0;
+                    rightTurn = rightTurnStickyCount > 0;
+                    
+                    if (leftTurnStickyCount > 0) leftTurnStickyCount--;
+                    if (rightTurnStickyCount > 0) rightTurnStickyCount--;
+                    
+                    lastLeftTurn = leftTurn;
+                    lastRightTurn = rightTurn;
+                } catch (Exception e) {
+                    logger.warn("Failed to read turn signal: " + e.getMessage());
+                }
             }
-        }
 
-        // Seatbelt: comprehensive probe on first poll to find working API
-        if (pollCount == 0) {
-            probeSeatbeltApis(savedContext);
-        }
-        // Use InstrumentDevice.getSafetyBeltStatus(int) — positions 1=driver, 2=passenger
-        // Value: 0=unbuckled, 1=buckled
-        if (instrumentDeviceForBelt != null && getSafetyBeltStatusMethod != null) {
-            try {
-                boolean[] belts = new boolean[2];
-                int driverRaw = (int) getSafetyBeltStatusMethod.invoke(instrumentDeviceForBelt, 1);
-                int passengerRaw = (int) getSafetyBeltStatusMethod.invoke(instrumentDeviceForBelt, 2);
-                // 0 = unbuckled, 1 = buckled, negative/large values = invalid (treat as buckled)
-                belts[0] = (driverRaw != 0);
-                belts[1] = (passengerRaw != 0);
-                seatbelts = belts;
-                lastSeatbelts = seatbelts;
-            } catch (Exception e) {
-                // Use defaults
+            // Seatbelt: comprehensive probe on first poll to find working API
+            if (pollCount == 0) {
+                probeSeatbeltApis(savedContext);
+            }
+            if (instrumentDeviceForBelt != null && getSafetyBeltStatusMethod != null) {
+                try {
+                    boolean[] belts = new boolean[2];
+                    int driverRaw = (int) getSafetyBeltStatusMethod.invoke(instrumentDeviceForBelt, 1);
+                    int passengerRaw = (int) getSafetyBeltStatusMethod.invoke(instrumentDeviceForBelt, 2);
+                    belts[0] = (driverRaw != 0);
+                    belts[1] = (passengerRaw != 0);
+                    seatbelts = belts;
+                    lastSeatbelts = seatbelts;
+                } catch (Exception e) {
+                    // Use defaults
+                }
             }
         }
 

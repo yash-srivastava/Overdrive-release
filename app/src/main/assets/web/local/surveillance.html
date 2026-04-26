@@ -8,9 +8,12 @@
     <link rel="stylesheet" href="../shared/styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+    <style>
+        .dev-arrow.open { transform: rotate(90deg); }
+    </style>
     <script src="https://cdn.jsdelivr.net/npm/jmuxer@2.0.4/dist/jmuxer.min.js"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="../shared/leaflet.css" />
+    <script src="../shared/leaflet.js"></script>
     <script src="../shared/SotaPlayer.js"></script>
     <script src="../shared/Decoder.js"></script>
     <script src="../shared/YUVCanvas.js"></script>
@@ -352,62 +355,189 @@
                 <div class="card">
                     <div class="card-header">
                         <div class="card-title">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
                             Detection Settings
                             <span class="unsaved-indicator" id="detectionUnsaved">● unsaved</span>
                         </div>
                     </div>
                     <div class="card-body">
+                        <!-- Environment Preset -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Detection Range</div>
-                                <div class="setting-desc">How far AI can detect objects</div>
+                                <div class="setting-name">Environment Preset</div>
+                                <div class="setting-desc">Quick preset for your parking situation</div>
                             </div>
                             <div class="setting-control">
-                                <div class="slider-control">
-                                    <span class="slider-value" id="distanceValue">~8m</span>
-                                    <input type="range" class="slider" id="distanceSlider" min="1" max="5" value="3" oninput="SurvSettings.updateDistance(this.value)">
+                                <div class="btn-group" id="envPresetBtns">
+                                    <button class="btn-toggle" data-value="outdoor" onclick="SurvSettings.setEnvironmentPreset('outdoor')">Outdoor</button>
+                                    <button class="btn-toggle" data-value="garage" onclick="SurvSettings.setEnvironmentPreset('garage')">Garage</button>
+                                    <button class="btn-toggle" data-value="street" onclick="SurvSettings.setEnvironmentPreset('street')">Street</button>
+                                    <button class="btn-toggle" data-value="custom" id="envPresetCustom" style="opacity:0.7;cursor:default;">Custom</button>
                                 </div>
                             </div>
                         </div>
-                        <div class="setting-hint" id="distanceHint">Balanced — detects people up to ~8m away</div>
-                        
+                        <div class="setting-hint" id="envPresetHint">Standard filtering for open parking lots and driveways. Handles sun, clouds, and headlights.</div>
+
+                        <!-- Sensitivity -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Motion Sensitivity</div>
-                                <div class="setting-desc">How easily motion triggers recording</div>
+                                <div class="setting-name">Sensitivity</div>
+                                <div class="setting-desc">How easily motion is detected</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
-                                    <span class="slider-value" id="sensitivityValue">Default</span>
-                                    <input type="range" class="slider" id="sensitivitySlider" min="1" max="5" value="3" oninput="SurvSettings.updateSensitivity(this.value)">
+                                    <span class="slider-value" id="v2SensitivityValue">3 — Default</span>
+                                    <input type="range" class="slider" id="v2SensitivitySlider" min="1" max="5" value="3" oninput="SurvSettings.updateV2Sensitivity(this.value)">
                                 </div>
                             </div>
                         </div>
-                        <div class="setting-hint" id="sensitivityHint">Balanced — triggers on walking people, ignores bugs/leaves</div>
-                        
+                        <div class="setting-hint" id="v2SensitivityHint">Balanced — detects a person approaching within about 3 meters.</div>
+
+                        <!-- Detection Zone -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Shadow Rejection</div>
-                                <div class="setting-desc">Filter shadows, reflections, faint light changes</div>
+                                <div class="setting-name">Detection Zone</div>
+                                <div class="setting-desc">How far from the car motion triggers an alert</div>
+                            </div>
+                            <div class="setting-control">
+                                <div class="btn-group" id="detectionZoneBtns">
+                                    <button class="btn-toggle" data-value="close" onclick="SurvSettings.setDetectionZone('close')">Close</button>
+                                    <button class="btn-toggle active" data-value="normal" onclick="SurvSettings.setDetectionZone('normal')">Normal</button>
+                                    <button class="btn-toggle" data-value="extended" onclick="SurvSettings.setDetectionZone('extended')">Extended</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="setting-hint" id="detectionZoneHint">Standard detection range (~3m around the car).</div>
+
+                        <!-- Loitering Time -->
+                        <div class="setting-row">
+                            <div class="setting-info">
+                                <div class="setting-name">Loitering Time</div>
+                                <div class="setting-desc">How long someone must stay near the car before recording starts</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
-                                    <span class="slider-value" id="flashImmunityValue">NORMAL</span>
-                                    <input type="range" class="slider" id="flashImmunitySlider" min="0" max="3" value="2" oninput="SurvSettings.updateFlashImmunity(this.value)">
+                                    <span class="slider-value" id="loiteringTimeValue">3s</span>
+                                    <input type="range" class="slider" id="loiteringTimeSlider" min="1" max="10" value="3" oninput="SurvSettings.updateLoiteringTime(this.value)">
                                 </div>
                             </div>
                         </div>
+                        <div class="setting-hint" id="loiteringTimeHint">Higher values ignore people just walking past. Lower values are more responsive.</div>
+
+                        <!-- Shadow Filter -->
+                        <div class="setting-row">
+                            <div class="setting-info">
+                                <div class="setting-name">Shadow Filter</div>
+                                <div class="setting-desc">Filters out tree shadows, cloud shadows, and other lighting changes that cause false recordings</div>
+                            </div>
+                            <div class="setting-control">
+                                <select class="select-control" id="shadowFilterSelect" onchange="SurvSettings.updateShadowFilter(this.value)">
+                                    <option value="0">Off</option>
+                                    <option value="1">Light</option>
+                                    <option value="2" selected>Normal</option>
+                                    <option value="3">Aggressive</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="setting-hint" id="shadowFilterHint">Normal works well for most outdoor parking. Use Aggressive if parked under trees with heavy shadow movement.</div>
+
+                        <!-- Camera Controls -->
+                        <div class="setting-row" style="border-bottom:none;">
+                            <div class="setting-info">
+                                <div class="setting-name">Camera Controls</div>
+                                <div class="setting-desc">Enable or disable detection per camera</div>
+                            </div>
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding-bottom:16px;">
+                            <div class="setting-row" style="border-bottom:none;padding:8px 0;">
+                                <div class="setting-info"><div class="setting-name" style="font-size:13px;">Front</div></div>
+                                <div class="setting-control">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="v2CameraFront" checked onchange="SurvSettings.updateV2Cameras()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="setting-row" style="border-bottom:none;padding:8px 0;">
+                                <div class="setting-info"><div class="setting-name" style="font-size:13px;">Right</div></div>
+                                <div class="setting-control">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="v2CameraRight" checked onchange="SurvSettings.updateV2Cameras()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="setting-row" style="border-bottom:none;padding:8px 0;">
+                                <div class="setting-info"><div class="setting-name" style="font-size:13px;">Left</div></div>
+                                <div class="setting-control">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="v2CameraLeft" checked onchange="SurvSettings.updateV2Cameras()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="setting-row" style="border-bottom:none;padding:8px 0;">
+                                <div class="setting-info"><div class="setting-name" style="font-size:13px;">Rear</div></div>
+                                <div class="setting-control">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="v2CameraRear" checked onchange="SurvSettings.updateV2Cameras()">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="setting-hint" id="cameraControlsHint">Disable cameras facing a wall or busy road to reduce false alerts.</div>
+
+                        <!-- Object Detection -->
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
                                 <div class="setting-name">Detect Objects</div>
-                                <div class="setting-desc">Select what triggers recording</div>
+                                <div class="setting-desc">AI identifies what triggered the motion</div>
                             </div>
                         </div>
                         <div class="checkbox-row">
                             <label class="checkbox-item active"><input type="checkbox" id="detectPerson" checked onchange="SurvSettings.updateDetection()">Person</label>
                             <label class="checkbox-item active"><input type="checkbox" id="detectCar" checked onchange="SurvSettings.updateDetection()">Vehicle</label>
-                            <label class="checkbox-item active"><input type="checkbox" id="detectBike" checked onchange="SurvSettings.updateDetection()">Bike</label>
+                            <label class="checkbox-item"><input type="checkbox" id="detectBike" onchange="SurvSettings.updateDetection()">Bike</label>
+                        </div>
+                        <div class="setting-hint">Select which objects YOLO AI should identify. Motion detection triggers regardless — AI classifies what was detected.</div>
+
+                        <!-- Developer Section (collapsible) -->
+                        <div style="border-top:1px solid var(--border-subtle);padding-top:12px;">
+                            <div class="setting-row" style="border-bottom:none;cursor:pointer;" onclick="document.getElementById('v2DevContent').style.display = document.getElementById('v2DevContent').style.display === 'none' ? 'block' : 'none'; this.querySelector('.dev-arrow').classList.toggle('open');">
+                                <div class="setting-info">
+                                    <div class="setting-name" style="font-size:13px;color:var(--text-muted);">
+                                        <svg class="dev-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:4px;transition:transform 0.2s;"><polyline points="9 18 15 12 9 6"/></svg>
+                                        Developer
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="v2DevContent" style="display:none;">
+                                <div class="setting-row">
+                                    <div class="setting-info">
+                                        <div class="setting-name" title="Shows colored blocks on the live stream indicating where motion is detected.">Motion Heatmap</div>
+                                        <div class="setting-desc">Overlay motion detection zones on stream</div>
+                                    </div>
+                                    <div class="setting-control">
+                                        <label class="toggle-switch" title="Shows colored blocks on the live stream indicating where motion is detected.">
+                                            <input type="checkbox" id="v2MotionHeatmap" onchange="SurvSettings.updateV2Dev()">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="setting-row" style="border-bottom:none;">
+                                    <div class="setting-info">
+                                        <div class="setting-name" title="Logs detailed filter decisions for each detection.">Filter Debug Log</div>
+                                        <div class="setting-desc">Log detailed filter decisions</div>
+                                    </div>
+                                    <div class="setting-control">
+                                        <label class="toggle-switch" title="Logs detailed filter decisions for each detection.">
+                                            <input type="checkbox" id="v2FilterDebugLog" onchange="SurvSettings.updateV2Dev()">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -648,6 +778,7 @@
     <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
     <div id="toastContainer" class="toast-container"></div>
 
+    <script src="../shared/auth.js"></script>
     <script src="../shared/core.js"></script>
     <script src="../shared/pip.js"></script>
     <script src="../shared/surveillance.js"></script>

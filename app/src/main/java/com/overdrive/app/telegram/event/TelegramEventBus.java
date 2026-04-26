@@ -69,28 +69,34 @@ public class TelegramEventBus implements ITelegramEventBus {
     public void publish(SystemEvent event) {
         if (event == null) return;
         
-        executor.execute(() -> {
-            // Notify global listeners
-            for (EventListener listener : globalListeners) {
-                try {
-                    listener.onEvent(event);
-                } catch (Exception e) {
-                    // Log but don't crash
-                    System.err.println("EventBus: listener error: " + e.getMessage());
-                }
-            }
-            
-            // Notify typed listeners
-            List<EventListener> typed = typedListeners.get(event.getType());
-            if (typed != null) {
-                for (EventListener listener : typed) {
+        try {
+            executor.execute(() -> {
+                // Notify global listeners
+                for (EventListener listener : globalListeners) {
                     try {
                         listener.onEvent(event);
                     } catch (Exception e) {
-                        System.err.println("EventBus: typed listener error: " + e.getMessage());
+                        // Log but don't crash
+                        System.err.println("EventBus: listener error: " + e.getMessage());
+                    }
+                }
+                
+                // Notify typed listeners
+                List<EventListener> typed = typedListeners.get(event.getType());
+                if (typed != null) {
+                    for (EventListener listener : typed) {
+                        try {
+                            listener.onEvent(event);
+                        } catch (Exception e) {
+                            System.err.println("EventBus: typed listener error: " + e.getMessage());
                     }
                 }
             }
         });
+        } catch (Throwable e) {
+            // Catches RejectedExecutionException and "Thread starting during runtime shutdown"
+            // which happens when publish() is called during process exit
+            System.err.println("EventBus: publish failed (shutdown?): " + e.getMessage());
+        }
     }
 }

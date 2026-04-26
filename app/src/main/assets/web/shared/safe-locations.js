@@ -88,6 +88,12 @@ window.SafeLocations = {
         if (this.map) return;
         const container = document.getElementById('safeLocMap');
         if (!container) return;
+        
+        // Guard: Leaflet may not be loaded yet (async script)
+        if (typeof L === 'undefined') {
+            setTimeout(() => this.initMap(), 500);
+            return;
+        }
 
         const center = this.currentGps ? [this.currentGps.lat, this.currentGps.lng] : [31.23, 121.47];
         const zoom = this.currentGps ? 16 : 3;

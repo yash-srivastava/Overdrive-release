@@ -52,6 +52,8 @@ class DaemonLauncher(
         // Flag to prevent concurrent launch attempts (shared across all instances)
         @Volatile
         private var accSentryLaunchInProgress = false
+        @Volatile
+        private var cameraLaunchInProgress = false
     }
     
     interface LaunchCallback {
@@ -97,6 +99,15 @@ class DaemonLauncher(
      * The daemon will run independently of this app as shell user (UID 2000).
     */
     fun launchCameraDaemon(outputDir: String, nativeLibDir: String, callback: LaunchCallback) {
+        // Prevent concurrent launch attempts
+        if (cameraLaunchInProgress) {
+            logManager.info(TAG, "CameraDaemon launch already in progress, skipping")
+            callback.onLog("Launch already in progress")
+            callback.onLaunched()
+            return
+        }
+        cameraLaunchInProgress = true
+        
         logManager.info(TAG, "Launching CameraDaemon...")
         callback.onLog("Launching CameraDaemon...")
         
@@ -106,8 +117,19 @@ class DaemonLauncher(
                 logManager.info(TAG, "CameraDaemon already running")
                 callback.onLog("CameraDaemon already running")
                 callback.onLaunched()
+                cameraLaunchInProgress = false
             } else {
-                launchCameraDaemonInternal(outputDir, nativeLibDir, callback)
+                launchCameraDaemonInternal(outputDir, nativeLibDir, object : LaunchCallback {
+                    override fun onLog(message: String) = callback.onLog(message)
+                    override fun onLaunched() {
+                        cameraLaunchInProgress = false
+                        callback.onLaunched()
+                    }
+                    override fun onError(error: String) {
+                        cameraLaunchInProgress = false
+                        callback.onError(error)
+                    }
+                })
             }
         }
     }
@@ -120,11 +142,18 @@ class DaemonLauncher(
         logManager.debug(TAG, "Deploying CameraDaemon watchdog script...")
         callback.onLog("Deploying watchdog script...")
         
-        // Step 1: Kill old processes and clean up
+        // Step 1: Kill old processes and clean up.
+        // CRITICAL: Kill the watchdog script FIRST so it can't respawn the daemon
+        // between the two pkill calls. Reversing the order here causes the old
+        // watchdog to relaunch the daemon, and the fresh watchdog we're about
+        // to start loses the singleton lock race ("Another CameraDaemon instance
+        // is already running. Exiting.").
         val cleanupCmd = buildString {
-            append("pkill -9 -f '$CAMERA_DAEMON_PROCESS' 2>/dev/null; ")
-            append("pkill -9 -f 'start_cam_daemon.sh' 2>/dev/null; ")
+            append("pkill -9 -f 'start_cam_daemon' 2>/dev/null; ")
             append("rm -f $scriptPath 2>/dev/null; ")
+            append("sleep 1; ")
+            append("pkill -9 -f '$CAMERA_DAEMON_PROCESS' 2>/dev/null; ")
+            append("killall -9 $CAMERA_DAEMON_PROCESS 2>/dev/null; ")
             append("rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null; ")
             append("sleep 1; echo done")
         }
@@ -169,12 +198,12 @@ class DaemonLauncher(
             "",
             "  EXIT_CODE=\$?",
             "  if [ \$EXIT_CODE -eq 0 ]; then",
-            "    echo \"[\$(date)] Daemon exited cleanly (code 0), restarting in 3s...\" >> \"\$LOG_FILE\"",
+            "    echo \"[\$(date)] Daemon exited cleanly (code 0), restarting in 10s...\" >> \"\$LOG_FILE\"",
             "    RETRY_COUNT=0",
-            "    sleep 3",
-            "  elif [ \$EXIT_CODE -eq 1 ] || [ \$EXIT_CODE -eq 137 ]; then",
-            "    # Exit 1 = singleton lock conflict (another instance), 137 = SIGKILL (OOM/system)",
-            "    # Both are transient — retry with backoff",
+            "    sleep 10",
+            "  elif [ \$EXIT_CODE -eq 1 ] || [ \$EXIT_CODE -eq 137 ] || [ \$EXIT_CODE -eq 134 ]; then",
+            "    # Exit 1 = singleton lock conflict, 137 = SIGKILL (OOM), 134 = SIGABRT (native crash/font init)",
+            "    # All are transient — retry with backoff",
             "    RETRY_COUNT=\$((RETRY_COUNT + 1))",
             "    if [ \$RETRY_COUNT -ge \$MAX_RETRIES ]; then",
             "      echo \"[\$(date)] Daemon exited with code \$EXIT_CODE, max retries (\$MAX_RETRIES) reached. Giving up.\" >> \"\$LOG_FILE\"",
@@ -182,8 +211,8 @@ class DaemonLauncher(
             "    fi",
             "    DELAY=\$((RETRY_COUNT * 3))",
             "    echo \"[\$(date)] Daemon exited with code \$EXIT_CODE (attempt \$RETRY_COUNT/\$MAX_RETRIES), retrying in \${DELAY}s...\" >> \"\$LOG_FILE\"",
-            "    # Clean stale lock file if process was killed",
-            "    if [ \$EXIT_CODE -eq 137 ]; then",
+            "    # Clean stale lock file if process was killed or aborted",
+            "    if [ \$EXIT_CODE -eq 137 ] || [ \$EXIT_CODE -eq 134 ]; then",
             "      rm -f \"\$LOCK_FILE\" 2>/dev/null",
             "    fi",
             "    sleep \$DELAY",

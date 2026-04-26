@@ -209,19 +209,24 @@ BYD.core = {
         let powerKW = 0;
 
         if (status.charging) {
-            const stateName = status.charging.stateName || '';
+            var stateName = status.charging.stateName || '';
             powerKW = status.charging.chargingPowerKW || 0;
+            var isEstimated = status.charging.isEstimated || false;
             
             // Determine if actively charging
-            const chargingStates = ['Charging', 'DC Charging', 'AC Charging', 'Fast Charging'];
-            isCharging = chargingStates.some(s => stateName.toLowerCase().includes(s.toLowerCase())) || powerKW > 0;
+            var chargingStates = ['Charging', 'DC Charging', 'AC Charging', 'Fast Charging'];
+            isCharging = chargingStates.some(function(s) { return stateName.toLowerCase().indexOf(s.toLowerCase()) >= 0; }) || powerKW > 0;
         }
 
         // Update power display
         if (evPower) {
             if (isCharging) {
-                // When charging is active, always show the power value (even 0.0 kW while ramping up)
-                evPower.textContent = powerKW > 0 ? powerKW.toFixed(1) + ' kW' : '0.0 kW';
+                if (powerKW > 0) {
+                    var prefix = isEstimated ? '~' : '';
+                    evPower.textContent = prefix + powerKW.toFixed(1) + ' kW';
+                } else {
+                    evPower.textContent = '0.0 kW';
+                }
             } else {
                 evPower.textContent = powerKW > 0 ? powerKW.toFixed(1) + ' kW' : '-- kW';
             }

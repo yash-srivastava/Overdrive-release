@@ -81,14 +81,42 @@ public class HardwareEventRecorderGpu {
     // Packets are queued here and written by drainEncoder() on the GL thread
     private final ConcurrentLinkedQueue<H264CircularBuffer.Packet> pendingFlushQueue = new ConcurrentLinkedQueue<>();
     private volatile boolean flushInProgress = false;
+    private volatile long actualPreRecordDurationMs = 0;  // Actual duration of flushed pre-record buffer
+    
+    // SOTA: Muxer write queue — decouples encoder dequeue from SD card I/O.
+    // The encoder dequeue loop copies frame data and releases the encoder buffer
+    // immediately, then pushes to this queue. A dedicated disk writer thread
+    // polls the queue and writes to the muxer. This prevents SD card I/O stalls
+    // (which can be 50-100ms during garbage collection) from blocking the encoder,
+    // which would cause the GPU to stall and drop camera frames.
+    private static class MuxerPacket {
+        final ByteBuffer data;
+        final MediaCodec.BufferInfo info;
+        MuxerPacket(ByteBuffer src, MediaCodec.BufferInfo srcInfo) {
+            // Deep copy — the encoder buffer is released immediately after
+            data = ByteBuffer.allocateDirect(srcInfo.size);
+            src.position(srcInfo.offset);
+            src.limit(srcInfo.offset + srcInfo.size);
+            data.put(src);
+            data.flip();
+            info = new MediaCodec.BufferInfo();
+            info.set(0, srcInfo.size, srcInfo.presentationTimeUs, srcInfo.flags);
+        }
+    }
+    private final ConcurrentLinkedQueue<MuxerPacket> muxerWriteQueue = new ConcurrentLinkedQueue<>();
+    private volatile boolean diskWriterRunning = false;
+    private Thread diskWriterThread;
     
     // SOTA: Background drainer thread (moves SD card I/O off GL thread)
     private volatile boolean drainerRunning = false;
     private Thread drainerThread;
-    private static final int DRAIN_INTERVAL_MS = 5;  // 5ms between drain cycles
+    private static final int DRAIN_INTERVAL_MS = 16;  // ~60Hz cadence, matches frame arrival rate
     
     // SOTA: Flag to disable pre-record buffer for stream-only encoders
     private boolean usePreRecordBuffer = true;
+    
+    // Pre-allocated BufferInfo — reused every drain cycle to avoid per-frame allocation
+    private final MediaCodec.BufferInfo reusableBufferInfo = new MediaCodec.BufferInfo();
     
     // Callback for when file is closed
     private Runnable fileClosedCallback;
@@ -102,6 +130,8 @@ public class HardwareEventRecorderGpu {
     private String outputPath;
     private File tempFile;
     private int recordedFrames = 0;
+    private long firstFramePtsUs = -1;   // PTS of first frame written to muxer
+    private long lastFramePtsUs = -1;    // PTS of last frame written to muxer
     
     // Segment rotation
     private long segmentStartTime = 0;
@@ -575,6 +605,9 @@ public class HardwareEventRecorderGpu {
                     (preRecordPackets.get(preRecordPackets.size()-1).info.presentationTimeUs - 
                      preRecordPackets.get(0).info.presentationTimeUs) / 1_000_000.0;
                 
+                // Store actual pre-record duration for timeline alignment
+                actualPreRecordDurationMs = (long)(preRecordDuration * 1000);
+                
                 // Add all packets to the flush queue (instant, no I/O)
                 pendingFlushQueue.addAll(preRecordPackets);
                 flushInProgress = true;
@@ -635,13 +668,70 @@ public class HardwareEventRecorderGpu {
      * Closes the current event recording and finalizes the file.
      */
     private void closeEventRecording() {
-        isWritingToFile = false;
+        // CRITICAL FIX: Do NOT set isWritingToFile=false yet!
+        // The drainer thread checks isWritingToFile to decide whether to write
+        // frames to the muxer. Setting it false first causes the drainer to
+        // dequeue frames from the encoder but SKIP writing them — losing the
+        // last segment's frames on shutdown.
+        //
+        // Correct order:
+        //   1. Stop drainer thread (waits for current drain cycle to finish)
+        //   2. Do one final synchronous drain WITH isWritingToFile still true
+        //   3. THEN set isWritingToFile=false and close the muxer
+        
         recording = false;
         
-        // CRITICAL: Stop drainer thread BEFORE touching the muxer.
+        // Step 1: Stop drainer thread BEFORE touching the muxer.
         // The drainer may be in the middle of muxer.writeSampleData() — 
         // calling muxer.stop() concurrently corrupts the MP4 (broken moov atom).
         stopDrainerThread();
+        
+        // Step 2: Final synchronous drain — flush any frames still queued in
+        // the encoder's output buffer. isWritingToFile is still true so these
+        // frames WILL be written to the muxer.
+        // FIX: Drain in a loop until the encoder is truly empty. A single call
+        // to drainEncoderInternal() may not get all frames if the encoder is still
+        // processing the last few input buffers. Loop with a short sleep to give
+        // the hardware encoder time to finish encoding in-flight frames.
+        try {
+            for (int drainPass = 0; drainPass < 5; drainPass++) {
+                int framesBefore = recordedFrames;
+                drainEncoderInternal();
+                int framesWritten = recordedFrames - framesBefore;
+                if (framesWritten == 0 && drainPass > 0) {
+                    break;  // Encoder is empty
+                }
+                if (framesWritten > 0 && drainPass < 4) {
+                    // More frames were available — give encoder a moment to finish any in-flight
+                    try { Thread.sleep(20); } catch (InterruptedException ignored) {}
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Final drain before close failed: " + e.getMessage());
+        }
+        
+        // Step 3: Flush the muxer write queue synchronously.
+        // The disk writer thread is already stopped, but drainEncoderInternal()
+        // pushed frames to the queue. Write them directly now.
+        {
+            MuxerPacket packet;
+            int flushed = 0;
+            while ((packet = muxerWriteQueue.poll()) != null) {
+                if (muxerStarted && muxer != null) {
+                    muxer.writeSampleData(trackIndex, packet.data, packet.info);
+                    if (firstFramePtsUs < 0) firstFramePtsUs = packet.info.presentationTimeUs;
+                    lastFramePtsUs = packet.info.presentationTimeUs;
+                    recordedFrames++;
+                    flushed++;
+                }
+            }
+            if (flushed > 0) {
+                logger.info("Final muxer queue flush: " + flushed + " frames written");
+            }
+        }
+        
+        // Step 4: NOW it's safe to flip the flag — no more writers.
+        isWritingToFile = false;
         
         // Stop muxer (may throw if no frames were written)
         try {
@@ -669,7 +759,11 @@ public class HardwareEventRecorderGpu {
             if (recordedFrames > 0 && tempFile.length() > 1024) {
                 File finalFile = new File(outputPath);
                 if (tempFile.renameTo(finalFile)) {
-                    float durationSec = recordedFrames / (float) fps;
+                    // Use actual PTS range for accurate duration (not recordedFrames/fps
+                    // which is misleading when pre-record frames are included)
+                    float durationSec = (firstFramePtsUs >= 0 && lastFramePtsUs > firstFramePtsUs)
+                            ? (lastFramePtsUs - firstFramePtsUs) / 1_000_000.0f
+                            : recordedFrames / (float) fps;
                     logger.info(String.format("Event saved: %s (segment %d, %d frames, %.1f sec, %d KB, codec=%s, bitrate=%d Mbps)",
                             finalFile.getName(), segmentNumber, recordedFrames, durationSec, finalFile.length() / 1024,
                             codecMimeType.equals(MediaFormat.MIMETYPE_VIDEO_HEVC) ? "H.265" : "H.264",
@@ -695,6 +789,8 @@ public class HardwareEventRecorderGpu {
         
         // Reset state
         recordedFrames = 0;
+        firstFramePtsUs = -1;
+        lastFramePtsUs = -1;
         postRecordStopTime = 0;
         segmentStartTime = 0;
         segmentNumber = 0;
@@ -791,6 +887,15 @@ public class HardwareEventRecorderGpu {
     }
     
     /**
+     * Get the actual duration of the pre-record buffer that was flushed.
+     * This may be longer than the configured preRecordMs because the H.264
+     * circular buffer starts from the nearest keyframe.
+     */
+    public long getActualPreRecordDurationMs() {
+        return actualPreRecordDurationMs;
+    }
+    
+    /**
      * Gets the current bitrate.
      * 
      * @return Bitrate in bps
@@ -867,6 +972,9 @@ public class HardwareEventRecorderGpu {
         
         drainerThread.setPriority(Thread.NORM_PRIORITY);
         drainerThread.start();
+        
+        // Start disk writer thread (handles muxer I/O separately from encoder dequeue)
+        startDiskWriterThread();
     }
     
     /**
@@ -882,6 +990,80 @@ public class HardwareEventRecorderGpu {
                 // Ignore
             }
             drainerThread = null;
+        }
+        
+        // Stop disk writer after drainer (drainer may still be pushing to the queue)
+        stopDiskWriterThread();
+    }
+    
+    // ==================== SOTA: Disk Writer Thread ====================
+    
+    /**
+     * Starts the disk writer thread that polls the muxer write queue
+     * and writes to the SD card. This decouples SD card I/O from the
+     * encoder dequeue loop, preventing I/O stalls from dropping frames.
+     */
+    private void startDiskWriterThread() {
+        if (diskWriterRunning) return;
+        
+        diskWriterRunning = true;
+        diskWriterThread = new Thread(() -> {
+            logger.info("Disk writer thread started");
+            while (diskWriterRunning || !muxerWriteQueue.isEmpty()) {
+                try {
+                    MuxerPacket packet = muxerWriteQueue.poll();
+                    if (packet != null) {
+                        if (muxerStarted && muxer != null) {
+                            muxer.writeSampleData(trackIndex, packet.data, packet.info);
+                            if (firstFramePtsUs < 0) firstFramePtsUs = packet.info.presentationTimeUs;
+                            lastFramePtsUs = packet.info.presentationTimeUs;
+                            recordedFrames++;
+                        }
+                    } else {
+                        // Queue empty — sleep briefly to avoid busy-waiting
+                        Thread.sleep(4);
+                    }
+                } catch (InterruptedException e) {
+                    // Drain remaining packets before exiting
+                    MuxerPacket remaining;
+                    while ((remaining = muxerWriteQueue.poll()) != null) {
+                        try {
+                            if (muxerStarted && muxer != null) {
+                                muxer.writeSampleData(trackIndex, remaining.data, remaining.info);
+                                if (firstFramePtsUs < 0) firstFramePtsUs = remaining.info.presentationTimeUs;
+                                lastFramePtsUs = remaining.info.presentationTimeUs;
+                                recordedFrames++;
+                            }
+                        } catch (Exception ex) {
+                            logger.warn("Disk writer flush error: " + ex.getMessage());
+                        }
+                    }
+                    break;
+                } catch (Exception e) {
+                    logger.error("Disk writer error: " + e.getMessage());
+                }
+            }
+            logger.info("Disk writer thread stopped");
+        }, "GpuDiskWriter");
+        
+        // Lower priority than drainer — SD card I/O should never preempt encoder dequeue
+        diskWriterThread.setPriority(Thread.MIN_PRIORITY + 1);
+        diskWriterThread.start();
+    }
+    
+    /**
+     * Stops the disk writer thread, flushing any remaining packets.
+     */
+    private void stopDiskWriterThread() {
+        diskWriterRunning = false;
+        if (diskWriterThread != null) {
+            try {
+                diskWriterThread.interrupt();
+                diskWriterThread.join(2000);  // Allow up to 2s for final flush
+            } catch (InterruptedException e) {
+                // Ignore
+            }
+            diskWriterThread = null;
         }
     }
     
@@ -903,18 +1085,26 @@ public class HardwareEventRecorderGpu {
             return;
         }
         
-        // SOTA: Process queued pre-record packets first (async flush)
-        // This writes buffered frames without blocking the motion detection thread
+        // SOTA: Process queued pre-record packets first (flush all at once).
+        // These packets are written to the SD card via the muxer, which does NOT
+        // block the encoder's input surface. The original chunking was added to prevent
+        // MediaCodec backpressure, but that was only an issue when flushing on the GL
+        // thread. Now that draining happens on a background thread, writing all packets
+        // in one pass is safe and ensures no PTS gap between pre-record and live frames.
+        //
+        // CRITICAL: Live frames must NOT be written until this flush completes.
+        // The pre-record packets have older PTS values. If live frames (with current PTS)
+        // are interleaved, the muxer sees non-monotonic timestamps and the MP4 is corrupt.
         if (flushInProgress && muxerStarted) {
             int flushedCount = 0;
             H264CircularBuffer.Packet queuedPacket;
             while ((queuedPacket = pendingFlushQueue.poll()) != null) {
-                muxer.writeSampleData(trackIndex, queuedPacket.data, queuedPacket.info);
-                recordedFrames++;
+                // Push pre-record packets to the muxer write queue (same path as live frames)
+                muxerWriteQueue.add(new MuxerPacket(queuedPacket.data, queuedPacket.info));
                 flushedCount++;
             }
             if (flushedCount > 0) {
-                logger.info("Async flush complete: " + flushedCount + " pre-record frames written");
+                logger.info("Async flush complete: " + flushedCount + " pre-record frames queued for disk write");
             }
             flushInProgress = false;
         }
@@ -928,7 +1118,7 @@ public class HardwareEventRecorderGpu {
             }
         }
         
-        MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
+        MediaCodec.BufferInfo bufferInfo = reusableBufferInfo;
         
         while (true) {
             int outputBufferIndex;
@@ -986,9 +1176,11 @@ public class HardwareEventRecorderGpu {
                     }
                     
                     // PATH A: Write to disk (if event recording active)
-                    if (isWritingToFile && muxerStarted) {
-                        muxer.writeSampleData(trackIndex, outputBuffer, bufferInfo);
-                        recordedFrames++;
+                    // SOTA: Don't write to muxer directly — push to the muxer write queue.
+                    // The disk writer thread handles the actual SD card I/O, preventing
+                    // I/O stalls from blocking the encoder dequeue loop.
+                    if (isWritingToFile && muxerStarted && !flushInProgress) {
+                        muxerWriteQueue.add(new MuxerPacket(outputBuffer, bufferInfo));
                     }
                     
                     // PATH B: Send to network (if streaming)

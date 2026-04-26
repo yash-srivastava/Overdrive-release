@@ -59,6 +59,12 @@ public class MqttConnectionManager {
     // SOH estimator reference (optional, for capacity/soh fields)
     private com.overdrive.app.abrp.SohEstimator sohEstimator;
 
+    // Telemetry cache — prevents multiple MQTT threads from hammering BYD hardware concurrently.
+    // Poll the car once, cache the result, let all publishers grab the cached JSON.
+    private volatile JSONObject lastCachedTelemetry = null;
+    private volatile long lastCollectionTimeMs = 0;
+    private static final long TELEMETRY_CACHE_TTL_MS = 2000; // 2 seconds
+
     private volatile boolean initialized = false;
 
     public MqttConnectionManager() {
@@ -77,10 +83,42 @@ public class MqttConnectionManager {
         this.gearMonitor = GearMonitor.getInstance();
         this.sohEstimator = sohEstimator;
 
+        // CRITICAL: Configure Paho MQTT logging BEFORE any Paho class is loaded.
+        // Paho's static initializer tries to load resource bundles (logcat_en_US)
+        // that don't exist in the app_process environment, causing ExceptionInInitializerError.
+        // Must be done before MqttClient/MqttAsyncClient is ever referenced.
+        initPahoLogging();
+
         store.load();
         initialized = true;
 
         logger.info("MqttConnectionManager initialized with " + store.size() + " connections");
+    }
+
+    /**
+     * Disable Paho's internal logging to prevent MissingResourceException.
+     * Called once before any Paho class is loaded.
+     *
+     * Paho's LoggerFactory checks the system property first, before trying to load
+     * the logcat resource bundle. Setting this property BEFORE any Paho class is
+     * referenced prevents the ExceptionInInitializerError entirely.
+     */
+    private void initPahoLogging() {
+        try {
+            // Set system property BEFORE any Paho class is loaded.
+            // This tells LoggerFactory to use JSR47 (java.util.logging) directly,
+            // bypassing the logcat resource bundle that fails in app_process.
+            System.setProperty("org.eclipse.paho.client.mqttv3.logging.LoggerFactory",
+                "org.eclipse.paho.client.mqttv3.logging.JSR47Logger");
+
+            // Also suppress java.util.logging output for Paho (it's noisy)
+            java.util.logging.Logger pahoLogger = java.util.logging.Logger.getLogger("org.eclipse.paho.client.mqttv3");
+            pahoLogger.setLevel(java.util.logging.Level.WARNING);
+
+            logger.info("Paho MQTT logging configured (JSR47 via system property)");
+        } catch (Exception e) {
+            logger.warn("Failed to configure Paho logging: " + e.getMessage());
+        }
     }
 
     /**
@@ -327,17 +365,24 @@ public class MqttConnectionManager {
      * Collect telemetry from all data sources.
      * Same fields as ABRP Gold Standard payload for consistency.
      */
-    private JSONObject collectTelemetry() {
+    private synchronized JSONObject collectTelemetry() {
+        long now = System.currentTimeMillis();
+
+        // If we collected data less than 2 seconds ago, return the cached copy immediately.
+        // This protects the BYD hardware from being spammed by multiple MQTT threads.
+        if (lastCachedTelemetry != null && (now - lastCollectionTimeMs) < TELEMETRY_CACHE_TTL_MS) {
+            return lastCachedTelemetry;
+        }
+
         JSONObject payload = new JSONObject();
 
         try {
-            // Refresh BYD data
+            // Read BYD data from cached snapshot (refreshed by BydDataCollector's 5s polling timer)
             BydDataCollector collector = BydDataCollector.getInstance();
-            if (collector.isInitialized()) collector.collectAll();
             BydVehicleData vd = collector.isInitialized() ? collector.getData() : null;
 
             // utc
-            payload.put("utc", System.currentTimeMillis() / 1000);
+            payload.put("utc", now / 1000);
 
             // soc
             double soc = -1;
@@ -444,6 +489,10 @@ public class MqttConnectionManager {
         } catch (Exception e) {
             logger.error("Telemetry collection error: " + e.getMessage());
         }
+
+        // Update the cache
+        lastCachedTelemetry = payload;
+        lastCollectionTimeMs = now;
 
         return payload;
     }

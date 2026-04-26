@@ -173,11 +173,41 @@ class MainActivity : AppCompatActivity() {
         
         // Schedule periodic update checks (every 6 hours)
         schedulePeriodicUpdateCheck()
+        
+        // Status overlay: start immediately if permission granted, show guide if not
+        startStatusOverlay()
+    }
+    
+    /**
+     * Start the status overlay service if overlay permission is granted.
+     * If not granted, show the setup guide to help the user enable it.
+     */
+    private fun startStatusOverlay() {
+        val hasPermission = com.overdrive.app.overlay.StatusOverlayService.hasOverlayPermission(this)
+        android.util.Log.i("MainActivity", "Overlay permission: $hasPermission")
+        logsViewModel.info("Overlay", "Overlay permission: $hasPermission")
+        
+        if (hasPermission) {
+            // Permission granted — start the overlay service
+            com.overdrive.app.overlay.StatusOverlayService.startIfPermitted(this)
+            logsViewModel.info("Overlay", "Status overlay service started")
+        } else {
+            // No permission — show setup guide after a short delay
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                com.overdrive.app.overlay.SetupGuideDialog.showIfNeeded(this)
+            }, 2000)
+        }
     }
     
     override fun onNewIntent(intent: android.content.Intent?) {
         super.onNewIntent(intent)
         intent?.let { handleLocationStartIntent(it) }
+    }
+    
+    override fun onResume() {
+        super.onResume()
+        // Try to start overlay if permission was just granted (user returned from settings)
+        com.overdrive.app.overlay.StatusOverlayService.startIfPermitted(this)
     }
     
     /**
@@ -550,6 +580,11 @@ class MainActivity : AppCompatActivity() {
                     onTrafficMonitorClicked()
                     true
                 }
+                R.id.nav_reconfigure_camera -> {
+                    drawerLayout.closeDrawers()
+                    onReconfigureCameraClicked()
+                    true
+                }
                 else -> {
                     // Let NavController handle navigation items
                     val handled = androidx.navigation.ui.NavigationUI.onNavDestinationSelected(menuItem, navController)
@@ -563,6 +598,7 @@ class MainActivity : AppCompatActivity() {
         drawerLayout.addDrawerListener(object : DrawerLayout.DrawerListener {
             override fun onDrawerOpened(drawerView: View) {
                 checkTrafficMonitorStatus()
+                updateCameraProbeMenuItem()
             }
             override fun onDrawerSlide(drawerView: View, slideOffset: Float) {}
             override fun onDrawerClosed(drawerView: View) {}
@@ -709,6 +745,137 @@ class MainActivity : AppCompatActivity() {
         } else {
             super.onBackPressed()
         }
+    }
+    
+    // ==================== Camera Reconfiguration ====================
+    
+    /**
+     * Update the "Reconfigure Camera" menu item to show current probe status.
+     * Called when the drawer opens.
+     */
+    private fun updateCameraProbeMenuItem() {
+        val menuItem = navigationView.menu.findItem(R.id.nav_reconfigure_camera) ?: return
+        
+        try {
+            val config = com.overdrive.app.config.UnifiedConfigManager.loadConfig()
+            val cameraConfig = config.optJSONObject("camera")
+            val savedId = cameraConfig?.optInt("probedCameraId", -1) ?: -1
+            val savedMode = cameraConfig?.optInt("probedSurfaceMode", -1) ?: -1
+            
+            if (savedId >= 0 && savedMode >= 0) {
+                menuItem.title = "Camera: ID $savedId, Mode $savedMode"
+            } else {
+                menuItem.title = "Camera: Not Configured"
+            }
+        } catch (e: Exception) {
+            menuItem.title = "Reconfigure Camera"
+        }
+    }
+    
+    /**
+     * Handle "Reconfigure Camera" menu item click.
+     * Clears the saved camera probe config and restarts the camera daemon
+     * so it performs a full probe of all camera ID × surfaceMode combinations.
+     */
+    private fun onReconfigureCameraClicked() {
+        // Read current saved config for display
+        var currentInfo = "Not configured"
+        try {
+            val config = com.overdrive.app.config.UnifiedConfigManager.loadConfig()
+            val cameraConfig = config.optJSONObject("camera")
+            if (cameraConfig != null) {
+                val savedId = cameraConfig.optInt("probedCameraId", -1)
+                val savedMode = cameraConfig.optInt("probedSurfaceMode", -1)
+                if (savedId >= 0 && savedMode >= 0) {
+                    currentInfo = "Camera ID: $savedId, Surface Mode: $savedMode"
+                }
+            }
+        } catch (e: Exception) {
+            // Ignore
+        }
+        
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Reconfigure Camera")
+            .setMessage(
+                "Current config: $currentInfo\n\n" +
+                "This will clear the saved camera configuration and restart the camera daemon. " +
+                "On restart, the daemon will probe all camera ID (0-5) × surface mode (0-5) " +
+                "combinations to find the one that produces panoramic video.\n\n" +
+                "Recording and streaming are paused during probe and resume automatically " +
+                "once a working camera is found.\n\n" +
+                "This is useful if:\n" +
+                "• Video appears black or frozen\n" +
+                "• You changed vehicle models\n" +
+                "• Camera stopped working after a firmware update\n\n" +
+                "The daemon will restart automatically."
+            )
+            .setPositiveButton("Reconfigure") { _, _ ->
+                performCameraReconfigure()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+    
+    /**
+     * Clear saved camera config and restart the camera daemon.
+     */
+    private fun performCameraReconfigure() {
+        Toast.makeText(this, "Clearing camera config...", Toast.LENGTH_SHORT).show()
+        logsViewModel.info("Camera", "Clearing saved camera probe config for re-probe")
+        
+        Thread {
+            try {
+                // Clear the camera section from unified config
+                val emptyCameraConfig = org.json.JSONObject()
+                emptyCameraConfig.put("probedCameraId", -1)
+                emptyCameraConfig.put("probedSurfaceMode", -1)
+                com.overdrive.app.config.UnifiedConfigManager.updateSection("camera", emptyCameraConfig)
+                
+                runOnUiThread {
+                    logsViewModel.info("Camera", "Camera config cleared — restarting daemon")
+                    Toast.makeText(this, "Restarting camera daemon...", Toast.LENGTH_SHORT).show()
+                }
+                
+                // Kill the camera daemon — DaemonLauncher's watchdog will auto-restart it
+                val adb = com.overdrive.app.launcher.AdbDaemonLauncher(this)
+                adb.killDaemon(object : com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback {
+                    override fun onLog(message: String) {
+                        logsViewModel.debug("Camera", message)
+                    }
+                    
+                    override fun onLaunched() {
+                        runOnUiThread {
+                            logsViewModel.info("Camera", "Camera daemon stopped — will auto-restart with full probe")
+                            Toast.makeText(this@MainActivity, 
+                                "✅ Camera daemon restarting with full probe", Toast.LENGTH_LONG).show()
+                            
+                            // Re-launch the daemon after a brief delay
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                daemonStartupManager.initializeOnAppLaunch()
+                                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                    daemonStartupManager.checkAllDaemonStatuses()
+                                }, 5000)
+                            }, 3000)
+                        }
+                    }
+                    
+                    override fun onError(error: String) {
+                        runOnUiThread {
+                            logsViewModel.error("Camera", "Failed to stop daemon: $error")
+                            Toast.makeText(this@MainActivity, 
+                                "⚠ Config cleared but daemon restart failed. Please restart manually.", 
+                                Toast.LENGTH_LONG).show()
+                        }
+                    }
+                })
+                
+            } catch (e: Exception) {
+                runOnUiThread {
+                    logsViewModel.error("Camera", "Reconfigure failed: ${e.message}")
+                    Toast.makeText(this, "❌ Failed: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
     }
     
     // ==================== Traffic Monitor Management ====================

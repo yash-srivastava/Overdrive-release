@@ -177,9 +177,8 @@ public class AbrpTelemetryService {
         JSONObject payload = new JSONObject();
 
         try {
-            // Refresh collector data
+            // Read BYD data from cached snapshot (refreshed by BydDataCollector's 5s polling timer)
             com.overdrive.app.byd.BydDataCollector collector = com.overdrive.app.byd.BydDataCollector.getInstance();
-            if (collector.isInitialized()) collector.collectAll();
             com.overdrive.app.byd.BydVehicleData vd = collector.isInitialized() ? collector.getData() : null;
 
             // utc
@@ -198,15 +197,27 @@ public class AbrpTelemetryService {
             // power — from collector's enginePowerKw, fallback to charging monitor
             try {
                 boolean powerSet = false;
-                if (vd != null && !Double.isNaN(vd.enginePowerKw) && Math.abs(vd.enginePowerKw) <= 300) {
+                if (vd != null && !Double.isNaN(vd.enginePowerKw) && Math.abs(vd.enginePowerKw) > 0.1 && Math.abs(vd.enginePowerKw) <= 300) {
                     payload.put("power", vd.enginePowerKw);
                     powerSet = true;
                 }
                 if (!powerSet) {
+                    // For charging power, prefer externalChargingPowerKw (InstrumentDevice)
+                    // which is the real charger-reported power. ChargingDevice values are unreliable.
+                    // Threshold 0.15 kW filters phantom 0.1 kW readings when charger is unplugged.
+                    double chargingPower = 0;
+                    if (vd != null && !Double.isNaN(vd.externalChargingPowerKw) && vd.externalChargingPowerKw > 0.15) {
+                        chargingPower = vd.externalChargingPowerKw;
+                    } else if (vd != null && !Double.isNaN(vd.chargingPowerKw) && vd.chargingPowerKw > 0.15) {
+                        chargingPower = vd.chargingPowerKw;
+                    }
+                    
+                    // Check charging state
                     ChargingStateData chargingData = vehicleDataMonitor.getChargingState();
-                    boolean isChg = chargingData != null && chargingData.status == ChargingStateData.ChargingStatus.CHARGING;
-                    double monitorPower = chargingData != null ? chargingData.chargingPowerKW : 0;
-                    payload.put("power", isChg && monitorPower > 0.1 ? -monitorPower : 0);
+                    boolean isChg = (chargingData != null && chargingData.status == ChargingStateData.ChargingStatus.CHARGING)
+                                    || chargingPower > 0.15;
+                    
+                    payload.put("power", isChg && chargingPower > 0.15 ? -chargingPower : 0);
                 }
             } catch (Exception e) {
                 payload.put("power", 0);

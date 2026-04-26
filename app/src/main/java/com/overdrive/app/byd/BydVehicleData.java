@@ -70,6 +70,7 @@ public class BydVehicleData {
     public final int chargerWorkState;
     public final double chargingPowerKw;
     public final double externalChargingPowerKw;
+    public final double hvPackVoltage;    // HV battery pack voltage (V), from CAN event
 
     // ==================== GEAR ====================
     public final int gearMode;
@@ -159,6 +160,7 @@ public class BydVehicleData {
         this.chargerWorkState = b.chargerWorkState;
         this.chargingPowerKw = b.chargingPowerKw;
         this.externalChargingPowerKw = b.externalChargingPowerKw;
+        this.hvPackVoltage = b.hvPackVoltage;
         this.gearMode = b.gearMode;
         this.tyrePressure = b.tyrePressure;
         this.doorLockStatus = b.doorLockStatus;
@@ -388,6 +390,7 @@ public class BydVehicleData {
         b.evMileageKm = evMileageKm; b.chargingState = chargingState;
         b.chargingGunState = chargingGunState; b.chargerWorkState = chargerWorkState;
         b.chargingPowerKw = chargingPowerKw; b.externalChargingPowerKw = externalChargingPowerKw;
+        b.hvPackVoltage = hvPackVoltage;
         b.gearMode = gearMode; b.tyrePressure = tyrePressure; b.doorLockStatus = doorLockStatus;
         b.windowOpenPercent = windowOpenPercent; b.leftTurnState = leftTurnState;
         b.rightTurnState = rightTurnState; b.lowBeam = lowBeam; b.highBeam = highBeam;
@@ -416,7 +419,7 @@ public class BydVehicleData {
         int elecRangeKm = UNAVAILABLE, fuelRangeKm = UNAVAILABLE, bodyworkRangeKm = UNAVAILABLE;
         int totalMileageKm = UNAVAILABLE, evMileageKm = UNAVAILABLE;
         int chargingState = UNAVAILABLE, chargingGunState = UNAVAILABLE, chargerWorkState = UNAVAILABLE;
-        double chargingPowerKw = NaN, externalChargingPowerKw = NaN;
+        double chargingPowerKw = NaN, externalChargingPowerKw = NaN, hvPackVoltage = NaN;
         int gearMode = UNAVAILABLE;
         int[] tyrePressure, doorLockStatus, windowOpenPercent, seatbeltStatus, radarDistances;
         int leftTurnState = UNAVAILABLE, rightTurnState = UNAVAILABLE;
@@ -465,6 +468,7 @@ public class BydVehicleData {
         public Builder chargerWorkState(int v) { chargerWorkState = v; return this; }
         public Builder chargingPowerKw(double v) { chargingPowerKw = v; return this; }
         public Builder externalChargingPowerKw(double v) { externalChargingPowerKw = v; return this; }
+        public Builder hvPackVoltage(double v) { hvPackVoltage = v; return this; }
         public Builder gearMode(int v) { gearMode = v; return this; }
         public Builder tyrePressure(int[] v) { tyrePressure = v; return this; }
         public Builder doorLockStatus(int[] v) { doorLockStatus = v; return this; }

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Recording inactive: video camera with slash through it -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Camera body (muted) -->
+    <path
+        android:fillColor="#71717A"
+        android:pathData="M17,10.5V7c0,-0.55 -0.45,-1 -1,-1H4c-0.55,0 -1,0.45 -1,1v10c0,0.55 0.45,1 1,1h12c0.55,0 1,-0.45 1,-1v-3.5l4,4v-11l-4,4z" />
+    <!-- Slash line -->
+    <path
+        android:fillColor="#EF4444"
+        android:pathData="M3.27,2L2,3.27 4.73,6H4c-0.55,0 -1,0.45 -1,1v10c0,0.55 0.45,1 1,1h12c0.21,0 0.39,-0.08 0.54,-0.18L19.73,21 21,19.73z"
+        android:fillAlpha="0" />
+    <path
+        android:strokeColor="#EF4444"
+        android:strokeWidth="2"
+        android:pathData="M2,2L22,22" />
+</vector>

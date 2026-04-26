@@ -158,6 +158,7 @@ public class TripApiHandler {
         List<TripRecord> trips = db.getTrips(days, limit);
         JSONArray tripsArray = new JSONArray();
         for (TripRecord trip : trips) {
+            enrichTripEnergy(trip);
             tripsArray.put(trip.toSummaryJson());
         }
 
@@ -184,6 +185,8 @@ public class TripApiHandler {
         if (trip == null) {
             return errorResponse("Trip not found", 404);
         }
+
+        enrichTripEnergy(trip);
 
         JSONObject response = new JSONObject();
         try {
@@ -717,6 +720,49 @@ public class TripApiHandler {
                 String value = eq < pair.length() - 1 ? pair.substring(eq + 1) : "";
                 params.put(key, value);
             }
+        }
+    }
+
+    /**
+     * Enrich a trip record with estimated energy if BMS kWh data wasn't available.
+     * Uses the SohEstimator's calibrated nominal capacity (same as VehicleDataMonitor).
+     * This ensures old trips without kWh readings still show cost in the UI.
+     */
+    private void enrichTripEnergy(TripRecord trip) {
+        // Already has energy data — nothing to do
+        if (trip.getEnergyUsedKwh() > 0) return;
+        
+        // Need SoC delta to estimate
+        if (trip.socStart <= 0 || trip.socEnd <= 0 || trip.socStart <= trip.socEnd) return;
+        
+        try {
+            com.overdrive.app.abrp.SohEstimator soh = 
+                com.overdrive.app.monitor.SocHistoryDatabase.getInstance().getSohEstimator();
+            if (soh != null && soh.getNominalCapacityKwh() > 0) {
+                double nominal = soh.getNominalCapacityKwh();
+                double sohPercent = soh.hasEstimate() ? soh.getCurrentSoh() : 100.0;
+                double usableKwh = nominal * (sohPercent / 100.0);
+                double socDelta = trip.socStart - trip.socEnd;
+                double estimatedEnergy = (socDelta / 100.0) * usableKwh;
+                
+                // Update the in-memory record (not persisted to DB — just for API response)
+                trip.kwhStart = (trip.socStart / 100.0) * usableKwh;
+                trip.kwhEnd = (trip.socEnd / 100.0) * usableKwh;
+                
+                // Compute cost if rate is available
+                TripConfig config = manager.getConfig();
+                if (config != null && config.getElectricityRate() > 0 && trip.tripCost <= 0) {
+                    trip.electricityRate = config.getElectricityRate();
+                    trip.currency = config.getCurrency();
+                    trip.tripCost = estimatedEnergy * trip.electricityRate;
+                }
+                
+                if (trip.distanceKm > 0) {
+                    trip.energyPerKm = estimatedEnergy / trip.distanceKm;
+                }
+            }
+        } catch (Exception e) {
+            // SohEstimator not available — leave as-is
         }
     }
 

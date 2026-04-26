@@ -47,6 +47,10 @@ public class MqttApiHandler {
         // PUT /api/mqtt/connections/{id} — update
         if (path.startsWith("/api/mqtt/connections/") && method.equals("PUT")) {
             String id = path.substring("/api/mqtt/connections/".length());
+            if (!id.matches("[a-f0-9\\-]{4,36}")) {
+                HttpResponse.sendJsonError(out, "Invalid connection id");
+                return true;
+            }
             handleUpdateConnection(out, id, body);
             return true;
         }
@@ -54,6 +58,10 @@ public class MqttApiHandler {
         // DELETE /api/mqtt/connections/{id} — delete
         if (path.startsWith("/api/mqtt/connections/") && method.equals("DELETE")) {
             String id = path.substring("/api/mqtt/connections/".length());
+            if (!id.matches("[a-f0-9\\-]{4,36}")) {
+                HttpResponse.sendJsonError(out, "Invalid connection id");
+                return true;
+            }
             handleDeleteConnection(out, id);
             return true;
         }

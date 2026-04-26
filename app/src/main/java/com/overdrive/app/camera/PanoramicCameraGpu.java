@@ -7,6 +7,7 @@ import android.view.Surface;
 
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.surveillance.GpuDownscaler;
+import com.overdrive.app.surveillance.FoveatedCropper;
 import com.overdrive.app.surveillance.GpuMosaicRecorder;
 import com.overdrive.app.surveillance.HardwareEventRecorderGpu;
 import com.overdrive.app.surveillance.SurveillanceEngineGpu;
@@ -33,6 +34,7 @@ public class PanoramicCameraGpu {
     private static final String TAG = "PanoramicCameraGpu";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
     private static final int PHYSICAL_CAMERA_ID = 1;
+    private static final int MAX_CAMERA_ID = 5;     // Probe camera IDs 0-5
     private static final int MAX_SURFACE_MODE = 5;  // Probe surface modes 0-5
     
     // AVMCamera surface mode — 0 works on Seal, Atto 1 may need different value
@@ -42,9 +44,17 @@ public class PanoramicCameraGpu {
     // Camera ID override — set via setCameraId() before start()
     private int cameraIdOverride = -1;  // -1 = use default PHYSICAL_CAMERA_ID
     
-    // Auto-probe mode — tries all camera IDs to find one with actual image data
+    // SOTA: Full-matrix auto-probe — sweeps camera IDs 0-5 × surface modes 0-5
+    // to find the first combination that produces panoramic image data.
     private boolean autoProbeCameras = false;
     private int probeStartId = -1;  // Tracks where probe started for wrap-around detection
+    private int probeNextCameraId = 0;    // Next camera ID to try
+    private int probeNextSurfaceMode = 0; // Next surface mode to try
+    
+    // SOTA: Probe gate — blocks recording/streaming/AI until probe finds a working camera.
+    // Without this, the encoder records BLACK frames and the stream shows garbage during probe.
+    // Defaults to true (no gate) — only set to false when setAutoProbeCameras(true) is called.
+    private volatile boolean probeComplete = true;
     
     // Callback when auto-probe discovers a working camera config
     public interface CameraProbeCallback {
@@ -79,10 +89,22 @@ public class PanoramicCameraGpu {
     private HardwareEventRecorderGpu streamEncoder;  // Stream encoder (optional)
     private GpuDownscaler downscaler;
     private SurveillanceEngineGpu sentry;
+    private FoveatedCropper foveatedCropper;  // High-res AI crop from raw strip
     
     // Frame timing
     private int frameCounter = 0;
-    private static final int AI_FRAME_SKIP = 15;  // 30fps / 15 = 2 FPS for AI
+    // Adaptive AI frame skip: dynamically computed to deliver ~10 FPS to the
+    // surveillance engine regardless of actual camera FPS. The V2 motion pipeline
+    // is designed for 10 FPS (ring buffer N vs N-3 = 300ms, temporal decay rates,
+    // loitering frame counts). Delivering too slow causes missed detections;
+    // delivering too fast wastes CPU on the GPU readback path.
+    //
+    // Computed as: max(1, round(actualFps / targetAiFps))
+    // At 30 FPS camera → skip=3 (10 FPS to sentry)
+    // At 15 FPS camera → skip=2 (7.5 FPS to sentry)  
+    // At 8 FPS camera  → skip=1 (8 FPS to sentry, sentry throttles to ~8)
+    private int aiFrameSkip = 1;  // Start at 1, recalculated from actual FPS
+    private static final float TARGET_AI_FPS = 10.0f;
     private long lastFrameTime = 0;
     private long startTime = 0;
     
@@ -277,6 +299,10 @@ public class PanoramicCameraGpu {
             logger.debug( "Downscaler initialized");
         }
         
+        // Initialize foveated cropper for high-res AI crops
+        foveatedCropper = new FoveatedCropper();
+        foveatedCropper.init();
+        
         logger.info( "OpenGL initialized (texture=" + cameraTextureId + ")");
     }
     
@@ -354,6 +380,36 @@ public class PanoramicCameraGpu {
      */
     public EGLCore getEglCore() {
         return eglCore;
+    }
+    
+    /**
+     * Recreates the SurfaceTexture and Surface for camera switching.
+     * 
+     * The BYD AVMCamera HAL doesn't properly deliver frames to a Surface
+     * that was previously connected to a different camera ID. After the first
+     * frame, subsequent frames are never delivered, causing a frozen image.
+     * Recreating the SurfaceTexture forces a clean connection to the new camera.
+     */
+    private void recreateCameraSurface() {
+        logger.info("Recreating SurfaceTexture for camera switch...");
+        
+        // Release old surface and texture
+        if (cameraSurface != null) {
+            cameraSurface.release();
+            cameraSurface = null;
+        }
+        if (cameraSurfaceTexture != null) {
+            cameraSurfaceTexture.release();
+            cameraSurfaceTexture = null;
+        }
+        
+        // Recreate with same texture ID (OES texture is still valid)
+        cameraSurfaceTexture = new SurfaceTexture(cameraTextureId);
+        cameraSurfaceTexture.setDefaultBufferSize(width, height);
+        cameraSurfaceTexture.setOnFrameAvailableListener(this::onFrameAvailable);
+        cameraSurface = new Surface(cameraSurfaceTexture);
+        
+        logger.info("SurfaceTexture recreated for camera switch");
     }
     
     /**
@@ -447,8 +503,10 @@ public class PanoramicCameraGpu {
             frameCounter++;
             lastFrameTime = System.currentTimeMillis();
             
-            // AUTO-PROBE: After 15 frames (~2 sec), check if current camera has image data.
-            // If blank and auto-probe is enabled, try next camera ID.
+            // SOTA: Full-matrix auto-probe at frame 15 (~2 sec).
+            // Sweeps camera IDs 0-5 × surface modes 0-5 to find the first
+            // combination that produces panoramic image data. Each combo gets
+            // 15 frames to warm up before pixel readback.
             if (frameCounter == 15 && downscaler != null) {
                 try {
                     byte[] probe = downscaler.readPixels(cameraTextureId, 8, 8);
@@ -472,33 +530,24 @@ public class PanoramicCameraGpu {
                             " (panoramic, has image data, surfaceMode=" + cameraSurfaceMode + ")");
                         autoProbeCameras = false;
                         probeStartId = -1;
+                        probeComplete = true;
+                        logger.info("Probe complete — recording/streaming/AI lanes now active");
                         // Notify pipeline to persist this config
                         if (probeCallback != null) {
                             probeCallback.onCameraFound(currentId, cameraSurfaceMode);
                         }
                     } else if (autoProbeCameras) {
-                        // Only try ID 0 and ID 1 with surfaceMode 0
-                        if (currentId == 0) {
-                            logger.info("Auto-probe: camera ID 0 " + 
-                                (!hasData ? "blank" : "not panoramic") + ", trying ID 1...");
-                            cameraIdOverride = 1;
-                            frameCounter = 0;
-                            lastGlThreadHeartbeat = System.currentTimeMillis();
-                            BydCameraCoordinator.closeCamera(cameraObj, cameraSurfaceMode);
-                            cameraObj = null;
-                            if (cameraCoordinator != null) {
-                                cameraCoordinator.resetEventCallbackState();
-                            }
-                            lastGlThreadHeartbeat = System.currentTimeMillis();
-                            startCamera();
-                            if (cameraCoordinator != null && cameraObj != null) {
-                                cameraCoordinator.setupEventCallback(cameraObj);
-                            }
-                        } else {
-                            logger.warn("Auto-probe: camera ID 0 and 1 both failed — giving up");
-                            autoProbeCameras = false;
-                            probeStartId = -1;
-                        }
+                        // Advance to next combination in the matrix
+                        advanceProbeToNext(currentId);
+                    } else if (!hasData) {
+                        // Saved config produces BLACK — enter full probe mode
+                        logger.warn("Saved camera config (id=" + currentId + 
+                            ", surfaceMode=" + cameraSurfaceMode + ") produces BLACK — starting full probe");
+                        autoProbeCameras = true;
+                        probeComplete = false;  // Re-gate consumers during re-probe
+                        probeNextCameraId = 0;
+                        probeNextSurfaceMode = 0;
+                        advanceProbeToNext(-1);  // -1 = no current, start from 0,0
                     }
                 } catch (Exception e) {
                     logger.warn("Camera probe failed: " + e.getMessage());
@@ -506,6 +555,19 @@ public class PanoramicCameraGpu {
             }
 
             long loopStartNs = System.nanoTime();
+
+            // SOTA: Gate all consumer passes until probe finds a working camera.
+            // Without this, the encoder records BLACK frames, the stream shows garbage,
+            // and the AI lane processes empty images during the probe sweep.
+            if (!probeComplete) {
+                // Still probing — consume texture to keep HAL flowing but don't feed consumers.
+                // Update heartbeat so watchdog doesn't kill us during probe.
+                lastGlThreadHeartbeat = System.currentTimeMillis();
+                if (running) {
+                    glHandler.post(this::renderLoop);
+                }
+                return;
+            }
 
             // PASS 1: Recording (Zero-Copy GPU Path)
             // SOTA: Always render to encoder (for pre-record circular buffer)
@@ -552,14 +614,26 @@ public class PanoramicCameraGpu {
             }
 
             // PASS 2: AI Lane (Downscale & Readback at 2 FPS)
-            // Only run AI lane if we have time budget remaining (< 50ms per loop iteration)
-            // This prevents AI processing from starving the camera HAL during heavy recording
+            // Run AI lane on every AI_FRAME_SKIP-th frame. The sentry's internal
+            // throttle (100ms interval) and the frame skip already limit CPU usage.
+            // Previous elapsedMs < 50 guard was too aggressive — at 8 FPS the recording
+            // pass alone takes 50-80ms, causing the AI lane to NEVER run.
             long elapsedMs = (System.nanoTime() - loopStartNs) / 1_000_000;
-            if (sentry != null && sentry.isActive() && downscaler != null && elapsedMs < 50) {
-                if (frameCounter % AI_FRAME_SKIP == 0) {
+            if (sentry != null && sentry.isActive() && downscaler != null) {
+                if (frameCounter % aiFrameSkip == 0) {
                     try {
-                        byte[] smallFrame = downscaler.readPixels(cameraTextureId, 640, 480);
+                        // SOTA: Use direct FBO readback on GL thread.
+                        // The async readPixels path returns stale frames because the
+                        // shared EGL context can't reliably read the camera's external
+                        // OES texture. Direct readback on the GL thread that owns the
+                        // texture guarantees fresh frame data.
+                        byte[] smallFrame = downscaler.readPixelsDirect(cameraTextureId);
                         if (smallFrame != null) {
+                            // Wire foveated cropper to sentry once (lazy init, GL thread safe)
+                            if (foveatedCropper != null && foveatedCropper.isInitialized()
+                                    && sentry.getFoveatedCropper() == null) {
+                                sentry.setFoveatedCropper(foveatedCropper, cameraTextureId);
+                            }
                             // Buffer is recycled inside processFrame's finally block
                             sentry.processFrame(smallFrame);
                         }
@@ -568,6 +642,10 @@ public class PanoramicCameraGpu {
                         logger.warn("AI lane error: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()));
                     }
                 }
+            } else if (sentry != null && frameCounter % 300 == 0) {
+                // Periodic diagnostic: log why AI lane is not running
+                logger.info(String.format("AI lane gate: active=%b, downscaler=%b, elapsed=%dms",
+                        sentry.isActive(), downscaler != null, elapsedMs));
             }
 
             // Log stats periodically (every 2 minutes, time-based)
@@ -576,8 +654,18 @@ public class PanoramicCameraGpu {
                 lastStatsTime = now;
                 long elapsed = now - startTime;
                 float fps = (frameCounter * 1000.0f) / elapsed;
-                logger.info( String.format("Stats: %d frames, %.1f FPS, uptime=%ds",
-                        frameCounter, fps, elapsed / 1000));
+                
+                // SOTA: Adaptive AI frame skip — recalculate based on measured FPS.
+                // Target ~10 FPS delivery to the V2 motion pipeline.
+                int newSkip = Math.max(1, Math.round(fps / TARGET_AI_FPS));
+                if (newSkip != aiFrameSkip) {
+                    logger.info(String.format("Adaptive AI skip: %d → %d (camera=%.1f FPS, target=%.0f FPS, effective=%.1f FPS)",
+                            aiFrameSkip, newSkip, fps, TARGET_AI_FPS, fps / newSkip));
+                    aiFrameSkip = newSkip;
+                }
+                
+                logger.info(String.format("Stats: %d frames, %.1f FPS, uptime=%ds, aiSkip=%d",
+                        frameCounter, fps, elapsed / 1000, aiFrameSkip));
             }
 
         } catch (Exception e) {
@@ -594,6 +682,93 @@ public class PanoramicCameraGpu {
         }
     }
     
+    /**
+     * SOTA: Advance to the next camera ID × surface mode combination during probe.
+     * Walks the matrix: (0,0) → (1,0) → ... → (5,0) → (0,1) → (1,1) → ... → (5,5).
+     * Surface mode is the outer loop because camera ID changes are cheaper than
+     * surface mode changes (surface mode affects the HAL's internal demux pipeline).
+     * 
+     * @param skipId Camera ID to skip (the one we just tested). -1 to start fresh.
+     */
+    private void advanceProbeToNext(int skipId) {
+        // Close current camera cleanly (simple close — no disablePreviewCallback)
+        if (cameraObj != null) {
+            try {
+                Class<?> avmClass = Class.forName("android.hardware.AVMCamera");
+                Method mStop = avmClass.getDeclaredMethod("stopPreview");
+                mStop.setAccessible(true);
+                mStop.invoke(cameraObj);
+                Method mClose = avmClass.getDeclaredMethod("close");
+                mClose.setAccessible(true);
+                mClose.invoke(cameraObj);
+            } catch (Exception closeEx) {
+                logger.warn("Error closing camera for probe: " + closeEx.getMessage());
+            }
+            cameraObj = null;
+        }
+        
+        // Find next valid combination
+        boolean found = false;
+        while (probeNextSurfaceMode <= MAX_SURFACE_MODE) {
+            while (probeNextCameraId <= MAX_CAMERA_ID) {
+                int tryId = probeNextCameraId;
+                int tryMode = probeNextSurfaceMode;
+                probeNextCameraId++;
+                
+                // Skip the combo we just tested (if same surface mode)
+                if (tryId == skipId && tryMode == cameraSurfaceMode) {
+                    continue;
+                }
+                
+                logger.info("Auto-probe: trying camera ID " + tryId + 
+                    ", surfaceMode " + tryMode + 
+                    " [" + (tryMode * (MAX_CAMERA_ID + 1) + tryId + 1) + 
+                    "/" + ((MAX_CAMERA_ID + 1) * (MAX_SURFACE_MODE + 1)) + "]");
+                
+                cameraIdOverride = tryId;
+                cameraSurfaceMode = tryMode;
+                frameCounter = 0;
+                lastGlThreadHeartbeat = System.currentTimeMillis();
+                
+                // Recreate SurfaceTexture — HAL won't deliver continuous frames
+                // to a Surface previously connected to a different camera/mode
+                recreateCameraSurface();
+                lastGlThreadHeartbeat = System.currentTimeMillis();
+                
+                try {
+                    startCamera();
+                    if (cameraCoordinator != null && cameraObj != null) {
+                        cameraCoordinator.setupEventCallback(cameraObj);
+                    }
+                    found = true;
+                    break;
+                } catch (Exception e) {
+                    // Camera ID doesn't exist or can't open — skip to next
+                    logger.info("Auto-probe: camera ID " + tryId + 
+                        " surfaceMode " + tryMode + " failed to open: " + e.getMessage());
+                    cameraObj = null;
+                    continue;
+                }
+            }
+            if (found) break;
+            // Move to next surface mode, reset camera ID
+            probeNextCameraId = 0;
+            probeNextSurfaceMode++;
+        }
+        
+        if (!found) {
+            logger.error("Auto-probe: exhausted all " + 
+                ((MAX_CAMERA_ID + 1) * (MAX_SURFACE_MODE + 1)) + 
+                " camera ID × surfaceMode combinations — no working panoramic camera found");
+            autoProbeCameras = false;
+            probeStartId = -1;
+            // Ungate consumers even on failure — better to record whatever we have
+            // than to stay permanently blocked
+            probeComplete = true;
+            logger.warn("Probe failed but unblocking consumers — frames may be black");
+        }
+    }
+
     /**
      * Starts the watchdog thread that monitors GL thread health.
      * 
@@ -700,8 +875,11 @@ public class PanoramicCameraGpu {
             clearStreamingComponents();
         }
         
-        // Wait for encoder drainer threads to quiesce
-        try { Thread.sleep(100); } catch (InterruptedException ignored) {}
+        // Wait for ALL encoder drainer threads to fully stop.
+        // The FORTIFY crash happens when a drainer thread accesses the camera's
+        // SurfaceTexture (via EGL) after the camera's native mutex is destroyed.
+        // 500ms is conservative but prevents the race condition.
+        try { Thread.sleep(500); } catch (InterruptedException ignored) {}
         
         if (cameraObj != null) {
             BydCameraCoordinator.closeCamera(cameraObj, cameraSurfaceMode);
@@ -744,8 +922,9 @@ public class PanoramicCameraGpu {
                 logger.info("Pre-restart: streaming components detached");
             }
             
-            // Wait for encoder drainer threads to quiesce after detach
-            Thread.sleep(100);
+            // Wait for encoder drainer threads to fully stop after detach
+            // 500ms prevents FORTIFY crash (pthread_mutex_lock on destroyed mutex)
+            Thread.sleep(500);
             
             // Close with proper cleanup
             if (cameraObj != null) {
@@ -761,6 +940,13 @@ public class PanoramicCameraGpu {
             
             // Update heartbeat so watchdog doesn't kill us during restart
             lastGlThreadHeartbeat = System.currentTimeMillis();
+            
+            // CRITICAL: Recreate SurfaceTexture before reopening camera.
+            // The BYD HAL won't deliver continuous frames to a Surface that was
+            // previously connected to a different camera instance — only the first
+            // frame arrives, then the stream freezes. This matches the fix already
+            // present in the auto-probe path in renderLoop().
+            recreateCameraSurface();
             
             // Reopen
             startCamera();
@@ -953,6 +1139,12 @@ public class PanoramicCameraGpu {
      * Releases OpenGL resources.
      */
     private void releaseGl() {
+        // Release foveated cropper before GL context is destroyed
+        if (foveatedCropper != null) {
+            foveatedCropper.release();
+            foveatedCropper = null;
+        }
+        
         if (cameraSurfaceTexture != null) {
             cameraSurfaceTexture.release();
             cameraSurfaceTexture = null;
@@ -1038,6 +1230,13 @@ public class PanoramicCameraGpu {
     }
     
     /**
+     * Gets the active camera ID (the one currently open or selected by probe).
+     */
+    public int getCameraId() {
+        return cameraIdOverride >= 0 ? cameraIdOverride : PHYSICAL_CAMERA_ID;
+    }
+    
+    /**
      * Sets the AVMCamera ID to use.
      * Must be called before start(). Default is 1 (works on Seal).
      * Dolphin/Atto 1 may need ID 0.
@@ -1055,6 +1254,12 @@ public class PanoramicCameraGpu {
      */
     public void setAutoProbeCameras(boolean enabled) {
         this.autoProbeCameras = enabled;
+        if (enabled) {
+            // Reset probe state — consumers are gated until probe completes
+            probeComplete = false;
+            probeNextCameraId = 0;
+            probeNextSurfaceMode = 0;
+        }
         logger.info("Camera auto-probe: " + (enabled ? "ENABLED" : "DISABLED"));
     }
     
@@ -1105,6 +1310,14 @@ public class PanoramicCameraGpu {
      */
     public int getFrameCount() {
         return frameCounter;
+    }
+    
+    /**
+     * Returns true when camera probe is complete and frames are valid for consumption.
+     * During probe, recording/streaming/AI are gated to prevent encoding BLACK frames.
+     */
+    public boolean isProbeComplete() {
+        return probeComplete;
     }
     
     /**

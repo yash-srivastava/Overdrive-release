@@ -171,13 +171,13 @@ public class ChargingStateMonitor extends BaseDeviceMonitor<ChargingStateData> {
     
     @Override
     public void start() {
-        if (isRunning.getAndSet(true)) {
-            log("Already running");
+        if (chargingDevice == null) {
+            logError("Cannot start - charging device not initialized", null);
             return;
         }
         
-        if (chargingDevice == null) {
-            logError("Cannot start - charging device not initialized", null);
+        if (isRunning.getAndSet(true)) {
+            log("Already running");
             return;
         }
         

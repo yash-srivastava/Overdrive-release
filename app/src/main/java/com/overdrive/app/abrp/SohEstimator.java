@@ -1,5 +1,6 @@
 package com.overdrive.app.abrp;
 
+import com.overdrive.app.byd.BydVehicleData;
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.monitor.BatterySocData;
 import com.overdrive.app.monitor.VehicleDataMonitor;
@@ -35,6 +36,7 @@ public class SohEstimator {
     private static final String PROP_ESTIMATION_METHOD = "estimation_method";
     private static final String PROP_LAST_UPDATED = "last_updated";
     private static final String PROP_SAMPLE_COUNT = "sample_count";
+    private static final String PROP_NOMINAL_CAPACITY = "nominal_capacity_kwh";
 
     private static final String METHOD_INSTANTANEOUS = "instantaneous";
     private static final String METHOD_CALIBRATION = "calibration";
@@ -47,11 +49,47 @@ public class SohEstimator {
         if (capacityKwh > 10 && capacityKwh < 200) {
             this.nominalCapacityKwh = capacityKwh;
             logger.info("Nominal capacity set to " + capacityKwh + " KWh");
+            persistEstimate();  // Save immediately so it survives restarts
+            
+            // Trigger seed now that we have capacity — autoDetect may have
+            // set this after the initial seedInitialEstimate call returned early
+            if (!hasEstimate()) {
+                seedInitialEstimate();
+            }
         }
     }
 
     public double getNominalCapacityKwh() {
         return nominalCapacityKwh;
+    }
+
+    /**
+     * Detect capacity directly from pack voltage and cell voltage.
+     * Called from BydDataCollector when the first HV pack voltage event arrives.
+     * This always overrides any previous detection (SOC heuristic is unreliable).
+     */
+    public void autoDetectFromPackVoltage(double packVoltage, BydVehicleData vd) {
+        if (packVoltage < 200 || packVoltage > 900) return;
+        
+        double cellVoltage = 3.2;
+        if (vd != null && !Double.isNaN(vd.highCellVoltage) && vd.highCellVoltage > 2.5 && vd.highCellVoltage < 3.7) {
+            cellVoltage = vd.highCellVoltage;
+        } else if (vd != null && !Double.isNaN(vd.lowCellVoltage) && vd.lowCellVoltage > 2.5 && vd.lowCellVoltage < 3.7) {
+            cellVoltage = vd.lowCellVoltage;
+        }
+        
+        int cellCount = (int) Math.round(packVoltage / cellVoltage);
+        double capacity = mapCellCountToCapacity(cellCount);
+        
+        if (capacity > 0) {
+            setNominalCapacityKwh(capacity);
+            logger.info("Pack Voltage Capacity: " + capacity + " kWh (voltage=" +
+                String.format("%.1f", packVoltage) + "V, cellV=" + String.format("%.3f", cellVoltage) +
+                "V, cells≈" + cellCount + "s)");
+        } else {
+            logger.debug("Pack voltage " + String.format("%.1f", packVoltage) + "V → " + 
+                cellCount + " cells — no matching BYD pack");
+        }
     }
 
     // ==================== AUTO-DETECT ====================
@@ -68,13 +106,43 @@ public class SohEstimator {
      * 3. Model string: ro.product.model → table lookup. Last resort.
      */
     public void autoDetectCarModel(android.content.Context context) {
-        // Priority order (changed: BMS first, SOC heuristic second):
-        // 1. BMS direct: getBatteryCapacity() Ah -> mapAhToKwh() lookup (deterministic, reliable)
-        // 2. SOC heuristic: remainKwh / SOC -> snap to nearest known pack (unreliable on PHEVs)
-        // 3. Model string: ro.product.model -> table lookup (last resort)
-        //
-        // BMS is prioritized because on PHEVs the remainKwh value can be stale/stuck,
-        // causing the SOC heuristic to match the wrong pack size.
+        // Priority order:
+        // 0. Pack voltage: derive cell count from HV voltage → map to known BYD pack
+        // 1. BMS direct: getBatteryCapacity() Ah -> mapAhToKwh() lookup
+        // 2. SOC heuristic: remainKwh / SOC -> snap to nearest known pack
+        // 3. Model string: ro.product.model -> table lookup
+        // 4. Persisted capacity from previous successful detection
+
+        // Method 0: Pack voltage → cell count → capacity lookup
+        // BYD Blade cells are LFP. Use actual cell voltage from BMS if available,
+        // otherwise fall back to 3.2V nominal. Using the real cell voltage gives
+        // accurate cell count regardless of SOC (e.g., 496V at 3.31V/cell = 150s Seal,
+        // not 155s which would wrongly match the Han EV).
+        try {
+            VehicleDataMonitor vdm = VehicleDataMonitor.getInstance();
+            BydVehicleData vd = vdm != null ? vdm.getVd() : null;
+            if (vd != null && !Double.isNaN(vd.hvPackVoltage) && vd.hvPackVoltage > 200) {
+                double voltage = vd.hvPackVoltage;
+                // Use actual cell voltage from BMS for accurate cell count
+                double cellVoltage = 3.2;  // default nominal
+                if (!Double.isNaN(vd.highCellVoltage) && vd.highCellVoltage > 2.5 && vd.highCellVoltage < 3.7) {
+                    cellVoltage = vd.highCellVoltage;
+                } else if (!Double.isNaN(vd.lowCellVoltage) && vd.lowCellVoltage > 2.5 && vd.lowCellVoltage < 3.7) {
+                    cellVoltage = vd.lowCellVoltage;
+                }
+                int cellCount = (int) Math.round(voltage / cellVoltage);
+                double capacity = mapCellCountToCapacity(cellCount);
+                if (capacity > 0) {
+                    setNominalCapacityKwh(capacity);
+                    logger.info("Pack Voltage Capacity: " + capacity + " kWh (voltage=" + 
+                        String.format("%.1f", voltage) + "V, cellV=" + String.format("%.3f", cellVoltage) + 
+                        "V, cells≈" + cellCount + "s)");
+                    return;
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Pack voltage capacity lookup failed: " + e.getMessage());
+        }
 
         // Method 1: BMS direct
         if (context != null) {
@@ -116,9 +184,13 @@ public class SohEstimator {
             BatterySocData socData = vdm.getBatterySoc();
             if (remainingKwh > 5 && socData != null && socData.socPercent > 20) {
                 double estimatedCapacity = remainingKwh / (socData.socPercent / 100.0);
-                double ratio = remainingKwh / socData.socPercent;
-                if (ratio > 0.8 && ratio < 1.2) {
-                    logger.info("SOC heuristic skipped: remainKwh looks like SOC percentage");
+                // Detect BYD PHEV firmware bug: BMS returns SOC% value as kWh
+                // (e.g. 50% SOC → getBatteryRemainPowerKwh() returns 50.0 kWh).
+                // In this case the two numbers are numerically almost equal.
+                if (Math.abs(remainingKwh - socData.socPercent) < 3.0) {
+                    logger.info("SOC heuristic skipped: remainKwh (" +
+                        String.format("%.1f", remainingKwh) + ") ≈ socPercent (" +
+                        String.format("%.1f", socData.socPercent) + ") — likely SOC-as-kWh firmware bug");
                 } else {
                     double matched = matchNearestCapacity(estimatedCapacity);
                     if (matched > 0) {
@@ -149,7 +221,9 @@ public class SohEstimator {
             }
         } catch (Exception e) { /* ignore */ }
 
-        logger.warn("Capacity detection failed — SOH estimation disabled until capacity is identified");
+        logger.warn("Capacity detection failed" + 
+            (nominalCapacityKwh > 0 ? " — using previously saved capacity: " + nominalCapacityKwh + " kWh" 
+                                    : " — SOH estimation disabled until capacity is identified"));
     }
 
     /**
@@ -215,6 +289,17 @@ public class SohEstimator {
 
             String countStr = props.getProperty(PROP_SAMPLE_COUNT);
             if (countStr != null) sampleCount = Integer.parseInt(countStr);
+
+            // Restore nominal capacity — this survives bad remainKwh readings
+            // that would otherwise cause autoDetectCarModel to fail.
+            String capStr = props.getProperty(PROP_NOMINAL_CAPACITY);
+            if (capStr != null) {
+                double savedCap = Double.parseDouble(capStr);
+                if (savedCap > 10 && savedCap < 200 && nominalCapacityKwh <= 0) {
+                    nominalCapacityKwh = savedCap;
+                    logger.info("Restored nominal capacity: " + savedCap + " kWh");
+                }
+            }
 
             // Sanity check — reject persisted values outside realistic range
             // Allow up to 110% for factory over-provisioned new packs
@@ -435,6 +520,9 @@ public class SohEstimator {
             props.setProperty(PROP_ESTIMATION_METHOD, estimationMethod);
             props.setProperty(PROP_LAST_UPDATED, String.valueOf(System.currentTimeMillis()));
             props.setProperty(PROP_SAMPLE_COUNT, String.valueOf(sampleCount));
+            if (nominalCapacityKwh > 0) {
+                props.setProperty(PROP_NOMINAL_CAPACITY, String.valueOf(nominalCapacityKwh));
+            }
 
             try (FileOutputStream fos = new FileOutputStream(SOH_FILE)) {
                 props.store(fos, "ABRP SOH Estimate");
@@ -499,6 +587,38 @@ public class SohEstimator {
             }
         }
         return bestMatch;
+    }
+
+    /**
+     * Map HV pack cell count (series) to known BYD battery capacity.
+     * BYD Blade cells are LFP (3.2V nominal). Cell count is derived from
+     * pack voltage / 3.2V and uniquely identifies the pack across all models.
+     *
+     * Known BYD Blade pack configurations:
+     * - 96s:  ~307V nominal → Seagull 30 kWh / Sealion 6 DM-i 18.3 kWh
+     * - 104s: ~333V nominal → Dolphin Standard 44.9 kWh
+     * - 120s: ~384V nominal → Atto 3 60.48 kWh / Dolphin Extended
+     * - 126s: ~403V nominal → Seal Dynamic 61.44 kWh
+     * - 138s: ~442V nominal → Seal U 71.8 kWh / Song Plus EV
+     * - 150s: ~480V nominal → Seal 82.5 kWh
+     * - 156s: ~499V nominal → Han EV 85.44 kWh
+     * - 166s: ~531V nominal → Seal U 87 kWh
+     * - 170s: ~544V nominal → Sealion 7 91.3 kWh
+     * - 192s: ~614V nominal → Tang 108.8 kWh
+     */
+    private static double mapCellCountToCapacity(int cellCount) {
+        // Allow ±3 cells tolerance (voltage measurement noise, SOC-dependent cell voltage)
+        if (cellCount >= 93 && cellCount <= 99) return 30.08;    // Seagull 30 / Atto 1
+        if (cellCount >= 101 && cellCount <= 107) return 44.9;   // Dolphin Standard
+        if (cellCount >= 117 && cellCount <= 123) return 60.48;  // Atto 3 / Dolphin Extended
+        if (cellCount >= 123 && cellCount <= 129) return 61.44;  // Seal Dynamic RWD
+        if (cellCount >= 135 && cellCount <= 141) return 71.8;   // Seal U / Song Plus EV
+        if (cellCount >= 147 && cellCount <= 153) return 82.56;  // Seal
+        if (cellCount >= 153 && cellCount <= 159) return 85.44;  // Han EV
+        if (cellCount >= 163 && cellCount <= 169) return 87.0;   // Seal U 87 kWh
+        if (cellCount >= 167 && cellCount <= 173) return 91.3;   // Sealion 7
+        if (cellCount >= 189 && cellCount <= 195) return 108.8;  // Tang
+        return 0;
     }
 
     private static double mapCarTypeToCapacity(String carType) {

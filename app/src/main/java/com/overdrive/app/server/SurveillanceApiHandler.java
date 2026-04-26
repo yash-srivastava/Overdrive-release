@@ -5,7 +5,9 @@ import com.overdrive.app.surveillance.GpuSurveillancePipeline;
 import com.overdrive.app.surveillance.SurveillanceConfig;
 import com.overdrive.app.surveillance.SurveillanceConfigManager;
 import com.overdrive.app.surveillance.SurveillanceEngineGpu;
+import com.overdrive.app.surveillance.MotionPipelineV2;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.OutputStream;
@@ -26,24 +28,35 @@ public class SurveillanceApiHandler {
      * @return true if handled
      */
     public static boolean handle(String method, String path, String body, OutputStream out) throws Exception {
-        if (path.equals("/api/surveillance/config") && method.equals("GET")) {
+        // Strip query parameters for path matching
+        String cleanPath = path.contains("?") ? path.substring(0, path.indexOf("?")) : path;
+        
+        if (cleanPath.equals("/api/surveillance/config") && method.equals("GET")) {
             sendConfig(out);
             return true;
         }
-        if (path.equals("/api/surveillance/config") && method.equals("POST")) {
+        if (cleanPath.equals("/api/surveillance/config") && method.equals("POST")) {
             handleConfigPost(out, body);
             return true;
         }
-        if (path.equals("/api/surveillance/status")) {
+        if (cleanPath.equals("/api/surveillance/status")) {
             sendStatus(out);
             return true;
         }
-        if (path.equals("/api/surveillance/enable")) {
+        if (cleanPath.equals("/api/surveillance/enable")) {
             handleEnable(out);
             return true;
         }
-        if (path.equals("/api/surveillance/disable")) {
+        if (cleanPath.equals("/api/surveillance/disable")) {
             handleDisable(out);
+            return true;
+        }
+        if (cleanPath.equals("/api/surveillance/heatmap")) {
+            sendHeatmap(out);
+            return true;
+        }
+        if (cleanPath.equals("/api/surveillance/filterlog")) {
+            sendFilterLog(out);
             return true;
         }
         return false;
@@ -169,6 +182,34 @@ public class SurveillanceApiHandler {
         config.put("safeZoneSuppressed", CameraDaemon.isSafeZoneSuppressed());
         config.put("inSafeZone", safeMgr.isInSafeZone());
         config.put("safeZoneName", safeMgr.getCurrentZoneName());
+        
+        // V2 Pipeline settings
+        if (sentryConfig != null) {
+            config.put("environmentPreset", sentryConfig.getEnvironmentPreset());
+            config.put("sensitivityLevel", sentryConfig.getSensitivityLevel());
+            config.put("detectionZone", sentryConfig.getDetectionZone());
+            config.put("loiteringTime", sentryConfig.getLoiteringTimeSeconds());
+            boolean[] cameras = sentryConfig.getCameraEnabled();
+            config.put("cameraFront", cameras[0]);
+            config.put("cameraRight", cameras[1]);
+            config.put("cameraLeft", cameras[2]);
+            config.put("cameraRear", cameras[3]);
+            config.put("motionHeatmap", sentryConfig.isMotionHeatmapEnabled());
+            config.put("filterDebugLog", sentryConfig.isFilterDebugLogEnabled());
+            config.put("shadowFilter", sentryConfig.getShadowFilterMode());
+        } else {
+            config.put("environmentPreset", "outdoor");
+            config.put("sensitivityLevel", 3);
+            config.put("detectionZone", "normal");
+            config.put("loiteringTime", 3);
+            config.put("cameraFront", true);
+            config.put("cameraRight", true);
+            config.put("cameraLeft", true);
+            config.put("cameraRear", true);
+            config.put("motionHeatmap", false);
+            config.put("filterDebugLog", false);
+            config.put("shadowFilter", 2);
+        }
         
         response.put("config", config);
         HttpResponse.sendJson(out, response.toString());
@@ -389,6 +430,68 @@ public class SurveillanceApiHandler {
                 configChanged = true;
             }
             
+            // V2 Motion Detection settings
+            // These are persisted to SurveillanceConfig; sentry.setConfig() below re-applies
+            // them to the live pipeline via pipelineV2Config.applyConfig().
+            if (configJson.has("environmentPreset")) {
+                String preset = configJson.optString("environmentPreset", "outdoor");
+                sentryConfig.setEnvironmentPreset(preset);
+                if (sentry != null) sentry.applyV2EnvironmentPreset(preset);
+                configChanged = true;
+            }
+            if (configJson.has("sensitivityLevel")) {
+                int level = configJson.optInt("sensitivityLevel", 3);
+                sentryConfig.setSensitivityLevel(level);
+                if (sentry != null) sentry.applyV2Sensitivity(level);
+                configChanged = true;
+            }
+            if (configJson.has("detectionZone")) {
+                String zone = configJson.optString("detectionZone", "normal");
+                sentryConfig.setDetectionZone(zone);
+                configChanged = true;
+            }
+            if (configJson.has("loiteringTime")) {
+                int seconds = configJson.optInt("loiteringTime", 3);
+                sentryConfig.setLoiteringTimeSeconds(seconds);
+                if (sentry != null) sentry.setV2LoiteringTime(seconds);
+                configChanged = true;
+            }
+            if (configJson.has("shadowFilter")) {
+                int mode = configJson.optInt("shadowFilter", 2);
+                sentryConfig.setShadowFilterMode(mode);
+                if (sentry != null) sentry.setV2ShadowFilterMode(mode);
+                configChanged = true;
+            }
+            if (configJson.has("cameraFront") || configJson.has("cameraRight") ||
+                configJson.has("cameraLeft")  || configJson.has("cameraRear")) {
+                boolean[] existing = sentryConfig.getCameraEnabled();
+                boolean front = configJson.optBoolean("cameraFront", existing[0]);
+                boolean right = configJson.optBoolean("cameraRight", existing[1]);
+                boolean left  = configJson.optBoolean("cameraLeft",  existing[2]);
+                boolean rear  = configJson.optBoolean("cameraRear",  existing[3]);
+                sentryConfig.setCameraEnabled(0, front);
+                sentryConfig.setCameraEnabled(1, right);
+                sentryConfig.setCameraEnabled(2, left);
+                sentryConfig.setCameraEnabled(3, rear);
+                if (sentry != null) {
+                    sentry.setV2QuadrantEnabled(0, front);
+                    sentry.setV2QuadrantEnabled(1, right);
+                    sentry.setV2QuadrantEnabled(2, left);
+                    sentry.setV2QuadrantEnabled(3, rear);
+                }
+                configChanged = true;
+            }
+            if (configJson.has("motionHeatmap")) {
+                sentryConfig.setMotionHeatmapEnabled(configJson.optBoolean("motionHeatmap", false));
+                configChanged = true;
+            }
+            if (configJson.has("filterDebugLog")) {
+                boolean val = configJson.optBoolean("filterDebugLog", false);
+                sentryConfig.setFilterDebugLogEnabled(val);
+                if (sentry != null) sentry.setFilterDebugEnabled(val);
+                configChanged = true;
+            }
+            
             if (configChanged) {
                 try {
                     SurveillanceConfigManager configManager = new SurveillanceConfigManager();
@@ -463,5 +566,104 @@ public class SurveillanceApiHandler {
         CameraDaemon.disableSurveillance();
         com.overdrive.app.config.UnifiedConfigManager.setSurveillanceEnabled(false);
         HttpResponse.sendJsonSuccess(out);
+    }
+    
+    /**
+     * Returns per-quadrant block confidence data for the motion heatmap overlay.
+     * 
+     * Response format:
+     * {
+     *   "quadrants": [
+     *     { "id": 0, "name": "front", "enabled": true, "suppressed": false,
+     *       "meanLuma": 85.3, "activeBlocks": 2, "confirmedBlocks": 1,
+     *       "threatLevel": 2, "confidence": [0.0, 0.0, 0.3, 0.7, ...] },
+     *     ...
+     *   ],
+     *   "gridCols": 10, "gridRows": 7
+     * }
+     */
+    private static void sendHeatmap(OutputStream out) throws Exception {
+        GpuSurveillancePipeline gpuPipeline = CameraDaemon.getGpuPipeline();
+        
+        JSONObject response = new JSONObject();
+        response.put("gridCols", 10);
+        response.put("gridRows", 7);
+        
+        // Include current stream view mode so the UI knows whether to draw
+        // a 2x2 mosaic heatmap or a single full-frame quadrant heatmap.
+        // 0=Mosaic, 1=Front, 2=Right, 3=Rear, 4=Left, -1=No stream
+        int viewMode = -1;
+        if (gpuPipeline != null) {
+            if (gpuPipeline.isStreamingEnabled()) {
+                viewMode = gpuPipeline.getStreamViewMode();
+            }
+            // If not streaming but surveillance is running, report the recording view.
+            // Surveillance always records the mosaic, but the heatmap should show
+            // all quadrants in a unified layout since there's no visible stream.
+            if (viewMode < 0 && gpuPipeline.isSurveillanceMode()) {
+                viewMode = 0;  // Mosaic (surveillance records all cameras)
+            }
+        }
+        response.put("viewMode", viewMode);
+        
+        JSONArray quadrants = new JSONArray();
+        String[] names = {"front", "right", "left", "rear"};
+        
+        SurveillanceEngineGpu sentry = (gpuPipeline != null) ? gpuPipeline.getSentry() : null;
+        MotionPipelineV2.QuadrantResult[] results = (sentry != null) ? sentry.getV2Results() : null;
+        
+        for (int q = 0; q < 4; q++) {
+            JSONObject qObj = new JSONObject();
+            qObj.put("id", q);
+            qObj.put("name", names[q]);
+            
+            if (results != null && results[q] != null) {
+                qObj.put("enabled", true);
+                qObj.put("suppressed", results[q].brightnessSuppressed);
+                qObj.put("meanLuma", Math.round(results[q].meanLuma * 10) / 10.0);
+                qObj.put("activeBlocks", results[q].activeBlocks);
+                qObj.put("confirmedBlocks", results[q].confirmedBlocks);
+                qObj.put("threatLevel", results[q].threatLevel);
+                qObj.put("componentSize", results[q].componentSize);
+                
+                // Block confidence array (70 floats, rounded to 2 decimal places)
+                JSONArray conf = new JSONArray();
+                for (int i = 0; i < results[q].blockConfidence.length; i++) {
+                    conf.put(Math.round(results[q].blockConfidence[i] * 100) / 100.0);
+                }
+                qObj.put("confidence", conf);
+            } else {
+                qObj.put("enabled", false);
+                qObj.put("suppressed", false);
+            }
+            
+            quadrants.put(qObj);
+        }
+        
+        response.put("quadrants", quadrants);
+        HttpResponse.sendJson(out, response.toString());
+    }
+    
+    /**
+     * Returns recent filter debug log entries.
+     * Ring buffer of the last 100 filter decisions (newest first).
+     */
+    private static void sendFilterLog(OutputStream out) throws Exception {
+        GpuSurveillancePipeline gpuPipeline = CameraDaemon.getGpuPipeline();
+        SurveillanceEngineGpu sentry = (gpuPipeline != null) ? gpuPipeline.getSentry() : null;
+        
+        JSONObject response = new JSONObject();
+        JSONArray entries = new JSONArray();
+        
+        if (sentry != null) {
+            String[] logEntries = sentry.getFilterLogEntries();
+            for (String entry : logEntries) {
+                if (entry != null) entries.put(entry);
+            }
+        }
+        
+        response.put("entries", entries);
+        response.put("count", entries.length());
+        HttpResponse.sendJson(out, response.toString());
     }
 }

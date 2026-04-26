@@ -430,6 +430,10 @@ class TelegramSettingsFragment : Fragment() {
         tvPin.visibility = View.VISIBLE
         tvPinExpiry.visibility = View.VISIBLE
         
+        // Write PIN to daemon config so TelegramBotDaemon can validate it
+        writeDaemonConfigProperty("pair_pin", pinState.pin, showToast = false)
+        writeDaemonConfigProperty("pair_pin_expiry", pinState.expiresAt.toString(), showToast = false)
+        
         // Start countdown
         pinCountdownTimer?.cancel()
         pinCountdownTimer = object : CountDownTimer(pinState.remainingMs, 1000) {

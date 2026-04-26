@@ -28,6 +28,7 @@ public class MqttConnectionConfig {
     public int publishIntervalSeconds;   // How often to publish (default: 5)
     public boolean adaptiveInterval;     // If true, slow down when parked (like ABRP)
     public boolean retainMessages;       // MQTT retain flag on published messages
+    public boolean trustAllCerts;        // If true, accept self-signed/untrusted certs (Home Assistant)
 
     // Defaults
     private static final int DEFAULT_PORT = 1883;
@@ -35,6 +36,7 @@ public class MqttConnectionConfig {
     private static final int DEFAULT_PUBLISH_INTERVAL = 5;
     private static final boolean DEFAULT_ADAPTIVE = true;
     private static final boolean DEFAULT_RETAIN = false;
+    private static final boolean DEFAULT_TRUST_ALL_CERTS = false;
 
     /**
      * Create a new connection config with defaults.
@@ -53,30 +55,41 @@ public class MqttConnectionConfig {
         this.publishIntervalSeconds = DEFAULT_PUBLISH_INTERVAL;
         this.adaptiveInterval = DEFAULT_ADAPTIVE;
         this.retainMessages = DEFAULT_RETAIN;
+        this.trustAllCerts = DEFAULT_TRUST_ALL_CERTS;
     }
 
     /**
      * Build the full broker URI for Paho MQTT client.
-     * Format: tcp://host:port or ssl://host:port
+     *
+     * Supports all Paho URI formats:
+     *   tcp://host:port          — plain MQTT
+     *   ssl://host:port          — MQTT over TLS
+     *   ws://host:port/path      — MQTT over WebSocket
+     *   wss://host:port/path     — MQTT over secure WebSocket (the ISP firewall bypass)
+     *
+     * The regex must allow an optional path after the port (e.g. /mqtt) so that
+     * wss://mqtt.eclipseprojects.io:443/mqtt is passed through as-is instead of
+     * getting a second port appended.
      */
     public String getBrokerUri() {
         String url = brokerUrl;
         if (url == null || url.isEmpty()) return "";
 
-        // Strip trailing slash
+        // Strip trailing slash (but not path components like /mqtt)
         if (url.endsWith("/")) url = url.substring(0, url.length() - 1);
 
-        // If user provided full URI with port, use as-is
-        if (url.matches("^(tcp|ssl|ws|wss)://.*:\\d+$")) {
+        // If the URL already contains a port (with or without a trailing path), use as-is.
+        // Matches: wss://broker:443  |  wss://broker:443/mqtt  |  ssl://broker:8883
+        if (url.matches("^(tcp|ssl|ws|wss)://.*:\\d+(/.*)?$")) {
             return url;
         }
 
-        // If user provided protocol + host without port, append port
+        // Protocol present but no port — append the configured port
         if (url.matches("^(tcp|ssl|ws|wss)://.*")) {
             return url + ":" + port;
         }
 
-        // If user provided just host, prepend tcp:// and append port
+        // Bare hostname — prepend tcp:// and append port
         return "tcp://" + url + ":" + port;
     }
 
@@ -92,6 +105,14 @@ public class MqttConnectionConfig {
             return "overdrive-" + deviceId.substring(0, Math.min(8, deviceId.length())) + "-" + id;
         }
         return "overdrive-" + id;
+    }
+
+    /**
+     * Check if the broker URI uses a secure protocol (ssl:// or wss://).
+     */
+    public boolean isSsl() {
+        String uri = getBrokerUri();
+        return uri.startsWith("ssl://") || uri.startsWith("wss://");
     }
 
     /**
@@ -132,6 +153,7 @@ public class MqttConnectionConfig {
             json.put("publishIntervalSeconds", publishIntervalSeconds);
             json.put("adaptiveInterval", adaptiveInterval);
             json.put("retainMessages", retainMessages);
+            json.put("trustAllCerts", trustAllCerts);
         } catch (Exception ignored) {}
         return json;
     }
@@ -166,6 +188,7 @@ public class MqttConnectionConfig {
         config.publishIntervalSeconds = json.optInt("publishIntervalSeconds", DEFAULT_PUBLISH_INTERVAL);
         config.adaptiveInterval = json.optBoolean("adaptiveInterval", DEFAULT_ADAPTIVE);
         config.retainMessages = json.optBoolean("retainMessages", DEFAULT_RETAIN);
+        config.trustAllCerts = json.optBoolean("trustAllCerts", DEFAULT_TRUST_ALL_CERTS);
         return config;
     }
 
@@ -179,6 +202,8 @@ public class MqttConnectionConfig {
                 ", enabled=" + enabled +
                 ", interval=" + publishIntervalSeconds + "s" +
                 ", adaptive=" + adaptiveInterval +
+                ", ssl=" + isSsl() +
+                ", trustAllCerts=" + trustAllCerts +
                 '}';
     }
 }

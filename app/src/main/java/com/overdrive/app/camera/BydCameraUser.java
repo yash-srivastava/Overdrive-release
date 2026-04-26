@@ -31,7 +31,7 @@ public class BydCameraUser extends IBYDCameraUser.Stub {
     private final String packageName;
     private volatile boolean yielded = false;
     private volatile boolean nativeAppHoldsCamera = false;
-    private CameraYieldListener listener;
+    private volatile CameraYieldListener listener;
 
     /**
      * Callback interface for camera yield/reacquire events.

@@ -311,18 +311,42 @@ public class GpuDownscaler {
     }
     
     /**
-     * Legacy method for compatibility - blocks and copies to byte array.
-     * Prefer postFrame() + acquireLatestImage() for zero-copy.
+     * Synchronous downscale + readback. Draws the camera texture on the downscaler
+     * thread, waits for completion, then reads the result.
      * 
-     * SOTA FIX: Uses reusable buffer to eliminate 900KB allocation per frame.
+     * SOTA: Previous async pattern (postFrame + sleep(5ms) + acquireLatestImage) was
+     * unreliable — the 5ms sleep was often not enough for the render thread to complete,
+     * resulting in stale frames. This synchronous approach ensures the readback always
+     * gets the current frame.
      */
     public byte[] readPixels(int cameraTextureId, int width, int height) {
-        // Post frame and wait briefly
-        postFrame(cameraTextureId);
+        if (!initialized || renderHandler == null) return null;
         
-        try {
-            Thread.sleep(5); // Give GPU time to render
-        } catch (InterruptedException ignored) {}
+        // Draw synchronously on the downscaler thread and wait for completion
+        final Object lock = new Object();
+        final boolean[] done = {false};
+        
+        renderHandler.post(() -> {
+            drawFrame(cameraTextureId);
+            synchronized (lock) {
+                done[0] = true;
+                lock.notify();
+            }
+        });
+        
+        // Wait for draw to complete (max 50ms — if it takes longer, skip this frame)
+        synchronized (lock) {
+            if (!done[0]) {
+                try {
+                    lock.wait(50);
+                } catch (InterruptedException ignored) {}
+            }
+        }
+        
+        if (!done[0]) {
+            // Render thread didn't complete in time — skip this frame
+            return null;
+        }
         
         Image image = acquireLatestImage();
         if (image == null) return null;
@@ -381,6 +405,185 @@ public class GpuDownscaler {
         }
     }
     
+    // ========================================================================
+    // SOTA: Direct GL-thread readback (bypasses broken async ImageReader path)
+    // ========================================================================
+    
+    private int directFbo = -1;
+    private int directTexture = -1;
+    private int directProgram = -1;
+    private int directAPosition = -1;
+    private int directATexCoord = -1;
+    private int directUCameraTex = -1;
+    private ByteBuffer directReadBuffer = null;
+    private byte[] directRgbBuffer = null;
+    private boolean directInitialized = false;
+    
+    // Double-buffered async readback: eliminates glFinish() stall.
+    // We maintain two FBOs. On frame N, we render to FBO[current] and read back
+    // from FBO[previous] (which the GPU finished rendering on frame N-1).
+    // This pipelines the readback one frame behind, eliminating the 10-15ms
+    // synchronous CPU-GPU block that glFinish() + glReadPixels causes.
+    private int directFbo2 = -1;
+    private int directTexture2 = -1;
+    private int directCurrentFbo = 0;  // 0 or 1 — which FBO to render to this frame
+    private boolean directHasPreviousFrame = false;  // First frame has nothing to read back
+    
+    /**
+     * SOTA: Double-buffered async readback on the current GL thread.
+     *
+     * Previous implementation used glFinish() + glReadPixels which stalls the CPU
+     * for 10-15ms waiting for the GPU to complete rendering. This double-buffered
+     * approach renders to FBO[N] while reading back from FBO[N-1], pipelining the
+     * readback one frame behind. The GPU has already finished FBO[N-1] by the time
+     * we read it, so glReadPixels returns immediately without a stall.
+     *
+     * Trade-off: the AI lane sees data that is one frame old (~100ms at 10 FPS).
+     * This is negligible for motion detection — a person moves ~3 pixels in 100ms.
+     */
+    public byte[] readPixelsDirect(int cameraTextureId) {
+        if (!directInitialized) initDirectFbo();
+        if (!directInitialized) return null;
+        
+        int[] savedViewport = new int[4];
+        GLES20.glGetIntegerv(GLES20.GL_VIEWPORT, savedViewport, 0);
+        
+        // Determine which FBO to render to (current) and which to read from (previous)
+        int renderFbo = (directCurrentFbo == 0) ? directFbo : directFbo2;
+        int readFbo = (directCurrentFbo == 0) ? directFbo2 : directFbo;
+        
+        // Step 1: Render current frame to renderFbo
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, renderFbo);
+        GLES20.glViewport(0, 0, WIDTH, HEIGHT);
+        GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+        
+        GLES20.glUseProgram(directProgram);
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
+        GLES20.glUniform1i(directUCameraTex, 0);
+        
+        GLES20.glEnableVertexAttribArray(directAPosition);
+        GLES20.glVertexAttribPointer(directAPosition, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer);
+        GLES20.glEnableVertexAttribArray(directATexCoord);
+        GLES20.glVertexAttribPointer(directATexCoord, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
+        
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
+        
+        GLES20.glDisableVertexAttribArray(directAPosition);
+        GLES20.glDisableVertexAttribArray(directATexCoord);
+        
+        // Step 2: Read back from readFbo (previous frame — GPU already finished it)
+        // No glFinish() needed! The previous frame was submitted at least one full
+        // render loop iteration ago (~33ms at 30 FPS camera), which is far more than
+        // the GPU needs to complete a simple FBO blit.
+        byte[] result = null;
+        if (directHasPreviousFrame) {
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, readFbo);
+            directReadBuffer.clear();
+            GLES20.glReadPixels(0, 0, WIDTH, HEIGHT, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, directReadBuffer);
+            
+            // RGBA → RGB with Y-flip (GL origin is bottom-left)
+            directReadBuffer.rewind();
+            int rgbIdx = 0;
+            for (int y = HEIGHT - 1; y >= 0; y--) {
+                int rowStart = y * WIDTH * 4;
+                for (int x = 0; x < WIDTH; x++) {
+                    int srcIdx = rowStart + x * 4;
+                    directRgbBuffer[rgbIdx++] = directReadBuffer.get(srcIdx);
+                    directRgbBuffer[rgbIdx++] = directReadBuffer.get(srcIdx + 1);
+                    directRgbBuffer[rgbIdx++] = directReadBuffer.get(srcIdx + 2);
+                }
+            }
+            result = directRgbBuffer;
+        } else {
+            // First frame — nothing to read back yet. Render submitted, will be
+            // available next call. Return null this one time.
+            directHasPreviousFrame = true;
+        }
+        
+        // Step 3: Swap FBOs for next frame
+        directCurrentFbo = 1 - directCurrentFbo;
+        
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+        GLES20.glViewport(savedViewport[0], savedViewport[1], savedViewport[2], savedViewport[3]);
+        
+        return result;
+    }
+    
+    private void initDirectFbo() {
+        try {
+            directProgram = GlUtil.createProgram(VERTEX_SHADER, FRAGMENT_SHADER);
+            if (directProgram == 0) { logger.error("Direct FBO shader failed"); return; }
+            directAPosition = GLES20.glGetAttribLocation(directProgram, "aPosition");
+            directATexCoord = GLES20.glGetAttribLocation(directProgram, "aTexCoord");
+            directUCameraTex = GLES20.glGetUniformLocation(directProgram, "uCameraTex");
+            
+            // Create FBO #1
+            int[] texIds = new int[1];
+            GLES20.glGenTextures(1, texIds, 0);
+            directTexture = texIds[0];
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, directTexture);
+            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, WIDTH, HEIGHT, 0,
+                    GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null);
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+            
+            int[] fboIds = new int[1];
+            GLES20.glGenFramebuffers(1, fboIds, 0);
+            directFbo = fboIds[0];
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, directFbo);
+            GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+                    GLES20.GL_TEXTURE_2D, directTexture, 0);
+            
+            int status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER);
+            if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
+                logger.error("FBO #1 incomplete: " + status);
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+                return;
+            }
+            
+            // Create FBO #2 (for double-buffered async readback)
+            int[] texIds2 = new int[1];
+            GLES20.glGenTextures(1, texIds2, 0);
+            directTexture2 = texIds2[0];
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, directTexture2);
+            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, WIDTH, HEIGHT, 0,
+                    GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null);
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+            
+            int[] fboIds2 = new int[1];
+            GLES20.glGenFramebuffers(1, fboIds2, 0);
+            directFbo2 = fboIds2[0];
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, directFbo2);
+            GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+                    GLES20.GL_TEXTURE_2D, directTexture2, 0);
+            
+            int status2 = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER);
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+            if (status2 != GLES20.GL_FRAMEBUFFER_COMPLETE) {
+                logger.error("FBO #2 incomplete: " + status2);
+                return;
+            }
+            
+            directReadBuffer = ByteBuffer.allocateDirect(WIDTH * HEIGHT * 4);
+            directReadBuffer.order(java.nio.ByteOrder.nativeOrder());
+            directRgbBuffer = new byte[WIDTH * HEIGHT * 3];
+            
+            if (vertexBuffer == null) vertexBuffer = GlUtil.createFloatBuffer(VERTEX_COORDS);
+            if (texCoordBuffer == null) texCoordBuffer = GlUtil.createFloatBuffer(TEX_COORDS);
+            
+            directCurrentFbo = 0;
+            directHasPreviousFrame = false;
+            
+            directInitialized = true;
+            logger.info("Double-buffered FBO readback initialized (640x480, async)");
+        } catch (Exception e) {
+            logger.error("Failed to init direct FBO: " + e.getMessage());
+        }
+    }
+    
     // Utility methods
     public static ByteBuffer getDirectBuffer(Image image) {
         if (image == null) return null;
@@ -412,9 +615,32 @@ public class GpuDownscaler {
      */
     public void release() {
         initialized = false;
+        directInitialized = false;
         
         if (renderHandler != null) {
             renderHandler.post(() -> {
+                // Clean up double-buffered FBOs
+                if (directFbo >= 0) {
+                    GLES20.glDeleteFramebuffers(1, new int[]{directFbo}, 0);
+                    directFbo = -1;
+                }
+                if (directFbo2 >= 0) {
+                    GLES20.glDeleteFramebuffers(1, new int[]{directFbo2}, 0);
+                    directFbo2 = -1;
+                }
+                if (directTexture >= 0) {
+                    GLES20.glDeleteTextures(1, new int[]{directTexture}, 0);
+                    directTexture = -1;
+                }
+                if (directTexture2 >= 0) {
+                    GLES20.glDeleteTextures(1, new int[]{directTexture2}, 0);
+                    directTexture2 = -1;
+                }
+                if (directProgram > 0) {
+                    GLES20.glDeleteProgram(directProgram);
+                    directProgram = -1;
+                }
+                
                 if (eglSurface != null && eglSurface != EGL14.EGL_NO_SURFACE) {
                     EGL14.eglDestroySurface(eglDisplay, eglSurface);
                 }

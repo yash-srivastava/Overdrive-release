@@ -347,7 +347,23 @@ class YoloDetector(private val context: Context) {
         val bikeCount = final.count { it.classId == CLASS_BICYCLE }
         val animalCount = final.count { it.classId in CLASS_BIRD..CLASS_GIRAFFE }
         
-        logger.info("Detected ${final.size} objects: person=$personCount car=$carCount bike=$bikeCount animal=$animalCount (max_conf=${"%.3f".format(maxConfSeen)} class=$maxConfClass)")
+        // FIX: Log the max confidence from KEPT detections, not from all 8400 raw boxes.
+        // Previously, maxConfSeen/maxConfClass tracked the highest confidence across ALL
+        // boxes including those that failed the class filter and confidence threshold.
+        // This caused the log to report "person=1 (max_conf=0.660 class=2)" — the person
+        // was the kept detection, but class=2 (car) was the highest raw box confidence.
+        // The EventTimelineCollector uses the same class IDs from the Detection objects
+        // (which are correct), but the misleading log made it look like a bug.
+        var bestKeptConf = 0f
+        var bestKeptClass = -1
+        for (det in final) {
+            if (det.confidence > bestKeptConf) {
+                bestKeptConf = det.confidence
+                bestKeptClass = det.classId
+            }
+        }
+        
+        logger.info("Detected ${final.size} objects: person=$personCount car=$carCount bike=$bikeCount animal=$animalCount (max_conf=${"%.3f".format(bestKeptConf)} class=$bestKeptClass)")
         
         return final
     }

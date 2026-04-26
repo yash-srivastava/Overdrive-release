@@ -1151,4 +1151,38 @@ public class SocHistoryDatabase {
     public boolean isAvailable() {
         return isInitialized && connection != null;
     }
+
+    /**
+     * Compute the SOC change rate in %/hour from recent samples (last 10 minutes).
+     * Returns a positive value if SOC is rising (charging), negative if falling,
+     * or 0 if insufficient data, samples are too close together, or too old.
+     */
+    public double getSocChangeRatePerHour() {
+        if (!isAvailable()) return 0;
+        try {
+            // Only use samples from the last 10 minutes to avoid stale cross-session data
+            long cutoff = System.currentTimeMillis() - 10 * 60 * 1000;
+            java.sql.PreparedStatement stmt = connection.prepareStatement(
+                "SELECT timestamp, soc_percent FROM " + TABLE_SOC +
+                " WHERE timestamp > ? ORDER BY timestamp DESC LIMIT 2");
+            stmt.setLong(1, cutoff);
+            java.sql.ResultSet rs = stmt.executeQuery();
+            double soc1 = Double.NaN, soc2 = Double.NaN;
+            long t1 = 0, t2 = 0;
+            if (rs.next()) { t1 = rs.getLong(1); soc1 = rs.getDouble(2); }
+            if (rs.next()) { t2 = rs.getLong(1); soc2 = rs.getDouble(2); }
+            rs.close();
+            stmt.close();
+
+            if (Double.isNaN(soc1) || Double.isNaN(soc2)) return 0;
+            long deltaMs = t1 - t2;
+            if (deltaMs < 60_000) return 0;  // Need at least 60s between samples
+            double deltaSoc = soc1 - soc2;
+            if (Math.abs(deltaSoc) < 0.1) return 0;  // SOC hasn't changed meaningfully
+            double deltaHours = deltaMs / 3_600_000.0;
+            return deltaSoc / deltaHours;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
 }

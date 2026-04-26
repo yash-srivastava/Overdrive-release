@@ -651,6 +651,9 @@ const TRIPS = {
                 if (btn) btn.style.display = data.trips.length >= this.pageSize ? 'block' : 'none';
                 document.getElementById('tripEmptyState').style.display = 'none';
             } else if (offset === 0) {
+                // No trips for this period — clear the list and show empty state.
+                this.trips = [];
+                this.renderTripList([]);
                 document.getElementById('tripEmptyState').style.display = 'flex';
                 document.getElementById('loadMoreBtn').style.display = 'none';
             }
@@ -720,6 +723,18 @@ const TRIPS = {
             costStr = cur + tripCost.toFixed(1);
         } else if (energyUsed > 0 && this.electricityRate > 0) {
             costStr = cur + (energyUsed * this.electricityRate).toFixed(1);
+        } else if (this.electricityRate > 0) {
+            // Fallback: estimate from SoC delta for old trips without kWh data
+            const socStart = trip.socStart || trip.soc_start || 0;
+            const socEnd = trip.socEnd || trip.soc_end || 0;
+            if (socStart > socEnd && socStart > 0) {
+                const socDelta = socStart - socEnd;
+                // Derive nominal from kwhStart if available, else use 82.56 kWh default
+                const kwhStart = trip.kwhStart || trip.kwh_start || 0;
+                const nominal = (kwhStart > 0 && socStart > 5) ? kwhStart / (socStart / 100) : 82.56;
+                const estEnergy = (socDelta / 100) * nominal;
+                costStr = '~' + cur + (estEnergy * this.electricityRate).toFixed(1);
+            }
         }
 
         const elevGain = trip.elevationGainM || trip.elevation_gain_m || 0;
@@ -795,7 +810,18 @@ const TRIPS = {
         trips.forEach(t => {
             totalDist += t.distanceKm || t.distance_km || 0;
             totalDur += t.durationSeconds || t.duration_seconds || 0;
-            totalEnergy += t.energyUsedKwh || t.energy_used_kwh || 0;
+            let energy = t.energyUsedKwh || t.energy_used_kwh || 0;
+            // Fallback: estimate energy from SoC delta for trips without kWh data
+            if (energy <= 0) {
+                const ss = t.socStart || t.soc_start || 0;
+                const se = t.socEnd || t.soc_end || 0;
+                if (ss > se && ss > 0) {
+                    const kws = t.kwhStart || t.kwh_start || 0;
+                    const nom = (kws > 0 && ss > 5) ? kws / (ss / 100) : 82.56;
+                    energy = ((ss - se) / 100) * nom;
+                }
+            }
+            totalEnergy += energy;
             totalCost += t.tripCost || t.trip_cost || 0;
             scoreSum += this.getAvgScore(t);
             const socStart = t.socStart || t.soc_start || 0;
@@ -854,7 +880,18 @@ const TRIPS = {
         let totalEnergy = 0, totalDist = 0;
         if (trips && trips.length > 0) {
             trips.forEach(t => {
-                totalEnergy += t.energyUsedKwh || t.energy_used_kwh || 0;
+                let energy = t.energyUsedKwh || t.energy_used_kwh || 0;
+                // Fallback: estimate from SoC delta for trips without kWh data
+                if (energy <= 0) {
+                    const ss = t.socStart || t.soc_start || 0;
+                    const se = t.socEnd || t.soc_end || 0;
+                    if (ss > se && ss > 0) {
+                        const kws = t.kwhStart || t.kwh_start || 0;
+                        const nom = (kws > 0 && ss > 5) ? kws / (ss / 100) : 82.56;
+                        energy = ((ss - se) / 100) * nom;
+                    }
+                }
+                totalEnergy += energy;
                 totalDist += t.distanceKm || t.distance_km || 0;
             });
         }
@@ -1090,11 +1127,15 @@ const TRIPS = {
             this.loadRouteComparison(trip);
 
             // Fetch telemetry (may be unavailable for older trips)
+            console.log('[Trips] Trip telemetry path:', trip.telemetryFilePath || trip.telemetry_file_path || 'NONE');
             if (trip.telemetryFilePath || trip.telemetry_file_path) {
                 try {
+                    console.log('[Trips] Fetching telemetry for trip ' + tripId);
                     const telResp = await fetch('/api/trips/' + tripId + '/telemetry');
+                    console.log('[Trips] Telemetry response status:', telResp.status);
                     if (telResp.ok) {
                         const telData = await telResp.json();
+                        console.log('[Trips] Telemetry data: success=' + telData.success + ' samples=' + (telData.telemetry ? telData.telemetry.length : 0));
                         if (telData.success && telData.telemetry && telData.telemetry.length > 0) {
                 const samples = telData.telemetry;
                 this.telemetryCache = samples;
@@ -1108,19 +1149,22 @@ const TRIPS = {
                 const histCanvas = document.getElementById('speedHistogram');
                 if (histCanvas) this.renderSpeedHistogram(histCanvas, samples);
                 const mapContainer = document.getElementById('tripMap');
+                console.log('[Trips] Map container:', mapContainer ? (mapContainer.offsetWidth + 'x' + mapContainer.offsetHeight) : 'NOT FOUND');
+                console.log('[Trips] Leaflet available:', typeof L !== 'undefined');
                 if (mapContainer) {
-                    // Delay map render to ensure container is visible and has dimensions
+                    // Delay map render to ensure container is visible and has dimensions.
+                    // renderRouteMap has its own retry logic for Leaflet loading and
+                    // container layout, so we just need a small initial delay.
                     setTimeout(() => {
+                        console.log('[Trips] Calling renderRouteMap with ' + samples.length + ' samples');
                         this.renderRouteMap(mapContainer, samples);
-                        // Force Leaflet to recalculate after render
-                        if (this.leafletMap) {
-                            setTimeout(() => { this.leafletMap.invalidateSize(); }, 200);
-                        }
-                    }, 100);
+                    }, 150);
                 }
                         }
                     }
-                } catch (e) { /* telemetry unavailable for this trip */ }
+                } catch (e) {
+                    console.error('[Trips] Telemetry/map error:', e.message || e);
+                }
             }
         } catch (e) { console.warn('[Trips] Detail load failed:', e); }
     },
@@ -1431,6 +1475,10 @@ const TRIPS = {
             }
 
             // Create Leaflet map
+            if (typeof L === 'undefined') {
+                mapDiv.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);">Map library not available</div>';
+                return;
+            }
             mapDiv.innerHTML = '';
             const map = L.map(mapDiv, { zoomControl: false, attributionControl: false });
             this.routeCompareMapInstance = map;
@@ -1687,12 +1735,18 @@ const TRIPS = {
     renderRadar(canvas, scores) {
         const dpr = window.devicePixelRatio || 1;
         const rect = canvas.getBoundingClientRect();
-        canvas.width = rect.width * dpr;
-        canvas.height = rect.height * dpr;
+        // Old WebView (Chrome <88) doesn't support CSS aspect-ratio, so the
+        // container may have zero height. Fall back to width for a square canvas.
+        const w = rect.width || 300;
+        const h = rect.height > 0 ? rect.height : w;
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        // Also set explicit CSS size so the canvas is visible
+        canvas.style.width = w + 'px';
+        canvas.style.height = h + 'px';
         const ctx = canvas.getContext('2d');
         ctx.scale(dpr, dpr);
 
-        const w = rect.width, h = rect.height;
         const cx = w / 2, cy = h / 2;
         const radius = Math.min(cx, cy) * 0.55;
 
@@ -1855,12 +1909,16 @@ const TRIPS = {
     renderTimeline(canvas, telemetry, highlightIdx) {
         const dpr = window.devicePixelRatio || 1;
         const rect = canvas.getBoundingClientRect();
-        canvas.width = rect.width * dpr;
-        canvas.height = rect.height * dpr;
+        // Fallback for zero-height containers on old WebView without aspect-ratio
+        const w = rect.width || 300;
+        const h = rect.height > 0 ? rect.height : 160;
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        canvas.style.width = w + 'px';
+        canvas.style.height = h + 'px';
         const ctx = canvas.getContext('2d');
         ctx.scale(dpr, dpr);
 
-        const w = rect.width, h = rect.height;
         const pad = { top: 10, right: 40, bottom: 25, left: 50 };
         const cw = w - pad.left - pad.right;
         const ch = h - pad.top - pad.bottom;
@@ -2106,12 +2164,15 @@ const TRIPS = {
     renderSpeedHistogram(canvas, telemetry) {
         const dpr = window.devicePixelRatio || 1;
         const rect = canvas.getBoundingClientRect();
-        canvas.width = rect.width * dpr;
-        canvas.height = rect.height * dpr;
+        const w = rect.width || 300;
+        const h = rect.height > 0 ? rect.height : 160;
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        canvas.style.width = w + 'px';
+        canvas.style.height = h + 'px';
         const ctx = canvas.getContext('2d');
         ctx.scale(dpr, dpr);
 
-        const w = rect.width, h = rect.height;
         const pad = { top: 10, right: 10, bottom: 25, left: 80 };
         const cw = w - pad.left - pad.right;
         const ch = h - pad.top - pad.bottom;
@@ -2201,11 +2262,50 @@ const TRIPS = {
     // ==================== ROUTE MAP ====================
 
     renderRouteMap(container, telemetry) {
+        console.log('[Trips] renderRouteMap called, telemetry=' + (telemetry ? telemetry.length : 'null'));
         if (this.leafletMap) { this.leafletMap.remove(); this.leafletMap = null; }
-        if (!telemetry || telemetry.length < 2) return;
+        if (!telemetry || telemetry.length < 2) {
+            console.warn('[Trips] renderRouteMap: not enough telemetry');
+            return;
+        }
+
+        // Guard: Leaflet may not be loaded (CDN fetch can fail on old WebView)
+        if (typeof L === 'undefined') {
+            console.warn('[Trips] Leaflet not loaded, retrying in 1s... (attempt ' + (this._mapRetries || 0) + ')');
+            if (!this._mapRetries) this._mapRetries = 0;
+            if (this._mapRetries < 5) {
+                this._mapRetries++;
+                setTimeout(() => this.renderRouteMap(container, telemetry), 1000);
+            } else {
+                console.error('[Trips] Leaflet never loaded after 5 retries');
+            }
+            return;
+        }
+        this._mapRetries = 0;
+
+        // Guard: container must have real dimensions (old WebView is slow to layout
+        // after display:none → display:block transition)
+        var rect = container.getBoundingClientRect();
+        console.log('[Trips] Map container rect:', rect.width + 'x' + rect.height);
+        if (rect.width < 10 || rect.height < 10) {
+            console.warn('[Trips] Map container has no dimensions, retrying... (attempt ' + (this._layoutRetries || 0) + ')');
+            if (!this._layoutRetries) this._layoutRetries = 0;
+            if (this._layoutRetries < 10) {
+                this._layoutRetries++;
+                setTimeout(() => this.renderRouteMap(container, telemetry), 300);
+            } else {
+                console.error('[Trips] Map container never got dimensions after 10 retries');
+            }
+            return;
+        }
+        this._layoutRetries = 0;
 
         const points = telemetry.filter(s => s.la && s.lo && s.la !== 0 && s.lo !== 0);
-        if (points.length < 2) return;
+        console.log('[Trips] GPS points with coordinates:', points.length);
+        if (points.length < 2) {
+            console.warn('[Trips] renderRouteMap: not enough GPS points with coordinates');
+            return;
+        }
 
         // Compute bounds FIRST
         let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
@@ -2237,6 +2337,8 @@ const TRIPS = {
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19
         }).addTo(this.leafletMap);
+
+        console.log('[Trips] Map created successfully, tiles added, bounds set');
 
         // Now add route polyline as a SINGLE polyline with color array
         // Build coordinate array for a single polyline (more reliable than many small segments)
@@ -2308,6 +2410,12 @@ const TRIPS = {
                 }, 100);
             }
         }
+
+        // Force Leaflet to recalculate container size (old WebView may report
+        // stale dimensions right after display:none → block transition)
+        var mapRef = this.leafletMap;
+        setTimeout(function() { if (mapRef) mapRef.invalidateSize(); }, 200);
+        setTimeout(function() { if (mapRef) mapRef.invalidateSize(); }, 800);
 
         // Click/tap on map to jump to nearest point
         const self = this;

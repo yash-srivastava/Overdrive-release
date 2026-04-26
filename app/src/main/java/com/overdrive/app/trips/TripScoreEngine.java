@@ -458,7 +458,9 @@ public class TripScoreEngine {
             default:               targetGapMs = 2500; break;
         }
         targetGapMs *= anticipationGradientFactor;
-        if (coastGapCount >= MIN_COAST_TRANSITIONS) {
+        if (targetGapMs <= 0) {
+            trip.anticipationScore = DEFAULT_SCORE;
+        } else if (coastGapCount >= MIN_COAST_TRANSITIONS) {
             double avgGapMs = (double) coastGapSumMs / coastGapCount;
             trip.anticipationScore = clamp((int) Math.round(avgGapMs / targetGapMs * 100), 0, 100);
         } else {
@@ -513,8 +515,13 @@ public class TripScoreEngine {
             }
             bestEff += efficiencyBestAdjust;
             worstEff *= efficiencyGradientFactor;
-            double score = (worstEff - kwhPerKm) / (worstEff - bestEff) * 100;
-            trip.efficiencyScore = clamp((int) Math.round(score), 0, 100);
+            double effRange = worstEff - bestEff;
+            if (effRange <= 0) {
+                trip.efficiencyScore = 100;
+            } else {
+                double score = (worstEff - kwhPerKm) / effRange * 100;
+                trip.efficiencyScore = clamp((int) Math.round(score), 0, 100);
+            }
         } else if (trip.distanceKm >= MIN_EFFICIENCY_DISTANCE) {
             double socDelta = trip.socStart - trip.socEnd;
             if (socDelta > 0) {

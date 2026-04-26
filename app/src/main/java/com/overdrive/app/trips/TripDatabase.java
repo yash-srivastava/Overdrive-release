@@ -206,16 +206,9 @@ public class TripDatabase {
                 stmt.execute("ALTER TABLE trips ADD COLUMN IF NOT EXISTS elevation_gain_m REAL DEFAULT 0");
                 stmt.execute("ALTER TABLE trips ADD COLUMN IF NOT EXISTS elevation_loss_m REAL DEFAULT 0");
                 stmt.execute("ALTER TABLE trips ADD COLUMN IF NOT EXISTS avg_gradient_pct REAL DEFAULT 0");
-                // Rollup migrations
-                stmt.execute("ALTER TABLE weekly_rollups ADD COLUMN IF NOT EXISTS total_energy_kwh REAL DEFAULT 0");
-                stmt.execute("ALTER TABLE weekly_rollups ADD COLUMN IF NOT EXISTS total_cost REAL DEFAULT 0");
-                stmt.execute("ALTER TABLE weekly_rollups ADD COLUMN IF NOT EXISTS avg_energy_per_km REAL DEFAULT 0");
-                stmt.execute("ALTER TABLE monthly_rollups ADD COLUMN IF NOT EXISTS total_energy_kwh REAL DEFAULT 0");
-                stmt.execute("ALTER TABLE monthly_rollups ADD COLUMN IF NOT EXISTS total_cost REAL DEFAULT 0");
-                stmt.execute("ALTER TABLE monthly_rollups ADD COLUMN IF NOT EXISTS avg_energy_per_km REAL DEFAULT 0");
             } catch (Exception e) {
                 // Columns already exist or H2 version doesn't support IF NOT EXISTS
-                logger.debug("kWh column migration: " + e.getMessage());
+                logger.debug("trips kWh column migration: " + e.getMessage());
             }
 
             // Routes table for O(1) similar-trip lookups
@@ -262,6 +255,15 @@ public class TripDatabase {
                 ")"
             );
 
+            // Weekly rollups migration (for databases created before energy columns were added)
+            try {
+                stmt.execute("ALTER TABLE weekly_rollups ADD COLUMN IF NOT EXISTS total_energy_kwh REAL DEFAULT 0");
+                stmt.execute("ALTER TABLE weekly_rollups ADD COLUMN IF NOT EXISTS total_cost REAL DEFAULT 0");
+                stmt.execute("ALTER TABLE weekly_rollups ADD COLUMN IF NOT EXISTS avg_energy_per_km REAL DEFAULT 0");
+            } catch (Exception e) {
+                logger.debug("weekly_rollups energy migration: " + e.getMessage());
+            }
+
             // Monthly rollups
             stmt.execute(
                 "CREATE TABLE IF NOT EXISTS monthly_rollups (" +
@@ -282,6 +284,15 @@ public class TripDatabase {
                 "PRIMARY KEY (\"year\", month_number)" +
                 ")"
             );
+
+            // Monthly rollups migration (for databases created before energy columns were added)
+            try {
+                stmt.execute("ALTER TABLE monthly_rollups ADD COLUMN IF NOT EXISTS total_energy_kwh REAL DEFAULT 0");
+                stmt.execute("ALTER TABLE monthly_rollups ADD COLUMN IF NOT EXISTS total_cost REAL DEFAULT 0");
+                stmt.execute("ALTER TABLE monthly_rollups ADD COLUMN IF NOT EXISTS avg_energy_per_km REAL DEFAULT 0");
+            } catch (Exception e) {
+                logger.debug("monthly_rollups energy migration: " + e.getMessage());
+            }
 
             // Consumption buckets
             stmt.execute(
@@ -310,11 +321,12 @@ public class TripDatabase {
                 "efficiency_soc_per_km, " +
                 "start_lat, start_lon, end_lat, end_lon, ext_temp_c, " +
                 "anticipation_score, smoothness_score, speed_discipline_score, " +
-                "efficiency_score, consistency_score, micro_moments_json, telemetry_file_path) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                "efficiency_score, consistency_score, micro_moments_json, telemetry_file_path, route_id) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
         try (PreparedStatement pstmt = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             setTripParams(pstmt, trip);
+            pstmt.setObject(33, trip.routeId > 0 ? trip.routeId : null);
             pstmt.executeUpdate();
 
             try (ResultSet keys = pstmt.getGeneratedKeys()) {

@@ -203,16 +203,38 @@ public class EGLCore {
         }
         
         if (!EGL14.eglSwapBuffers(eglDisplay, surface)) {
-            // eglSwapBuffers returned false — grab the error code immediately
-            // before anything else can clear it
             int error = EGL14.eglGetError();
             String errorMsg = String.format("swapBuffers: EGL error 0x%x", error);
             logger.error(errorMsg);
             throw new RuntimeException(errorMsg);
         }
-        // Only check for deferred errors if swapBuffers reported success
-        // (some drivers set error flags asynchronously)
         checkEglError("swapBuffers");
+    }
+    
+    /**
+     * Set the presentation timestamp on an EGL surface and swap buffers.
+     * This stamps the exact nanosecond timestamp onto the encoder's input surface,
+     * ensuring the MediaCodec produces frames with accurate, monotonic PTS values
+     * derived from the physical camera sensor — not from the jittery system clock.
+     *
+     * @param surface The EGL surface (encoder input surface)
+     * @param timestampNs Presentation time in nanoseconds (from SurfaceTexture.getTimestamp())
+     */
+    public void swapBuffersWithTimestamp(EGLSurface surface, long timestampNs) {
+        if (surface == null || surface == EGL14.EGL_NO_SURFACE) {
+            throw new IllegalArgumentException("Invalid surface");
+        }
+        
+        // Stamp the exact camera sensor timestamp onto the encoder surface
+        EGLExt.eglPresentationTimeANDROID(eglDisplay, surface, timestampNs);
+        
+        if (!EGL14.eglSwapBuffers(eglDisplay, surface)) {
+            int error = EGL14.eglGetError();
+            String errorMsg = String.format("swapBuffers: EGL error 0x%x", error);
+            logger.error(errorMsg);
+            throw new RuntimeException(errorMsg);
+        }
+        checkEglError("swapBuffersWithTimestamp");
     }
     
     /**

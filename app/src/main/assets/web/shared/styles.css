@@ -608,6 +608,41 @@ input, select { font-family: inherit; }
     padding: 8px 0;
 }
 
+/* === SELECT DROPDOWNS === */
+.select-control {
+    padding: 8px 32px 8px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    min-width: 120px;
+    transition: border-color 0.15s ease;
+}
+
+.select-control:hover {
+    border-color: var(--border-default);
+}
+
+.select-control:focus {
+    border-color: var(--brand-primary);
+    box-shadow: 0 0 0 2px rgba(0, 212, 170, 0.15);
+}
+
+.select-control option {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    padding: 8px;
+}
+
 .checkbox-item {
     display: flex;
     align-items: center;

@@ -53,6 +53,12 @@
             android:title="Trips" />
 
         <item
+            android:id="@+id/nav_reconfigure_camera"
+            android:icon="@drawable/ic_camera_probe"
+            android:title="Reconfigure Camera"
+            android:checkable="false" />
+
+        <item
             android:id="@+id/nav_check_update"
             android:icon="@drawable/ic_update"
             android:title="Check for Updates" />

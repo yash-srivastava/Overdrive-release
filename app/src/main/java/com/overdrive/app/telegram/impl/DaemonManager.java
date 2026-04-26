@@ -64,10 +64,17 @@ public class DaemonManager implements IDaemonManager {
         DaemonEntry entry = DAEMONS.get(name.toLowerCase());
         if (entry == null) return false;
         
-        // For camera daemon, also kill the restart wrapper script and delete it
+        // For camera daemon, kill the watchdog script FIRST so it can't
+        // respawn the daemon, then sleep briefly, then kill the daemon and
+        // clean up the singleton lock file.
         if ("camera".equals(name.toLowerCase())) {
             execShell("pkill -9 -f start_cam_daemon 2>/dev/null");
             execShell("rm -f /data/local/tmp/start_cam_daemon.sh 2>/dev/null");
+            try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+            execShell("pkill -9 -f byd_cam_daemon 2>/dev/null");
+            execShell("killall -9 byd_cam_daemon 2>/dev/null");
+            execShell("rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null");
+            return true;
         }
         
         String cmd = "pkill -f " + entry.className;

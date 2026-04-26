@@ -22,7 +22,19 @@ BYD.surveillance = {
         recordingBitrate: 'MEDIUM',
         recordingCodec: 'H264',
         surveillanceLimitMb: 500,
-        surveillanceStorageType: 'INTERNAL'
+        surveillanceStorageType: 'INTERNAL',
+        // V2 Motion Detection
+        environmentPreset: 'outdoor',
+        sensitivityLevel: 3,
+        detectionZone: 'normal',
+        loiteringTime: 3,
+        shadowFilter: 2,
+        cameraFront: true,
+        cameraRight: true,
+        cameraLeft: true,
+        cameraRear: true,
+        motionHeatmap: false,
+        filterDebugLog: false
     },
     storageInfo: {
         sdCardAvailable: false,
@@ -63,6 +75,22 @@ BYD.surveillance = {
 
     flashImmunityMap: { 0: 'SENSITIVE', 1: 'NORMAL', 2: 'STRICT', 3: 'MAX' },
 
+    // V2 sensitivity level labels
+    v2SensitivityLabels: {
+        1: '1 — Low',
+        2: '2',
+        3: '3 — Default',
+        4: '4',
+        5: '5 — Max'
+    },
+
+    // V2 environment presets: { sensitivityLevel, detectionZone, loiteringTime, shadowFilter }
+    v2Presets: {
+        outdoor:  { sensitivityLevel: 3, detectionZone: 'normal', loiteringTime: 3, shadowFilter: 2 },
+        garage:   { sensitivityLevel: 4, detectionZone: 'close',  loiteringTime: 2, shadowFilter: 1 },
+        street:   { sensitivityLevel: 3, detectionZone: 'normal', loiteringTime: 5, shadowFilter: 3 }
+    },
+
     async init() {
         await this.loadConfig();
         await this.loadStorageStats();
@@ -73,16 +101,33 @@ BYD.surveillance = {
         // Show CDR cleanup card if SD card is selected on load
         this.updateCdrCleanupVisibility();
         
+        // Auto-start heatmap if enabled in config and video display area exists
+        if (this.config.motionHeatmap) {
+            this.startHeatmap();
+        }
+        
         // Reload config when page becomes visible (user switches back to tab)
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible' && !this.hasUnsavedChanges) {
                 this.reloadConfig();
             }
+            // Stop heatmap polling when page is hidden
+            if (document.visibilityState === 'hidden' && this._heatmapInterval) {
+                this.stopHeatmap();
+                this._heatmapWasRunning = true;
+            }
+            // Restart heatmap when page becomes visible again
+            if (document.visibilityState === 'visible' && this._heatmapWasRunning) {
+                this._heatmapWasRunning = false;
+                if (this.config.motionHeatmap) {
+                    this.startHeatmap();
+                }
+            }
         });
     },
     
     async reloadConfig() {
-        // Only reload if no unsaved changes
+        // Don't reload if user has unsaved changes
         if (this.hasUnsavedChanges) return;
         
         try {
@@ -100,18 +145,19 @@ BYD.surveillance = {
                     if (!data.config.sensitivity) {
                         this.config.sensitivity = 3;  // Default
                     }
-                    this.savedConfig = JSON.parse(JSON.stringify(this.config));
                     this.lastConfigTimestamp = newTimestamp;
+                    
+                    // Load storage settings BEFORE setting savedConfig
+                    // so both config and savedConfig include the same storage values
+                    await this.loadStorageSettings();
+                    
+                    this.savedConfig = JSON.parse(JSON.stringify(this.config));
                     this.updateUI();
-                    console.log('Config reloaded (timestamp:', newTimestamp, ')');
                 }
             }
         } catch (e) {
             console.warn('Failed to reload config:', e);
         }
-        
-        // Also reload storage settings
-        await this.loadStorageSettings();
     },
     
     async loadStorageSettings() {
@@ -465,12 +511,12 @@ BYD.surveillance = {
         update();
         setInterval(update, 1000);
         
-        // SOTA: More frequent config refresh (every 10s) to catch app UI changes quickly
+        // Config refresh (every 10s) to catch external changes (Telegram, IPC)
         setInterval(() => {
             if (!this.hasUnsavedChanges) {
                 this.reloadConfig();
             }
-            this.loadStorageStats();  // Always refresh storage stats
+            this.loadStorageStats();
             
             // Refresh CDR info if SD card is selected
             if (this.config.surveillanceStorageType === 'SD_CARD' && this.storageInfo.sdCardAvailable) {
@@ -511,8 +557,33 @@ BYD.surveillance = {
     },
 
     markChanged() {
-        this.hasUnsavedChanges = JSON.stringify(this.config) !== JSON.stringify(this.savedConfig);
-        document.getElementById('btnApply').disabled = !this.hasUnsavedChanges;
+        // Only compare user-editable fields (ignore server-only fields like lastModified, densityThreshold, etc.)
+        const editableKeys = [
+            'enabled', 'distance', 'sensitivity', 'flashImmunity',
+            'detectPerson', 'detectCar', 'detectBike',
+            'preRecordSeconds', 'postRecordSeconds',
+            'recordingBitrate', 'recordingCodec',
+            'surveillanceLimitMb', 'surveillanceStorageType',
+            'environmentPreset', 'sensitivityLevel', 'detectionZone', 'loiteringTime',
+            'shadowFilter',
+            'cameraFront', 'cameraRight', 'cameraLeft', 'cameraRear',
+            'motionHeatmap', 'filterDebugLog'
+        ];
+        const pick = (obj) => {
+            const r = {};
+            editableKeys.forEach(k => { if (k in obj) r[k] = obj[k]; });
+            return JSON.stringify(r);
+        };
+        this.hasUnsavedChanges = pick(this.config) !== pick(this.savedConfig);
+        const btn = document.getElementById('btnApply');
+        if (btn) {
+            btn.disabled = !this.hasUnsavedChanges;
+            if (this.hasUnsavedChanges) {
+                btn.classList.add('has-changes');
+            } else {
+                btn.classList.remove('has-changes');
+            }
+        }
         document.getElementById('detectionUnsaved').classList.toggle('show', this.hasUnsavedChanges);
         document.getElementById('recordingUnsaved').classList.toggle('show', this.hasUnsavedChanges);
         var _su = document.getElementById('storageUnsaved'); if (_su) _su.classList.toggle('show', this.hasUnsavedChanges);
@@ -524,24 +595,6 @@ BYD.surveillance = {
         const badge = document.getElementById('survStatusBadge');
         badge.textContent = this.config.enabled ? '● ON' : '○ OFF';
         badge.className = 'status-badge ' + (this.config.enabled ? 'active' : 'inactive');
-        
-        // Distance slider with hint
-        document.getElementById('distanceSlider').value = this.config.distance;
-        document.getElementById('distanceValue').textContent = (this.distanceMap[this.config.distance] || {}).label || '~8m';
-        document.getElementById('distanceHint').textContent = (this.distanceMap[this.config.distance] || {}).hint || '';
-        
-        // Sensitivity slider with hint
-        document.getElementById('sensitivitySlider').value = this.config.sensitivity;
-        document.getElementById('sensitivityValue').textContent = (this.sensitivityMap[this.config.sensitivity] || {}).label || 'Default';
-        document.getElementById('sensitivityHint').textContent = (this.sensitivityMap[this.config.sensitivity] || {}).hint || '';
-        
-        document.getElementById('flashImmunitySlider').value = this.config.flashImmunity;
-        document.getElementById('flashImmunityValue').textContent = this.flashImmunityMap[this.config.flashImmunity] || 'MEDIUM';
-        
-        document.getElementById('detectPerson').checked = this.config.detectPerson;
-        document.getElementById('detectCar').checked = this.config.detectCar;
-        document.getElementById('detectBike').checked = this.config.detectBike;
-        this.updateCheckboxStyles();
         
         document.getElementById('preRecSlider').value = this.config.preRecordSeconds;
         document.getElementById('preRecValue').textContent = this.config.preRecordSeconds + 's';
@@ -561,10 +614,13 @@ BYD.surveillance = {
         this.updateStorageLimitUI();
         this.updateFileSizeEstimate();
         
+        // V2 Motion Detection UI
+        this.updateV2UI();
+        
         // Reset Apply button state after UI update (no unsaved changes after load)
         this.hasUnsavedChanges = false;
         document.getElementById('btnApply').disabled = true;
-        document.getElementById('detectionUnsaved').classList.remove('show');
+        var _du = document.getElementById('detectionUnsaved'); if (_du) _du.classList.remove('show');
         document.getElementById('recordingUnsaved').classList.remove('show');
         var _su2 = document.getElementById('storageUnsaved'); if (_su2) _su2.classList.remove('show');
     },
@@ -661,14 +717,533 @@ BYD.surveillance = {
         }
     },
 
+    // ==================== V2 Motion Detection ====================
+
+    // V2 environment preset hint texts
+    v2EnvPresetHints: {
+        outdoor: 'Standard filtering for open parking lots and driveways. Handles sun, clouds, and headlights.',
+        garage: 'Aggressive light filtering for indoor parking. Ignores fluorescent flicker and reflections.',
+        street: 'Tuned for busy areas with foot traffic. Longer loitering time to ignore passersby.'
+    },
+
+    // V2 sensitivity hint texts
+    v2SensitivityHints: {
+        1: 'Only detects large, close movement like someone touching the car.',
+        2: 'Detects solid objects nearby. Good for windy conditions.',
+        3: 'Balanced — detects a person approaching within about 3 meters.',
+        4: 'Sensitive — catches motion quickly, good for people at distance.',
+        5: 'Maximum — detects any movement in the camera view. May increase false alerts.'
+    },
+
+    // V2 detection zone hint texts
+    v2DetectionZoneHints: {
+        close: 'Only triggers when someone is right next to the car (~1.5m).',
+        normal: 'Standard detection range (~3m around the car).',
+        extended: 'Detects activity further out (~5m+). May pick up more passing traffic.'
+    },
+
+    setEnvironmentPreset(preset) {
+        this.config.environmentPreset = preset;
+        document.querySelectorAll('#envPresetBtns .btn-toggle').forEach(btn =>
+            btn.classList.toggle('active', btn.dataset.value === preset));
+        // Hide Custom button when a real preset is selected
+        const customBtn = document.getElementById('envPresetCustom');
+        if (customBtn) customBtn.classList.remove('active');
+
+        // Update environment preset hint
+        var _eh = document.getElementById('envPresetHint');
+        if (_eh) _eh.textContent = this.v2EnvPresetHints[preset] || '';
+
+        // Apply preset values to other V2 controls (UI only, not sent yet)
+        const p = this.v2Presets[preset];
+        if (p) {
+            this.config.sensitivityLevel = p.sensitivityLevel;
+            this.config.detectionZone = p.detectionZone;
+            this.config.loiteringTime = p.loiteringTime;
+
+            // Update sensitivity slider + label + hint
+            const sensSlider = document.getElementById('v2SensitivitySlider');
+            if (sensSlider) sensSlider.value = p.sensitivityLevel;
+            const sensValue = document.getElementById('v2SensitivityValue');
+            if (sensValue) sensValue.textContent = this.v2SensitivityLabels[p.sensitivityLevel] || p.sensitivityLevel;
+            var _sh = document.getElementById('v2SensitivityHint');
+            if (_sh) _sh.textContent = this.v2SensitivityHints[p.sensitivityLevel] || '';
+
+            // Update detection zone buttons + hint
+            document.querySelectorAll('#detectionZoneBtns .btn-toggle').forEach(btn =>
+                btn.classList.toggle('active', btn.dataset.value === p.detectionZone));
+            var _dh = document.getElementById('detectionZoneHint');
+            if (_dh) _dh.textContent = this.v2DetectionZoneHints[p.detectionZone] || '';
+
+            // Update loitering slider + label
+            const loiterSlider = document.getElementById('loiteringTimeSlider');
+            if (loiterSlider) loiterSlider.value = p.loiteringTime;
+            const loiterValue = document.getElementById('loiteringTimeValue');
+            if (loiterValue) loiterValue.textContent = p.loiteringTime + 's';
+            
+            // Update shadow filter select
+            if (p.shadowFilter !== undefined) {
+                this.config.shadowFilter = p.shadowFilter;
+                const shadowSelect = document.getElementById('shadowFilterSelect');
+                if (shadowSelect) shadowSelect.value = p.shadowFilter;
+            }
+        }
+        this.markChanged();
+    },
+
+    updateV2Sensitivity(value) {
+        this.config.sensitivityLevel = parseInt(value);
+        const label = document.getElementById('v2SensitivityValue');
+        if (label) label.textContent = this.v2SensitivityLabels[value] || value;
+        var _sh = document.getElementById('v2SensitivityHint');
+        if (_sh) _sh.textContent = this.v2SensitivityHints[value] || '';
+        this._deselectPresetIfCustom();
+        this.markChanged();
+    },
+
+    setDetectionZone(zone) {
+        this.config.detectionZone = zone;
+        document.querySelectorAll('#detectionZoneBtns .btn-toggle').forEach(btn =>
+            btn.classList.toggle('active', btn.dataset.value === zone));
+        var _dh = document.getElementById('detectionZoneHint');
+        if (_dh) _dh.textContent = this.v2DetectionZoneHints[zone] || '';
+        this._deselectPresetIfCustom();
+        this.markChanged();
+    },
+
+    updateLoiteringTime(value) {
+        this.config.loiteringTime = parseInt(value);
+        const label = document.getElementById('loiteringTimeValue');
+        if (label) label.textContent = value + 's';
+        this._deselectPresetIfCustom();
+        this.markChanged();
+    },
+    
+    updateShadowFilter(value) {
+        this.config.shadowFilter = parseInt(value);
+        const hints = {
+            0: 'Shadow filtering disabled. May cause false recordings from tree shadows and cloud movement.',
+            1: 'Light filtering — catches obvious shadows. Good for garages with fluorescent lights.',
+            2: 'Balanced filtering — catches most tree shadows while preserving real motion detection.',
+            3: 'Aggressive filtering — maximum shadow rejection. Use when parked under trees with heavy wind.'
+        };
+        const hint = document.getElementById('shadowFilterHint');
+        if (hint) hint.textContent = hints[this.config.shadowFilter] || '';
+        this.markChanged();
+    },
+    
+    _deselectPresetIfCustom() {
+        // Check if current values match ANY preset
+        let matchedPreset = null;
+        for (const [name, p] of Object.entries(this.v2Presets)) {
+            if (this.config.sensitivityLevel == p.sensitivityLevel &&
+                this.config.detectionZone === p.detectionZone &&
+                this.config.loiteringTime == p.loiteringTime) {
+                matchedPreset = name;
+                break;
+            }
+        }
+        
+        const customBtn = document.getElementById('envPresetCustom');
+        if (matchedPreset) {
+            // Values match a known preset — highlight it
+            this.config.environmentPreset = matchedPreset;
+            document.querySelectorAll('#envPresetBtns .btn-toggle').forEach(btn =>
+                btn.classList.toggle('active', btn.dataset.value === matchedPreset));
+            if (customBtn) customBtn.classList.remove('active');
+            var _eh = document.getElementById('envPresetHint');
+            if (_eh) _eh.textContent = this.v2EnvPresetHints[matchedPreset] || '';
+        } else {
+            // No preset matches — show Custom
+            document.querySelectorAll('#envPresetBtns .btn-toggle').forEach(btn =>
+                btn.classList.remove('active'));
+            if (customBtn) customBtn.classList.add('active');
+            var _eh = document.getElementById('envPresetHint');
+            if (_eh) _eh.textContent = 'Custom configuration — select a preset to reset to recommended values.';
+        }
+    },
+
+    updateV2Cameras() {
+        this.config.cameraFront = document.getElementById('v2CameraFront').checked;
+        this.config.cameraRight = document.getElementById('v2CameraRight').checked;
+        this.config.cameraLeft = document.getElementById('v2CameraLeft').checked;
+        this.config.cameraRear = document.getElementById('v2CameraRear').checked;
+        this.markChanged();
+    },
+
+    updateV2Dev() {
+        var heatmapEl = document.getElementById('v2MotionHeatmap');
+        var filterEl = document.getElementById('v2FilterDebugLog');
+        const heatmapOn = (heatmapEl && heatmapEl.checked) || false;
+        const wasOn = this.config.motionHeatmap;
+        this.config.motionHeatmap = heatmapOn;
+        this.config.filterDebugLog = (filterEl && filterEl.checked) || false;
+
+        // Start/stop heatmap when toggle changes
+        if (heatmapOn && !wasOn) {
+            this.startHeatmap();
+        } else if (!heatmapOn && wasOn) {
+            this.stopHeatmap();
+        }
+
+        this.markChanged();
+    },
+
+    // ==================== Motion Heatmap Overlay ====================
+
+    _heatmapInterval: null,
+    _heatmapCanvas: null,
+    _heatmapWasRunning: false,
+
+    /**
+     * Start the motion heatmap overlay.
+     * Creates a canvas over the live stream container and polls at 3 FPS.
+     */
+    startHeatmap() {
+        if (this._heatmapInterval) return; // Already running
+
+        const container = document.getElementById('videoDisplayArea');
+        if (!container) {
+            console.log('[Heatmap] No video display area found — skipping');
+            return;
+        }
+
+        // Create canvas overlay if not exists
+        if (!this._heatmapCanvas) {
+            const canvas = document.createElement('canvas');
+            canvas.id = 'heatmapOverlay';
+            canvas.width = 1280;
+            canvas.height = 960;
+            canvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:15;';
+            container.style.position = 'relative';
+            container.appendChild(canvas);
+            this._heatmapCanvas = canvas;
+        }
+
+        this._heatmapCanvas.style.display = 'block';
+
+        // Poll at 3 FPS (333ms)
+        this._heatmapInterval = setInterval(() => this._pollHeatmap(), 333);
+        console.log('[Heatmap] Started polling at 3 FPS');
+    },
+
+    /**
+     * Stop the motion heatmap overlay and clean up.
+     */
+    stopHeatmap() {
+        if (this._heatmapInterval) {
+            clearInterval(this._heatmapInterval);
+            this._heatmapInterval = null;
+        }
+
+        if (this._heatmapCanvas) {
+            this._heatmapCanvas.remove();
+            this._heatmapCanvas = null;
+        }
+
+        console.log('[Heatmap] Stopped');
+    },
+
+    /**
+     * Fetch heatmap data and draw on canvas.
+     */
+    async _pollHeatmap() {
+        if (!this._heatmapCanvas) return;
+
+        try {
+            const resp = await fetch('/api/surveillance/heatmap');
+            const data = await resp.json();
+            if (data && data.quadrants) {
+                // Override viewMode with client-side stream selection if available.
+                // BYD.stream tracks which camera the user selected — use that
+                // so the heatmap matches what's visible on screen.
+                if (typeof BYD !== 'undefined' && BYD.stream && BYD.stream.currentViewMode >= 0) {
+                    data.viewMode = BYD.stream.currentViewMode;
+                }
+                this._drawHeatmap(this._heatmapCanvas, data);
+            }
+        } catch (e) {
+            // Surveillance not running or API error — clear the canvas
+            const ctx = this._heatmapCanvas.getContext('2d');
+            if (ctx) ctx.clearRect(0, 0, this._heatmapCanvas.width, this._heatmapCanvas.height);
+        }
+    },
+
+    /**
+     * Draw the heatmap overlay on the canvas.
+     * 
+     * In mosaic mode (viewMode=0), draws a 2x2 grid:
+     *   [0: FRONT]  [1: RIGHT]
+     *   [2: LEFT ]  [3: REAR ]
+     *
+     * In single-camera mode (viewMode=1-4), draws only the active quadrant
+     * filling the full canvas. viewMode mapping: 1=Front, 2=Right, 3=Rear, 4=Left.
+     *
+     * Each quadrant has gridCols x gridRows blocks with confidence values.
+     * Blocks are color-coded: green (low) → yellow (medium) → red (high).
+     */
+    _drawHeatmap(canvas, data) {
+        var ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        var cw = canvas.width;
+        var ch = canvas.height;
+        ctx.clearRect(0, 0, cw, ch);
+
+        var gridCols = data.gridCols || 10;
+        var gridRows = data.gridRows || 7;
+
+        // viewMode: 0=Mosaic, 1=Front, 2=Right, 3=Rear, 4=Left
+        var viewMode = data.viewMode || 0;
+        
+        // Map viewMode to quadrant ID: 1→0(front), 2→1(right), 3→3(rear), 4→2(left)
+        var viewModeToQuadrant = { 1: 0, 2: 1, 3: 3, 4: 2 };
+        var singleQuadrant = (viewMode > 0) ? viewModeToQuadrant[viewMode] : -1;
+        
+        // In single-camera mode, the heatmap fills the full canvas
+        // In mosaic mode, each quadrant takes a quarter
+        var isSingle = singleQuadrant >= 0;
+        var quadW = isSingle ? cw : cw / 2;
+        var quadH = isSingle ? ch : ch / 2;
+        var blockW = quadW / gridCols;
+        var blockH = quadH / gridRows;
+
+        var quadPositions = [
+            [0, 0],  // 0: front  — top-left
+            [1, 0],  // 1: right  — top-right
+            [1, 1],  // 2: left   — bottom-right
+            [0, 1]   // 3: rear   — bottom-left
+        ];
+        var quadLabels = ['FRONT', 'RIGHT', 'LEFT', 'REAR'];
+        var threatLabels = ['', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+
+        for (var qi = 0; qi < data.quadrants.length; qi++) {
+            var q = data.quadrants[qi];
+            
+            // In single-camera mode, only draw the active quadrant
+            if (isSingle && q.id !== singleQuadrant) continue;
+            
+            var pos = quadPositions[q.id];
+            if (!pos) continue;
+
+            // In single mode, always draw at (0,0) filling full canvas
+            var qx = isSingle ? 0 : pos[0] * quadW;
+            var qy = isSingle ? 0 : pos[1] * quadH;
+
+            // Quadrant border (thin white line) — only in mosaic mode
+            if (!isSingle) {
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(qx, qy, quadW, quadH);
+            }
+
+            // Camera label (top-left of each quadrant)
+            ctx.font = 'bold 14px Inter, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+
+            // Disabled quadrant
+            if (!q.enabled) {
+                ctx.fillStyle = 'rgba(128, 128, 128, 0.25)';
+                ctx.fillRect(qx, qy, quadW, quadH);
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                ctx.fillText(quadLabels[q.id] + ' — OFF', qx + 8, qy + 6);
+                continue;
+            }
+
+            // Suppressed quadrant (brightness shift detected)
+            if (q.suppressed) {
+                ctx.fillStyle = 'rgba(59, 130, 246, 0.20)';
+                ctx.fillRect(qx, qy, quadW, quadH);
+                ctx.fillStyle = 'rgba(147, 197, 253, 0.8)';
+                ctx.fillText(quadLabels[q.id] + ' — LIGHT SHIFT', qx + 8, qy + 6);
+                continue;
+            }
+
+            // Draw confidence blocks with smooth gradient
+            var activeCount = 0;
+            if (q.confidence && q.confidence.length > 0) {
+                for (var i = 0; i < q.confidence.length; i++) {
+                    var c = q.confidence[i];
+                    if (c <= 0) continue;
+
+                    activeCount++;
+                    var col = i % gridCols;
+                    var row = Math.floor(i / gridCols);
+                    var bx = qx + col * blockW;
+                    var by = qy + row * blockH;
+
+                    // Smooth color gradient: green → yellow → red
+                    var r, g, b, a;
+                    if (c < 0.40) {
+                        var t = c / 0.40;
+                        r = Math.round(34 + (234 - 34) * t);
+                        g = Math.round(197 + (179 - 197) * t);
+                        b = Math.round(94 + (8 - 94) * t);
+                        a = 0.25 + 0.15 * t;
+                    } else {
+                        var t = (c - 0.40) / 0.60;
+                        r = Math.round(234 + (239 - 234) * t);
+                        g = Math.round(179 - 179 * t);
+                        b = Math.round(8 + (68 - 8) * t);
+                        a = 0.40 + 0.25 * t;
+                    }
+                    ctx.fillStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + a.toFixed(2) + ')';
+                    ctx.fillRect(bx + 1, by + 1, blockW - 2, blockH - 2);
+                }
+            }
+
+            // Camera label with active block count
+            var threat = q.threatLevel || 0;
+            var labelColor = threat >= 3 ? 'rgba(239, 68, 68, 0.9)' :
+                             threat >= 2 ? 'rgba(234, 179, 8, 0.9)' :
+                             activeCount > 0 ? 'rgba(34, 197, 94, 0.9)' :
+                             'rgba(255, 255, 255, 0.5)';
+            ctx.fillStyle = labelColor;
+            var label = quadLabels[q.id];
+            if (activeCount > 0) {
+                label += '  ' + activeCount + ' blocks';
+                if (threat > 0 && threat < threatLabels.length) {
+                    label += ' · ' + threatLabels[threat];
+                }
+            }
+            var labelWidth = ctx.measureText(label).width + 12;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.fillRect(qx + 4, qy + 3, labelWidth, 20);
+            ctx.fillStyle = labelColor;
+            ctx.fillText(label, qx + 8, qy + 6);
+        }
+
+        // Legend (bottom-center)
+        var legendY = ch - 24;
+        var legendX = cw / 2 - 120;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillRect(legendX - 8, legendY - 4, 256, 22);
+        ctx.font = '11px Inter, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        // Green
+        ctx.fillStyle = 'rgba(34, 197, 94, 0.7)';
+        ctx.fillRect(legendX, legendY, 12, 12);
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.fillText('Low', legendX + 16, legendY + 6);
+        // Yellow
+        ctx.fillStyle = 'rgba(234, 179, 8, 0.7)';
+        ctx.fillRect(legendX + 55, legendY, 12, 12);
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.fillText('Medium', legendX + 71, legendY + 6);
+        // Red
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.7)';
+        ctx.fillRect(legendX + 130, legendY, 12, 12);
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.fillText('High', legendX + 146, legendY + 6);
+        // Blue
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.7)';
+        ctx.fillRect(legendX + 190, legendY, 12, 12);
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.fillText('Suppressed', legendX + 206, legendY + 6);
+    },
+
+    updateV2UI() {
+        // Environment preset — check if current values match the saved preset
+        // If user customized sliders after selecting a preset, don't highlight any preset
+        const savedPreset = this.config.environmentPreset;
+        const presetValues = this.v2Presets[savedPreset];
+        let presetMatches = false;
+        if (presetValues) {
+            presetMatches = (
+                this.config.sensitivityLevel == presetValues.sensitivityLevel &&
+                this.config.detectionZone === presetValues.detectionZone &&
+                this.config.loiteringTime == presetValues.loiteringTime
+            );
+        }
+        
+        document.querySelectorAll('#envPresetBtns .btn-toggle').forEach(btn =>
+            btn.classList.toggle('active', presetMatches && btn.dataset.value === savedPreset));
+        const customBtn = document.getElementById('envPresetCustom');
+        if (!presetMatches) {
+            if (customBtn) customBtn.classList.add('active');
+        } else {
+            if (customBtn) customBtn.classList.remove('active');
+        }
+        var _eh = document.getElementById('envPresetHint');
+        if (_eh) {
+            if (presetMatches) {
+                _eh.textContent = this.v2EnvPresetHints[savedPreset] || '';
+            } else {
+                _eh.textContent = 'Custom configuration — select a preset to reset to recommended values.';
+            }
+        }
+
+        // Sensitivity
+        const sensSlider = document.getElementById('v2SensitivitySlider');
+        if (sensSlider) sensSlider.value = this.config.sensitivityLevel;
+        const sensValue = document.getElementById('v2SensitivityValue');
+        if (sensValue) sensValue.textContent = this.v2SensitivityLabels[this.config.sensitivityLevel] || this.config.sensitivityLevel;
+        var _sh = document.getElementById('v2SensitivityHint');
+        if (_sh) _sh.textContent = this.v2SensitivityHints[this.config.sensitivityLevel] || '';
+
+        // Detection zone
+        document.querySelectorAll('#detectionZoneBtns .btn-toggle').forEach(btn =>
+            btn.classList.toggle('active', btn.dataset.value === this.config.detectionZone));
+        var _dh = document.getElementById('detectionZoneHint');
+        if (_dh) _dh.textContent = this.v2DetectionZoneHints[this.config.detectionZone] || '';
+
+        // Loitering time
+        const loiterSlider = document.getElementById('loiteringTimeSlider');
+        if (loiterSlider) loiterSlider.value = this.config.loiteringTime;
+        const loiterValue = document.getElementById('loiteringTimeValue');
+        if (loiterValue) loiterValue.textContent = this.config.loiteringTime + 's';
+
+        // Shadow filter
+        const shadowSelect = document.getElementById('shadowFilterSelect');
+        if (shadowSelect && this.config.shadowFilter !== undefined) {
+            shadowSelect.value = this.config.shadowFilter;
+        }
+
+        // Camera toggles
+        const cf = document.getElementById('v2CameraFront');
+        if (cf) cf.checked = this.config.cameraFront;
+        const cr = document.getElementById('v2CameraRight');
+        if (cr) cr.checked = this.config.cameraRight;
+        const cl = document.getElementById('v2CameraLeft');
+        if (cl) cl.checked = this.config.cameraLeft;
+        const cb = document.getElementById('v2CameraRear');
+        if (cb) cb.checked = this.config.cameraRear;
+
+        // Developer toggles
+        const hm = document.getElementById('v2MotionHeatmap');
+        if (hm) hm.checked = this.config.motionHeatmap;
+        const fd = document.getElementById('v2FilterDebugLog');
+        if (fd) fd.checked = this.config.filterDebugLog;
+        
+        // Object detection checkboxes
+        const dp = document.getElementById('detectPerson');
+        if (dp) dp.checked = this.config.detectPerson;
+        const dc = document.getElementById('detectCar');
+        if (dc) dc.checked = this.config.detectCar;
+        const db = document.getElementById('detectBike');
+        if (db) db.checked = this.config.detectBike;
+        this.updateCheckboxStyles();
+    },
+
     async applySettings() {
+        const btn = document.getElementById('btnApply');
+        const origText = btn.innerHTML;
+        btn.innerHTML = '⏳ Saving...';
+        btn.disabled = true;
+        
         try {
             // Save surveillance config
-            await fetch('/api/surveillance/config', {
+            const configResp = await fetch('/api/surveillance/config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(this.config)
             });
+            
+            if (!configResp.ok) {
+                throw new Error('Config save failed: ' + configResp.status);
+            }
             
             // SOTA: Also save storage limit and type settings via storage API
             const storageResp = await fetch('/api/settings/storage', {
@@ -695,10 +1270,61 @@ BYD.surveillance = {
                 msg = `Settings applied. Deleting ~${storageData.cleanup.surveillanceFilesEstimate} old events (${storageData.cleanup.surveillanceToDelete})`;
             }
             
+            btn.innerHTML = '✓ Saved';
+            setTimeout(() => { btn.innerHTML = origText; }, 1500);
+            
             if (BYD.utils && BYD.utils.toast) BYD.utils.toast(msg, 'success');
         } catch (e) {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to save settings', 'error');
+            console.error('applySettings error:', e);
+            btn.innerHTML = origText;
+            btn.disabled = false;
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to save: ' + (e.message || 'unknown error'), 'error');
         }
+    },
+
+    /**
+     * Lightweight init for pages that only need the heatmap overlay (e.g., live view).
+     * Loads config and starts heatmap if enabled, without touching surveillance UI elements.
+     */
+    async initHeatmapOnly() {
+        await this.loadConfig();
+
+        // Auto-start heatmap if enabled in config and video display area exists
+        if (this.config.motionHeatmap) {
+            this.startHeatmap();
+        }
+
+        // Handle page visibility for heatmap
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden' && this._heatmapInterval) {
+                this.stopHeatmap();
+                this._heatmapWasRunning = true;
+            }
+            if (document.visibilityState === 'visible' && this._heatmapWasRunning) {
+                this._heatmapWasRunning = false;
+                if (this.config.motionHeatmap) {
+                    this.startHeatmap();
+                }
+            }
+        });
+
+        // Periodically check if heatmap config changed (e.g., toggled from surveillance page)
+        setInterval(async () => {
+            try {
+                const resp = await fetch('/api/surveillance/config');
+                const data = await resp.json();
+                if (data.success && data.config) {
+                    const newHeatmap = data.config.motionHeatmap || false;
+                    if (newHeatmap && !this._heatmapInterval) {
+                        this.config.motionHeatmap = true;
+                        this.startHeatmap();
+                    } else if (!newHeatmap && this._heatmapInterval) {
+                        this.config.motionHeatmap = false;
+                        this.stopHeatmap();
+                    }
+                }
+            } catch (e) { /* ignore */ }
+        }, 5000);
     },
 
     /**
@@ -716,11 +1342,10 @@ BYD.surveillance = {
             }
         }
         
-        // Reload config if surveillance state changed and no unsaved changes
-        const newEnabled = status.gpuSurveillance || false;
-        if (newEnabled !== this.config.enabled && !this.hasUnsavedChanges) {
-            this.reloadConfig();
-        }
+        // Don't touch the enabled toggle from status — gpuSurveillance is runtime state,
+        // not the user's preference. Surveillance can be enabled (preference=true) but not
+        // active (gpuSurveillance=false) when ACC is ON. The toggle reflects the preference,
+        // which is loaded from the config API, not from status.
     }
 };
 

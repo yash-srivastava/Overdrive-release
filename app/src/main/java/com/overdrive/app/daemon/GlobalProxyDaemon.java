@@ -67,17 +67,15 @@ public class GlobalProxyDaemon {
     private static String PROXY_EXCLUSIONS() { return Safe.s("W7U2p2zXmYFyuvgULJIqsoxZjUDWIXt7EPxQTiIZSC2LArvfp3HcABvEZcmXXayC"); }
 
     // ==================== VLESS SERVER CREDENTIALS (encrypted) ====================
-    // These are PLACEHOLDERS. Supply your own VLESS credentials in secrets/secrets.json
-    // and re-encrypt using the generate_safe_enc.py script (see README).
-    /** [VLESS server IP] - placeholder: YOUR_SERVER_IP_HERE */
-    private static String SERVER_IP() { return Safe.s("WVJRYpvmp/XFscpjqdmcePpGqLDp4uKlgO+VwJvufCk="); }
-    /** [VLESS UUID] - placeholder: YOUR_UUID_HERE */
-    private static String UUID() { return Safe.s("vv2W+bqJQTnU0s9t1THlpg=="); }
-    /** [VLESS short_id] - placeholder: YOUR_SHORT_ID_HERE */
-    private static String SHORT_ID() { return Safe.s("lgWj2tUxBIeuYAVkw5iBY4GcSCCWQ9VfgBFiVw8J6vc="); }
-    /** [VLESS public_key] - placeholder: YOUR_PUBLIC_KEY_HERE */
-    private static String PUBLIC_KEY() { return Safe.s("F4OAFgiNRz2FNlpdurBjCqnXB5ZP1NjWZN+eJQlkpkA="); }
-    /** [VLESS SNI] - default: google.com */
+    /** [VLESS server IP] */
+    private static String SERVER_IP() { return Safe.s("Z1e89edb4BHkcdq18ZwS4g=="); }
+    /** [VLESS UUID] */
+    private static String UUID() { return Safe.s("Y4LjDZ/o19unOrs5FoJBf5MjCDMSI/PGZXX9WqDp2Y4JJPBSUh2sYkt1ymAV0v2L"); }
+    /** [VLESS short_id] */
+    private static String SHORT_ID() { return Safe.s("o/bXp+lFk608hy8OWTfuELQgU4pZxSk/2VDwpg+KW/o="); }
+    /** [VLESS public_key] */
+    private static String PUBLIC_KEY() { return Safe.s("A37D/HxqBdi7vuJ5cyw8gh2VvwTgbS9cbhEaDv78GqpZznF3x5JiRMDj9WJpQ7Gm"); }
+    /** [VLESS SNI] */
     private static String SNI() { return Safe.s("u7674GDA85JNqEffkyiqRg=="); }
 
     public static void main(String[] args) {
@@ -304,11 +302,26 @@ public class GlobalProxyDaemon {
     }
 
     private static void setupSystemProxy() {
-        execShell(SETTINGS_HTTP_PROXY() + PROXY_PORT);
-        execShell(SETTINGS_PROXY_HOST());
-        execShell(SETTINGS_PROXY_PORT() + PROXY_PORT);
-        execShell(SETTINGS_PROXY_EXCLUSION() + PROXY_EXCLUSIONS() + "\"");
-        log("System proxy settings applied");
+        // DISABLED: System-wide proxy is no longer needed and is risky.
+        // If sing-box dies, stale proxy settings break ALL apps on the device.
+        // All OverDrive components use explicit proxy configuration instead:
+        // - ABRP/Telegram/Updater: ProxyHelper.getHttpProxy() via OkHttp
+        // - MQTT: ProxyHelper.getMqttSocketFactory() via Paho
+        // - Zrok/Cloudflared: HTTP_PROXY env var set per-process at launch
+        //
+        // execShell(SETTINGS_HTTP_PROXY() + PROXY_PORT);
+        // execShell(SETTINGS_PROXY_HOST());
+        // execShell(SETTINGS_PROXY_PORT() + PROXY_PORT);
+        // execShell(SETTINGS_PROXY_EXCLUSION() + PROXY_EXCLUSIONS() + "\"");
+        
+        // Clear any stale proxy settings from previous versions
+        execShell("settings delete global http_proxy 2>/dev/null");
+        execShell("settings delete global global_http_proxy_host 2>/dev/null");
+        execShell("settings delete global global_http_proxy_port 2>/dev/null");
+        execShell("settings delete global global_http_proxy_exclusion_list 2>/dev/null");
+        execShell("settings put global http_proxy :0 2>/dev/null");
+        
+        log("System proxy cleared (sing-box available on localhost:" + PROXY_PORT + " for app-scoped use only)");
     }
 
     private static void execShell(String cmd) {

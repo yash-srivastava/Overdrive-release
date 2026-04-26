@@ -142,6 +142,34 @@ const BYDAuth = {
     }
 };
 
+// SOTA: Override global fetch to automatically inject Authorization header.
+// This ensures all API calls work through tunnels (where cookies get dropped due to SameSite policy).
+// Only injects for same-origin or relative URL requests (not external APIs like ABRP/weather).
+(function() {
+    const originalFetch = window.fetch;
+    window.fetch = function(url, options) {
+        // Only inject auth for relative URLs or same-origin requests
+        if (typeof url === 'string' && (url.startsWith('/') || url.startsWith(window.location.origin))) {
+            const token = BYDAuth.getToken();
+            if (token) {
+                options = options || {};
+                options.headers = options.headers || {};
+                // Don't override if Authorization is already set
+                if (!options.headers['Authorization'] && !options.headers['authorization']) {
+                    if (options.headers instanceof Headers) {
+                        if (!options.headers.has('Authorization')) {
+                            options.headers.set('Authorization', 'Bearer ' + token);
+                        }
+                    } else {
+                        options.headers['Authorization'] = 'Bearer ' + token;
+                    }
+                }
+            }
+        }
+        return originalFetch.call(this, url, options);
+    };
+})();
+
 // Export for module systems
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = BYDAuth;

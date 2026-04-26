@@ -101,8 +101,11 @@ public class StorageManager {
     private static final String[] SD_CARD_PATHS = {
         "/storage/external_sd",
         "/storage/sdcard1",
+        "/storage/sdcard0",
         "/mnt/external_sd",
-        "/mnt/sdcard/external_sd"
+        "/mnt/sdcard/external_sd",
+        "/mnt/media_rw",
+        "/mnt/sdcard",
     };
     
     // Subdirectories
@@ -120,8 +123,8 @@ public class StorageManager {
     private static final long DEFAULT_PROXIMITY_LIMIT_MB = 500;
     private static final long DEFAULT_TRIPS_LIMIT_MB = 500;
     private static final long MIN_LIMIT_MB = 100;
-    private static final long MAX_LIMIT_MB_INTERNAL = 1000;
-    private static final long MAX_LIMIT_MB_SD_CARD = 10000;  // 10GB max for SD card
+    private static final long MAX_LIMIT_MB_INTERNAL = 100000;  // 100GB max for internal
+    private static final long MAX_LIMIT_MB_SD_CARD = 100000;  // 100GB max for SD card
     
     // Periodic cleanup interval (30 seconds)
     private static final long CLEANUP_INTERVAL_SECONDS = 30;
@@ -182,6 +185,9 @@ public class StorageManager {
     // SD card mount watchdog (keeps SD card mounted during sentry mode)
     private ScheduledExecutorService sdCardWatchdog;
     private static final long SD_WATCHDOG_INTERVAL_SECONDS = 15;
+    private int sdWatchdogConsecutiveFailures = 0;
+    private static final int SD_WATCHDOG_MAX_VERBOSE_FAILURES = 5;  // Log verbosely for first 5 failures
+    private static final int SD_WATCHDOG_QUIET_LOG_INTERVAL = 20;   // Then log every 20th attempt (~5 min)
     
     private StorageManager() {
         discoverSdCard();
@@ -237,7 +243,7 @@ public class StorageManager {
             }
         }
         
-        logInfo("Mounting SD card...");
+        logDebug("Mounting SD card...");
         
         try {
             // Step 1: Find the Volume ID using 'sm list-volumes all'
@@ -333,7 +339,7 @@ public class StorageManager {
                     logWarn("sm mount command failed with exit code: " + exitCode);
                 }
             } else {
-                logInfo("No public SD card volume found");
+                logDebug("No public SD card volume found");
             }
             
         } catch (Exception e) {
@@ -414,6 +420,16 @@ public class StorageManager {
         initSdCardDirectories();
         updateActiveDirectories();
 
+        // Pre-reserve space on SD card by cleaning BYD dashcam files if needed
+        try {
+            ExternalStorageCleaner cleaner = ExternalStorageCleaner.getInstance();
+            if (cleaner.isEnabled() && cleaner.isSdCardAvailable()) {
+                cleaner.ensureReservedSpace();
+            }
+        } catch (Exception e) {
+            logWarn("Pre-recording CDR cleanup failed: " + e.getMessage());
+        }
+
         return true;
     }
     
@@ -477,24 +493,81 @@ public class StorageManager {
                 File[] volumes = storageDir.listFiles();
                 if (volumes != null) {
                     for (File vol : volumes) {
-                        // Skip emulated and self
+                        // Skip known non-SD entries
                         String name = vol.getName();
                         if (name.equals("emulated") || name.equals("self") || name.startsWith(".")) {
                             continue;
                         }
                         
-                        // Check if it's a mounted SD card (UUID format like "3661-3064")
-                        if (vol.isDirectory() && vol.canWrite() && name.contains("-")) {
+                        // Any writable directory under /storage/ that isn't emulated/self could be an SD card
+                        if (vol.isDirectory() && vol.canWrite()) {
                             sdCardPath = vol.getAbsolutePath();
                             sdCardAvailable = true;
                             logInfo("Found SD card via /storage scan: " + sdCardPath);
                             return;
+                        }
+                        
+                        // Some mounts are readable but not writable via Java — try shell test
+                        if (vol.isDirectory() && vol.canRead()) {
+                            try {
+                                Process p = Runtime.getRuntime().exec(new String[]{
+                                    "sh", "-c", "touch " + vol.getAbsolutePath() + "/.overdrive_probe && rm " + vol.getAbsolutePath() + "/.overdrive_probe"
+                                });
+                                int exitCode = p.waitFor();
+                                if (exitCode == 0) {
+                                    sdCardPath = vol.getAbsolutePath();
+                                    sdCardAvailable = true;
+                                    logInfo("Found SD card via /storage scan (shell write test): " + sdCardPath);
+                                    return;
+                                }
+                            } catch (Exception ignored) {}
                         }
                     }
                 }
             }
         } catch (Exception e) {
             logDebug("Could not scan /storage: " + e.getMessage());
+        }
+        
+        // Method 4: Parse /proc/mounts for vfat/exfat filesystems (SD card signatures)
+        try {
+            BufferedReader reader = new BufferedReader(new FileReader("/proc/mounts"));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                // SD cards are typically vfat, exfat, or sdcardfs
+                if (line.contains("vfat") || line.contains("exfat")) {
+                    String[] parts = line.split("\\s+");
+                    if (parts.length >= 2) {
+                        String mountPoint = parts[1];
+                        // Skip internal partitions
+                        if (mountPoint.startsWith("/mnt/vendor") || mountPoint.startsWith("/firmware") ||
+                            mountPoint.equals("/boot") || mountPoint.startsWith("/cache")) {
+                            continue;
+                        }
+                        File mountDir = new File(mountPoint);
+                        if (mountDir.exists() && mountDir.isDirectory() && mountDir.canRead()) {
+                            // Verify writable via shell
+                            try {
+                                Process p = Runtime.getRuntime().exec(new String[]{
+                                    "sh", "-c", "touch " + mountPoint + "/.overdrive_probe && rm " + mountPoint + "/.overdrive_probe"
+                                });
+                                int exitCode = p.waitFor();
+                                if (exitCode == 0) {
+                                    sdCardPath = mountPoint;
+                                    sdCardAvailable = true;
+                                    logInfo("Found SD card via /proc/mounts: " + sdCardPath + " (filesystem: " + 
+                                        (line.contains("exfat") ? "exfat" : "vfat") + ")");
+                                    reader.close();
+                                    return;
+                                }
+                            } catch (Exception ignored) {}
+                        }
+                    }
+                }
+            }
+            reader.close();
+        } catch (Exception e) {
+            logDebug("Could not parse /proc/mounts: " + e.getMessage());
         }
         
         // Method 4: Check known paths
@@ -508,7 +581,7 @@ public class StorageManager {
             }
         }
         
-        logInfo("No writable SD card found");
+        logDebug("No writable SD card found");
     }
     
     /**
@@ -873,9 +946,11 @@ public class StorageManager {
      * Note: chmod doesn't work on FUSE - rely on MediaScanner broadcast for cross-UID visibility.
      */
     public void fixAllPermissions() {
-        logInfo("Broadcasting files to MediaScanner for UI app access...");
-        
-        // Fix base directory
+        // Run MediaScanner broadcasts on a background thread to avoid blocking daemon startup
+        new Thread(() -> {
+            logInfo("Broadcasting files to MediaScanner for UI app access...");
+            
+            // Fix base directory
         File baseDir = new File(INTERNAL_BASE_DIR);
         if (baseDir.exists()) {
             baseDir.setReadable(true, false);
@@ -894,6 +969,7 @@ public class StorageManager {
         broadcastRecentFiles(proximityDir, Long.MAX_VALUE);
         
         logInfo("MediaScanner broadcast complete");
+        }, "MediaScannerBroadcast").start();
     }
     
     // ==================== Limit Getters/Setters ====================
@@ -1219,8 +1295,8 @@ public class StorageManager {
         if (!dir.exists() || !dir.isDirectory()) return 0;
         
         long size = 0;
-        // SOTA: Try direct listFiles first, fall back to shell if null
-        File[] files = dir.listFiles((d, name) -> name.endsWith(".mp4"));
+        // Count ALL files in the directory (mp4, json sidecars, tmp, etc.)
+        File[] files = dir.listFiles();
         
         if (files == null) {
             // Directory might be owned by UI app - use shell to list
@@ -1229,7 +1305,9 @@ public class StorageManager {
         
         if (files != null) {
             for (File f : files) {
-                size += f.length();
+                if (f.isFile()) {
+                    size += f.length();
+                }
             }
         }
         return size;
@@ -1396,6 +1474,19 @@ public class StorageManager {
             logInfo("Cleanup complete: deleted " + deletedCount + " files (" + formatSize(deletedSize) + ")");
         }
         
+        // If still over limit and directory is on SD card, try freeing space via CDR cleanup
+        if (currentSize > targetSize && sdCardAvailable && dir.getAbsolutePath().startsWith(sdCardPath)) {
+            try {
+                ExternalStorageCleaner cleaner = ExternalStorageCleaner.getInstance();
+                if (cleaner.isEnabled()) {
+                    logInfo("Overdrive cleanup insufficient on SD card — triggering CDR cleanup");
+                    cleaner.ensureReservedSpace();
+                }
+            } catch (Exception e) {
+                logWarn("CDR fallback cleanup failed: " + e.getMessage());
+            }
+        }
+        
         return currentSize <= targetSize;
     }
     
@@ -1468,8 +1559,7 @@ public class StorageManager {
         // Fix directory permissions in case they were reset
         fixDirectoryPermissions(recordingsDir);
         
-        // SOTA: Broadcast recent files to MediaScanner (files from last 60 seconds)
-        broadcastRecentFiles(recordingsDir, 60000);
+        // FIX: Removed broadcastRecentFiles() — specific file already broadcast by onFileSaved()
         
         asyncCleanupExecutor.execute(() -> {
             synchronized (cleanupLock) {
@@ -1506,8 +1596,12 @@ public class StorageManager {
         // Fix directory permissions in case they were reset
         fixDirectoryPermissions(surveillanceDir);
         
-        // SOTA: Broadcast recent files to MediaScanner (files from last 60 seconds)
-        broadcastRecentFiles(surveillanceDir, 60000);
+        // FIX: Removed broadcastRecentFiles() call that re-scanned ALL files modified
+        // in the last 60 seconds. This caused duplicate MediaScanner broadcasts —
+        // if two events saved 20 seconds apart, the second save re-broadcast the first.
+        // Over days of parking, this list grows to hundreds of files, causing massive
+        // CPU spikes on every new event. The specific file is already broadcast by
+        // onFileSaved() → broadcastFile(file) before this method is called.
         
         asyncCleanupExecutor.execute(() -> {
             synchronized (cleanupLock) {
@@ -1544,8 +1638,7 @@ public class StorageManager {
         // Fix directory permissions in case they were reset
         fixDirectoryPermissions(proximityDir);
         
-        // SOTA: Broadcast recent files to MediaScanner (files from last 60 seconds)
-        broadcastRecentFiles(proximityDir, 60000);
+        // FIX: Removed broadcastRecentFiles() — specific file already broadcast by onFileSaved()
         
         asyncCleanupExecutor.execute(() -> {
             synchronized (cleanupLock) {
@@ -1827,9 +1920,21 @@ public class StorageManager {
         sdCardWatchdog.scheduleAtFixedRate(() -> {
             try {
                 if (!isSdCardMounted()) {
-                    logWarn("SD card watchdog: card unmounted, attempting remount...");
+                    sdWatchdogConsecutiveFailures++;
+                    
+                    // Only log verbosely for the first few failures, then quiet down
+                    boolean shouldLog = sdWatchdogConsecutiveFailures <= SD_WATCHDOG_MAX_VERBOSE_FAILURES ||
+                                        sdWatchdogConsecutiveFailures % SD_WATCHDOG_QUIET_LOG_INTERVAL == 0;
+                    
+                    if (shouldLog) {
+                        logWarn("SD card watchdog: card unmounted, attempting remount... (attempt #" + 
+                            sdWatchdogConsecutiveFailures + ")");
+                    }
+                    
                     if (ensureSdCardMounted(true)) {
-                        logInfo("SD card watchdog: remounted successfully");
+                        logInfo("SD card watchdog: remounted successfully after " + 
+                            sdWatchdogConsecutiveFailures + " attempts");
+                        sdWatchdogConsecutiveFailures = 0;
 
                         // Restore SD card directories now that card is back
                         initSdCardDirectories();
@@ -1847,8 +1952,14 @@ public class StorageManager {
                         } catch (Exception e) {
                             logWarn("SD card watchdog: could not update sentry dir: " + e.getMessage());
                         }
-                    } else {
+                    } else if (shouldLog) {
                         logError("SD card watchdog: remount FAILED - surveillance may use internal fallback");
+                    }
+                } else {
+                    // Card is mounted — reset failure counter
+                    if (sdWatchdogConsecutiveFailures > 0) {
+                        logInfo("SD card watchdog: card is mounted again");
+                        sdWatchdogConsecutiveFailures = 0;
                     }
                 }
             } catch (Exception e) {

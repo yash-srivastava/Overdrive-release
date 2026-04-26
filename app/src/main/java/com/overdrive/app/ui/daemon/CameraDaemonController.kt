@@ -68,10 +68,22 @@ class CameraDaemonController(
             sendShutdownCommand()
             Thread.sleep(500)
             
-            // Kill all related processes
-            val killCommands = RELATED_PROCESSES.joinToString("; ") { "killall -9 $it 2>/dev/null" }
+            // Kill the watchdog script FIRST so it can't respawn the daemon,
+            // then kill the daemon and related processes. Without this, the
+            // watchdog sees the daemon die and relaunches it immediately.
+            val killCommands = buildString {
+                append("pkill -9 -f 'start_cam_daemon' 2>/dev/null; ")
+                append("rm -f /data/local/tmp/start_cam_daemon.sh 2>/dev/null; ")
+                append("sleep 1; ")
+                RELATED_PROCESSES.forEach { proc ->
+                    append("pkill -9 -f '$proc' 2>/dev/null; ")
+                    append("killall -9 $proc 2>/dev/null; ")
+                }
+                append("rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null; ")
+                append("echo done")
+            }
             adbLauncher.executeShellCommand(
-                "$killCommands; echo done",
+                killCommands,
                 object : AdbDaemonLauncher.LaunchCallback {
                     override fun onLog(message: String) {}
                     override fun onLaunched() {
@@ -112,9 +124,20 @@ class CameraDaemonController(
     
     override fun cleanup() {
         sendShutdownCommand()
-        val killCommands = RELATED_PROCESSES.joinToString("; ") { "killall -9 $it 2>/dev/null" }
+        // Kill the watchdog first so the daemon stays dead.
+        val killCommands = buildString {
+            append("pkill -9 -f 'start_cam_daemon' 2>/dev/null; ")
+            append("rm -f /data/local/tmp/start_cam_daemon.sh 2>/dev/null; ")
+            append("sleep 1; ")
+            RELATED_PROCESSES.forEach { proc ->
+                append("pkill -9 -f '$proc' 2>/dev/null; ")
+                append("killall -9 $proc 2>/dev/null; ")
+            }
+            append("rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null; ")
+            append("echo done")
+        }
         adbLauncher.executeShellCommand(
-            "$killCommands; echo done",
+            killCommands,
             object : AdbDaemonLauncher.LaunchCallback {
                 override fun onLog(message: String) {}
                 override fun onLaunched() {}

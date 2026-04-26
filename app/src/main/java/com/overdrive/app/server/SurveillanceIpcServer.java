@@ -7,6 +7,7 @@ import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.concurrent.ExecutorService;
@@ -53,8 +54,8 @@ public class SurveillanceIpcServer implements Runnable {
     @Override
     public void run() {
         try {
-            serverSocket = new ServerSocket(port);
-            logger.info("Surveillance IPC server listening on port " + port);
+            serverSocket = new ServerSocket(port, 50, java.net.InetAddress.getByName("127.0.0.1"));
+            logger.info("Surveillance IPC server listening on 127.0.0.1:" + port);
             
             while (running) {
                 try {
@@ -754,6 +755,103 @@ public class SurveillanceIpcServer implements Runnable {
             
             // Note: minObjectHeight filter is now applied in C++ (yolo_detector.cpp)
             // Height filter (10% of frame) is applied BEFORE NMS in native code for efficiency
+            
+            // ========================================================================
+            // V2 Pipeline Settings
+            // ========================================================================
+            
+            // Environment preset (outdoor/garage/street) — sets slider defaults
+            if (config.has("environmentPreset")) {
+                String preset = config.optString("environmentPreset", "outdoor").toLowerCase();
+                sentryConfig.setEnvironmentPreset(preset);
+                if (sentry != null) {
+                    sentry.applyV2EnvironmentPreset(preset);
+                }
+                configChanged = true;
+                logger.info("V2 environment preset: " + preset);
+            }
+            
+            // Sensitivity level (1-5)
+            if (config.has("sensitivityLevel")) {
+                int level = config.optInt("sensitivityLevel", 3);
+                sentryConfig.setSensitivityLevel(level);
+                if (sentry != null) {
+                    sentry.applyV2Sensitivity(level);
+                }
+                configChanged = true;
+                logger.info("V2 sensitivity level: " + level);
+            }
+            
+            // Detection zone (close/normal/extended)
+            if (config.has("detectionZone")) {
+                String zone = config.optString("detectionZone", "normal").toLowerCase();
+                sentryConfig.setDetectionZone(zone);
+                configChanged = true;
+                logger.info("V2 detection zone: " + zone);
+            }
+            
+            // Loitering time (seconds)
+            if (config.has("loiteringTime")) {
+                int seconds = config.optInt("loiteringTime", 3);
+                sentryConfig.setLoiteringTimeSeconds(seconds);
+                if (sentry != null) {
+                    sentry.setV2LoiteringTime(seconds);
+                }
+                configChanged = true;
+                logger.info("V2 loitering time: " + seconds + "s");
+            }
+            
+            // Shadow filter mode (0=OFF, 1=LIGHT, 2=NORMAL, 3=AGGRESSIVE)
+            if (config.has("shadowFilter")) {
+                int mode = config.optInt("shadowFilter", 2);
+                sentryConfig.setShadowFilterMode(mode);
+                if (sentry != null) {
+                    sentry.setV2ShadowFilterMode(mode);
+                }
+                configChanged = true;
+                String[] modeNames = {"OFF", "LIGHT", "NORMAL", "AGGRESSIVE"};
+                logger.info("V2 shadow filter: " + (mode >= 0 && mode <= 3 ? modeNames[mode] : "invalid"));
+            }
+            
+            // Per-camera enable/disable
+            if (config.has("cameraFront")) {
+                boolean enabled = config.optBoolean("cameraFront", true);
+                sentryConfig.setCameraEnabled(0, enabled);
+                if (sentry != null) sentry.setV2QuadrantEnabled(0, enabled);
+                configChanged = true;
+            }
+            if (config.has("cameraRight")) {
+                boolean enabled = config.optBoolean("cameraRight", true);
+                sentryConfig.setCameraEnabled(1, enabled);
+                if (sentry != null) sentry.setV2QuadrantEnabled(1, enabled);
+                configChanged = true;
+            }
+            if (config.has("cameraLeft")) {
+                boolean enabled = config.optBoolean("cameraLeft", true);
+                sentryConfig.setCameraEnabled(2, enabled);
+                if (sentry != null) sentry.setV2QuadrantEnabled(2, enabled);
+                configChanged = true;
+            }
+            if (config.has("cameraRear")) {
+                boolean enabled = config.optBoolean("cameraRear", true);
+                sentryConfig.setCameraEnabled(3, enabled);
+                if (sentry != null) sentry.setV2QuadrantEnabled(3, enabled);
+                configChanged = true;
+            }
+            
+            // Developer toggles
+            if (config.has("motionHeatmap")) {
+                sentryConfig.setMotionHeatmapEnabled(config.optBoolean("motionHeatmap", false));
+                configChanged = true;
+            }
+            if (config.has("filterDebugLog")) {
+                boolean debugEnabled = config.optBoolean("filterDebugLog", false);
+                sentryConfig.setFilterDebugLogEnabled(debugEnabled);
+                if (sentry != null) {
+                    sentry.setFilterDebugEnabled(debugEnabled);
+                }
+                configChanged = true;
+            }
             
         } catch (Exception e) {
             logger.error("Failed to apply config", e);

@@ -149,9 +149,9 @@ public class HttpServer {
                     try { serverSocket.close(); } catch (Exception e) {}
                 }
                 
-                serverSocket = new ServerSocket(port, 10, InetAddress.getByName("0.0.0.0"));
+                serverSocket = new ServerSocket(port, 10, InetAddress.getByName("127.0.0.1"));
                 serverSocket.setReuseAddress(true);
-                CameraDaemon.log("HTTP server listening on 0.0.0.0:" + port);
+                CameraDaemon.log("HTTP server listening on 127.0.0.1:" + port);
 
                 while (running && CameraDaemon.isRunning() && !serverSocket.isClosed()) {
                     try {
@@ -234,11 +234,18 @@ public class HttpServer {
             }
             
             // Read POST body if present
+            // SOTA: Loop read for large payloads (e.g., base64 image uploads)
+            // BufferedReader.read() may return fewer chars than requested in a single call
             String body = null;
             if (contentLength > 0) {
                 char[] bodyChars = new char[contentLength];
-                reader.read(bodyChars, 0, contentLength);
-                body = new String(bodyChars);
+                int totalRead = 0;
+                while (totalRead < contentLength) {
+                    int read = reader.read(bodyChars, totalRead, contentLength - totalRead);
+                    if (read == -1) break;  // EOF
+                    totalRead += read;
+                }
+                body = new String(bodyChars, 0, totalRead);
             }
 
             String[] parts = requestLine.split(" ");
@@ -314,6 +321,10 @@ public class HttpServer {
             } else if (path.equals("/abrp.html") || path.equals("/abrp")) {
                 if (!serveStaticFile(out, "local/abrp.html")) {
                     HttpResponse.sendError(out, 404, "abrp.html not found");
+                }
+            } else if (path.equals("/mqtt.html") || path.equals("/mqtt")) {
+                if (!serveStaticFile(out, "local/mqtt.html")) {
+                    HttpResponse.sendError(out, 404, "mqtt.html not found");
                 }
             } else if (path.equals("/trips.html") || path.equals("/trips")) {
                 if (!serveStaticFile(out, "local/trips.html")) {
@@ -594,6 +605,47 @@ public class HttpServer {
         com.overdrive.app.surveillance.GpuSurveillancePipeline pipeline = CameraDaemon.getGpuPipeline();
         status.put("gpuSurveillance", pipeline != null && pipeline.isSurveillanceMode());
         
+        // Recording mode details (for status overlay)
+        try {
+            JSONObject recordingStatus = new JSONObject();
+            com.overdrive.app.recording.RecordingModeManager rmm = CameraDaemon.getRecordingModeManager();
+            if (rmm != null) {
+                recordingStatus.put("configuredMode", rmm.getCurrentMode().name());
+                recordingStatus.put("isRecording", pipeline != null && pipeline.isRecording());
+                recordingStatus.put("pipelineRunning", pipeline != null && pipeline.isRunning());
+                recordingStatus.put("gear", com.overdrive.app.recording.RecordingModeManager.gearToString(rmm.getCurrentGear()));
+                recordingStatus.put("accOn", rmm.isAccOn());
+            } else {
+                recordingStatus.put("configuredMode", "UNKNOWN");
+                recordingStatus.put("isRecording", false);
+                recordingStatus.put("pipelineRunning", false);
+            }
+            status.put("recordingStatus", recordingStatus);
+        } catch (Exception e) {
+            // Recording status not available
+        }
+        
+        // Trip analytics status (for status overlay)
+        try {
+            JSONObject tripStatus = new JSONObject();
+            com.overdrive.app.trips.TripAnalyticsManager tam = CameraDaemon.getTripAnalyticsManager();
+            if (tam != null) {
+                tripStatus.put("enabled", tam.isEnabled());
+                tripStatus.put("tripActive", tam.isTripActive());
+                com.overdrive.app.trips.TripRecord activeTrip = tam.getActiveTrip();
+                if (activeTrip != null) {
+                    tripStatus.put("tripStartTime", activeTrip.startTime);
+                    tripStatus.put("tripDurationSec", (System.currentTimeMillis() - activeTrip.startTime) / 1000);
+                }
+            } else {
+                tripStatus.put("enabled", false);
+                tripStatus.put("tripActive", false);
+            }
+            status.put("tripStatus", tripStatus);
+        } catch (Exception e) {
+            // Trip status not available
+        }
+        
         // GPS location
         com.overdrive.app.monitor.GpsMonitor gps = com.overdrive.app.monitor.GpsMonitor.getInstance();
         status.put("gps", gps.getLocationJson());
@@ -620,14 +672,28 @@ public class HttpServer {
         try (FileInputStream fis = new FileInputStream(file)) {
             String contentType = getContentType(relativePath);
             
-            String headers = "HTTP/1.1 200 OK\r\n" +
-                            "Content-Type: " + contentType + "\r\n" +
-                            "Content-Length: " + file.length() + "\r\n" +
-                            "Cache-Control: no-store, no-cache, must-revalidate, max-age=0\r\n" +
-                            "Pragma: no-cache\r\n" +
-                            "Expires: 0\r\n" +
-                            "Connection: close\r\n\r\n";
-            out.write(headers.getBytes());
+            // HTML pages must always revalidate so the user gets the latest UI logic.
+            // Shared static assets (JS/CSS/fonts/images) ship inside the APK and never
+            // change without an app update, so we let the browser cache them to avoid
+            // re-downloading ~360KB on every page load.
+            String cacheControl;
+            if (relativePath.endsWith(".html")) {
+                cacheControl = "no-store, no-cache, must-revalidate, max-age=0";
+            } else {
+                cacheControl = "public, max-age=86400";
+            }
+            
+            StringBuilder headers = new StringBuilder();
+            headers.append("HTTP/1.1 200 OK\r\n")
+                   .append("Content-Type: ").append(contentType).append("\r\n")
+                   .append("Content-Length: ").append(file.length()).append("\r\n")
+                   .append("Cache-Control: ").append(cacheControl).append("\r\n");
+            if (relativePath.endsWith(".html")) {
+                headers.append("Pragma: no-cache\r\n")
+                       .append("Expires: 0\r\n");
+            }
+            headers.append("Connection: close\r\n\r\n");
+            out.write(headers.toString().getBytes());
             
             // Stream in 16KB chunks
             byte[] buffer = new byte[16384];

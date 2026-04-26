@@ -49,13 +49,13 @@ public class TripRecord {
      * Compute the overall Driving DNA score as the average of all 5 axis scores.
      */
     public int getOverallScore() {
-        return (anticipationScore + smoothnessScore + speedDisciplineScore
-                + efficiencyScore + consistencyScore) / 5;
+        return (int) Math.round((anticipationScore + smoothnessScore + speedDisciplineScore
+                + efficiencyScore + consistencyScore) / 5.0);
     }
 
     /**
-     * Get the actual energy consumed in kWh (from BMS readings).
-     * Returns 0 if kWh data not available.
+     * Get the actual energy consumed in kWh from BMS readings.
+     * Returns 0 if kWh data not available (caller should use SoC-based estimation).
      */
     public double getEnergyUsedKwh() {
         if (kwhStart > 0 && kwhEnd > 0 && kwhStart > kwhEnd) {

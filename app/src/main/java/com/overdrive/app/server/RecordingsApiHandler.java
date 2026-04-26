@@ -541,6 +541,28 @@ public class RecordingsApiHandler {
             scanDatesInDirectory(legacySentryDir, true, dates, countByDate, hasSentryByDate);
         }
         
+        // Also scan the other storage location (files may exist on both internal and SD card)
+        StorageManager sm = StorageManager.getInstance();
+        if (sm.isSdCardAvailable() && sm.getSdCardPath() != null) {
+            File sdRecDir = new File(sm.getSdCardPath(), "Overdrive/recordings");
+            File intRecDir = new File("/storage/emulated/0/Overdrive/recordings");
+            File sdSentryDir = new File(sm.getSdCardPath(), "Overdrive/surveillance");
+            File intSentryDir = new File("/storage/emulated/0/Overdrive/surveillance");
+            
+            if (sdRecDir.exists() && !sdRecDir.getAbsolutePath().equals(recordingsDir.getAbsolutePath())) {
+                scanDatesInDirectory(sdRecDir, false, dates, countByDate, hasSentryByDate);
+            }
+            if (intRecDir.exists() && !intRecDir.getAbsolutePath().equals(recordingsDir.getAbsolutePath())) {
+                scanDatesInDirectory(intRecDir, false, dates, countByDate, hasSentryByDate);
+            }
+            if (sdSentryDir.exists() && !sdSentryDir.getAbsolutePath().equals(sentryDir.getAbsolutePath())) {
+                scanDatesInDirectory(sdSentryDir, true, dates, countByDate, hasSentryByDate);
+            }
+            if (intSentryDir.exists() && !intSentryDir.getAbsolutePath().equals(sentryDir.getAbsolutePath())) {
+                scanDatesInDirectory(intSentryDir, true, dates, countByDate, hasSentryByDate);
+            }
+        }
+        
         JSONArray datesArray = new JSONArray();
         for (String date : dates) {
             JSONObject dateObj = new JSONObject();

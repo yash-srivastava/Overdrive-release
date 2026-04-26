@@ -106,7 +106,7 @@ public class VehicleDataMonitor {
     
     // ==================== DATA ACCESS (delegates to BydDataCollector) ====================
     
-    private BydVehicleData getVd() {
+    public BydVehicleData getVd() {
         try {
             BydDataCollector c = BydDataCollector.getInstance();
             if (!c.isInitialized() && context != null) {
@@ -157,22 +157,29 @@ public class VehicleDataMonitor {
             } else if (!Double.isNaN(vd.chargingPowerKw) && vd.chargingPowerKw > 0) {
                 data.updateChargingPower(vd.chargingPowerKw);
             } else if (data.status == ChargingStateData.ChargingStatus.CHARGING) {
-                // Both power sources returned 0 but charging is active (common on PHEVs).
-                // Estimate power from SOC change rate: deltaSOC% x nominal / deltaTime
+                // Both power sources returned 0 but charging is active.
+                // Don't hardcode a power value — it's misleading (e.g., showing 7 kW
+                // when the car is actually drawing 4.6 kW). Instead, try to compute
+                // from SOC change rate, and if that's not possible, mark as estimated.
                 try {
                     com.overdrive.app.abrp.SohEstimator soh =
                         com.overdrive.app.monitor.SocHistoryDatabase.getInstance().getSohEstimator();
                     if (soh != null && soh.getNominalCapacityKwh() > 0) {
-                        // Use a conservative estimate: PHEV AC charging is typically 3.3-7 kW
-                        // We can't compute exact rate without time delta, so use nominal-based hint
                         double nominal = soh.getNominalCapacityKwh();
-                        if (nominal < 30) {
-                            // PHEV: typical AC charge rate is 3.3 kW (single phase)
-                            data.updateChargingPower(3.3);
-                        } else {
-                            // BEV: typical AC charge rate is 7 kW
-                            data.updateChargingPower(7.0);
+                        // Try to compute from SOC change rate
+                        double ratePerHour = com.overdrive.app.monitor.SocHistoryDatabase.getInstance()
+                            .getSocChangeRatePerHour();
+                        if (ratePerHour > 0.5) {
+                            // SOC is rising — compute power from rate
+                            // power = (rate% / 100) * nominalKwh
+                            double estimatedPower = (ratePerHour / 100.0) * nominal;
+                            // Clamp to reasonable range (0.5 - 150 kW)
+                            estimatedPower = Math.max(0.5, Math.min(150, estimatedPower));
+                            data.updateChargingPower(estimatedPower);
+                            data.isEstimated = true;
                         }
+                        // If rate is too low or negative, leave power as 0
+                        // (UI will show "Charging" without a kW number)
                     }
                 } catch (Exception e) { /* leave as 0 */ }
             }
@@ -217,31 +224,34 @@ public class VehicleDataMonitor {
                 com.overdrive.app.monitor.SocHistoryDatabase.getInstance().getSohEstimator();
             if (soh != null && soh.getNominalCapacityKwh() > 0 && soc > 0) {
                 double nominal = soh.getNominalCapacityKwh();
-                boolean isPhev = nominal < 30.0; // PHEVs have packs under 30 kWh
-
-                if (isPhev) {
-                    // PHEV: raw kWh from getBatteryPowerHEV() is stuck/stale.
-                    // Always compute from SOC x nominal.
-                    return (soc / 100.0) * nominal;
+                double sohPercent = soh.hasEstimate() ? soh.getCurrentSoh() : 100.0;
+                double computedKwh = (soc / 100.0) * nominal * (sohPercent / 100.0);
+                
+                // Validate raw BMS value: if implied capacity is wildly off from nominal,
+                // the BMS is returning garbage (common on Seal, Han EV when ACC is off).
+                // Use computed value instead.
+                if (rawKwh > 0 && soc > 5) {
+                    double impliedCap = rawKwh / (soc / 100.0);
+                    double ratio = impliedCap / nominal;
+                    if (ratio < 0.5 || ratio > 1.5) {
+                        // Raw value is garbage — use computed
+                        return computedKwh;
+                    }
                 }
-                // BEV: prefer raw BMS value (more accurate, accounts for SOH).
-                // Fall through to raw value below.
+                
+                boolean isPhev = nominal < 30.0;
+                if (isPhev) {
+                    return computedKwh;
+                }
+                // BEV with valid raw value: use it
+                if (rawKwh > 0) return rawKwh;
+                // BEV with no raw value: use computed
+                return computedKwh;
             }
         } catch (Exception e) { /* fall through to raw */ }
 
-        // BEV path or SohEstimator not ready: use raw BMS value
+        // SohEstimator not ready: use raw BMS value if available
         if (rawKwh > 0) return rawKwh;
-
-        // Last resort: compute from SOC if raw is unavailable
-        if (soc > 0) {
-            try {
-                com.overdrive.app.abrp.SohEstimator soh =
-                    com.overdrive.app.monitor.SocHistoryDatabase.getInstance().getSohEstimator();
-                if (soh != null && soh.getNominalCapacityKwh() > 0) {
-                    return (soc / 100.0) * soh.getNominalCapacityKwh();
-                }
-            } catch (Exception e) { /* unavailable */ }
-        }
 
         return 0.0;
     }
@@ -284,7 +294,7 @@ public class VehicleDataMonitor {
                 // Prefer externalChargingPowerKw (InstrumentDevice) over chargingPowerKw (ChargingDevice)
                 if (!Double.isNaN(vd.externalChargingPowerKw) && vd.externalChargingPowerKw > 0) {
                     cs.updateChargingPower(vd.externalChargingPowerKw);
-                } else if (!Double.isNaN(vd.chargingPowerKw)) {
+                } else if (!Double.isNaN(vd.chargingPowerKw) && vd.chargingPowerKw > 0) {
                     cs.updateChargingPower(vd.chargingPowerKw);
                 }
                 JSONObject csJson = new JSONObject();
@@ -294,6 +304,7 @@ public class VehicleDataMonitor {
                 csJson.put("isError", cs.isError);
                 csJson.put("chargingPowerKW", cs.chargingPowerKW);
                 csJson.put("isDischarging", cs.isDischarging);
+                csJson.put("isEstimated", cs.isEstimated);
                 json.put("chargingState", csJson);
             }
             

@@ -29,7 +29,8 @@ public class AuthMiddleware {
         "/auth/logout",
         "/login.html",
         "/login",
-        "/favicon.ico"
+        "/favicon.ico",
+        "/status"
     ));
     
     // Path prefixes that don't require authentication

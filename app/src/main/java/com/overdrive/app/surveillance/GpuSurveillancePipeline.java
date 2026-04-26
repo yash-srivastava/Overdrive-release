@@ -62,6 +62,10 @@ public class GpuSurveillancePipeline {
     private boolean running = false;
     private boolean recordingMode = false;  // true = recording, false = viewing only
     
+    // Deferred recording: stored when startRecording() is called before encoder is ready
+    private volatile java.io.File pendingRecordingDir = null;
+    private volatile String pendingRecordingPrefix = null;
+    
     /**
      * Creates the GPU surveillance pipeline.
      * 
@@ -482,9 +486,35 @@ public class GpuSurveillancePipeline {
             int savedMode = cameraConfig != null ? cameraConfig.optInt("probedSurfaceMode", -1) : -1;
             
             if (savedId >= 0 && savedMode >= 0) {
-                logger.info("Using saved camera config: id=" + savedId + ", surfaceMode=" + savedMode);
-                camera.setCameraId(savedId);
+                // Use saved surface mode but ALWAYS start from ID 0 with probe enabled.
+                // On some models (Seal U), the HAL needs camera ID 0 to be opened briefly
+                // before ID 1 produces image data. Starting directly with saved ID 1
+                // results in BLACK frames.
+                logger.info("Saved camera config: id=" + savedId + ", surfaceMode=" + savedMode +
+                    " — starting from id=0 with probe (HAL warm-up)");
+                camera.setCameraId(0);
                 camera.setCameraSurfaceMode(savedMode);
+                camera.setAutoProbeCameras(true);
+                // SOTA: Always register probe callback so config is re-persisted
+                // if the saved config no longer works (e.g., after firmware update)
+                camera.setCameraProbeCallback((cameraId, surfaceMode) -> {
+                    logger.info("Probe found working camera: id=" + cameraId + ", surfaceMode=" + surfaceMode);
+                    try {
+                        org.json.JSONObject camCfg = new org.json.JSONObject();
+                        camCfg.put("probedCameraId", cameraId);
+                        camCfg.put("probedSurfaceMode", surfaceMode);
+                        com.overdrive.app.config.UnifiedConfigManager.updateSection("camera", camCfg);
+                        logger.info("Saved camera config for next launch");
+                    } catch (Exception ex) {
+                        logger.warn("Failed to save camera config: " + ex.getMessage());
+                    }
+                    // Check if there's a pending recording that was deferred
+                    // Wait briefly for encoder to receive first frame format
+                    new Thread(() -> {
+                        try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
+                        checkPendingRecording();
+                    }, "PendingRecCheck").start();
+                });
                 configured = true;
             }
         } catch (Exception e) {
@@ -507,6 +537,11 @@ public class GpuSurveillancePipeline {
                 } catch (Exception ex) {
                     logger.warn("Failed to save camera config: " + ex.getMessage());
                 }
+                // Check if there's a pending recording that was deferred
+                new Thread(() -> {
+                    try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
+                    checkPendingRecording();
+                }, "PendingRecCheck").start();
             });
         }
         
@@ -583,7 +618,15 @@ public class GpuSurveillancePipeline {
                 
                 @Override
                 public void onPostReacquire() {
-                    logger.info("Post-reacquire: resuming recording...");
+                    logger.info("Post-reacquire: resuming recording and streaming...");
+                    
+                    // Restore streaming components if streaming was enabled.
+                    // yieldCameraInternal and restartCameraAfterError call clearStreamingComponents()
+                    // which nulls the camera's local refs. The pipeline still holds the actual objects.
+                    if (streamingEnabled && streamScaler != null && streamEncoder != null && camera != null) {
+                        camera.setStreamingComponents(streamScaler, streamEncoder);
+                        logger.info("Post-reacquire: streaming components restored");
+                    }
                     
                     // Resume recording in whatever mode was active before yield
                     if (currentMode == Mode.SURVEILLANCE) {
@@ -617,6 +660,7 @@ public class GpuSurveillancePipeline {
                     // Enable overlay for auto-started recording
                     recorder.setOverlayRecordingModeAllowed(true);
                     if (telemetryCollector != null && recorder.isOverlayEnabled()) {
+                        telemetryCollector.setOverlayRecordingActive(true);
                         telemetryCollector.startPolling();
                     }
                 });
@@ -662,9 +706,22 @@ public class GpuSurveillancePipeline {
         logger.info( "Stopping GPU pipeline...");
         running = false;
         
+        // Clear any pending deferred recording
+        pendingRecordingDir = null;
+        pendingRecordingPrefix = null;
+        
+        // Reset mode so status API reflects that we're not in any active mode
+        currentMode = Mode.IDLE;
+        
         // Stop recording first to finalize file
         if (recorder != null && recorder.isRecording()) {
             recorder.stopRecording();
+        }
+        
+        // Disable streaming — stream encoder/scaler hold EGL surfaces that will be
+        // destroyed when the camera stops. They must be released before camera.stop().
+        if (streamingEnabled) {
+            disableStreaming();
         }
         
         // Disable surveillance
@@ -767,17 +824,53 @@ public class GpuSurveillancePipeline {
         }
         
         if (recorder != null) {
-            recorder.startRecording(outputDir, prefix);
-            currentMode = Mode.NORMAL_RECORDING;
-            
-            // Enable overlay compositing in normal recording mode
-            recorder.setOverlayRecordingModeAllowed(true);
-            if (telemetryCollector != null) {
-                telemetryCollector.startPolling();
+            // Check if encoder is ready (has received at least one frame from camera).
+            if (recorder.getEncoder() != null && recorder.getEncoder().isFormatAvailable()) {
+                recorder.startRecording(outputDir, prefix);
+                currentMode = Mode.NORMAL_RECORDING;
+                recorder.setOverlayRecordingModeAllowed(true);
+                if (telemetryCollector != null) {
+                    telemetryCollector.setOverlayRecordingActive(true);
+                    telemetryCollector.startPolling();
+                }
+                logger.info("Normal recording started (dir=" + (outputDir != null ? outputDir.getName() : "default") + ", prefix=" + prefix + ")");
+            } else {
+                // Encoder not ready yet (camera still probing on ACC ON).
+                // Store the request and let the pipeline start recording once the
+                // encoder format becomes available. The render loop or probe-complete
+                // callback will pick this up.
+                logger.info("Encoder not ready yet — recording will start when camera is ready");
+                pendingRecordingDir = outputDir;
+                pendingRecordingPrefix = prefix;
+                recordingMode = true;
             }
-            
-            logger.info("Normal recording started (dir=" + (outputDir != null ? outputDir.getName() : "default") + ", prefix=" + prefix + ")");
         }
+    }
+    
+    /**
+     * Called when the encoder format becomes available (probe complete, first frame encoded).
+     * Starts any pending recording that was deferred because the encoder wasn't ready.
+     */
+    void checkPendingRecording() {
+        if (pendingRecordingPrefix == null) return;
+        if (recorder == null || recorder.getEncoder() == null) return;
+        if (!recorder.getEncoder().isFormatAvailable()) return;
+        
+        java.io.File dir = pendingRecordingDir;
+        String prefix = pendingRecordingPrefix;
+        pendingRecordingDir = null;
+        pendingRecordingPrefix = null;
+        
+        logger.info("Encoder now ready — starting deferred recording");
+        recorder.startRecording(dir, prefix);
+        currentMode = Mode.NORMAL_RECORDING;
+        recorder.setOverlayRecordingModeAllowed(true);
+        if (telemetryCollector != null) {
+            telemetryCollector.setOverlayRecordingActive(true);
+            telemetryCollector.startPolling();
+        }
+        logger.info("Deferred normal recording started (dir=" + 
+            (dir != null ? dir.getName() : "default") + ", prefix=" + prefix + ")");
     }
     
     /**
@@ -790,6 +883,7 @@ public class GpuSurveillancePipeline {
             // Disable overlay compositing when recording stops
             recorder.setOverlayRecordingModeAllowed(false);
             if (telemetryCollector != null) {
+                telemetryCollector.setOverlayRecordingActive(false);
                 telemetryCollector.stopPolling();
             }
             
@@ -833,7 +927,9 @@ public class GpuSurveillancePipeline {
         if (sentry != null) {
             sentry.enable();
             currentMode = Mode.SURVEILLANCE;
-            logger.info( "Surveillance mode enabled");
+            logger.info("Surveillance mode enabled (sentry.active=" + sentry.isActive() + ")");
+        } else {
+            logger.error("Cannot enable surveillance: sentry is null!");
         }
         
         // Disable overlay compositing in surveillance mode
@@ -841,6 +937,7 @@ public class GpuSurveillancePipeline {
             recorder.setOverlayRecordingModeAllowed(false);
         }
         if (telemetryCollector != null) {
+            telemetryCollector.setOverlayRecordingActive(false);
             telemetryCollector.stopPolling();
         }
     }
@@ -914,9 +1011,16 @@ public class GpuSurveillancePipeline {
             return;
         }
         
+        // Auto-start pipeline if not running (e.g., DRIVE_MODE in gear P, user opens stream)
         if (!running) {
-            logger.error("Cannot enable streaming - pipeline not running");
-            throw new IllegalStateException("Pipeline must be running to enable streaming");
+            logger.info("Pipeline not running — auto-starting for streaming (view-only)");
+            start(false);  // Start without auto-recording
+        }
+        
+        // Verify camera GL thread is ready after start
+        if (camera == null || camera.getGlHandler() == null) {
+            logger.error("Cannot enable streaming - camera GL thread not ready");
+            throw new IllegalStateException("Camera GL thread not initialized");
         }
         
         logger.info(String.format("Enabling H.264 streaming: %dx%d @ %dfps, %d Mbps",
@@ -1218,8 +1322,10 @@ public class GpuSurveillancePipeline {
         }
         // Start/stop telemetry collector based on overlay state
         if (enabled && currentMode == Mode.NORMAL_RECORDING && telemetryCollector != null) {
+            telemetryCollector.setOverlayRecordingActive(true);
             telemetryCollector.startPolling();
         } else if (!enabled && telemetryCollector != null) {
+            telemetryCollector.setOverlayRecordingActive(false);
             telemetryCollector.stopPolling();
         }
     }

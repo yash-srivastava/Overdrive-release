@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Trip tracking inactive: route icon with slash -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Navigation arrow (muted) -->
+    <path
+        android:fillColor="#71717A"
+        android:pathData="M12,2L4.5,20.29l0.71,0.71L12,18l6.79,3 0.71,-0.71z" />
+    <!-- Slash -->
+    <path
+        android:strokeColor="#EF4444"
+        android:strokeWidth="2"
+        android:pathData="M2,2L22,22" />
+</vector>

@@ -1,17 +1,21 @@
 package com.overdrive.app.ui.fragment
 
 import android.annotation.SuppressLint
+import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
 import com.google.android.material.button.MaterialButton
 import com.overdrive.app.R
@@ -43,7 +47,7 @@ class WebViewFragment : Fragment() {
 (function() {
     // Hide sidebar
     var s = document.createElement('style');
-    s.textContent = '.sidebar, .sidebar-overlay, .mobile-header { display: none !important; } .main-content { margin-left: 0 !important; padding-top: 0 !important; } .pip-container, .pip-toggle-btn, #pipToggleBtn, #pipContainer { display: none !important; } .footer-bar { bottom: 0 !important; left: 0 !important; right: 0 !important; padding: 12px 16px !important; padding-bottom: 12px !important; z-index: 10000 !important; } .page-body { padding-bottom: 80px !important; } #safeLocMap, .leaflet-container { z-index: 1 !important; } .leaflet-pane { z-index: 1 !important; } .leaflet-top, .leaflet-bottom { z-index: 2 !important; } .page-header { padding-top: 12px !important; } .btn-group { display: inline-flex !important; } .btn-toggle { border: none !important; cursor: pointer !important; background: transparent; -webkit-appearance: none !important; appearance: none !important; outline: none !important; } .btn-toggle.active { background: var(--brand-primary) !important; color: #000 !important; } .toast-container { z-index: 20000 !important; bottom: 70px !important; }';
+    s.textContent = '.sidebar, .sidebar-overlay, .mobile-header { display: none !important; } .main-content { margin-left: 0 !important; padding-top: 0 !important; } .pip-container, .pip-toggle-btn, #pipToggleBtn, #pipContainer { display: none !important; } .footer-bar { bottom: 0 !important; left: 0 !important; right: 0 !important; padding: 12px 16px !important; padding-bottom: 12px !important; z-index: 10000 !important; } .page-body { padding-bottom: 80px !important; } #safeLocMap { z-index: 1 !important; } .page-header { padding-top: 12px !important; } .toast-container { z-index: 20000 !important; bottom: 70px !important; }';
     document.head.appendChild(s);
 
     // Replace fetch() to bypass sing-box proxy for localhost
@@ -56,10 +60,16 @@ class WebViewFragment : Fragment() {
             var isLocal = url.startsWith('/') || url.indexOf('127.0.0.1') !== -1 || url.indexOf('localhost') !== -1;
             
             // Only intercept API calls — let media (video/thumb/snapshot/h264) go through normally
-            var isApi = url.indexOf('/api/') !== -1 || url.indexOf('/status') !== -1 || url.indexOf('/auth/') !== -1;
+            // Also let /status go through normal async path — it polls every 3s and would block the JS thread
+            var isApi = url.indexOf('/api/') !== -1 || url.indexOf('/auth/') !== -1;
             if (!isLocal || !isApi) return _orig.call(window, input, init);
             
             var method = (init.method || 'GET').toUpperCase();
+            
+            // Only use synchronous AndroidBridge for POST/PUT/DELETE (writes).
+            // GET requests go through normal async WebView path (shouldInterceptRequest handles proxy bypass).
+            // This prevents the synchronous bridge from blocking the JS thread during polling/config loads.
+            if (method === 'GET') return _orig.call(window, input, init);
             var body = init.body || '';
             var headers = {};
             if (init.headers) {
@@ -103,6 +113,26 @@ class WebViewFragment : Fragment() {
     private var currentUrl: String? = null
     private var pageLoadFailed = false
 
+    // Pending callback from onShowFileChooser — must be invoked exactly once,
+    // with either the selected URIs or null on cancel.
+    private var pendingFileCallback: ValueCallback<Array<Uri>>? = null
+
+    // Picker launcher — registered in onCreate so it survives config changes.
+    // We use OpenMultipleDocuments so the same handler works whether the
+    // <input> allows a single file or has the `multiple` attribute.
+    private lateinit var fileChooserLauncher: ActivityResultLauncher<Array<String>>
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        fileChooserLauncher = registerForActivityResult(
+            ActivityResultContracts.OpenMultipleDocuments()
+        ) { uris: List<Uri> ->
+            val result = if (uris.isNullOrEmpty()) null else uris.toTypedArray()
+            pendingFileCallback?.onReceiveValue(result)
+            pendingFileCallback = null
+        }
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
     ): View? = inflater.inflate(R.layout.fragment_webview, container, false)
@@ -138,7 +168,11 @@ class WebViewFragment : Fragment() {
             settings.allowFileAccess = false
             settings.allowContentAccess = false
             settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            settings.cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
+            // Respect server Cache-Control headers. The daemon serves HTML with no-store
+            // and shared static assets (CSS/JS/fonts/icons, ~360KB total) with a 24h
+            // max-age, so switching from LOAD_NO_CACHE keeps HTML always fresh while
+            // avoiding a full re-download of every asset on each page load.
+            settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
             settings.loadWithOverviewMode = true
             settings.useWideViewPort = true
             setBackgroundColor(android.graphics.Color.parseColor("#0a0a0f"))
@@ -163,6 +197,7 @@ class WebViewFragment : Fragment() {
                     
                     // Bypass proxy for map tiles and CDN resources (sing-box proxy blocks these)
                     val isMapTile = url.contains("tile.openstreetmap.org") ||
+                        url.contains("basemaps.cartocdn.com") ||
                         url.contains("unpkg.com") ||
                         url.contains("cdn.jsdelivr.net") ||
                         url.contains("fonts.googleapis.com") ||
@@ -172,43 +207,67 @@ class WebViewFragment : Fragment() {
                         return super.shouldInterceptRequest(view, request)
                     }
                     
-                    // For map tiles/CDN: bypass proxy with direct connection
+                    // For map tiles/CDN: route through sing-box proxy (HTTP or SOCKS).
+                    // The BYD head unit has no direct internet — all external requests
+                    // must go through the sing-box mixed proxy on port 8119.
+                    // Strategy: try HTTP proxy first, then SOCKS proxy, then direct, then
+                    // fall back to letting WebView handle it (which uses system proxy).
                     if (isMapTile) {
-                        try {
-                            val connection = java.net.URL(url).openConnection(java.net.Proxy.NO_PROXY) as java.net.HttpURLConnection
-                            connection.connectTimeout = 5000
-                            connection.readTimeout = 10000
-                            request?.requestHeaders?.forEach { (key, value) ->
-                                connection.setRequestProperty(key, value)
-                            }
-                            connection.connect()
-                            
-                            val stream = if (connection.responseCode in 200..399) {
-                                connection.inputStream
-                            } else {
-                                return super.shouldInterceptRequest(view, request)
-                            }
-                            
-                            val rawContentType = connection.contentType ?: "application/octet-stream"
-                            val mime = rawContentType.split(";").first().trim()
-                            val encoding = if (rawContentType.contains("charset=")) {
-                                rawContentType.substringAfter("charset=").trim()
-                            } else null
-                            
-                            val response = WebResourceResponse(mime, encoding, stream)
-                            response.setStatusCodeAndReasonPhrase(connection.responseCode, connection.responseMessage ?: "OK")
-                            
-                            val headers = mutableMapOf<String, String>()
-                            connection.headerFields?.forEach { (k, v) ->
-                                if (k != null && v.isNotEmpty()) headers[k] = v.last()
-                            }
-                            headers["Access-Control-Allow-Origin"] = "*"
-                            response.responseHeaders = headers
-                            return response
-                        } catch (e: Exception) {
-                            android.util.Log.w("WebViewProxy", "Map tile bypass failed: ${e.message}")
-                            return super.shouldInterceptRequest(view, request)
+                        val proxyAvailable = com.overdrive.app.mqtt.ProxyHelper.isProxyAvailable()
+                        
+                        // Build list of proxy strategies to try
+                        val strategies = mutableListOf<java.net.Proxy>()
+                        if (proxyAvailable) {
+                            // sing-box "mixed" inbound supports both HTTP and SOCKS5
+                            strategies.add(java.net.Proxy(java.net.Proxy.Type.HTTP, java.net.InetSocketAddress("127.0.0.1", 8119)))
+                            strategies.add(java.net.Proxy(java.net.Proxy.Type.SOCKS, java.net.InetSocketAddress("127.0.0.1", 8119)))
                         }
+                        strategies.add(java.net.Proxy.NO_PROXY) // direct as last resort
+                        
+                        for (proxy in strategies) {
+                            try {
+                                val connection = java.net.URL(url).openConnection(proxy) as java.net.HttpURLConnection
+                                connection.connectTimeout = if (proxy == java.net.Proxy.NO_PROXY) 3000 else 8000
+                                connection.readTimeout = 15000
+                                connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 7.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0 Safari/537.36")
+                                request?.requestHeaders?.forEach { (key, value) ->
+                                    if (key != "User-Agent") connection.setRequestProperty(key, value)
+                                }
+                                connection.connect()
+                                
+                                if (connection.responseCode !in 200..399) {
+                                    connection.disconnect()
+                                    continue
+                                }
+                                
+                                val stream = connection.inputStream
+                                val rawContentType = connection.contentType ?: "application/octet-stream"
+                                val mime = rawContentType.split(";").first().trim()
+                                val encoding = if (rawContentType.contains("charset=")) {
+                                    rawContentType.substringAfter("charset=").trim()
+                                } else null
+                                
+                                val response = WebResourceResponse(mime, encoding, stream)
+                                response.setStatusCodeAndReasonPhrase(connection.responseCode, connection.responseMessage ?: "OK")
+                                
+                                val headers = mutableMapOf<String, String>()
+                                connection.headerFields?.forEach { (k, v) ->
+                                    if (k != null && v.isNotEmpty()) headers[k] = v.last()
+                                }
+                                headers["Access-Control-Allow-Origin"] = "*"
+                                response.responseHeaders = headers
+                                
+                                android.util.Log.d("WebViewProxy", "CDN OK via ${proxy.type()}: $url")
+                                return response
+                            } catch (e: Exception) {
+                                android.util.Log.w("WebViewProxy", "CDN ${proxy.type()} failed for $url: ${e.message}")
+                                // Try next strategy
+                            }
+                        }
+                        
+                        // All strategies failed — let WebView try its own way
+                        android.util.Log.e("WebViewProxy", "All CDN strategies failed for: $url")
+                        return super.shouldInterceptRequest(view, request)
                     }
 
                     // LOGGING: Check if we are seeing the video request
@@ -354,7 +413,58 @@ class WebViewFragment : Fragment() {
                 }
             }
 
-            webChromeClient = WebChromeClient()
+            webChromeClient = object : WebChromeClient() {
+                override fun onConsoleMessage(
+                    consoleMessage: android.webkit.ConsoleMessage?
+                ): Boolean {
+                    consoleMessage?.let {
+                        val level = when (it.messageLevel()) {
+                            android.webkit.ConsoleMessage.MessageLevel.ERROR -> android.util.Log.ERROR
+                            android.webkit.ConsoleMessage.MessageLevel.WARNING -> android.util.Log.WARN
+                            android.webkit.ConsoleMessage.MessageLevel.DEBUG -> android.util.Log.DEBUG
+                            else -> android.util.Log.INFO
+                        }
+                        android.util.Log.println(
+                            level,
+                            "WebViewJS",
+                            "${it.sourceId()?.substringAfterLast('/')}:${it.lineNumber()} — ${it.message()}"
+                        )
+                    }
+                    return true
+                }
+
+                /**
+                 * Bridge <input type="file"> clicks into the Android photo picker.
+                 * Without this, the default WebChromeClient ignores the click and
+                 * nothing happens (e.g. file upload buttons in the web UI).
+                 */
+                override fun onShowFileChooser(
+                    webView: WebView?,
+                    filePathCallback: ValueCallback<Array<Uri>>?,
+                    fileChooserParams: FileChooserParams?
+                ): Boolean {
+                    // Release any stale callback from a previous, unfinished request
+                    pendingFileCallback?.onReceiveValue(null)
+                    pendingFileCallback = filePathCallback
+
+                    // Honor the <input accept="..."> MIME hints; default to images.
+                    val accept = fileChooserParams?.acceptTypes
+                        ?.filter { it.isNotBlank() }
+                        ?.toTypedArray()
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: arrayOf("image/*")
+
+                    return try {
+                        fileChooserLauncher.launch(accept)
+                        true
+                    } catch (e: Exception) {
+                        android.util.Log.e("WebView", "File chooser launch failed: ${e.message}")
+                        pendingFileCallback?.onReceiveValue(null)
+                        pendingFileCallback = null
+                        false
+                    }
+                }
+            }
 
             // Native bridge for direct HTTP calls bypassing proxy
             addJavascriptInterface(ProxyBypassBridge(), "AndroidBridge")
@@ -443,13 +553,26 @@ class WebViewFragment : Fragment() {
         if (cachedJwt != null && now < jwtExpiry) return cachedJwt
         
         return try {
+            // Try to initialize AuthManager if not already done
             if (com.overdrive.app.auth.AuthManager.getState() == null) {
                 com.overdrive.app.auth.AuthManager.initialize()
             }
-            val jwt = com.overdrive.app.auth.AuthManager.generateJwt()
+            
+            var jwt = com.overdrive.app.auth.AuthManager.generateJwt()
+            
+            // If JWT generation failed, try reading auth state directly from daemon's file
+            if (jwt == null) {
+                android.util.Log.w("WebView", "JWT generation failed, retrying with fresh init...")
+                com.overdrive.app.auth.AuthManager.initialize()
+                jwt = com.overdrive.app.auth.AuthManager.generateJwt()
+            }
+            
             if (jwt != null) {
                 cachedJwt = jwt
                 jwtExpiry = now + 5 * 60 * 1000  // 5 min cache
+                android.util.Log.d("WebView", "JWT generated successfully")
+            } else {
+                android.util.Log.e("WebView", "JWT generation failed after retry")
             }
             jwt
         } catch (e: Exception) {
@@ -460,12 +583,33 @@ class WebViewFragment : Fragment() {
 
     private fun injectAuthCookie() {
         try {
-            val jwt = getAuthJwt() ?: return
-            val cm = CookieManager.getInstance()
-            cm.setAcceptCookie(true)
-            cm.setCookie("http://127.0.0.1:${CameraDaemon.HTTP_PORT}", "byd_session=$jwt; Path=/; Max-Age=31536000")
-            cm.flush()
-            android.util.Log.d("WebView", "Auth cookie set")
+            val jwt = getAuthJwt()
+            if (jwt != null) {
+                val cm = CookieManager.getInstance()
+                cm.setAcceptCookie(true)
+                cm.setCookie("http://127.0.0.1:${CameraDaemon.HTTP_PORT}", "byd_session=$jwt; Path=/; Max-Age=31536000")
+                cm.flush()
+                android.util.Log.d("WebView", "Auth cookie set")
+            } else {
+                // JWT not available yet — retry after 2 seconds (daemon may still be starting)
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    try {
+                        val retryJwt = getAuthJwt()
+                        if (retryJwt != null) {
+                            val cm = CookieManager.getInstance()
+                            cm.setCookie("http://127.0.0.1:${CameraDaemon.HTTP_PORT}", "byd_session=$retryJwt; Path=/; Max-Age=31536000")
+                            cm.flush()
+                            android.util.Log.d("WebView", "Auth cookie set (retry)")
+                            // Reload page now that auth is available
+                            webView?.reload()
+                        } else {
+                            android.util.Log.e("WebView", "Auth cookie retry also failed")
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("WebView", "Auth cookie retry error: ${e.message}")
+                    }
+                }, 2000)
+            }
         } catch (e: Exception) {
             android.util.Log.e("WebView", "Cookie inject failed: ${e.message}")
         }
@@ -519,6 +663,11 @@ class WebViewFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        // If a file picker is pending, release its callback so the WebView
+        // doesn't hang onto a dangling handle.
+        pendingFileCallback?.onReceiveValue(null)
+        pendingFileCallback = null
+
         webView?.let { wv ->
             // Stop any media playback and clear content before destroying
             wv.loadUrl("about:blank")

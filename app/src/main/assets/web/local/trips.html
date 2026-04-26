@@ -8,8 +8,27 @@
     <link rel="stylesheet" href="../shared/styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="../shared/leaflet.css" />
     <style>
+        /* ===== OLD WEBVIEW COMPAT (Chrome <88, Android 7.x) ===== */
+        /* backdrop-filter needs -webkit- prefix on old Chrome */
+        .score-hero-tooltip,
+        .range-hero-tooltip,
+        .radar-tooltip,
+        .calendar-popup {
+            -webkit-backdrop-filter: blur(12px);
+        }
+        /* Flexbox gap fallback — old Chrome only supports gap in Grid, not Flexbox.
+           Use margin on children instead. Applied globally via > * + * selector. */
+        .hero-row > * + * { margin-top: 20px; }
+        @media (min-width: 768px) { .hero-row > * + * { margin-top: 0; margin-left: 24px; } }
+        .top-row > * + * { margin-top: 16px; }
+        @media (min-width: 1024px) { .top-row > * + * { margin-top: 0; margin-left: 16px; } }
+        .trips-top-bar > * + * { margin-left: 12px; }
+        .filter-tabs > * + * { margin-left: 6px; }
+        .trip-capsules > * + * { margin-top: 6px; }
+        .summary-grid > * + * { /* grid gap works fine on old Chrome, no fallback needed */ margin: 0; }
+
         /* ===== TRIPS PAGE v2 ===== */
 
         /* Settings Card */
@@ -348,9 +367,22 @@
         .radar-canvas-wrap {
             width: 100%;
             max-width: 460px;
-            aspect-ratio: 1;
+            /* aspect-ratio: 1 — not supported on Chrome <88 (old Android WebView) */
             position: relative;
             padding: 8px;
+        }
+        /* Fallback for aspect-ratio: use padding-bottom trick */
+        .radar-canvas-wrap::before {
+            content: '';
+            display: block;
+            padding-bottom: 100%;
+        }
+        .radar-canvas-wrap > canvas {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            width: calc(100% - 16px);
+            height: calc(100% - 16px);
         }
         .radar-canvas-wrap canvas { width: 100%; height: 100%; }
 
@@ -535,7 +567,10 @@
             font-weight: 600;
         }
         .calendar-day {
-            aspect-ratio: 1;
+            /* aspect-ratio: 1 — not supported on old WebView, use fixed size */
+            width: 100%;
+            padding-bottom: 100%;
+            position: relative;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -649,7 +684,8 @@
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            aspect-ratio: 1;
+            /* aspect-ratio: 1 — not supported on old WebView, use min-height */
+            min-height: 160px;
             position: relative;
             overflow: hidden;
         }
@@ -1881,7 +1917,8 @@
         </div>
     </div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="../shared/leaflet.js"></script>
+    <script src="../shared/auth.js"></script>
     <script src="../shared/core.js"></script>
     <script src="../shared/trips.js"></script>
     <script>

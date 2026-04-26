@@ -121,6 +121,9 @@ public class CameraDaemon {
     // ==================== SHARED APP CONTEXT ====================
     private static android.content.Context sharedAppContext = null;
     
+    /** Get the shared app context (for use by other components in this process). */
+    public static android.content.Context getAppContext() { return sharedAppContext; }
+    
     // Lock file for singleton enforcement
     private static final String LOCK_FILE = "/data/local/tmp/camera_daemon.lock";
     private static java.io.RandomAccessFile lockFile;
@@ -364,7 +367,28 @@ public class CameraDaemon {
 
         log("Daemon ready on TCP:" + TCP_PORT + " HTTP:" + HTTP_PORT);
         
-        Looper.loop();
+        // RESILIENT LOOPER: BYD framework listeners (gearbox, bodywork, etc.) can throw
+        // uncaught exceptions from their internal processing (e.g., learningEPB → CarSettings
+        // UID mismatch). These exceptions escape through Handler.dispatchMessage and kill
+        // Looper.loop(). Wrapping in a retry loop keeps the daemon alive.
+        while (running.get()) {
+            try {
+                Looper.loop();
+                // Looper.loop() only returns if someone calls quit()
+                break;
+            } catch (Throwable t) {
+                log("LOOPER CRASH (recovered): " + t.getClass().getSimpleName() + ": " + t.getMessage());
+                if (t.getCause() != null) {
+                    log("  Cause: " + t.getCause().getMessage());
+                }
+                // Log first 5 stack frames
+                StackTraceElement[] stack = t.getStackTrace();
+                for (int i = 0; i < Math.min(5, stack.length); i++) {
+                    log("    at " + stack[i].toString());
+                }
+                // Continue looping — the Looper is still valid, just the current message failed
+            }
+        }
     }
     
     /**
@@ -549,39 +573,61 @@ public class CameraDaemon {
             fileLock = channel.tryLock();
             
             if (fileLock == null) {
-                // Another process holds the lock — check if it's actually alive
+                // Another process holds the lock — check if it's actually alive.
+                // We treat "holder PID is dead", "holder PID is missing/corrupt",
+                // and "holder PID is our own PID" all as stale-lock cases, because
+                // each one means no live daemon owns the lock.
+                boolean stale = false;
+                String reason = null;
                 try {
+                    lockFile.seek(0);
                     String pidStr = lockFile.readLine();
-                    if (pidStr != null && !pidStr.trim().isEmpty()) {
+                    int myPid = android.os.Process.myPid();
+                    if (pidStr == null || pidStr.trim().isEmpty()) {
+                        stale = true;
+                        reason = "empty lock file";
+                    } else {
                         int pid = Integer.parseInt(pidStr.trim());
-                        File procDir = new File("/proc/" + pid);
-                        if (!procDir.exists()) {
-                            // Process is dead — stale lock. Force cleanup and retry.
-                            log("Stale lock from dead PID " + pid + " — cleaning up");
-                            lockFile.close();
-                            lockFileObj.delete();
-                            
-                            // Retry lock acquisition
-                            lockFile = new java.io.RandomAccessFile(lockFileObj, "rw");
-                            channel = lockFile.getChannel();
-                            fileLock = channel.tryLock();
-                            
-                            if (fileLock == null) {
-                                lockFile.close();
-                                return false;
-                            }
-                            // Fall through to write PID and register shutdown hook
+                        if (pid == myPid) {
+                            stale = true;
+                            reason = "lock held by our own PID (previous crash)";
+                        } else if (!new File("/proc/" + pid).exists()) {
+                            stale = true;
+                            reason = "dead PID " + pid;
                         } else {
+                            // Live process holds the lock — real conflict.
+                            log("Singleton: live daemon PID " + pid + " holds the lock");
                             lockFile.close();
                             return false;
                         }
-                    } else {
-                        lockFile.close();
-                        return false;
                     }
+                } catch (NumberFormatException nfe) {
+                    stale = true;
+                    reason = "corrupt PID in lock file";
                 } catch (Exception e) {
                     lockFile.close();
                     return false;
+                }
+                
+                if (stale) {
+                    log("Singleton: stale lock (" + reason + ") — cleaning up");
+                    try { lockFile.close(); } catch (Exception ignored) {}
+                    lockFileObj.delete();
+                    
+                    // Small delay so the kernel releases the inode lock before retry
+                    try { Thread.sleep(200); } catch (InterruptedException ignored) {}
+                    
+                    // Retry lock acquisition on the new inode
+                    lockFile = new java.io.RandomAccessFile(lockFileObj, "rw");
+                    channel = lockFile.getChannel();
+                    fileLock = channel.tryLock();
+                    
+                    if (fileLock == null) {
+                        log("Singleton: retry after stale-lock cleanup still failed");
+                        try { lockFile.close(); } catch (Exception ignored) {}
+                        return false;
+                    }
+                    // Fall through to write PID and register shutdown hook
                 }
             }
             
@@ -604,9 +650,12 @@ public class CameraDaemon {
             log("Lock already held by this process");
             return false;
         } catch (Exception e) {
+            // Don't fall back to port checks — TCP sockets linger in TIME_WAIT
+            // long after the daemon dies and would cause spurious "already
+            // running" decisions during a fast retry loop. If we can't take
+            // the lock, admit defeat and let the watchdog back off.
             log("Failed to acquire singleton lock: " + e.getMessage());
-            // If we can't acquire lock, check if ports are in use as fallback
-            return !isPortInUse(TCP_PORT) && !isPortInUse(HTTP_PORT);
+            return false;
         }
     }
     
@@ -891,16 +940,20 @@ public class CameraDaemon {
             return;  // Camera never opens. Zero resources.
         }
         
-        log("Enabling GPU surveillance");
+        log("Enabling GPU surveillance (pipeline=" + (gpuPipeline != null) + 
+            ", running=" + (gpuPipeline != null && gpuPipeline.isRunning()) +
+            ", sentry=" + (gpuPipeline != null && gpuPipeline.getSentry() != null) + ")");
         surveillanceEnabled = true;
         safeZoneSuppressed = false;
         
         try {
             if (!gpuPipeline.isRunning()) {
+                log("Pipeline not running — starting...");
                 gpuPipeline.start();
             }
             // Enable surveillance mode (motion detection)
             gpuPipeline.enableSurveillance();
+            log("Surveillance mode activated successfully");
         } catch (Exception e) {
             log("ERROR: Failed to enable surveillance: " + e.getMessage());
         }
@@ -969,6 +1022,33 @@ public class CameraDaemon {
         if (accIsOff) {
             // ACC OFF - Start pipeline for sentry mode
             try {
+                // CRITICAL: Notify RecordingModeManager FIRST so it can finalize any
+                // active continuous/drive-mode recording segment before we transition
+                // to surveillance. Without this, the last recording segment is lost
+                // when surveillance is disabled or suppressed by safe zone (early returns
+                // below skip enableSurveillance which was the only path that stopped recording).
+                if (recordingModeManager != null) {
+                    log("ACC OFF - notifying RecordingModeManager to finalize active recording...");
+                    recordingModeManager.onAccStateChanged(false);
+                }
+                
+                // CRITICAL: Force-stop TelemetryDataCollector when ACC goes off.
+                // No consumer needs it when the car is off (no overlay, no trip recording).
+                // This prevents refcount leaks from keeping the poller alive during sentry mode.
+                if (telemetryDataCollector != null) {
+                    telemetryDataCollector.setOverlayRecordingActive(false);
+                    telemetryDataCollector.forceStopPolling();
+                    log("TelemetryDataCollector force-stopped (ACC OFF)");
+                }
+                
+                // Stop GearMonitor polling — gear is always P when ACC is off.
+                // It will be restarted on ACC ON.
+                com.overdrive.app.monitor.GearMonitor.getInstance().stop();
+                log("GearMonitor stopped (ACC OFF)");
+                
+                // Tell BydDataCollector to skip speed/engine/gearbox polling (always 0 when parked)
+                com.overdrive.app.byd.BydDataCollector.getInstance().setAccState(false);
+                
                 // CRITICAL: FORCE remount SD card when ACC goes off — BEFORE any early returns.
                 // Even if surveillance is disabled or suppressed by safe zone, the SD card must stay
                 // mounted so the HTTP server can serve existing recordings/events/trips.
@@ -1016,7 +1096,29 @@ public class CameraDaemon {
                 }
                 gpuPipeline.setRecordingMode(
                     com.overdrive.app.surveillance.GpuPipelineConfig.RecordingMode.SENTRY);
-                gpuPipeline.enableSurveillance();
+                // NOTE: Do NOT call gpuPipeline.enableSurveillance() here.
+                // Surveillance is enabled by AccSentryDaemon after the door lock gate
+                // (registerDoorLockListenerAndArmOnLock). Enabling here would bypass
+                // the door lock check and cause a double-enable when AccSentryDaemon
+                // sends its own enable IPC.
+                log("Pipeline started in sentry mode (surveillance will be armed by AccSentryDaemon)");
+                
+                // FALLBACK: If AccSentryDaemon doesn't arm surveillance within 45s
+                // (e.g., door lock API broken, IPC failed, daemon not running),
+                // arm it directly from CameraDaemon. This prevents the car sitting
+                // with no motion detection indefinitely.
+                final long SURVEILLANCE_ARM_FALLBACK_MS = 45_000;
+                new Thread(() -> {
+                    try {
+                        Thread.sleep(SURVEILLANCE_ARM_FALLBACK_MS);
+                        if (!surveillanceEnabled && gpuPipeline != null && !gpuPipeline.isSurveillanceMode()) {
+                            log("FALLBACK: AccSentryDaemon did not arm surveillance within " + 
+                                (SURVEILLANCE_ARM_FALLBACK_MS / 1000) + "s — arming directly");
+                            enableSurveillance();
+                        }
+                    } catch (InterruptedException ignored) {}
+                }, "SurveillanceArmFallback").start();
+                
                 log("Pipeline started in sentry mode");
             } catch (Exception e) {
                 String errorMsg = e.getMessage();
@@ -1029,6 +1131,16 @@ public class CameraDaemon {
         } else {
             // ACC ON - Stop SD card watchdog (system manages SD card normally when ACC is on)
             com.overdrive.app.storage.StorageManager.getInstance().stopSdCardWatchdog();
+            
+            // Restart GearMonitor (stopped on ACC OFF)
+            com.overdrive.app.monitor.GearMonitor gearMonitor = com.overdrive.app.monitor.GearMonitor.getInstance();
+            if (!gearMonitor.isRunning()) {
+                gearMonitor.start();
+                log("GearMonitor restarted (ACC ON)");
+            }
+            
+            // Tell BydDataCollector to resume full polling (speed/engine/gearbox)
+            com.overdrive.app.byd.BydDataCollector.getInstance().setAccState(true);
             
             // Notify RecordingModeManager — it handles stopping surveillance pipeline
             // and starting recording mode
@@ -1334,6 +1446,12 @@ public class CameraDaemon {
                 status.put("nativeAppActive", coordinator.isNativeAppActive());
                 status.put("cameraEventCallback", coordinator.isEventCallbackActive());
             }
+            
+            // SOTA: Camera probe status
+            com.overdrive.app.camera.PanoramicCameraGpu cam = gpuPipeline.getCamera();
+            status.put("probeComplete", cam.isProbeComplete());
+            status.put("activeCameraId", cam.getCameraId());
+            status.put("activeSurfaceMode", cam.getCameraSurfaceMode());
         }
         
         return status;
@@ -1867,6 +1985,11 @@ public class CameraDaemon {
             com.overdrive.app.monitor.GearMonitor gearMonitor =
                 com.overdrive.app.monitor.GearMonitor.getInstance();
             gearMonitor.init(sharedAppContext);
+            // Wire GearMonitor to read gear from TelemetryDataCollector's cached snapshot
+            // when the overlay poller is running, avoiding duplicate CAN bus reads
+            if (telemetryDataCollector != null) {
+                gearMonitor.setTelemetrySource(telemetryDataCollector);
+            }
             gearMonitor.start();
             
             log("Gear Monitor initialized successfully");

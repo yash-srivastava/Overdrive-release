@@ -187,7 +187,6 @@ public class GpuStreamScaler {
         
         // Set viewport
         GLES20.glViewport(0, 0, outputWidth, outputHeight);
-        GlUtil.checkGlError("glViewport");
         
         // Clear
         GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -195,7 +194,6 @@ public class GpuStreamScaler {
         
         // Use shader
         GLES20.glUseProgram(programId);
-        GlUtil.checkGlError("glUseProgram");
         
         // Bind texture
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
@@ -205,7 +203,6 @@ public class GpuStreamScaler {
         // Set view mode (0=Mosaic, 1-4=Single camera, 5=Raw)
         GLES20.glUniform1i(uViewModeLocation, currentViewMode);
         GLES20.glUniform1f(uApaModeLocation, (float) cameraLayout);
-        GlUtil.checkGlError("glBindTexture");
         
         // Set up vertex attributes
         GLES20.glEnableVertexAttribArray(aPositionLocation);
@@ -214,11 +211,8 @@ public class GpuStreamScaler {
         GLES20.glEnableVertexAttribArray(aTexCoordLocation);
         GLES20.glVertexAttribPointer(aTexCoordLocation, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
         
-        GlUtil.checkGlError("glVertexAttribPointer");
-        
         // Draw
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-        GlUtil.checkGlError("glDrawArrays");
         
         // Disable vertex arrays
         GLES20.glDisableVertexAttribArray(aPositionLocation);

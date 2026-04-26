@@ -65,13 +65,13 @@ public class BatteryPowerMonitor extends BaseDeviceMonitor<BatteryPowerData> {
     
     @Override
     public void start() {
-        if (isRunning.getAndSet(true)) {
-            log("Already running");
+        if (device == null) {
+            logError("Cannot start - device not initialized", null);
             return;
         }
         
-        if (device == null) {
-            logError("Cannot start - device not initialized", null);
+        if (isRunning.getAndSet(true)) {
+            log("Already running");
             return;
         }
         

@@ -38,6 +38,7 @@ public class ChargingStateData {
     public final String errorType;       // "AC", "CHARGER", "GUN", "C10", null
     public double chargingPowerKW;       // Current charging power in KW (negative = discharging)
     public boolean isDischarging;        // true if power < 0
+    public boolean isEstimated;          // true if power is computed from SOC rate (not from BYD API)
     public final long timestamp;
     
     /**

@@ -47,6 +47,13 @@ public class BydDataCollector {
     private Object radarDevice;
     private Object powerDevice;
 
+    // Unit conversion: BYD APIs return values in the user's configured unit.
+    // If the user set miles on the instrument cluster, mileage/speed/range come back in miles/mph.
+    // We detect this once at init and convert everything to km at the ingestion boundary.
+    private static final double MILES_TO_KM = 1.60934;
+    private double distanceToKmFactor = 1.0;  // 1.0 = already km, 1.60934 = miles→km
+    private boolean unitDetected = false;
+
     private final List<String> availableDevices = new ArrayList<>();
     private final List<String> unavailableDevices = new ArrayList<>();
 
@@ -106,8 +113,16 @@ public class BydDataCollector {
             logger.info("Unavailable: " + String.join(", ", unavailableDevices));
         }
 
-        // Read initial values
-        collectAll();
+        // Detect mileage unit from instrument cluster
+        detectMileageUnit();
+
+        // Read initial values (full collection including display-only devices)
+        collectAllFull();
+
+        // Dump all battery/energy related getter methods on key devices
+        // to discover the correct remaining kWh API at runtime
+        // Discovery methods removed — getBatteryRemainPowerEV() confirmed as correct BEV API.
+        // BYD light/setting APIs have no write access from UID 2000.
 
         // Register listeners
         registerAllListeners();
@@ -120,8 +135,51 @@ public class BydDataCollector {
         initialized = true;
     }
 
+    /**
+     * Detect whether the BYD instrument cluster is configured for miles or km.
+     * getMileageUnit() returns 1 for km, 0 for miles.
+     * If detection fails, defaults to km (factor = 1.0).
+     */
+    private void detectMileageUnit() {
+        if (instrumentDevice == null) {
+            logger.info("Mileage unit: defaulting to km (no instrument device)");
+            return;
+        }
+        try {
+            Object unitVal = BydDeviceHelper.callGetter(instrumentDevice, "getMileageUnit");
+            if (unitVal instanceof Number) {
+                int unit = ((Number) unitVal).intValue();
+                if (unit == 0) {
+                    // Miles mode
+                    distanceToKmFactor = MILES_TO_KM;
+                    unitDetected = true;
+                    logger.info("Mileage unit: MILES detected (factor=" + MILES_TO_KM + ")");
+                } else {
+                    // km mode (unit == 1 or any other value)
+                    distanceToKmFactor = 1.0;
+                    unitDetected = true;
+                    logger.info("Mileage unit: KM detected (factor=1.0)");
+                }
+            } else {
+                logger.info("Mileage unit: defaulting to km (getMileageUnit returned null)");
+            }
+        } catch (Exception e) {
+            logger.info("Mileage unit: defaulting to km (detection failed: " + e.getMessage() + ")");
+        }
+    }
+
+    /**
+     * Get the distance-to-km conversion factor.
+     * Returns 1.0 if km, 1.60934 if miles.
+     * Used by OdometerReader and other components that read BYD distance values directly.
+     */
+    public double getDistanceToKmFactor() {
+        return distanceToKmFactor;
+    }
+
     private java.util.concurrent.ScheduledExecutorService pollScheduler;
-    private static final long POLL_INTERVAL_MS = 5000; // 5 seconds
+    private static final long POLL_INTERVAL_MS = 5000; // 5 seconds when ACC on
+    private static final long POLL_INTERVAL_PARKED_MS = 30000; // 30 seconds when ACC off
     private String lastSummaryHash = "";
 
     private void startPolling() {
@@ -172,15 +230,108 @@ public class BydDataCollector {
 
     // ==================== DATA COLLECTION ====================
 
+    // Core data polled every 5s. Display-only data updated via listeners only (no polling).
+    // Core = fields consumed by ABRP, MQTT, trip analytics, SOC history.
+    // Display = fields only shown on the web dashboard — updated by BYD HAL listener callbacks
+    //           or on-demand via collectAllFull() when the HTTP API is queried.
+
+    // Hard throttle: never poll devices more frequently than this, even if listeners fire.
+    // Listener callbacks update individual values directly in the snapshot without polling.
+    // This guard prevents any code path from triggering a full device sweep within the interval.
+    private volatile long lastCoreCollectTime = 0;
+    private static final long MIN_COLLECT_INTERVAL_MS = 5000; // 5 seconds
+
+    // ACC state: when off, skip polling speed/engine/gearbox (always 0 when parked)
+    private volatile boolean accIsOn = true;
+
+    /** Called by CameraDaemon when ACC state changes. Adjusts poll rate accordingly. */
+    public void setAccState(boolean isOn) {
+        this.accIsOn = isOn;
+        // Restart poll scheduler at the appropriate rate
+        if (pollScheduler != null && !pollScheduler.isShutdown()) {
+            pollScheduler.shutdownNow();
+            long interval = isOn ? POLL_INTERVAL_MS : POLL_INTERVAL_PARKED_MS;
+            pollScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "BydDataPoll");
+                t.setDaemon(true);
+                return t;
+            });
+            pollScheduler.scheduleAtFixedRate(() -> {
+                try {
+                    collectAll();
+                    BydVehicleData d = snapshot.get();
+                    if (d != null) {
+                        String hash = String.format("%.1f|%.2f|%.1f/%.1f/%.1f|%.3f/%.3f",
+                            d.socPercent, d.voltage12v, d.highCellTempC, d.lowCellTempC, d.avgCellTempC,
+                            d.highCellVoltage, d.lowCellVoltage);
+                        if (!hash.equals(lastSummaryHash)) {
+                            logger.info("Data changed: SOC=" + d.socPercent + "% 12V=" + d.voltage12v + "V" +
+                                " Temp=" + d.highCellTempC + "/" + d.lowCellTempC + "/" + d.avgCellTempC + "°C" +
+                                " CellV=" + d.highCellVoltage + "/" + d.lowCellVoltage + "V");
+                            lastSummaryHash = hash;
+                        }
+                    }
+                } catch (Throwable t) {
+                    logger.debug("Poll error: " + t.getMessage());
+                }
+            }, 0, interval, java.util.concurrent.TimeUnit.MILLISECONDS);
+            logger.info("BydDataPoll rate changed to " + (interval / 1000) + "s (ACC " + (isOn ? "ON" : "OFF") + ")");
+        }
+    }
+
     /**
-     * Collect all data from all devices into a new snapshot.
+     * Collect core telemetry data from devices into the snapshot.
      * Safe to call from any thread.
+     * 
+     * Hard-throttled: will not poll devices if called within 5 seconds of the last poll.
+     * 
+     * Only polls CORE devices (used by ABRP, MQTT, trips, SOC history).
+     * When ACC is off, skips speed/engine/gearbox (always 0 when parked).
+     * Display-only devices are NOT polled — updated via listeners or on-demand.
      */
     public void collectAll() {
+        long now = System.currentTimeMillis();
+
+        // Hard throttle: skip if called within MIN_COLLECT_INTERVAL_MS of last poll.
+        if (now - lastCoreCollectTime < MIN_COLLECT_INTERVAL_MS) {
+            return;
+        }
+        lastCoreCollectTime = now;
+
         BydVehicleData.Builder b = (snapshot.get() != null) ? snapshot.get().toBuilder() : new BydVehicleData.Builder();
         b.availableDevices(availableDevices.toArray(new String[0]));
         b.unavailableDevices(unavailableDevices.toArray(new String[0]));
 
+        // ALWAYS needed: battery, SOC, charging, temperature, 12V
+        collectBodywork(b);     // SOC, 12V, remainKwh, powerLevel
+        collectStatistic(b);    // SOC, mileage, range, cellTemps, cellVoltages
+        collectCharging(b);     // chargingState, gunState, chargingPower
+        collectInstrument(b);   // outsideTemp, externalChargingPower
+        collectOta(b);          // 12V voltage (precise)
+
+        // DRIVING ONLY: skip when ACC is off (values are always 0/stale when parked)
+        if (accIsOn) {
+            collectSpeed(b);        // speed, accel, brake
+            collectEngine(b);       // enginePower, motorSpeed/torque
+            collectGearbox(b);      // gearMode
+        }
+
+        snapshot.set(b.build());
+    }
+
+    /**
+     * Force a full collection of ALL data including display-only fields.
+     * Bypasses the 5-second throttle. Called by the HTTP API when a client
+     * explicitly requests the full vehicle data, or during init().
+     */
+    public void collectAllFull() {
+        lastCoreCollectTime = 0;  // Bypass throttle
+
+        BydVehicleData.Builder b = (snapshot.get() != null) ? snapshot.get().toBuilder() : new BydVehicleData.Builder();
+        b.availableDevices(availableDevices.toArray(new String[0]));
+        b.unavailableDevices(unavailableDevices.toArray(new String[0]));
+
+        // Core devices
         collectBodywork(b);
         collectSpeed(b);
         collectEngine(b);
@@ -189,6 +340,8 @@ public class BydDataCollector {
         collectInstrument(b);
         collectOta(b);
         collectGearbox(b);
+
+        // Display-only devices (normally listener-driven, polled here on-demand)
         collectAc(b);
         collectLight(b);
         collectPower(b);
@@ -200,6 +353,7 @@ public class BydDataCollector {
         collectRadar(b);
 
         snapshot.set(b.build());
+        lastCoreCollectTime = System.currentTimeMillis();
     }
 
     private void collectBodywork(BydVehicleData.Builder b) {
@@ -222,30 +376,93 @@ public class BydDataCollector {
                 }
             }
 
-            // Battery SOC HEV — getBatteryPowerHEV() as kWh remaining, not percentage
+            // Battery remaining energy — try multiple APIs in priority order.
+            // Priority 1: PowerDevice.getBatteryRemainPowerEV() — most accurate for BEVs.
+            // On PHEVs this may return stale values when ICE is running — validate against SOC.
+            if (Double.isNaN(b.remainKwh) && powerDevice != null) {
+                try {
+                    Object evKwh = BydDeviceHelper.callGetter(powerDevice, "getBatteryRemainPowerEV");
+                    if (evKwh instanceof Number) {
+                        double evVal = ((Number) evKwh).doubleValue();
+                        if (evVal > 1 && evVal < 120) {
+                            // Validate: implied capacity should be within 50-150% of any BYD pack
+                            double soc = b.socPercent;
+                            if (!Double.isNaN(soc) && soc > 5) {
+                                double impliedCap = evVal / (soc / 100.0);
+                                if (impliedCap >= 10 && impliedCap <= 130) {
+                                    b.remainKwh(evVal);
+                                    logger.debug("remainKwh from getBatteryRemainPowerEV: " + 
+                                        String.format("%.1f", evVal));
+                                } else {
+                                    logger.debug("getBatteryRemainPowerEV rejected: " + 
+                                        String.format("%.1f", evVal) + " kWh at " + 
+                                        String.format("%.0f", soc) + "% SOC → implied " + 
+                                        String.format("%.1f", impliedCap) + " kWh");
+                                }
+                            } else {
+                                b.remainKwh(evVal);  // No SOC to validate, accept
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.debug("getBatteryRemainPowerEV failed: " + e.getMessage());
+                }
+            }
+            
+            // Priority 2: StatisticDevice.getRemainingBatteryPower() — returns int (0.1 kWh units)
+            if (Double.isNaN(b.remainKwh) && statisticDevice != null) {
+                try {
+                    Object rawPower = BydDeviceHelper.callGetter(statisticDevice, "getRemainingBatteryPower");
+                    if (rawPower instanceof Number) {
+                        int rawVal = ((Number) rawPower).intValue();
+                        if (rawVal > 10 && rawVal < 1200) {  // 1-120 kWh in 0.1 units
+                            double kwh = rawVal / 10.0;
+                            // Validate against SOC
+                            double soc = b.socPercent;
+                            if (!Double.isNaN(soc) && soc > 5) {
+                                double impliedCap = kwh / (soc / 100.0);
+                                if (impliedCap >= 10 && impliedCap <= 130) {
+                                    b.remainKwh(kwh);
+                                    logger.debug("remainKwh from getRemainingBatteryPower: " + 
+                                        String.format("%.1f", kwh) + " (raw=" + rawVal + ")");
+                                }
+                            } else {
+                                b.remainKwh(kwh);
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.debug("getRemainingBatteryPower failed: " + e.getMessage());
+                }
+            }
+            
+            // Priority 3: BodyworkDevice.getBatteryPowerHEV() — fallback, unreliable on some BEVs
             Object hev = BydDeviceHelper.callGetter(bodyworkDevice, "getBatteryPowerHEV");
             if (hev instanceof Number) {
                 double hevVal = ((Number) hev).doubleValue();
                 if (hevVal >= 0) {
                     b.socHevPercent(hevVal);
-                    // SOTA: getBatteryPowerHEV() returns kWh remaining on most models
-                    // Use as remainKwh fallback if PowerDevice didn't provide it
-                    if (hevVal > 0 && hevVal < 200 && Double.isNaN(b.remainKwh)) {
+                    if (hevVal > 1 && hevVal < 120 && Double.isNaN(b.remainKwh)) {
                         b.remainKwh(hevVal);
                     }
                 }
             }
 
-            // Battery capacity
+            // getBatteryCapacity() — semantics vary by model:
+            // - Newer models: returns Ah rating (fixed, e.g. 150 for Atto 3)
+            // - Older models: returns remaining energy in 0.1 kWh units (changes with SOC)
+            // Used as fallback when getBatteryPowerHEV() returns negative.
             Object cap = BydDeviceHelper.callGetter(bodyworkDevice, "getBatteryCapacity");
             if (cap instanceof Number) {
                 double capVal = ((Number) cap).doubleValue();
                 if (capVal > 0) b.capacityAh(capVal);
-                // SOTA: Diplus fallback — if getBatteryPowerHEV() returned negative,
-                // use getBatteryCapacity() / 10.0 as kWh remaining
+
+                // Fallback for older models where getBatteryPowerHEV() returned negative:
+                // getBatteryCapacity() / 10.0 gives remaining kWh
                 if (Double.isNaN(b.remainKwh) && capVal > 0) {
                     double kwhFromCap = capVal / 10.0;
-                    if (kwhFromCap > 0 && kwhFromCap < 200) {
+                    // Plausible remaining energy range for any BYD model: 1-120 kWh
+                    if (kwhFromCap > 1.0 && kwhFromCap < 120.0) {
                         b.remainKwh(kwhFromCap);
                     }
                 }
@@ -266,7 +483,7 @@ public class BydDataCollector {
             Object battRange = BydDeviceHelper.callGet(bodyworkDevice, BydFeatureIds.BODYWORK_BATTERY_RANGE, Double.class);
             if (battRange != null) {
                 int rangeVal = BydDeviceHelper.getIntValue(battRange);
-                if (rangeVal >= 0 && rangeVal <= 1016) b.bodyworkRangeKm(rangeVal);
+                if (rangeVal >= 0 && rangeVal <= 1016) b.bodyworkRangeKm((int) Math.round(rangeVal * distanceToKmFactor));
             }
 
             // Window open percent (positions 1-6)
@@ -292,7 +509,7 @@ public class BydDataCollector {
             Object speed = BydDeviceHelper.callGetter(speedDevice, "getCurrentSpeed");
             if (speed instanceof Number) {
                 double v = ((Number) speed).doubleValue();
-                if (v != BydFeatureIds.SDK_NOT_AVAILABLE) b.speedKmh(v);
+                if (v != BydFeatureIds.SDK_NOT_AVAILABLE) b.speedKmh(v * distanceToKmFactor);
             }
             Object accel = BydDeviceHelper.callGetter(speedDevice, "getAccelerateDeepness");
             if (accel instanceof Number) b.accelPercent(((Number) accel).intValue());
@@ -334,10 +551,16 @@ public class BydDataCollector {
         if (statisticDevice == null) return;
         try {
             Object mileage = BydDeviceHelper.callGetter(statisticDevice, "getTotalMileageValue");
-            if (mileage instanceof Number) b.totalMileageKm(((Number) mileage).intValue());
+            if (mileage instanceof Number) {
+                int raw = ((Number) mileage).intValue();
+                b.totalMileageKm((int) Math.round(raw * distanceToKmFactor));
+            }
 
             Object evMileage = BydDeviceHelper.callGetter(statisticDevice, "getEVMileageValue");
-            if (evMileage instanceof Number) b.evMileageKm(((Number) evMileage).intValue());
+            if (evMileage instanceof Number) {
+                int raw = ((Number) evMileage).intValue();
+                b.evMileageKm((int) Math.round(raw * distanceToKmFactor));
+            }
 
             Object elecPct = BydDeviceHelper.callGetter(statisticDevice, "getElecPercentageValue");
             // This is the primary SOC source — StatisticDevice.getElecPercentageValue() returns display SOC %
@@ -356,10 +579,16 @@ public class BydDataCollector {
             if (totalFuel instanceof Number) b.totalFuelCon(((Number) totalFuel).doubleValue());
 
             Object elecRange = BydDeviceHelper.callGetter(statisticDevice, "getElecDrivingRangeValue");
-            if (elecRange instanceof Number) b.elecRangeKm(((Number) elecRange).intValue());
+            if (elecRange instanceof Number) {
+                int raw = ((Number) elecRange).intValue();
+                b.elecRangeKm((int) Math.round(raw * distanceToKmFactor));
+            }
 
             Object fuelRange = BydDeviceHelper.callGetter(statisticDevice, "getFuelDrivingRangeValue");
-            if (fuelRange instanceof Number) b.fuelRangeKm(((Number) fuelRange).intValue());
+            if (fuelRange instanceof Number) {
+                int raw = ((Number) fuelRange).intValue();
+                b.fuelRangeKm((int) Math.round(raw * distanceToKmFactor));
+            }
 
             // Battery temps via get() — intValue - 40 = °C
             collectStatTemp(b, BydFeatureIds.STAT_HIGHEST_BATTERY_TEMP, "high");
@@ -410,18 +639,34 @@ public class BydDataCollector {
         try {
             // Battery charging state (0=ready, 1=charging, 2=finished, 3=discharging, etc.)
             Object battState = BydDeviceHelper.callGetter(chargingDevice, "getBatteryManagementDeviceState");
-            if (battState instanceof Number) b.chargingState(((Number) battState).intValue());
+            if (battState instanceof Number) {
+                int state = ((Number) battState).intValue();
+                b.chargingState(state);
+                
+                // Clear stale charging power when not actively charging
+                // Phantom 0.1 kW values persist on the CAN bus after unplugging
+                if (state != 1) {  // Not CHARGING_BATTERY_STATE_CHARGING
+                    b.chargingPowerKw(Double.NaN);
+                    b.externalChargingPowerKw(Double.NaN);
+                }
+            }
             // Gun connection state (0=none, 1=AC, 2=AC fast, 3=DC, 4=V2L)
             Object gunState = BydDeviceHelper.callGetter(chargingDevice, "getChargingGunState");
             if (gunState instanceof Number) b.chargingGunState(((Number) gunState).intValue());
             // Charger work state
             Object charger = BydDeviceHelper.callGetter(chargingDevice, "getChargerWorkState");
             if (charger instanceof Number) b.chargerWorkState(((Number) charger).intValue());
-            // Charging power
+            // Charging power — only use getter value if non-zero.
+            // The getter often returns 0 on BYD models even while charging.
+            // The real value comes from the onDataEventChanged callback (event 666894360).
+            // Writing 0 here would overwrite the callback's valid value.
             Object power = BydDeviceHelper.callGetter(chargingDevice, "getChargingPower");
             if (power instanceof Number) {
                 double kw = ((Number) power).doubleValue();
-                if (Math.abs(kw) < 500) b.chargingPowerKw(kw);
+                if (Math.abs(kw) > 0.01 && Math.abs(kw) < 500) {
+                    b.chargingPowerKw(kw);
+                    logger.debug("ChargingDevice.getChargingPower() = " + kw + " kW");
+                }
             }
         } catch (Exception e) {
             logger.debug("collectCharging error: " + e.getMessage());
@@ -436,10 +681,15 @@ public class BydDataCollector {
                 int t = ((Number) extTemp).intValue();
                 if (t >= -50 && t <= 60) b.outsideTempC(t);
             }
+            // External charging power — only use getter value if non-zero.
+            // Same issue as ChargingDevice: getter returns 0 but callback delivers real value.
             Object extPower = BydDeviceHelper.callGetter(instrumentDevice, "getExternalChargingPower");
             if (extPower instanceof Number) {
                 double p = ((Number) extPower).doubleValue();
-                if (p >= -500 && p <= 500) b.externalChargingPowerKw(p);
+                if (Math.abs(p) > 0.01 && p >= -500 && p <= 500) {
+                    b.externalChargingPowerKw(p);
+                    logger.debug("InstrumentDevice.getExternalChargingPower() = " + p + " kW");
+                }
             }
         } catch (Exception e) {
             logger.debug("collectInstrument error: " + e.getMessage());
@@ -525,11 +775,11 @@ public class BydDataCollector {
             
             Object mcu = BydDeviceHelper.callGetter(powerDevice, "getMcuStatus");
             if (mcu instanceof Number) b.mcuStatus(((Number) mcu).intValue());
-            Object remain = BydDeviceHelper.callGetter(powerDevice, "getBatteryRemainPowerEV");
-            if (remain instanceof Number) {
-                double kwh = ((Number) remain).doubleValue();
-                if (kwh > 0 && kwh < 200) b.remainKwh(kwh);
-            }
+            // NOTE: getBatteryRemainPowerEV() intentionally NOT called here.
+            // On PHEVs (Sealion 6 DM-i), the PowerDevice EV subsystem returns stale kWh
+            // values when the ICE is running. The BodyworkDevice path (getBatteryPowerHEV +
+            // onBatteryPowerHEVChanged listener) is the correct CAN bus path for kWh on
+            // both BEVs and PHEVs — matching the OEM Diplus app's approach.
         } catch (Exception e) {
             logger.debug("collectPower error: " + e.getMessage());
         }
@@ -668,12 +918,21 @@ public class BydDataCollector {
             logger.info("  Speed listener registered");
             count++;
         }
-        if (BydDeviceHelper.registerListener(gearboxDevice, this::onGenericCallback)) {
-            logger.info("  Gearbox listener registered");
+        // SKIP gearbox listener — BYDAutoGearboxDevice.learningEPB() crashes with
+        // "Given calling package android does not match caller's uid 2000" when running
+        // as shell (UID 2000). The crash kills the BYD device manager's HandlerThread,
+        // which cascades into GL thread hang → watchdog kill → daemon restart loop.
+        // Gear data is collected via polling (collectAll) and GearMonitor handles gear changes.
+        // if (BydDeviceHelper.registerListener(gearboxDevice, this::onGenericCallback)) {
+        //     logger.info("  Gearbox listener registered");
+        //     count++;
+        // }
+        if (BydDeviceHelper.registerListener(chargingDevice, this::onChargingCallback)) {
+            logger.info("  Charging listener registered");
             count++;
         }
-        if (BydDeviceHelper.registerListener(chargingDevice, this::onGenericCallback)) {
-            logger.info("  Charging listener registered");
+        if (BydDeviceHelper.registerListener(instrumentDevice, this::onInstrumentCallback)) {
+            logger.info("  Instrument listener registered (external charging power)");
             count++;
         }
         if (BydDeviceHelper.registerListener(statisticDevice, this::onGenericCallback)) {
@@ -689,6 +948,33 @@ public class BydDataCollector {
             count++;
         }
 
+        // Display-only devices — no periodic polling, listener-driven only.
+        // These update the snapshot when BYD HAL pushes CAN bus state changes.
+        if (BydDeviceHelper.registerListener(doorLockDevice, this::onDisplayCallback)) {
+            logger.info("  DoorLock listener registered");
+            count++;
+        }
+        if (BydDeviceHelper.registerListener(tyreDevice, this::onDisplayCallback)) {
+            logger.info("  Tyre listener registered");
+            count++;
+        }
+        if (BydDeviceHelper.registerListener(acDevice, this::onDisplayCallback)) {
+            logger.info("  AC listener registered");
+            count++;
+        }
+        if (BydDeviceHelper.registerListener(sensorDevice, this::onDisplayCallback)) {
+            logger.info("  Sensor listener registered");
+            count++;
+        }
+        if (BydDeviceHelper.registerListener(energyDevice, this::onDisplayCallback)) {
+            logger.info("  Energy listener registered");
+            count++;
+        }
+        if (BydDeviceHelper.registerListener(powerDevice, this::onDisplayCallback)) {
+            logger.info("  Power listener registered");
+            count++;
+        }
+
         logger.info("Listeners registered: " + count);
     }
 
@@ -700,11 +986,153 @@ public class BydDataCollector {
         }
     }
 
+    /**
+     * Callback for display-only devices (DoorLock, Tyre, AC, Sensor, Energy, Power).
+     * 
+     * These listeners exist solely to keep the BYD device singletons' internal caches
+     * fresh. We do NOT re-poll devices here — the snapshot is updated on-demand when
+     * the HTTP API calls collectAllFull(), or when the bodywork listener fires.
+     * 
+     * This avoids the 10Hz SensorDevice postEvent from triggering expensive
+     * full display sweeps (door×7, tyre×4, seatbelt×5, AC×5, light×8, radar, etc.)
+     */
+    private void onDisplayCallback(String method, Object[] args) {
+        // No-op: listener registration keeps BYD HAL singletons' caches alive.
+        // Actual data is read on-demand via collectAllFull().
+    }
+
+    // Throttle for generic listener callbacks (StatisticDevice fires at ~10Hz on CAN bus)
+    private volatile long lastGenericCallbackTime = 0;
+
     private void onGenericCallback(String method, Object[] args) {
-        // Listeners trigger collectAll on data changes — no logging needed (polling handles freshness)
-        if (method.contains("Changed") || method.contains("changed")) {
-            collectAll();
+        // Capture HV pack voltage from statistic device event.
+        // BYD CAN bus fires StatisticDevice events at ~10Hz — throttle to 1Hz max.
+        if ("onDataEventChanged".equals(method) && args != null && args.length >= 2) {
+            long now = System.currentTimeMillis();
+            if (now - lastGenericCallbackTime < 1000) return;
+            lastGenericCallbackTime = now;
+
+            try {
+                int eventId = ((Number) args[0]).intValue();
+                Object eventValue = args[1];
+                int iVal = BydDeviceHelper.getIntValue(eventValue);
+                
+                // Event 1151336480: HV pack voltage in decivolts (e.g., 4955 = 495.5V)
+                if (eventId == 1151336480 && iVal > 2000 && iVal < 9000) {
+                    BydVehicleData current = snapshot.get();
+                    if (current != null) {
+                        double volts = iVal / 10.0;
+                        boolean isFirst = Double.isNaN(current.hvPackVoltage);
+                        if (isFirst || Math.abs(current.hvPackVoltage - volts) > 0.5) {
+                            snapshot.set(current.toBuilder().hvPackVoltage(volts).build());
+                            
+                            if (isFirst) {
+                                logger.info("HV pack voltage: " + String.format("%.1f", volts) + "V");
+                                try {
+                                    com.overdrive.app.abrp.SohEstimator soh = 
+                                        com.overdrive.app.monitor.SocHistoryDatabase.getInstance().getSohEstimator();
+                                    if (soh != null) {
+                                        soh.autoDetectFromPackVoltage(volts, current);
+                                    }
+                                } catch (Exception ignored) {}
+                            }
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
         }
+    }
+
+    /**
+     * Charging device callback — captures onChargingPowerChanged directly.
+     * On many BYD models, getChargingPower() returns 0 but the callback delivers
+     * the real value. We store it in the snapshot for VehicleDataMonitor to pick up.
+     */
+    // Throttle charging power log to once per 30 seconds
+    private volatile long lastChargingPowerLogTime = 0;
+
+    private void onChargingCallback(String method, Object[] args) {
+        // Handle the new-style BYDAutoEvent callbacks
+        if ("onDataEventChanged".equals(method) && args != null && args.length >= 2) {
+            try {
+                int eventId = ((Number) args[0]).intValue();
+                Object eventValue = args[1];
+                double dVal = BydDeviceHelper.getDoubleValue(eventValue);
+                
+                // If this looks like a charging power value (reasonable kW range)
+                // Only accept if the car is actually charging — phantom 0.1 kW values
+                // come from the CAN bus even when the charger is unplugged.
+                if (!Double.isNaN(dVal) && Math.abs(dVal) > 0.1 && Math.abs(dVal) < 500) {
+                    BydVehicleData current = snapshot.get();
+                    if (current != null) {
+                        boolean isCharging = current.chargingState == 1;  // CHARGING_BATTERY_STATE_CHARGING
+                        if (isCharging) {
+                            snapshot.set(current.toBuilder().chargingPowerKw(dVal).build());
+                            long now = System.currentTimeMillis();
+                            if (now - lastChargingPowerLogTime > 30_000) {
+                                lastChargingPowerLogTime = now;
+                                logger.info("Charging power: " + String.format("%.1f", dVal) + " kW (event " + eventId + ")");
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("Charging event parse error: " + e.getMessage());
+            }
+        }
+        if ("onChargingPowerChanged".equals(method) && args != null && args.length > 0) {
+            try {
+                double power = ((Number) args[0]).doubleValue();
+                if (Math.abs(power) < 500 && power != 0) {
+                    BydVehicleData current = snapshot.get();
+                    if (current != null) {
+                        snapshot.set(current.toBuilder().chargingPowerKw(power).build());
+                        logger.info("Charging power via typed callback: " + power + " kW");
+                    }
+                }
+            } catch (Exception e) { /* ignore */ }
+        }
+        // Listener-driven: the specific event value was already captured above.
+        // Skip full device re-collection — the 5s polling timer handles periodic refresh.
+    }
+
+    private void onInstrumentCallback(String method, Object[] args) {
+        // Handle the new-style BYDAutoEvent callbacks
+        if ("onDataEventChanged".equals(method) && args != null && args.length >= 2) {
+            try {
+                int eventId = ((Number) args[0]).intValue();
+                Object eventValue = args[1];
+                double dVal = BydDeviceHelper.getDoubleValue(eventValue);
+                int iVal = BydDeviceHelper.getIntValue(eventValue);
+                
+                // Only store non-zero values as external charging power.
+                // Event 315621436 on some models always returns 0 — don't let it
+                // overwrite a valid chargingPowerKw from the ChargingDevice callback.
+                if (!Double.isNaN(dVal) && dVal > 0.1 && dVal < 500) {
+                    BydVehicleData current = snapshot.get();
+                    if (current != null) {
+                        snapshot.set(current.toBuilder().externalChargingPowerKw(dVal).build());
+                        logger.info("External charging power from event " + eventId + ": " + dVal + " kW");
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("Instrument event parse error: " + e.getMessage());
+            }
+        }
+        if ("onExternalChargingPowerChanged".equals(method) && args != null && args.length > 0) {
+            try {
+                double power = ((Number) args[0]).doubleValue();
+                if (power > 0.1 && power <= 500) {
+                    BydVehicleData current = snapshot.get();
+                    if (current != null) {
+                        snapshot.set(current.toBuilder().externalChargingPowerKw(power).build());
+                        logger.info("External charging power via typed callback: " + power + " kW");
+                    }
+                }
+            } catch (Exception e) { /* ignore */ }
+        }
+        // Listener-driven: the specific event value was already captured above.
+        // Skip full device re-collection — the 5s polling timer handles periodic refresh.
     }
 
     /**

@@ -138,19 +138,23 @@ public abstract class BaseDeviceMonitor<T> {
         long backoffMs = RETRY_BACKOFF_MS[Math.min(currentRetry, RETRY_BACKOFF_MS.length - 1)];
         log("Scheduling retry " + (currentRetry + 1) + "/" + MAX_RETRIES + " in " + backoffMs + "ms");
         
+        // Cancel any existing retry thread before spawning a new one
+        cancelRetries();
+        
         retryThread = new Thread(() -> {
             try {
                 Thread.sleep(backoffMs);
-                if (isRunning.get()) {
+                if (!isAvailable.get()) {
                     log("Retrying initialization...");
                     init(context);
-                    start();
+                    if (isAvailable.get()) {
+                        start();
+                    }
                 }
             } catch (InterruptedException e) {
                 // Interrupted, stop retrying
             } catch (Exception e) {
                 logError("Retry failed", e);
-                markUnavailable();
             }
         }, monitorName + "-Retry");
         
@@ -159,16 +163,23 @@ public abstract class BaseDeviceMonitor<T> {
     
     /**
      * Schedule periodic reconnection attempts.
+     * Only one reconnect thread runs at a time.
      */
     protected void schedulePeriodicReconnect() {
+        // Cancel any existing retry/reconnect thread
+        cancelRetries();
+        
         retryThread = new Thread(() -> {
-            while (isRunning.get() && !isAvailable.get()) {
+            while (!isAvailable.get() && !Thread.currentThread().isInterrupted()) {
                 try {
                     Thread.sleep(RECONNECT_INTERVAL_MS);
-                    if (isRunning.get() && !isAvailable.get()) {
+                    if (!isAvailable.get()) {
                         log("Attempting periodic reconnection...");
+                        retryCount.set(0);
                         init(context);
-                        start();
+                        if (isAvailable.get()) {
+                            start();
+                        }
                     }
                 } catch (InterruptedException e) {
                     break;
@@ -178,6 +189,7 @@ public abstract class BaseDeviceMonitor<T> {
             }
         }, monitorName + "-Reconnect");
         
+        retryThread.setDaemon(true);
         retryThread.start();
     }
     

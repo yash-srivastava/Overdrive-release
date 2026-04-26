@@ -293,6 +293,13 @@ public class RangeEstimator {
             actualCapacityKwh = nominalKwh;
         }
 
+        // If nominal capacity is 0 (detection failed), try computing from
+        // the persisted SOH file which now saves the capacity.
+        if (actualCapacityKwh <= 0) {
+            logger.debug("No usable capacity for range estimation");
+            return 0;
+        }
+
         // Usable SoC: current SoC minus BMS cutoff buffer
         double usableSocPercent = Math.max(0, currentSocPercent - BMS_CUTOFF_SOC);
 

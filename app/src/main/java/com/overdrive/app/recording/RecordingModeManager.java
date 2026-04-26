@@ -176,11 +176,10 @@ public class RecordingModeManager {
         accIsOn = isOn;
         
         if (isOn) {
-            // ACC is ON — full pipeline stop and restart to cleanly reacquire camera.
-            // The BYD native dashcam app starts on ACC ON and grabs the camera.
-            // A full restart ensures we get a working camera connection.
+            // ACC is ON — stop pipeline completely. The delayed thread will restart it.
+            // Don't call onAccOn() — it tries to reopen the camera which is pointless
+            // since stop() will tear everything down immediately after.
             if (pipeline.isRunning()) {
-                pipeline.onAccOn();
                 pipeline.stop();
             }
             

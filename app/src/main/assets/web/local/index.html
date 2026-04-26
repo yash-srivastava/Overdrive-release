@@ -8,8 +8,8 @@
     <link rel="stylesheet" href="../shared/styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="../shared/leaflet.css" />
+    <script src="../shared/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jmuxer@2.0.4/dist/jmuxer.min.js"></script>
     <script src="../shared/SotaPlayer.js"></script>
     <script src="../shared/Decoder.js"></script>
@@ -728,9 +728,11 @@
         /* Mini preview position handled by .cameras-mode class */
     </style>
 
+    <script src="../shared/auth.js"></script>
     <script src="../shared/core.js"></script>
     <script src="../shared/stream.js"></script>
     <script src="../shared/map.js"></script>
+    <script src="../shared/surveillance.js"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
@@ -748,7 +750,7 @@
                 if (tab === 'map') {
                     label.textContent = 'Cameras';
                     content.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg>';
-                    setTimeout(() => BYD.map.map?.invalidateSize(), 100);
+                    setTimeout(() => { if (BYD.map.map) BYD.map.map.invalidateSize(); }, 100);
                 } else {
                     label.textContent = 'Location';
                     content.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>';
@@ -824,7 +826,8 @@
             this.updateConnectionStatus('connecting');
             
             // 1. Set quality
-            const quality = document.getElementById('qualitySelector')?.value || 'LOW';
+            var _qSel = document.getElementById('qualitySelector');
+            const quality = (_qSel && _qSel.value) || 'LOW';
             try { await fetch('/api/stream/quality/' + quality, { method: 'POST' }); } catch(e) {}
             
             // 2. Set view mode BEFORE enabling streaming
@@ -838,7 +841,7 @@
             // 3. Enable Streaming on Backend
             const enabled = await this.enableStreaming();
             if (!enabled) {
-                if (BYD.utils?.toast) BYD.utils.toast('Failed to enable streaming', 'error');
+                if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to enable streaming', 'error');
                 return;
             }
             
@@ -850,8 +853,10 @@
                 const canvas = document.getElementById('sota_canvas');
                 if (canvas) {
                     canvas.classList.add('active');
-                    document.getElementById('hw_player')?.classList.remove('active');
-                    document.getElementById('sw_container')?.classList.remove('active');
+                    var _hw = document.getElementById('hw_player');
+                    if (_hw) _hw.classList.remove('active');
+                    var _sw = document.getElementById('sw_container');
+                    if (_sw) _sw.classList.remove('active');
                 }
                 
                 // Show decoder badge
@@ -891,7 +896,7 @@
                 console.log("[Stream] WebCodecs not supported, using fallback decoder...");
                 const decoderReady = await this.initDecoder();
                 if (!decoderReady) {
-                    if (BYD.utils?.toast) BYD.utils.toast('Decoder init failed', 'error');
+                    if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Decoder init failed', 'error');
                     return;
                 }
                 
@@ -962,6 +967,7 @@
         BYD.core.init();
         BYD.stream.init();
         BYD.map.init();
+        SurvSettings.initHeatmapOnly();
         
         // Load saved quality from backend and pre-select
         (async function() {
@@ -985,7 +991,8 @@
         document.addEventListener('fullscreenchange', () => {
             if (!document.fullscreenElement && BYD.stream.isFullscreen) {
                 BYD.stream.isFullscreen = false;
-                document.querySelector('.seamless-camera-view')?.classList.remove('fullscreen');
+                var _scv = document.querySelector('.seamless-camera-view');
+                if (_scv) _scv.classList.remove('fullscreen');
             }
         });
     </script>

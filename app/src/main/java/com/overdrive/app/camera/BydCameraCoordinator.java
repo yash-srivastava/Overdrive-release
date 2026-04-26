@@ -193,7 +193,10 @@ public class BydCameraCoordinator {
                     new Thread(() -> {
                         try {
                             Thread.sleep(REACQUIRE_DELAY_MS);
-                        } catch (InterruptedException ignored) {}
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
 
                         if (!yielded && !nativeAppActive) {
                             yieldCallback.onReacquireCamera();
@@ -275,12 +278,14 @@ public class BydCameraCoordinator {
     private void unregisterCameraUser() {
         if (!registeredAsUser || cameraUser == null) return;
 
+        boolean unregistered = false;
         if (typedServiceProxy != null) {
             try {
                 typedServiceProxy.unregisterUser(cameraUser);
+                unregistered = true;
                 logger.info("Unregistered camera user via typed AIDL");
             } catch (Exception e) {
-                logger.warn("unregisterUser failed: " + e.getMessage());
+                logger.warn("unregisterUser failed (service may still hold reference): " + e.getMessage());
             }
         } else if (reflectionServiceProxy != null) {
             try {
@@ -288,12 +293,16 @@ public class BydCameraCoordinator {
                     .getDeclaredMethod("unregisterUser", IBYDCameraUser.class);
                 unregisterMethod.setAccessible(true);
                 unregisterMethod.invoke(reflectionServiceProxy, cameraUser);
+                unregistered = true;
                 logger.info("Unregistered camera user via reflection");
             } catch (Exception e) {
                 logger.warn("unregisterUser via reflection failed: " + e.getMessage());
             }
         }
 
+        if (!unregistered) {
+            logger.warn("Could not confirm unregister — clearing local state to allow re-registration");
+        }
         registeredAsUser = false;
         cameraUser.clearYielded();
     }

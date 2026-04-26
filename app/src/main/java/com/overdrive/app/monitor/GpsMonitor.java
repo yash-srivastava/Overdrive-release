@@ -44,6 +44,8 @@ public class GpsMonitor {
     private volatile long lastUpdate = 0;
     private volatile boolean isRunning = false;
     private volatile boolean loadedFromCache = false;
+    private volatile long lastLoggedAt = 0;
+    private static final long LOG_INTERVAL_MS = 30_000;
 
     private GpsMonitor() {}
 
@@ -105,8 +107,13 @@ public class GpsMonitor {
             // Don't let geofence errors break GPS flow
         }
 
-        // Log periodically
-        if (System.currentTimeMillis() % 10000 < 2000 && hasLocation()) {
+        // Log periodically — once every LOG_INTERVAL_MS at most.
+        // The previous `currentTimeMillis() % 10000 < 2000` trick fired
+        // whenever a 2-second IPC update happened to land inside a fixed
+        // 2s window, which produced bursts of identical log lines.
+        long now = System.currentTimeMillis();
+        if (hasLocation() && now - lastLoggedAt >= LOG_INTERVAL_MS) {
+            lastLoggedAt = now;
             CameraDaemon.log(TAG + ": GPS: " + lat + ", " + lng + " (speed=" + speed + "m/s)");
         }
     }

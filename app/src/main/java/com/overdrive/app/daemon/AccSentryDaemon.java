@@ -742,8 +742,13 @@ public class AccSentryDaemon {
                 // 6. Another small delay to let power stabilize before surveillance
                 try { Thread.sleep(500); } catch (InterruptedException ignored) {}
                 
-                // 7. Enable surveillance AFTER power is stable
-                enableSurveillance();
+                // 7. Register door lock listener and wait for lock before arming surveillance.
+                // When ACC goes OFF and you exit the car, motion detection would pick you up
+                // as a false event. By waiting for the doors to lock, we skip your own exit.
+                // The pipeline/camera are started by the notifyAccState(true) IPC above
+                // (CameraDaemon starts the pipeline on ACC OFF), so they're warming up
+                // while we wait for the lock — no extra delay once you lock the car.
+                registerDoorLockListenerAndArmOnLock();
                 
                 // 8. Optional: Telegram daemon (in separate try-catch so surveillance failure doesn't block it)
                 try {
@@ -775,6 +780,15 @@ public class AccSentryDaemon {
 
         log("=== EXITING SENTRY MODE ===");
 
+        // CRITICAL: Set inSentryMode=false FIRST, before stopping the keep-alive thread.
+        // The keep-alive loop checks `while (running && inSentryMode)` and its interrupt
+        // handler also checks `if (!running || !inSentryMode)`. If we stop the thread
+        // while inSentryMode is still true, the interrupt handler sees inSentryMode=true
+        // and CONTINUES the loop instead of exiting — racing with the screen-wake thread
+        // below and calling setBacklightState(false) after we've already turned the screen on.
+        // This race caused intermittent 20-30 second screen blackouts after vehicle ON.
+        inSentryMode = false;
+
         // CRITICAL: Always notify CameraDaemon that ACC is ON, regardless of surveillance state.
         // disableSurveillance() may skip IPC if surveillanceEnabled is already false
         // (e.g. user had surveillance disabled, or safe zone suppressed it),
@@ -793,22 +807,20 @@ public class AccSentryDaemon {
         // Stop VehicleDataMonitor listener
         stopVehicleDataMonitor();
         
-        // Stop system keep-alive
+        // Stop system keep-alive (thread will exit cleanly since inSentryMode is already false)
         stopSystemKeepAlive();
 
-        // Restore backlight — retry a few times with delay
-        // The keep-alive thread may have just turned it off before stopping,
-        // or the BYD system may override our first attempt during its own ACC ON boot
+        // Restore backlight — retry a few times with delay.
+        // The keep-alive thread should be fully stopped by now (inSentryMode=false
+        // ensures it exits on interrupt), but retry in case the BYD system overrides
+        // our first attempt during its own ACC ON boot sequence.
         new Thread(() -> {
             for (int attempt = 1; attempt <= 3; attempt++) {
                 setBacklightState(true);
                 try { Thread.sleep(1000); } catch (InterruptedException ignored) { break; }
             }
         }, "ScreenWake").start();
-        // Release the BCM power override so car can sleep normally
-        //configurePeripheralPower(false);
 
-        inSentryMode = false;
         log("Sentry mode DEACTIVATED");
     }
     
@@ -1370,16 +1382,8 @@ public class AccSentryDaemon {
             while (running && inSentryMode) {  // Check BOTH flags
                 try {
                     // 1. Maintain Network Interface Stability
-                    // Prevents the OS from suspending the WiFi chip to save power
                     ensureWifiEnabled();
-
-                    // 2. Refresh CPU Wake Timer
-                    // Simulates user activity to reset the system's "Auto-Sleep" watchdog
                     injectFakeUserActivity();
-                    
-                    // 3. Enforce Stealth Power State
-                    // Immediately transitions the display to "OFF" to ensure stealth.
-                    // This corrects the state if Step 2 (or an external event) triggered the screen.
                     setBacklightState(false);
 
                     // 4. Maintenance Cycle Interval (10 seconds)
@@ -1736,7 +1740,10 @@ public class AccSentryDaemon {
                 JSONObject cmd = new JSONObject();
                 cmd.put("command", "SET_CONFIG");
                 JSONObject config = new JSONObject();
-                config.put("accOff", true);
+                // NOTE: Do NOT send accOff=true here — it was already sent by
+                // notifyAccState(true) in enterSentryMode(). Sending it again
+                // causes CameraDaemon.onAccStateChanged to run twice, which
+                // double-enables surveillance and resets the V2 pipeline.
                 config.put("enabled", true);
                 cmd.put("config", config);
 
@@ -1792,6 +1799,234 @@ public class AccSentryDaemon {
         }
     }
 
+    /**
+     * Notify CameraDaemon of ACC state change.
+     * This updates AccMonitor so HTTP API returns correct acc status.
+     * 
+     * @param accOff true if ACC is OFF, false if ACC is ON
+     */
+    
+    // ==================== DOOR LOCK GATED SURVEILLANCE ====================
+    // When ACC goes OFF, we start the pipeline/camera immediately but suppress
+    // motion detection until the car is locked. This prevents your own exit
+    // from the vehicle being detected as a sentry event.
+    
+    private static Object doorLockDevice = null;
+    private static volatile boolean doorLockListenerArmed = false;
+    // Timeout: if doors aren't locked within this window, arm surveillance anyway
+    // (user may have walked away without locking, or lock event wasn't detected)
+    private static final long DOOR_LOCK_ARM_TIMEOUT_MS = 30_000;  // 30 seconds
+    
+    // Door lock state constants (hardcoded from BYD SDK docs)
+    // DOOR_LOCK_STATE_INVALID = 0, DOOR_LOCK_STATE_UNLOCK = 1, DOOR_LOCK_STATE_LOCK = 2
+    private static final int DOOR_STATE_INVALID = 0;
+    private static final int DOOR_STATE_UNLOCK = 1;
+    private static final int DOOR_STATE_LOCK = 2;
+    
+    /**
+     * Initialize door lock device using BydDeviceHelper (proven pattern from BydDataCollector).
+     * Also registers an IBYDAutoListener for real-time lock state change events.
+     * Falls back to polling if listener registration fails.
+     */
+    private static void registerDoorLockListenerAndArmOnLock() {
+        if (appContext == null) {
+            log("No context — arming surveillance immediately (no door lock gate)");
+            enableSurveillance();
+            return;
+        }
+        
+        // Use BydDeviceHelper.getDevice — same proven pattern as BydDataCollector
+        doorLockDevice = com.overdrive.app.byd.BydDeviceHelper.getDevice(
+            "android.hardware.bydauto.doorlock.BYDAutoDoorLockDevice",
+            new PermissionBypassContext(appContext));
+        
+        if (doorLockDevice == null) {
+            log("BYDAutoDoorLockDevice not available — arming surveillance immediately");
+            enableSurveillance();
+            return;
+        }
+        
+        log("DoorLock device initialized: " + doorLockDevice.getClass().getSimpleName());
+        
+        // Dump all door lock states for debugging
+        logAllDoorStates();
+        
+        // Check if already locked (user may have locked before ACC OFF, e.g., remote lock)
+        if (isDriverDoorLocked()) {
+            // If the module is asleep (all INVALID), the car just shut down.
+            // Add a short grace period so we don't record the owner walking away.
+            // If the module reports actual LOCKED state, arm immediately.
+            Object result = com.overdrive.app.byd.BydDeviceHelper.callGetter(
+                doorLockDevice, "getDoorLockStatus", 1);
+            int state = (result instanceof Number) ? ((Number) result).intValue() : -1;
+            
+            if (state == DOOR_STATE_INVALID) {
+                log("Door lock module asleep — adding 10s grace period before arming");
+                new Thread(() -> {
+                    try {
+                        Thread.sleep(10_000);
+                        if (inSentryMode && !surveillanceEnabled) {
+                            log("Grace period complete — arming surveillance");
+                            enableSurveillance();
+                        }
+                    } catch (InterruptedException ignored) {}
+                }, "DoorLockGrace").start();
+            } else {
+                log("Doors already locked — arming surveillance immediately");
+                enableSurveillance();
+            }
+            return;
+        }
+        
+        log("Doors unlocked — registering listener + polling for lock event...");
+        doorLockListenerArmed = false;
+        
+        // Register IBYDAutoListener for real-time door lock events
+        // BydDeviceHelper uses a Proxy on IBYDAutoListener interface which works
+        // even though AbsBYDAutoDoorLockListener is an abstract class.
+        try {
+            boolean registered = com.overdrive.app.byd.BydDeviceHelper.registerListener(
+                doorLockDevice,
+                (methodName, args) -> {
+                    // onDoorLockStatusChanged(int area, int state)
+                    if ("onDoorLockStatusChanged".equals(methodName) && args != null && args.length >= 2) {
+                        int area = ((Number) args[0]).intValue();
+                        int state = ((Number) args[1]).intValue();
+                        String stateName = doorStateToString(state);
+                        log("Door lock EVENT: area=" + area + " state=" + stateName + " (" + state + ")");
+                        
+                        // Any door locking means the user has locked the car
+                        if (state == DOOR_STATE_LOCK && !doorLockListenerArmed && inSentryMode) {
+                            doorLockListenerArmed = true;
+                            log("Door LOCKED via listener event — arming surveillance");
+                            enableSurveillance();
+                        }
+                    }
+                });
+            log("Door lock listener registered: " + registered);
+        } catch (Exception e) {
+            log("Door lock listener registration failed: " + e.getMessage() + " — relying on polling");
+        }
+        
+        // Poll for door lock state with timeout (backup for listener)
+        new Thread(() -> {
+            long deadline = System.currentTimeMillis() + DOOR_LOCK_ARM_TIMEOUT_MS;
+            log("Door lock poll started (timeout=" + (DOOR_LOCK_ARM_TIMEOUT_MS / 1000) + "s)");
+            
+            while (inSentryMode && System.currentTimeMillis() < deadline) {
+                try {
+                    // If listener already armed, we're done
+                    if (doorLockListenerArmed || surveillanceEnabled) {
+                        log("Door lock poll: surveillance already armed (listener=" + doorLockListenerArmed + ")");
+                        return;
+                    }
+                    
+                    if (isDriverDoorLocked()) {
+                        log("All doors LOCKED (via poll) — arming surveillance");
+                        enableSurveillance();
+                        return;
+                    }
+                    Thread.sleep(2000);  // Check every 2 seconds
+                } catch (InterruptedException e) {
+                    if (!inSentryMode) {
+                        log("Door lock poll cancelled — exited sentry mode");
+                        return;
+                    }
+                } catch (Exception e) {
+                    log("Door lock poll error: " + e.getMessage());
+                    break;
+                }
+            }
+            
+            if (inSentryMode && !surveillanceEnabled && !doorLockListenerArmed) {
+                log("Door lock timeout (" + (DOOR_LOCK_ARM_TIMEOUT_MS / 1000) + "s) — arming surveillance anyway");
+                enableSurveillance();
+            }
+        }, "DoorLockPoll").start();
+    }
+    
+    /**
+     * Check if the driver's door (left front) is locked.
+     * Uses BydDeviceHelper.callGetter — same proven pattern as BydDataCollector.collectDoorLock.
+     * BydDataCollector queries areas 1-7 by integer index. Area 1 = left front (driver's door).
+     * 
+     * IMPORTANT: When ACC is OFF, the BYD door lock module goes to sleep and returns
+     * INVALID (0) for all electronic locks. We treat "all doors INVALID" as locked,
+     * because the module only sleeps after the car is fully shut down and secured.
+     * If any door were physically unlocked/open, the car stays semi-awake.
+     */
+    private static boolean isDriverDoorLocked() {
+        if (doorLockDevice == null) {
+            log("Door lock check: device is null");
+            return false;
+        }
+        
+        // Use BydDeviceHelper.callGetter with area index (same as BydDataCollector)
+        // Area 1 = DOOR_LOCK_AREA_LEFT_FRONT (driver's door)
+        Object result = com.overdrive.app.byd.BydDeviceHelper.callGetter(
+            doorLockDevice, "getDoorLockStatus", 1);
+        
+        int state = (result instanceof Number) ? ((Number) result).intValue() : -1;
+        String stateName = doorStateToString(state);
+        log("Door lock poll: driver door=" + stateName + " (raw=" + state + ")");
+        
+        if (state == DOOR_STATE_LOCK) {
+            return true;
+        }
+        
+        // When ACC is OFF, the door lock module sleeps and returns INVALID (0) for all doors.
+        // Check if ALL electronic doors are INVALID — if so, the module is asleep which means
+        // the car is fully shut down and secured. Treat this as "locked".
+        if (state == DOOR_STATE_INVALID) {
+            boolean allInvalid = true;
+            // Check areas 1-5 (the 4 doors + back, skip child locks 6-7)
+            for (int area = 1; area <= 5; area++) {
+                Object r = com.overdrive.app.byd.BydDeviceHelper.callGetter(
+                    doorLockDevice, "getDoorLockStatus", area);
+                int s = (r instanceof Number) ? ((Number) r).intValue() : -1;
+                if (s != DOOR_STATE_INVALID) {
+                    allInvalid = false;
+                    break;
+                }
+            }
+            if (allInvalid) {
+                log("Door lock module asleep (all doors INVALID) — treating as LOCKED");
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Log all door lock states for debugging.
+     * Queries areas 1-7 (same as BydDataCollector.collectDoorLock).
+     */
+    private static void logAllDoorStates() {
+        if (doorLockDevice == null) return;
+        
+        String[] areaNames = {"?", "LeftFront", "LeftRear", "RightFront", "RightRear", 
+                              "Back", "ChildLockLeft", "ChildLockRight"};
+        StringBuilder sb = new StringBuilder("Door lock states: ");
+        for (int i = 1; i <= 7; i++) {
+            Object result = com.overdrive.app.byd.BydDeviceHelper.callGetter(
+                doorLockDevice, "getDoorLockStatus", i);
+            int state = (result instanceof Number) ? ((Number) result).intValue() : -1;
+            if (i > 1) sb.append(", ");
+            sb.append(areaNames[i]).append("=").append(doorStateToString(state));
+        }
+        log(sb.toString());
+    }
+    
+    private static String doorStateToString(int state) {
+        switch (state) {
+            case DOOR_STATE_INVALID: return "INVALID";
+            case DOOR_STATE_UNLOCK: return "UNLOCKED";
+            case DOOR_STATE_LOCK: return "LOCKED";
+            default: return "UNKNOWN(" + state + ")";
+        }
+    }
+    
     /**
      * Notify CameraDaemon of ACC state change.
      * This updates AccMonitor so HTTP API returns correct acc status.

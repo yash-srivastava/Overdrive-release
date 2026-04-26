@@ -52,6 +52,9 @@
     <uses-permission android:name="android.permission.DEVICE_POWER" />
     <!-- Data cache (for ACC whitelist) -->
     <uses-permission android:name="android.permission.ACCESS_APPOPSDATA" />
+    
+    <!-- Overlay permission for floating status indicator (user must grant manually) -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:name="com.overdrive.app.OverdriveApplication"
@@ -159,6 +162,12 @@
         <service
             android:name="com.overdrive.app.services.DaemonKeepaliveService"
             android:foregroundServiceType="specialUse|dataSync"
+            android:exported="false" />
+
+        <!-- Status Overlay Service - Floating recording/trip status indicator -->
+        <service
+            android:name="com.overdrive.app.overlay.StatusOverlayService"
+            android:foregroundServiceType="specialUse"
             android:exported="false" />
 
         <!-- AccessibilityService Keep-Alive - Highest process priority protection.

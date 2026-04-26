@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Floating status pill: shows only configured items, tap ✗ to restart -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/pillContainer"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:background="@drawable/overlay_pill_background"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingHorizontal="10dp"
+    android:paddingVertical="5dp"
+    android:elevation="8dp">
+
+    <!-- Recording status (hidden if mode=NONE) -->
+    <LinearLayout
+        android:id="@+id/recContainer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/ivRecIcon"
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:src="@drawable/ic_overlay_rec_inactive"
+            android:contentDescription="Recording status" />
+
+        <TextView
+            android:id="@+id/tvRecLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:text="REC ✗"
+            android:textColor="@color/status_danger"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:fontFamily="monospace" />
+
+    </LinearLayout>
+
+    <!-- Separator (only when both items visible) -->
+    <View
+        android:id="@+id/separator"
+        android:layout_width="1dp"
+        android:layout_height="14dp"
+        android:layout_marginHorizontal="8dp"
+        android:background="@color/border_default"
+        android:visibility="gone" />
+
+    <!-- Trip status (hidden if not enabled) -->
+    <LinearLayout
+        android:id="@+id/tripContainer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/ivTripIcon"
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:src="@drawable/ic_overlay_trip_inactive"
+            android:contentDescription="Trip tracking status" />
+
+        <TextView
+            android:id="@+id/tvTripLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:text="TRIP ✗"
+            android:textColor="@color/status_danger"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:fontFamily="monospace" />
+
+    </LinearLayout>
+
+</LinearLayout>

@@ -50,6 +50,8 @@ endif()
 # ==================== Surveillance Library ====================
 set(SURVEILLANCE_SOURCES
     surveillance/native_motion.cpp
+    surveillance/motion_pipeline_v2.cpp
+    surveillance/texture_tracker.cpp
 )
 
 add_library(surveillance SHARED ${SURVEILLANCE_SOURCES})

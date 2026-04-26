@@ -37,6 +37,15 @@ public class GpuMosaicRecorder {
     private EGLSurface encoderSurface;
     private Surface encoderInputSurface;
     
+    // SOTA: Dynamic Time-Base Corrector (TBC) state.
+    // Uses an Exponential Moving Average to learn the actual hardware frame rate
+    // in real-time, then feeds mathematically perfect, evenly spaced timestamps
+    // to the encoder. This eliminates both the fast-forward bug (from hardcoded FPS)
+    // and the rubber-banding jitter (from raw System.nanoTime()).
+    private long lastRealTimeNs = -1;
+    private long smoothedPtsNs = -1;
+    private long averageDeltaNs = 181_000_000L;  // Initial assumption: ~5.5 FPS
+    
     // OpenGL program and locations
     private int programId;
     private int uCameraTexLocation;
@@ -74,6 +83,7 @@ public class GpuMosaicRecorder {
     private int overlayFrameCounter = 0;
     private volatile boolean overlayRecordingModeAllowed = false;
     private boolean overlayTextureReady = false;
+    private boolean overlayTextureInitialized = false;
     
     // Frame skip tracking - prevents eglSwapBuffers from blocking GL thread
     // When encoder is backed up (SD card I/O), skip rendering to keep camera HAL flowing
@@ -285,6 +295,7 @@ public class GpuMosaicRecorder {
             
             // Create bitmap renderer
             overlayRenderer = new OverlayBitmapRenderer();
+            overlayTextureInitialized = false;
         }
         
         logger.info("GpuMosaicRecorder initialized (encoder codec=" + 
@@ -350,22 +361,19 @@ public class GpuMosaicRecorder {
 
         // Set viewport to encoder resolution (2560x1920)
         GLES20.glViewport(0, 0, 2560, 1920);
-        GlUtil.checkGlError("glViewport");
 
-        // Clear (optional, but good practice)
+        // Clear
         GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
 
         // Use our shader program
         GLES20.glUseProgram(programId);
-        GlUtil.checkGlError("glUseProgram");
 
         // Bind camera texture
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
         GLES20.glUniform1i(uCameraTexLocation, 0);
         GLES20.glUniform1f(uApaModeLocation, (float) cameraLayout);
-        GlUtil.checkGlError("glBindTexture");
 
         // Set up vertex attributes
         GLES20.glEnableVertexAttribArray(aPositionLocation);
@@ -374,11 +382,8 @@ public class GpuMosaicRecorder {
         GLES20.glEnableVertexAttribArray(aTexCoordLocation);
         GLES20.glVertexAttribPointer(aTexCoordLocation, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
 
-        GlUtil.checkGlError("glVertexAttribPointer");
-
         // Draw fullscreen quad (shader does the 2x2 grid mapping)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-        GlUtil.checkGlError("glDrawArrays");
 
         // Disable vertex arrays
         GLES20.glDisableVertexAttribArray(aPositionLocation);
@@ -388,19 +393,29 @@ public class GpuMosaicRecorder {
         if (overlayEnabled && overlayRecordingModeAllowed && overlayRenderer != null) {
             overlayFrameCounter++;
             try {
-                // Update bitmap every 3rd frame (5 FPS at 15 FPS recording)
+                // Update bitmap every 3rd frame (~5 FPS at 15 FPS recording)
                 if ((overlayFrameCounter == 1 || overlayFrameCounter % 3 == 0) && telemetryCollector != null) {
                     TelemetrySnapshot snapshot = telemetryCollector.getLatestSnapshot();
                     overlayRenderer.renderFrame(snapshot, overlayFrameCounter / 3);
                 }
                 
-                // Upload new bitmap to texture if ready (doesn't happen every frame)
+                // Upload new bitmap to texture ONLY when the double buffer actually swapped.
+                // swapAndGetFront() returns null when no new content is available,
+                // avoiding the expensive texImage2D/texSubImage2D call on unchanged frames.
                 android.graphics.Bitmap overlayBitmap = overlayRenderer.swapAndGetFront();
                 if (overlayBitmap != null && !overlayBitmap.isRecycled()) {
                     GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTextureId);
-                    GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, overlayBitmap, 0);
-                    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
-                    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+                    if (!overlayTextureInitialized) {
+                        // First upload: allocate GPU texture storage with texImage2D
+                        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, overlayBitmap, 0);
+                        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+                        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+                        overlayTextureInitialized = true;
+                    } else {
+                        // Subsequent uploads: reuse existing texture storage with texSubImage2D
+                        // This avoids GPU texture reallocation on every update
+                        GLUtils.texSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, overlayBitmap);
+                    }
                     overlayTextureReady = true;
                     
                     if (overlayFrameCounter <= 3) {
@@ -439,10 +454,40 @@ public class GpuMosaicRecorder {
             }
         }
 
-        // Swap buffers to encoder (this submits frame to MediaCodec)
-        // NOTE: This can block if encoder input buffer is full
+        // --- SOTA: Dynamic Time-Base Corrector (TBC) ---
+        // Learns the actual hardware frame rate via EMA and produces perfectly
+        // paced timestamps that eliminate both fast-forward and rubber-banding.
+        long nowNs = System.nanoTime();
+        if (smoothedPtsNs < 0) {
+            // First frame initialization
+            smoothedPtsNs = nowNs;
+            lastRealTimeNs = nowNs;
+        } else {
+            // 1. Calculate the raw, jittery delta
+            long rawDeltaNs = nowNs - lastRealTimeNs;
+            lastRealTimeNs = nowNs;
+            
+            // 2. Clamp outliers (ignore massive CPU freezes or dropped frames)
+            //    Min 30ms (33 FPS cap), Max 500ms (2 FPS floor)
+            long clampedDeltaNs = Math.max(30_000_000L, Math.min(rawDeltaNs, 500_000_000L));
+            
+            // 3. Update the moving average (Alpha=0.1 for smooth adaptation)
+            //    This learns the car's actual framerate without jitter
+            averageDeltaNs = (long)(averageDeltaNs * 0.9 + clampedDeltaNs * 0.1);
+            
+            // 4. Advance the perfectly smooth timeline
+            smoothedPtsNs += averageDeltaNs;
+            
+            // 5. Failsafe: prevent smoothed clock from drifting >1s from real time
+            long driftNs = nowNs - smoothedPtsNs;
+            if (Math.abs(driftNs) > 1_000_000_000L) {
+                smoothedPtsNs = nowNs;
+            }
+        }
+        
+        // Push the mathematically perfect timestamp to the hardware encoder
         try {
-            eglCore.swapBuffers(encoderSurface);
+            eglCore.swapBuffersWithTimestamp(encoderSurface, smoothedPtsNs);
             consecutiveSurfaceErrors = 0;  // Reset on success
         } catch (RuntimeException e) {
             consecutiveSurfaceErrors++;
@@ -682,6 +727,8 @@ public class GpuMosaicRecorder {
     public void setApaMode(boolean apa) {
         setCameraLayout(apa ? 1 : 0);
     }
+    
+    // (TBC timestamp is computed inline in drawFrame)
 
     public boolean isOverlayEnabled() {
         return overlayEnabled;
@@ -750,6 +797,7 @@ public class GpuMosaicRecorder {
             overlayRenderer = null;
         }
         overlayTextureReady = false;
+        overlayTextureInitialized = false;
         
         if (encoderSurface != null) {
             eglCore.destroySurface(encoderSurface);

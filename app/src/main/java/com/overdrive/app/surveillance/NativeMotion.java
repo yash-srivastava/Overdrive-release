@@ -449,4 +449,89 @@ public class NativeMotion {
         int minY = unpackMinY(result);
         return maxY - minY;
     }
+    
+    // ========================================================================
+    // Pipeline V2: Per-Quadrant 6-Stage Motion Detection
+    // ========================================================================
+    
+    /**
+     * Initialize the V2 pipeline state. Call once before first processFrameV2.
+     */
+    public static native void initPipelineV2();
+    
+    /**
+     * Process a full mosaic frame through the V2 per-quadrant pipeline.
+     * 
+     * @param frameBuffer   640×480 RGB direct ByteBuffer (from GpuDownscaler)
+     * @param width         Frame width (640)
+     * @param height        Frame height (480)
+     * @param configBuffer  PipelineConfigV2 serialized as direct ByteBuffer
+     * @param resultBuffer  Output: 4 × QuadrantResultV2 as direct ByteBuffer
+     */
+    public static native void processFrameV2(
+        java.nio.ByteBuffer frameBuffer,
+        int width, int height,
+        java.nio.ByteBuffer configBuffer,
+        java.nio.ByteBuffer resultBuffer
+    );
+    
+    /**
+     * Get the size of PipelineConfigV2 struct (for ByteBuffer allocation).
+     */
+    public static native int getPipelineConfigSize();
+    
+    /**
+     * Get the size of one QuadrantResultV2 struct (for ByteBuffer allocation).
+     * Total result buffer size = getQuadrantResultSize() * 4.
+     */
+    public static native int getQuadrantResultSize();
+    
+    // ========================================================================
+    // Texture Tracker (YOLO + NCC Hybrid VOT)
+    // ========================================================================
+    
+    /** Initialize the native texture tracker. */
+    public static native void initTracker();
+    
+    /**
+     * Start tracking an object detected by YOLO.
+     * @return Track slot index (0-3) or -1 if no slot available
+     */
+    public static native int trackerStartTrack(
+            byte[] frameRgb, int width, int height,
+            int quadrant, int classId,
+            int x, int y, int w, int h,
+            long nowMs);
+    
+    /** Update all active tracks in a quadrant with a new frame. */
+    public static native void trackerUpdate(
+            byte[] frameRgb, int width, int height,
+            int quadrant, long nowMs);
+    
+    /** Check if any track is active in the given quadrant. */
+    public static native boolean trackerHasActiveTrack(int quadrant);
+    
+    /**
+     * Get the tracked bounding box for a quadrant.
+     * @return float[7] = {x, y, w, h, confidence, classId, active} or null
+     */
+    public static native float[] trackerGetTrackBox(int quadrant);
+    
+    /** Drop (kill) the track in a quadrant. */
+    public static native void trackerDropTrack(int quadrant);
+    
+    /** Check if a track needs YOLO heartbeat verification. */
+    public static native boolean trackerNeedsYoloHeartbeat(int quadrant);
+    
+    /** Confirm YOLO heartbeat (resets verification timer). */
+    public static native void trackerConfirmHeartbeat(int quadrant, long nowMs);
+    
+    /**
+     * Refresh a track's template with a new YOLO bounding box (handles scale change).
+     */
+    public static native void trackerRefreshTemplate(
+            byte[] frameRgb, int width, int height,
+            int quadrant,
+            int newX, int newY, int newW, int newH,
+            long nowMs);
 }

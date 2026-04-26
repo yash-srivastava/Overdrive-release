@@ -160,6 +160,47 @@ public class SurveillanceConfig {
     private boolean nightMode = false;
     
     // ========================================================================
+    // V2 Pipeline Settings
+    // ========================================================================
+    private String environmentPreset = "outdoor";  // outdoor, garage, street
+    private String detectionZone = "normal";        // close, normal, extended
+    private int loiteringTimeSeconds = 3;           // 1-10 seconds
+    private int sensitivityLevel = 3;               // 1-5
+    private boolean[] cameraEnabled = {true, true, true, true};  // front, right, left, rear
+    private boolean motionHeatmapEnabled = false;
+    private boolean filterDebugLogEnabled = false;
+    private int shadowFilterMode = 2;               // 0=OFF, 1=LIGHT, 2=NORMAL, 3=AGGRESSIVE
+    
+    // V2 getters
+    public String getEnvironmentPreset() { return environmentPreset; }
+    public String getDetectionZone() { return detectionZone; }
+    public int getLoiteringTimeSeconds() { return loiteringTimeSeconds; }
+    public int getSensitivityLevel() { return sensitivityLevel; }
+    public boolean[] getCameraEnabled() { return cameraEnabled; }
+    public boolean isCameraEnabled(int quadrant) { 
+        return quadrant >= 0 && quadrant < 4 && cameraEnabled[quadrant]; 
+    }
+    public boolean isMotionHeatmapEnabled() { return motionHeatmapEnabled; }
+    public boolean isFilterDebugLogEnabled() { return filterDebugLogEnabled; }
+    public int getShadowFilterMode() { return shadowFilterMode; }
+    
+    // V2 setters
+    public void setEnvironmentPreset(String preset) { this.environmentPreset = preset; }
+    public void setDetectionZone(String zone) { this.detectionZone = zone; }
+    public void setLoiteringTimeSeconds(int seconds) { 
+        this.loiteringTimeSeconds = Math.max(1, Math.min(10, seconds)); 
+    }
+    public void setSensitivityLevel(int level) { 
+        this.sensitivityLevel = Math.max(1, Math.min(5, level)); 
+    }
+    public void setCameraEnabled(int quadrant, boolean enabled) {
+        if (quadrant >= 0 && quadrant < 4) cameraEnabled[quadrant] = enabled;
+    }
+    public void setMotionHeatmapEnabled(boolean enabled) { this.motionHeatmapEnabled = enabled; }
+    public void setFilterDebugLogEnabled(boolean enabled) { this.filterDebugLogEnabled = enabled; }
+    public void setShadowFilterMode(int mode) { this.shadowFilterMode = Math.max(0, Math.min(3, mode)); }
+    
+    // ========================================================================
     // Constructors
     // ========================================================================
     

@@ -5,6 +5,8 @@ import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Typeface;
@@ -14,11 +16,16 @@ import com.overdrive.app.logging.DaemonLogger;
 import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Telemetry overlay renderer with solid PNG icons tinted via alpha extraction.
  * Dark semi-transparent background, white text, colored icons.
+ *
+ * Performance: All geometry objects (Rect, RectF, Date) and ColorFilters are
+ * pre-allocated and reused across frames to eliminate per-frame GC pressure.
  */
 public class OverlayBitmapRenderer {
 
@@ -36,6 +43,15 @@ public class OverlayBitmapRenderer {
     // Pre-extracted alpha masks (solid icons → clean stencils)
     private Bitmap alphaPedal, alphaLeft, alphaRight, alphaBelt;
 
+    // Pre-allocated geometry objects — reused every frame to avoid GC pressure
+    private final RectF bgRect = new RectF();
+    private final Rect iconSrcRect = new Rect();
+    private final RectF iconDstRect = new RectF();
+    private final Date reusableDate = new Date();
+
+    // Cached PorterDuffColorFilters — keyed by color int, avoids allocation per icon per frame
+    private final Map<Integer, PorterDuffColorFilter> colorFilterCache = new HashMap<>();
+
     public OverlayBitmapRenderer() {
         logger = DaemonLogger.getInstance("OverlayRenderer");
         doubleBuffer = new OverlayDoubleBuffer(WIDTH, HEIGHT);
@@ -44,17 +60,28 @@ public class OverlayBitmapRenderer {
 
         bgPaint = mp(Color.argb(160, 0, 0, 0), Paint.Style.FILL, 0);
         speedPaint = mp(Color.WHITE, Paint.Style.FILL, 48);
-        speedPaint.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
-        speedPaint.setShadowLayer(4f, 0f, 0f, 0xAAFFFFFF);
         unitPaint = mp(0xFFCCCCCC, Paint.Style.FILL, 18);
         gearPaint = mp(Color.WHITE, Paint.Style.FILL, 48);
-        gearPaint.setTypeface(Typeface.DEFAULT_BOLD);
-        gearPaint.setShadowLayer(6f, 0f, 0f, 0xAAFFFFFF);
         iconPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
         labelPaint = mp(0xFFCCCCCC, Paint.Style.FILL, 13);
-        labelPaint.setTypeface(Typeface.DEFAULT_BOLD);
         timePaint = mp(Color.WHITE, Paint.Style.FILL, 20);
-        timePaint.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
+
+        // Typeface initialization can fail on rapid daemon restarts when the
+        // Android font cache is in a corrupted state (SystemFonts throws
+        // "Failed to create internal object. maybe invalid font data.").
+        // Catch and fall back to default paint — no custom fonts is better
+        // than crashing the daemon with SIGABRT on the second restart.
+        try {
+            speedPaint.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
+            speedPaint.setShadowLayer(4f, 0f, 0f, 0xAAFFFFFF);
+            gearPaint.setTypeface(Typeface.DEFAULT_BOLD);
+            gearPaint.setShadowLayer(6f, 0f, 0f, 0xAAFFFFFF);
+            labelPaint.setTypeface(Typeface.DEFAULT_BOLD);
+            timePaint.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
+        } catch (Throwable t) {
+            // Catches both Exception and Error (RuntimeException from native font init)
+            logger.warn("Font init failed (will use defaults): " + t.getMessage());
+        }
 
         loadIcons();
     }
@@ -102,7 +129,8 @@ public class OverlayBitmapRenderer {
 
             boolean blink = (fc / 3) % 2 == 0;
             float barL = 200, barR = 1080;
-            c.drawRoundRect(new RectF(barL, 2, barR, 78), 14, 14, bgPaint);
+            bgRect.set(barL, 2, barR, 78);
+            c.drawRoundRect(bgRect, 14, 14, bgPaint);
 
             int iy = (HEIGHT - ICON_SIZE) / 2;
 
@@ -173,11 +201,11 @@ public class OverlayBitmapRenderer {
             x += belt2W;
 
             // TIMESTAMP
-            Date now = new Date(snap.timestampMs);
+            reusableDate.setTime(snap.timestampMs);
             timePaint.setTextSize(16);
-            c.drawText(dateFmt.format(now), x, 34, timePaint);
+            c.drawText(dateFmt.format(reusableDate), x, 34, timePaint);
             timePaint.setTextSize(20);
-            c.drawText(timeFmt.format(now), x, 60, timePaint);
+            c.drawText(timeFmt.format(reusableDate), x, 60, timePaint);
 
             doubleBuffer.markBackReady();
             return true;
@@ -200,16 +228,29 @@ public class OverlayBitmapRenderer {
         }
     }
 
-    /** SOTA: Solid fill with neon glow effect via setShadowLayer + SRC_IN. */
+    /**
+     * Solid fill with neon glow effect via setShadowLayer + SRC_IN.
+     * Uses cached ColorFilter instances to avoid per-icon allocation.
+     */
     private void drawIcon(Canvas c, Bitmap alpha, float x, float y, int color) {
         if (alpha == null) return;
-        iconPaint.setColorFilter(new android.graphics.PorterDuffColorFilter(color, android.graphics.PorterDuff.Mode.SRC_IN));
+        iconPaint.setColorFilter(getCachedColorFilter(color));
         iconPaint.setShadowLayer(8f, 0f, 0f, color); // Neon glow
-        Rect src = new Rect(0, 0, alpha.getWidth(), alpha.getHeight());
-        RectF dst = new RectF(x, y, x + ICON_SIZE, y + ICON_SIZE);
-        c.drawBitmap(alpha, src, dst, iconPaint);
+        iconSrcRect.set(0, 0, alpha.getWidth(), alpha.getHeight());
+        iconDstRect.set(x, y, x + ICON_SIZE, y + ICON_SIZE);
+        c.drawBitmap(alpha, iconSrcRect, iconDstRect, iconPaint);
         iconPaint.setColorFilter(null);
         iconPaint.clearShadowLayer();
+    }
+
+    /** Returns a cached PorterDuffColorFilter for the given color, creating one if needed. */
+    private PorterDuffColorFilter getCachedColorFilter(int color) {
+        PorterDuffColorFilter filter = colorFilterCache.get(color);
+        if (filter == null) {
+            filter = new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN);
+            colorFilterCache.put(color, filter);
+        }
+        return filter;
     }
 
     public Bitmap swapAndGetFront() { return doubleBuffer.swapAndGetFront(); }

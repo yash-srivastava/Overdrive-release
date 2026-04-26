@@ -184,6 +184,22 @@
         <item name="android:windowFullscreen">true</item>
     </style>
     
+    <!-- Dialog Theme (dark, matching app style) -->
+    <style name="Theme.Overdrive.Dialog" parent="Theme.Material3.Dark.Dialog.Alert">
+        <item name="colorPrimary">@color/brand_primary</item>
+        <item name="colorOnPrimary">@color/bg_base</item>
+        <item name="colorSurface">@color/bg_surface</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="android:windowBackground">@color/bg_surface</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+        <item name="buttonBarPositiveButtonStyle">@style/Widget.Overdrive.DialogButton</item>
+    </style>
+    
+    <style name="Widget.Overdrive.DialogButton" parent="Widget.Material3.Button.TextButton.Dialog">
+        <item name="android:textColor">@color/brand_primary</item>
+    </style>
+    
     <!-- Time Picker Dialog Theme -->
     <style name="Theme.Overdrive.TimePicker" parent="ThemeOverlay.Material3.MaterialTimePicker">
         <item name="colorPrimary">@color/brand_primary</item>

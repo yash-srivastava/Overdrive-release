@@ -408,7 +408,6 @@ public class TripDetector {
         startOdometerKm = -1;
         parkStartTime = 0;
         state = State.IDLE;
-        startOdometerKm = -1;
 
         if (listener != null && discardedTrip != null) {
             try {

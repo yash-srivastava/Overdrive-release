@@ -221,6 +221,20 @@ public class TripAnalyticsManager {
     }
 
     /**
+     * Check if a trip is currently being tracked (ACTIVE or PARK_PENDING).
+     */
+    public boolean isTripActive() {
+        return enabled && detector != null && detector.isTripActive();
+    }
+
+    /**
+     * Get the active trip record, or null if no trip is active.
+     */
+    public TripRecord getActiveTrip() {
+        return (detector != null) ? detector.getActiveTrip() : null;
+    }
+
+    /**
      * Update the TelemetryDataCollector reference after late initialization.
      * Called by CameraDaemon once TelemetryDataCollector is ready (after GPU init delay).
      */
@@ -360,13 +374,44 @@ public class TripAnalyticsManager {
             trip.avgSpeedKmh = recorder.getAvgSpeedKmh();
         }
 
-        // Snapshot electricity rate and compute trip cost
+        // Snapshot electricity rate and compute trip cost.
+        // Use SohEstimator's calibrated nominal capacity for accurate energy calculation.
         if (config != null) {
             trip.electricityRate = config.getElectricityRate();
             trip.currency = config.getCurrency();
+            
             double energyUsed = trip.getEnergyUsedKwh();
+            
+            // If BMS kWh readings weren't available, estimate from SoC delta
+            // using the SohEstimator's calibrated nominal capacity (from pack voltage).
+            if (energyUsed <= 0 && trip.socStart > 0 && trip.socEnd > 0 && trip.socStart > trip.socEnd) {
+                double nominalKwh = 0;
+                try {
+                    com.overdrive.app.abrp.SohEstimator soh = 
+                        com.overdrive.app.monitor.SocHistoryDatabase.getInstance().getSohEstimator();
+                    if (soh != null && soh.getNominalCapacityKwh() > 0) {
+                        nominalKwh = soh.getNominalCapacityKwh();
+                        double sohPercent = soh.hasEstimate() ? soh.getCurrentSoh() : 100.0;
+                        // Actual usable capacity = nominal × SOH
+                        double usableKwh = nominalKwh * (sohPercent / 100.0);
+                        energyUsed = ((trip.socStart - trip.socEnd) / 100.0) * usableKwh;
+                        logger.info(String.format("Energy estimated from SoC: %.1f%% → %.1f%% = %.2f kWh (nominal=%.1f, SOH=%.1f%%)",
+                                trip.socStart, trip.socEnd, energyUsed, nominalKwh, sohPercent));
+                    }
+                } catch (Exception e) {
+                    logger.warn("SohEstimator not available for energy estimation: " + e.getMessage());
+                }
+            }
+            
+            // Store computed energy for the database (so future reads don't need to re-estimate)
+            if (energyUsed > 0 && trip.distanceKm > 0) {
+                trip.energyPerKm = energyUsed / trip.distanceKm;
+            }
+            
             if (energyUsed > 0 && trip.electricityRate > 0) {
                 trip.tripCost = energyUsed * trip.electricityRate;
+                logger.info(String.format("Trip cost: %.2f kWh × %s%.2f = %s%.2f",
+                        energyUsed, trip.currency, trip.electricityRate, trip.currency, trip.tripCost));
             }
         }
 
