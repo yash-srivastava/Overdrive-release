@@ -61,6 +61,7 @@ tasks.matching { it.name.contains("CMake") || it.name.contains("ExternalNative")
 
 // OpenCV-mobile version for surveillance module (minimal build, ~3MB vs ~20MB)
 // https://github.com/nihui/opencv-mobile
+val opencvMobileTag = "v31"
 val opencvMobileVersion = "4.10.0"
 tasks.register("downloadOpenCV") {
     val opencvDir = file("src/main/cpp/opencv")
@@ -77,7 +78,7 @@ tasks.register("downloadOpenCV") {
             println("Downloading opencv-mobile ${opencvMobileVersion} for Android...")
             
             // Correct URL format: /releases/download/vVERSION/
-            val zipUrl = "https://github.com/nihui/opencv-mobile/releases/download/v${opencvMobileVersion}/opencv-mobile-${opencvMobileVersion}-android.zip"
+            val zipUrl = "https://github.com/nihui/opencv-mobile/releases/download/${opencvMobileTag}/opencv-mobile-${opencvMobileVersion}-android.zip"
             val zipFile = file("${opencvDir}/opencv-mobile-android.zip")
             
             try {
@@ -104,7 +105,7 @@ tasks.register("downloadOpenCV") {
                     
                     if (extractedDir.exists()) {
                         // Copy arm64-v8a static libs
-                        val extractedLibDir = file("${extractedDir}/arm64-v8a/lib")
+                        val extractedLibDir = file("${extractedDir}/sdk/native/staticlibs/arm64-v8a")
                         if (extractedLibDir.exists()) {
                             extractedLibDir.listFiles()?.forEach { f ->
                                 println("  Copying lib: ${f.name}")
@@ -116,7 +117,7 @@ tasks.register("downloadOpenCV") {
                         }
                         
                         // Copy headers
-                        val extractedInclude = file("${extractedDir}/arm64-v8a/include")
+                        val extractedInclude = file("${extractedDir}/sdk/native/jni/include")
                         if (extractedInclude.exists()) {
                             if (includeDir.exists()) includeDir.deleteRecursively()
                             extractedInclude.copyRecursively(includeDir, overwrite = true)
