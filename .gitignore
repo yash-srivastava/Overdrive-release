@@ -1,0 +1,10 @@
+/.gradle
+/.idea
+/.kotlin
+/local.properties
+/build
+
+/app/build
+/app/.cxx
+/app/src/main/cpp/opencv
+/app/src/main/cpp/openh264
