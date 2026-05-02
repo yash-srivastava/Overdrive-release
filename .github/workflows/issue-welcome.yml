@@ -1,0 +1,25 @@
+name: Issue Welcome Bot
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  welcome:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment on new issue
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.issue.number }}
+          body: |
+            👋 Thanks for opening this issue!
+
+            Just a friendly heads-up — **OverDrive is a free, open-source project** maintained in spare time. There are no deadlines, no paid team, and no guarantees on response times.
+
+            We'll do our best to look into this when we can, but please be patient. If you'd like to speed things up, **pull requests are always welcome!** Check out our [Contributing Guide](../blob/main/CONTRIBUTING.md) to get started.
+
+            Thanks for understanding and for being part of the community 🙏
