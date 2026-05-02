@@ -18,9 +18,14 @@ import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.ui.AppBarConfiguration
 import androidx.navigation.ui.navigateUp
 import androidx.navigation.ui.setupWithNavController
+import com.google.android.material.appbar.MaterialToolbar
+import com.google.android.material.navigation.NavigationView
+import com.google.android.material.switchmaterial.SwitchMaterial
+import com.overdrive.app.BuildConfig
+import com.overdrive.app.R
+import com.overdrive.app.launcher.AdbDaemonLauncher
 import com.overdrive.app.logging.LogLevel
 import com.overdrive.app.logging.LogManager
-import com.overdrive.app.shell.PrivilegedShellSetup
 import com.overdrive.app.storage.StorageSetup
 import com.overdrive.app.ui.daemon.DaemonStartupManager
 import com.overdrive.app.ui.model.AccessMode
@@ -29,12 +34,6 @@ import com.overdrive.app.ui.model.DaemonType
 import com.overdrive.app.ui.viewmodel.DaemonsViewModel
 import com.overdrive.app.ui.viewmodel.LogsViewModel
 import com.overdrive.app.ui.viewmodel.MainViewModel
-import com.overdrive.app.launcher.AdbDaemonLauncher
-import com.google.android.material.appbar.MaterialToolbar
-import com.google.android.material.navigation.NavigationView
-import com.google.android.material.switchmaterial.SwitchMaterial
-import com.overdrive.app.BuildConfig
-import com.overdrive.app.R
 import com.overdrive.app.util.BydDataCacheWhitelist
 
 /**
@@ -486,45 +485,6 @@ class MainActivity : AppCompatActivity() {
             }, 1000)
         }
     }
-    
-    /**
-     * Setup the privileged shell (UID 1000) for daemon management.
-     * This must be done before starting any daemons that need elevated privileges.
-     */
-    private fun setupPrivilegedShell() {
-        logsViewModel.info("Shell", "Setting up privileged shell...")
-        
-        // Initialize with context
-        PrivilegedShellSetup.init(this)
-        
-        PrivilegedShellSetup.setup(object : PrivilegedShellSetup.SetupCallback {
-            override fun onSuccess() {
-                runOnUiThread {
-                    logsViewModel.info("Shell", "✓ Privileged shell ready (UID 1000)")
-                    
-                    // Now check all daemon statuses (auto-start is configurable in DaemonStartupManager)
-                    daemonStartupManager.checkAllDaemonStatuses()
-                }
-            }
-            
-            override fun onFailure(reason: String) {
-                runOnUiThread {
-                    logsViewModel.warn("Shell", "⚠ Privileged shell setup failed: $reason")
-                    logsViewModel.info("Shell", "Falling back to ADB shell for daemon management")
-                    
-                    // Still check daemon statuses - they might be running from previous session
-                    daemonStartupManager.checkAllDaemonStatuses()
-                }
-            }
-            
-            override fun onProgress(message: String) {
-                runOnUiThread {
-                    logsViewModel.debug("Shell", "→ $message")
-                }
-            }
-        })
-    }
-    
     private fun initViews() {
         drawerLayout = findViewById(R.id.drawerLayout)
         toolbar = findViewById(R.id.toolbar)
