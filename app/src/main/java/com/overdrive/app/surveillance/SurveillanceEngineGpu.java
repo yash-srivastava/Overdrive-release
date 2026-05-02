@@ -538,21 +538,26 @@ public class SurveillanceEngineGpu {
         // NCC tracker has an active lock on it, keep anyMotion=true so the sequence
         // timer continues. The tracker's pixel-level lock is immune to global
         // brightness changes — it tracks texture, not absolute luminance.
+        // FIX: Only person tracks (classId==0) get immunity. Vehicle tracks
+        // (motorcycles, cars) should not override brightness suppression.
         if (!anyMotion) {
             for (int q = 0; q < MotionPipelineV2.NUM_QUADRANTS; q++) {
                 if (results[q].brightnessSuppressed) {
                     try {
                         if (NativeMotion.trackerHasActiveTrack(q)) {
-                            anyMotion = true;
-                            if (maxThreat < MotionPipelineV2.THREAT_MEDIUM) {
-                                maxThreat = MotionPipelineV2.THREAT_MEDIUM;
+                            float[] trackBox = NativeMotion.trackerGetTrackBox(q);
+                            if (trackBox != null && (int) trackBox[5] == 0) { // person only
+                                anyMotion = true;
+                                if (maxThreat < MotionPipelineV2.THREAT_MEDIUM) {
+                                    maxThreat = MotionPipelineV2.THREAT_MEDIUM;
+                                }
+                                if (frameCount % 50 == 0) {
+                                    logger.info("Headlight sweep immunity: Q" + q + 
+                                            " [" + MotionPipelineV2.QUADRANT_NAMES[q] + 
+                                            "] suppressed but tracker holds person lock");
+                                }
+                                break;
                             }
-                            if (frameCount % 50 == 0) {
-                                logger.info("Headlight sweep immunity: Q" + q + 
-                                        " [" + MotionPipelineV2.QUADRANT_NAMES[q] + 
-                                        "] suppressed but tracker holds lock");
-                            }
-                            break;
                         }
                     } catch (Exception ignored) {}
                 }
@@ -783,6 +788,14 @@ public class SurveillanceEngineGpu {
                         } catch (Exception e) {
                             logger.warn("Failed to send motion notification: " + e.getMessage());
                         }
+                        
+                        // SOTA: Fire BYD cloud deterrent (flash lights / find car)
+                        // Runs on background thread, never blocks surveillance pipeline
+                        try {
+                            com.overdrive.app.byd.cloud.BydCloudDeterrent.getInstance().onMotionDetected();
+                        } catch (Exception e) {
+                            logger.debug("Deterrent dispatch failed: " + e.getMessage());
+                        }
                     }
                 } else {
                     // Already recording — extend recording timer on continued motion.
@@ -790,6 +803,14 @@ public class SurveillanceEngineGpu {
                     long newStopTime = now + postRecordMs;
                     if (newStopTime > recordingStopTime) {
                         recordingStopTime = newStopTime;
+                    }
+                    
+                    // SOTA: Recurring deterrent — re-trigger while motion continues.
+                    // The cooldown inside BydCloudDeterrent prevents spamming (default 15s).
+                    try {
+                        com.overdrive.app.byd.cloud.BydCloudDeterrent.getInstance().onMotionDetected();
+                    } catch (Exception e) {
+                        // Fail silently — never block surveillance
                     }
                     
                     // Also run YOLO on new quadrants that have motion (even if different from original)
@@ -855,7 +876,12 @@ public class SurveillanceEngineGpu {
                 boolean aiPending = isAiRunning.get() || !aiQuadrantQueue.isEmpty();
                 for (int q = 0; q < MotionPipelineV2.NUM_QUADRANTS; q++) {
                     try {
-                        if (NativeMotion.trackerHasActiveTrack(q)) trackerActive = true;
+                        if (NativeMotion.trackerHasActiveTrack(q)) {
+                            float[] trackBox = NativeMotion.trackerGetTrackBox(q);
+                            if (trackBox != null && (int) trackBox[5] == 0) { // person only
+                                trackerActive = true;
+                            }
+                        }
                     } catch (Exception ignored) {}
                     if (results[q].activeBlocks > 0) anyLowActivity = true;
                 }
@@ -898,12 +924,18 @@ public class SurveillanceEngineGpu {
             // zero motion blocks but the NCC tracker holds a lock on their pixel texture.
             // This is the "Static Foreground Victory" — recording stays alive as long as
             // the tracked object is present, even with zero motion pipeline activity.
+            // FIX: Only person tracks (classId==0) can hold recording open.
+            // Parked vehicles (motorcycles, cars) would otherwise keep recording
+            // indefinitely via the "hitchhiker" pattern.
             boolean trackerHolding = false;
             for (int q = 0; q < MotionPipelineV2.NUM_QUADRANTS; q++) {
                 try {
                     if (NativeMotion.trackerHasActiveTrack(q)) {
-                        trackerHolding = true;
-                        break;
+                        float[] trackBox = NativeMotion.trackerGetTrackBox(q);
+                        if (trackBox != null && (int) trackBox[5] == 0) { // class 0 = person only
+                            trackerHolding = true;
+                            break;
+                        }
                     }
                 } catch (Exception ignored) {}
             }

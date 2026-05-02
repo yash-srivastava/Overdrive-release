@@ -79,6 +79,14 @@
 # ==================== ZXing (QR codes) ====================
 -keep class com.google.zxing.** { *; }
 
+# ==================== Eclipse Paho MQTT ====================
+# Paho uses java.util.logging internally and loads logging resource bundles
+# by class name via reflection. ProGuard strips these, causing
+# MissingResourceException at connect time.
+-keep class org.eclipse.paho.client.mqttv3.** { *; }
+-keep class org.eclipse.paho.client.mqttv3.logging.** { *; }
+-dontwarn org.eclipse.paho.client.mqttv3.**
+
 # ==================== RTMP client ====================
 -keep class com.pedro.** { *; }
 -dontwarn com.pedro.**

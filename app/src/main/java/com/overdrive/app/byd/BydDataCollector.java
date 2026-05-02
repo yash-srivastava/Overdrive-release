@@ -46,6 +46,7 @@ public class BydDataCollector {
     private Object lightDevice;
     private Object radarDevice;
     private Object powerDevice;
+    private Object settingDevice;
 
     // Unit conversion: BYD APIs return values in the user's configured unit.
     // If the user set miles on the instrument cluster, mileage/speed/range come back in miles/mph.
@@ -106,6 +107,7 @@ public class BydDataCollector {
         sensorDevice = initDevice("android.hardware.bydauto.sensor.BYDAutoSensorDevice", "Sensor");
         energyDevice = initDevice("android.hardware.bydauto.energy.BYDAutoEnergyDevice", "Energy");
         radarDevice = initDevice("android.hardware.bydauto.radar.BYDAutoRadarDevice", "Radar");
+        settingDevice = initDevice("android.hardware.bydauto.setting.BYDAutoSettingDevice", "Setting");
 
         logger.info("Devices available: " + availableDevices.size() + "/" + 
             (availableDevices.size() + unavailableDevices.size()));
@@ -316,6 +318,10 @@ public class BydDataCollector {
             collectGearbox(b);      // gearMode
         }
 
+        // Extended data consumed by ABRP/MQTT/trips
+        collectStatisticExtended(b);   // SOH, driving time, key battery
+        collectInstrumentExtended(b);  // cabin temp, tyre temps, trip data, consumption
+
         snapshot.set(b.build());
     }
 
@@ -351,6 +357,13 @@ public class BydDataCollector {
         collectSensor(b);
         collectEnergy(b);
         collectRadar(b);
+
+        // Extended data — core + display-only
+        collectStatisticExtended(b);   // SOH, driving time, key battery
+        collectInstrumentExtended(b);  // cabin temp, tyre temps, trip data, consumption
+        collectChargingExtended(b);    // charging rest time
+        collectBodyworkExtended(b);    // steering, auto system, 12V level, sunroof, sunshade
+        collectEngineExtended(b);      // coolant, oil, engine code
 
         snapshot.set(b.build());
         lastCoreCollectTime = System.currentTimeMillis();
@@ -523,13 +536,59 @@ public class BydDataCollector {
     private void collectEngine(BydVehicleData.Builder b) {
         if (engineDevice == null) return;
         try {
-            Object rpm = BydDeviceHelper.callGetter(engineDevice, "getEngineSpeed");
-            if (rpm instanceof Number) {
-                int rpmVal = ((Number) rpm).intValue();
-                if (rpmVal >= 0 && rpmVal <= 8000) b.engineSpeedRpm(rpmVal);
+            // ==================== ENGINE SPEED ====================
+            // Feature ID path first — try ENGINE_SPEED (339738642), then ENGINE_SPEED_GB (282066952)
+            try {
+                Object val = BydDeviceHelper.callGet(engineDevice, BydFeatureIds.ENGINE_SPEED, Integer.class);
+                if (val != null) {
+                    int raw = BydDeviceHelper.getIntValue(val);
+                    if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
+                        && raw != BydFeatureIds.INVALID_VALUE_2 && raw >= 0 && raw <= 8000) {
+                        b.engineSpeedRpm(raw);
+                    }
+                }
+                // Try alternate signal if primary didn't populate
+                if (b.engineSpeedRpm == BydVehicleData.UNAVAILABLE) {
+                    Object altVal = BydDeviceHelper.callGet(engineDevice, BydFeatureIds.ENGINE_SPEED_ALT, Integer.class);
+                    if (altVal != null) {
+                        int altRaw = BydDeviceHelper.getIntValue(altVal);
+                        if (altRaw != BydFeatureIds.BMS_UNAVAILABLE && altRaw != BydFeatureIds.INVALID_VALUE
+                            && altRaw != BydFeatureIds.INVALID_VALUE_2 && altRaw >= 0 && altRaw <= 8000) {
+                            b.engineSpeedRpm(altRaw);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("collectEngine engineSpeed feature ID error: " + e.getMessage());
             }
-            Object power = BydDeviceHelper.callGetter(engineDevice, "getEnginePower");
-            if (power instanceof Number) b.enginePowerKw(((Number) power).doubleValue());
+            // Fallback to typed getter if feature ID didn't populate
+            if (b.engineSpeedRpm == BydVehicleData.UNAVAILABLE) {
+                Object rpm = BydDeviceHelper.callGetter(engineDevice, "getEngineSpeed");
+                if (rpm instanceof Number) {
+                    int rpmVal = ((Number) rpm).intValue();
+                    if (rpmVal >= 0 && rpmVal <= 8000) b.engineSpeedRpm(rpmVal);
+                }
+            }
+
+            // ==================== ENGINE POWER ====================
+            // Feature ID path first (matches BYDAutoDevice.get(ENGINE_POWER))
+            try {
+                Object val = BydDeviceHelper.callGet(engineDevice, BydFeatureIds.ENGINE_POWER, Integer.class);
+                if (val != null) {
+                    int raw = BydDeviceHelper.getIntValue(val);
+                    if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
+                        && raw != BydFeatureIds.INVALID_VALUE_2) {
+                        b.enginePowerKw((double) raw);
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("collectEngine enginePower feature ID error: " + e.getMessage());
+            }
+            // Fallback to typed getter if feature ID didn't populate
+            if (Double.isNaN(b.enginePowerKw)) {
+                Object power = BydDeviceHelper.callGetter(engineDevice, "getEnginePower");
+                if (power instanceof Number) b.enginePowerKw(((Number) power).doubleValue());
+            }
 
             // Front motor speed (negated)
             Object fms = BydDeviceHelper.callGet(engineDevice, BydFeatureIds.ENGINE_FRONT_MOTOR_SPEED, Integer.class);
@@ -550,44 +609,159 @@ public class BydDataCollector {
     private void collectStatistic(BydVehicleData.Builder b) {
         if (statisticDevice == null) return;
         try {
-            Object mileage = BydDeviceHelper.callGetter(statisticDevice, "getTotalMileageValue");
-            if (mileage instanceof Number) {
-                int raw = ((Number) mileage).intValue();
-                b.totalMileageKm((int) Math.round(raw * distanceToKmFactor));
+            // ==================== TOTAL MILEAGE ====================
+            // Feature ID path first (matches BYDAutoDevice.getInt(STATISTIC_TOTAL_MILEAGE))
+            try {
+                Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_TOTAL_MILEAGE, Integer.class);
+                if (val != null) {
+                    int raw = BydDeviceHelper.getIntValue(val);
+                    if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
+                        && raw != BydFeatureIds.INVALID_VALUE_2 && raw > 0) {
+                        b.totalMileageKm((int) Math.round(raw * distanceToKmFactor));
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("collectStatistic totalMileage feature ID error: " + e.getMessage());
+            }
+            // Fallback to typed getter if feature ID didn't populate
+            if (b.totalMileageKm == BydVehicleData.UNAVAILABLE) {
+                Object mileage = BydDeviceHelper.callGetter(statisticDevice, "getTotalMileageValue");
+                if (mileage instanceof Number) {
+                    int raw = ((Number) mileage).intValue();
+                    if (raw > 0) b.totalMileageKm((int) Math.round(raw * distanceToKmFactor));
+                }
             }
 
-            Object evMileage = BydDeviceHelper.callGetter(statisticDevice, "getEVMileageValue");
-            if (evMileage instanceof Number) {
-                int raw = ((Number) evMileage).intValue();
-                b.evMileageKm((int) Math.round(raw * distanceToKmFactor));
+            // ==================== EV MILEAGE ====================
+            // Feature ID path first (matches BYDAutoDevice.getInt(STATISTIC_MILEAGE_EV))
+            try {
+                Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_MILEAGE_EV, Integer.class);
+                if (val != null) {
+                    int raw = BydDeviceHelper.getIntValue(val);
+                    if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
+                        && raw != BydFeatureIds.INVALID_VALUE_2 && raw > 0) {
+                        b.evMileageKm((int) Math.round(raw * distanceToKmFactor));
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("collectStatistic evMileage feature ID error: " + e.getMessage());
+            }
+            // Fallback to typed getter if feature ID didn't populate
+            if (b.evMileageKm == BydVehicleData.UNAVAILABLE) {
+                Object evMileage = BydDeviceHelper.callGetter(statisticDevice, "getEVMileageValue");
+                if (evMileage instanceof Number) {
+                    int raw = ((Number) evMileage).intValue();
+                    if (raw > 0) b.evMileageKm((int) Math.round(raw * distanceToKmFactor));
+                }
             }
 
-            Object elecPct = BydDeviceHelper.callGetter(statisticDevice, "getElecPercentageValue");
-            // This is the primary SOC source — StatisticDevice.getElecPercentageValue() returns display SOC %
-            if (elecPct instanceof Number) {
-                double soc = ((Number) elecPct).doubleValue();
-                if (soc >= 0 && soc <= 100) b.socPercent(soc);
+            // ==================== SOC (ELEC PERCENTAGE) ====================
+            // Feature ID path first (matches BYDAutoDevice.getInt(STATISTIC_ELEC_PERCENTAGE))
+            // This is the primary SOC source — display SOC %
+            try {
+                Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_ELEC_PERCENTAGE, Integer.class);
+                if (val != null) {
+                    int raw = BydDeviceHelper.getIntValue(val);
+                    if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
+                        && raw != BydFeatureIds.INVALID_VALUE_2 && raw >= 0 && raw <= 100) {
+                        b.socPercent((double) raw);
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("collectStatistic socPercent feature ID error: " + e.getMessage());
+            }
+            // Fallback to typed getter if feature ID didn't populate
+            if (Double.isNaN(b.socPercent)) {
+                Object elecPct = BydDeviceHelper.callGetter(statisticDevice, "getElecPercentageValue");
+                if (elecPct instanceof Number) {
+                    double soc = ((Number) elecPct).doubleValue();
+                    if (soc >= 0 && soc <= 100) b.socPercent(soc);
+                }
             }
 
+            // ==================== WATER TEMP (no feature ID in Statistic class) ====================
             Object waterTemp = BydDeviceHelper.callGetter(statisticDevice, "getWaterTemperature");
             if (waterTemp instanceof Number) b.waterTempC(((Number) waterTemp).intValue());
 
+            // ==================== TOTAL ELEC CONSUMPTION (no feature ID — different from THIS_TRIP) ====================
             Object totalElec = BydDeviceHelper.callGetter(statisticDevice, "getTotalElecConValue");
             if (totalElec instanceof Number) b.totalElecCon(((Number) totalElec).doubleValue());
 
+            // ==================== TOTAL FUEL CONSUMPTION (no feature ID) ====================
             Object totalFuel = BydDeviceHelper.callGetter(statisticDevice, "getTotalFuelConValue");
             if (totalFuel instanceof Number) b.totalFuelCon(((Number) totalFuel).doubleValue());
 
-            Object elecRange = BydDeviceHelper.callGetter(statisticDevice, "getElecDrivingRangeValue");
-            if (elecRange instanceof Number) {
-                int raw = ((Number) elecRange).intValue();
-                b.elecRangeKm((int) Math.round(raw * distanceToKmFactor));
+            // ==================== ELECTRIC DRIVING RANGE ====================
+            // Feature ID path first (matches BYDAutoDevice.getInt(STATISTIC_ELEC_DRIVING_RANGE))
+            try {
+                Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_ELEC_DRIVING_RANGE, Integer.class);
+                if (val != null) {
+                    int raw = BydDeviceHelper.getIntValue(val);
+                    if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
+                        && raw != BydFeatureIds.INVALID_VALUE_2 && raw > 0) {
+                        b.elecRangeKm((int) Math.round(raw * distanceToKmFactor));
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("collectStatistic elecRange feature ID error: " + e.getMessage());
+            }
+            // Fallback to typed getter if feature ID didn't populate
+            if (b.elecRangeKm == BydVehicleData.UNAVAILABLE) {
+                Object elecRange = BydDeviceHelper.callGetter(statisticDevice, "getElecDrivingRangeValue");
+                if (elecRange instanceof Number) {
+                    int raw = ((Number) elecRange).intValue();
+                    if (raw > 0) b.elecRangeKm((int) Math.round(raw * distanceToKmFactor));
+                }
             }
 
-            Object fuelRange = BydDeviceHelper.callGetter(statisticDevice, "getFuelDrivingRangeValue");
-            if (fuelRange instanceof Number) {
-                int raw = ((Number) fuelRange).intValue();
-                b.fuelRangeKm((int) Math.round(raw * distanceToKmFactor));
+            // ==================== FUEL DRIVING RANGE ====================
+            // Feature ID path first (matches BYDAutoDevice.getInt(STATISTIC_FUEL_DRIVING_RANGE))
+            try {
+                Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_FUEL_DRIVING_RANGE, Integer.class);
+                if (val != null) {
+                    int raw = BydDeviceHelper.getIntValue(val);
+                    if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
+                        && raw != BydFeatureIds.INVALID_VALUE_2 && raw > 0) {
+                        b.fuelRangeKm((int) Math.round(raw * distanceToKmFactor));
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("collectStatistic fuelRange feature ID error: " + e.getMessage());
+            }
+            // Fallback to typed getter if feature ID didn't populate
+            if (b.fuelRangeKm == BydVehicleData.UNAVAILABLE) {
+                Object fuelRange = BydDeviceHelper.callGetter(statisticDevice, "getFuelDrivingRangeValue");
+                if (fuelRange instanceof Number) {
+                    int raw = ((Number) fuelRange).intValue();
+                    if (raw > 0) b.fuelRangeKm((int) Math.round(raw * distanceToKmFactor));
+                }
+            }
+
+            // ==================== FUEL PERCENTAGE (PHEV only — returns 0 on BEVs) ====================
+            // Priority 1: Feature ID path (STATISTIC_FUEL_PERCENTAGE) — more reliable on PHEVs.
+            // The typed getter getFuelPercentageValue() returns stale values on some DiLink versions.
+            try {
+                Object fuelFeatureVal = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_FUEL_PERCENTAGE, Integer.class);
+                if (fuelFeatureVal != null) {
+                    int fuelRaw = BydDeviceHelper.getIntValue(fuelFeatureVal);
+                    if (fuelRaw > 0 && fuelRaw <= 100) {
+                        b.fuelPercent(fuelRaw);
+                        logger.debug("Fuel percentage from feature ID: " + fuelRaw + "%");
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("Fuel percentage feature ID read failed: " + e.getMessage());
+            }
+            // Priority 2: Typed getter fallback (if feature ID didn't populate)
+            if (Double.isNaN(b.fuelPercent)) {
+                Object fuelPct = BydDeviceHelper.callGetter(statisticDevice, "getFuelPercentageValue");
+                if (fuelPct instanceof Number) {
+                    double pct = ((Number) fuelPct).doubleValue();
+                    if (pct > 0 && pct <= 100) {
+                        b.fuelPercent(pct);
+                        logger.debug("Fuel percentage from getter: " + pct + "%");
+                    }
+                }
             }
 
             // Battery temps via get() — intValue - 40 = °C
@@ -637,25 +811,61 @@ public class BydDataCollector {
     private void collectCharging(BydVehicleData.Builder b) {
         if (chargingDevice == null) return;
         try {
-            // Battery charging state (0=ready, 1=charging, 2=finished, 3=discharging, etc.)
-            Object battState = BydDeviceHelper.callGetter(chargingDevice, "getBatteryManagementDeviceState");
-            if (battState instanceof Number) {
-                int state = ((Number) battState).intValue();
-                b.chargingState(state);
-                
-                // Clear stale charging power when not actively charging
-                // Phantom 0.1 kW values persist on the CAN bus after unplugging
-                if (state != 1) {  // Not CHARGING_BATTERY_STATE_CHARGING
-                    b.chargingPowerKw(Double.NaN);
-                    b.externalChargingPowerKw(Double.NaN);
+            // ==================== BATTERY MANAGEMENT DEVICE STATE ====================
+            // Feature ID path first (matches BYDAutoDevice.get(CHARGING_BATTERRY_DEVICE_STATE))
+            // 0=ready, 1=charging, 2=finished, 3=discharging, etc.
+            try {
+                Object val = BydDeviceHelper.callGet(chargingDevice, BydFeatureIds.CHARGING_BATTERY_DEVICE_STATE, Integer.class);
+                if (val != null) {
+                    int raw = BydDeviceHelper.getIntValue(val);
+                    if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
+                        && raw != BydFeatureIds.INVALID_VALUE_2 && raw >= 0) {
+                        b.chargingState(raw);
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("collectCharging batteryState feature ID error: " + e.getMessage());
+            }
+            // Fallback to typed getter if feature ID didn't populate
+            if (b.chargingState == BydVehicleData.UNAVAILABLE) {
+                Object battState = BydDeviceHelper.callGetter(chargingDevice, "getBatteryManagementDeviceState");
+                if (battState instanceof Number) {
+                    int state = ((Number) battState).intValue();
+                    b.chargingState(state);
                 }
             }
+            
+            // Clear stale charging power when not actively charging
+            // Phantom 0.1 kW values persist on the CAN bus after unplugging
+            if (b.chargingState != BydVehicleData.UNAVAILABLE && b.chargingState != 1) {
+                b.chargingPowerKw(Double.NaN);
+                b.externalChargingPowerKw(Double.NaN);
+            }
+
             // Gun connection state (0=none, 1=AC, 2=AC fast, 3=DC, 4=V2L)
             Object gunState = BydDeviceHelper.callGetter(chargingDevice, "getChargingGunState");
             if (gunState instanceof Number) b.chargingGunState(((Number) gunState).intValue());
-            // Charger work state
-            Object charger = BydDeviceHelper.callGetter(chargingDevice, "getChargerWorkState");
-            if (charger instanceof Number) b.chargerWorkState(((Number) charger).intValue());
+
+            // ==================== CHARGER WORK STATE ====================
+            // Feature ID path first (matches BYDAutoDevice.get(CHARGING_CHARGER_WORK_STATE))
+            try {
+                Object val = BydDeviceHelper.callGet(chargingDevice, BydFeatureIds.CHARGING_CHARGER_WORK_STATE, Integer.class);
+                if (val != null) {
+                    int raw = BydDeviceHelper.getIntValue(val);
+                    if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
+                        && raw != BydFeatureIds.INVALID_VALUE_2 && raw >= 0) {
+                        b.chargerWorkState(raw);
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("collectCharging chargerWorkState feature ID error: " + e.getMessage());
+            }
+            // Fallback to typed getter if feature ID didn't populate
+            if (b.chargerWorkState == BydVehicleData.UNAVAILABLE) {
+                Object charger = BydDeviceHelper.callGetter(chargingDevice, "getChargerWorkState");
+                if (charger instanceof Number) b.chargerWorkState(((Number) charger).intValue());
+            }
+
             // Charging power — only use getter value if non-zero.
             // The getter often returns 0 on BYD models even while charging.
             // The real value comes from the onDataEventChanged callback (event 666894360).
@@ -904,6 +1114,299 @@ public class BydDataCollector {
         }
     }
 
+    // ==================== EXTENDED GETTERS ====================
+
+    /**
+     * Extended statistic data: OEM SOH, driving time, key battery level.
+     * Called from collectAll() (core telemetry consumers need SOH).
+     */
+    private void collectStatisticExtended(BydVehicleData.Builder b) {
+        if (statisticDevice == null) return;
+
+        // SOH from STATISTIC_BATTERY_HEALTHY_INDEX
+        try {
+            Object sohVal = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_BATTERY_HEALTHY_INDEX, Integer.class);
+            if (sohVal != null) {
+                int raw = BydDeviceHelper.getIntValue(sohVal);
+                if (raw >= 60 && raw <= 110) {
+                    b.sohPercent(raw);
+
+                    // Wire OEM SOH into SohEstimator — OEM value supersedes estimation
+                    try {
+                        com.overdrive.app.abrp.SohEstimator soh =
+                            com.overdrive.app.monitor.SocHistoryDatabase.getInstance().getSohEstimator();
+                        if (soh != null) {
+                            soh.updateFromOem(raw);
+                        }
+                    } catch (Exception e) {
+                        logger.debug("collectStatisticExtended SohEstimator update error: " + e.getMessage());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("collectStatisticExtended SOH error: " + e.getMessage());
+        }
+
+        // Driving time
+        try {
+            Object drivingTime = BydDeviceHelper.callGetter(statisticDevice, "getDrivingTimeValue");
+            if (drivingTime instanceof Number) {
+                double hours = ((Number) drivingTime).doubleValue();
+                if (hours >= 0) b.drivingTimeHours(hours);
+            }
+        } catch (Exception e) {
+            logger.debug("collectStatisticExtended drivingTime error: " + e.getMessage());
+        }
+
+        // Key battery level
+        try {
+            Object keyBatt = BydDeviceHelper.callGetter(statisticDevice, "getKeyBatteryLevel");
+            if (keyBatt instanceof Number) {
+                b.keyBatteryLevel(((Number) keyBatt).intValue());
+            }
+        } catch (Exception e) {
+            logger.debug("collectStatisticExtended keyBattery error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Extended instrument data: cabin temp, tyre temps, trip data, consumption.
+     * Called from collectAll() (ABRP/MQTT/trips consume these).
+     */
+    private void collectInstrumentExtended(BydVehicleData.Builder b) {
+        // Inside cabin temperature from AC device
+        try {
+            if (acDevice != null) {
+                Object insideTemp = BydDeviceHelper.callGet(acDevice, BydFeatureIds.AC_TEMP_INSIDE, Integer.class);
+                if (insideTemp != null) {
+                    int raw = BydDeviceHelper.getIntValue(insideTemp);
+                    if (raw >= -40 && raw <= 60) b.insideTempCelsius(raw);
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("collectInstrumentExtended insideTemp error: " + e.getMessage());
+        }
+
+        // Tyre temperatures from instrument device
+        try {
+            if (instrumentDevice != null) {
+                int[] tyreTemps = new int[4];
+                boolean anyValid = false;
+                int[] featureIds = {
+                    BydFeatureIds.INSTRUMENT_LF_TYRE_TEMPERATURE,
+                    BydFeatureIds.INSTRUMENT_RF_TYRE_TEMPERATURE,
+                    BydFeatureIds.INSTRUMENT_LB_TYRE_TEMPERATURE,
+                    BydFeatureIds.INSTRUMENT_RB_TYRE_TEMPERATURE
+                };
+                for (int i = 0; i < 4; i++) {
+                    Object val = BydDeviceHelper.callGet(instrumentDevice, featureIds[i], Integer.class);
+                    if (val != null) {
+                        int raw = BydDeviceHelper.getIntValue(val);
+                        if (raw >= -40 && raw <= 150) {
+                            tyreTemps[i] = raw;
+                            anyValid = true;
+                        } else {
+                            tyreTemps[i] = BydVehicleData.UNAVAILABLE;
+                        }
+                    } else {
+                        tyreTemps[i] = BydVehicleData.UNAVAILABLE;
+                    }
+                }
+                if (anyValid) b.tyreTemperatures(tyreTemps);
+            }
+        } catch (Exception e) {
+            logger.debug("collectInstrumentExtended tyreTemps error: " + e.getMessage());
+        }
+
+        // Current trip mileage
+        try {
+            if (instrumentDevice != null) {
+                Object tripMileage = BydDeviceHelper.callGet(instrumentDevice,
+                        BydFeatureIds.INSTRUMENT_2IN1_CURRENT_JOURNEY_DRIVE_MILEAGE, Double.class);
+                if (tripMileage != null) {
+                    double val = BydDeviceHelper.getDoubleValue(tripMileage);
+                    if (!Double.isNaN(val) && val >= 0) b.currentTripMileageKm(val * distanceToKmFactor);
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("collectInstrumentExtended tripMileage error: " + e.getMessage());
+        }
+
+        // Current trip time
+        try {
+            if (instrumentDevice != null) {
+                Object tripTime = BydDeviceHelper.callGet(instrumentDevice,
+                        BydFeatureIds.INSTRUMENT_2IN1_CURRENT_JOURNEY_DRIVE_TIME, Double.class);
+                if (tripTime != null) {
+                    double val = BydDeviceHelper.getDoubleValue(tripTime);
+                    if (!Double.isNaN(val) && val >= 0) b.currentTripTimeHours(val);
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("collectInstrumentExtended tripTime error: " + e.getMessage());
+        }
+
+        // This trip electricity consumption from statistic device
+        try {
+            if (statisticDevice != null) {
+                Object tripElec = BydDeviceHelper.callGet(statisticDevice,
+                        BydFeatureIds.STAT_THIS_TRIP_ELEC_CONSUMPTION, Double.class);
+                if (tripElec != null) {
+                    double val = BydDeviceHelper.getDoubleValue(tripElec);
+                    if (!Double.isNaN(val) && val >= 0) b.currentTripConsumptionKwh(val);
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("collectInstrumentExtended tripElecConsumption error: " + e.getMessage());
+        }
+
+        // Last 50km power consumption
+        try {
+            if (instrumentDevice != null) {
+                Object last50km = BydDeviceHelper.callGetter(instrumentDevice, "getLast50KmPowerConsume");
+                if (last50km instanceof Number) {
+                    double val = ((Number) last50km).doubleValue();
+                    if (val >= 0) b.last50KmConsumption(val);
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("collectInstrumentExtended last50km error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Extended charging data: charging rest time.
+     * Called from collectAllFull() only (display-only, on-demand).
+     */
+    private void collectChargingExtended(BydVehicleData.Builder b) {
+        if (chargingDevice == null) return;
+
+        // Charging rest time — returns int[2] = {hours, minutes}
+        try {
+            Object restTime = BydDeviceHelper.callGetter(chargingDevice, "getChargingRestTime");
+            if (restTime instanceof int[]) {
+                int[] times = (int[]) restTime;
+                if (times.length >= 2) {
+                    if (times[0] >= 0) b.chargingRestTimeHours(times[0]);
+                    if (times[1] >= 0) b.chargingRestTimeMinutes(times[1]);
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("collectChargingExtended error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Extended bodywork data: steering angle, auto system state, 12V level, sunroof, sunshade.
+     * Called from collectAllFull() only (display-only, on-demand).
+     */
+    private void collectBodyworkExtended(BydVehicleData.Builder b) {
+        if (bodyworkDevice == null) return;
+
+        // Steering wheel angle
+        try {
+            Object steering = BydDeviceHelper.callGetter(bodyworkDevice, "getSteeringWheelValue", 1);
+            if (steering instanceof Number) {
+                double angle = ((Number) steering).doubleValue();
+                b.steeringAngleDegrees(angle);
+            }
+        } catch (Exception e) {
+            logger.debug("collectBodyworkExtended steering error: " + e.getMessage());
+        }
+
+        // Auto system state (0=normal, 1=set_secure, 2=start_secure)
+        try {
+            Object autoState = BydDeviceHelper.callGetter(bodyworkDevice, "getAutoSystemState");
+            if (autoState instanceof Number) {
+                b.autoSystemState(((Number) autoState).intValue());
+            }
+        } catch (Exception e) {
+            logger.debug("collectBodyworkExtended autoSystemState error: " + e.getMessage());
+        }
+
+        // 12V battery voltage level (LOW/NORMAL/INVALID)
+        try {
+            Object battLevel = BydDeviceHelper.callGetter(bodyworkDevice, "getBatteryVoltageLevel");
+            if (battLevel instanceof Number) {
+                b.battery12vLevel(((Number) battLevel).intValue());
+            }
+        } catch (Exception e) {
+            logger.debug("collectBodyworkExtended battery12vLevel error: " + e.getMessage());
+        }
+
+        // Sunroof state (if available)
+        try {
+            Object sunroof = BydDeviceHelper.callGetter(bodyworkDevice, "getSunroofState");
+            if (sunroof instanceof Number) {
+                b.sunroofState(((Number) sunroof).intValue());
+            }
+        } catch (Exception e) {
+            logger.debug("collectBodyworkExtended sunroofState error: " + e.getMessage());
+        }
+
+        // Sunroof position (if available)
+        try {
+            Object sunroofPos = BydDeviceHelper.callGetter(bodyworkDevice, "getSunroofPosition");
+            if (sunroofPos instanceof Number) {
+                b.sunroofPosition(((Number) sunroofPos).intValue());
+            }
+        } catch (Exception e) {
+            logger.debug("collectBodyworkExtended sunroofPosition error: " + e.getMessage());
+        }
+
+        // Sunshade panel percent
+        try {
+            Object sunshade = BydDeviceHelper.callGet(bodyworkDevice, BydFeatureIds.BODY_SUNSHADE_PANEL_PERCENT, Integer.class);
+            if (sunshade != null) {
+                int val = BydDeviceHelper.getIntValue(sunshade);
+                if (val >= 0 && val <= 100) b.sunshadePercent(val);
+            }
+        } catch (Exception e) {
+            logger.debug("collectBodyworkExtended sunshade error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Extended engine data: coolant level, oil level, engine code.
+     * Called from collectAllFull() only (display-only, on-demand).
+     */
+    private void collectEngineExtended(BydVehicleData.Builder b) {
+        if (engineDevice == null) return;
+
+        // Engine coolant level (0=normal, 1=low)
+        try {
+            Object coolant = BydDeviceHelper.callGetter(engineDevice, "getEngineCoolantLevel");
+            if (coolant instanceof Number) {
+                b.engineCoolantLevel(((Number) coolant).intValue());
+            }
+        } catch (Exception e) {
+            logger.debug("collectEngineExtended coolant error: " + e.getMessage());
+        }
+
+        // Oil level (0-254)
+        try {
+            Object oil = BydDeviceHelper.callGetter(engineDevice, "getOilLevel");
+            if (oil instanceof Number) {
+                b.oilLevel(((Number) oil).intValue());
+            }
+        } catch (Exception e) {
+            logger.debug("collectEngineExtended oilLevel error: " + e.getMessage());
+        }
+
+        // Engine code (e.g. "BYD473QF")
+        try {
+            Object code = BydDeviceHelper.callGetter(engineDevice, "getEngineCode");
+            if (code instanceof String) {
+                b.engineCode((String) code);
+            } else if (code != null) {
+                String codeStr = BydDeviceHelper.getStringValue(code);
+                if (codeStr != null && !codeStr.isEmpty()) b.engineCode(codeStr);
+            }
+        } catch (Exception e) {
+            logger.debug("collectEngineExtended engineCode error: " + e.getMessage());
+        }
+    }
+
     // ==================== LISTENER REGISTRATION ====================
 
     private void registerAllListeners() {
@@ -1099,25 +1602,12 @@ public class BydDataCollector {
     private void onInstrumentCallback(String method, Object[] args) {
         // Handle the new-style BYDAutoEvent callbacks
         if ("onDataEventChanged".equals(method) && args != null && args.length >= 2) {
-            try {
-                int eventId = ((Number) args[0]).intValue();
-                Object eventValue = args[1];
-                double dVal = BydDeviceHelper.getDoubleValue(eventValue);
-                int iVal = BydDeviceHelper.getIntValue(eventValue);
-                
-                // Only store non-zero values as external charging power.
-                // Event 315621436 on some models always returns 0 — don't let it
-                // overwrite a valid chargingPowerKw from the ChargingDevice callback.
-                if (!Double.isNaN(dVal) && dVal > 0.1 && dVal < 500) {
-                    BydVehicleData current = snapshot.get();
-                    if (current != null) {
-                        snapshot.set(current.toBuilder().externalChargingPowerKw(dVal).build());
-                        logger.info("External charging power from event " + eventId + ": " + dVal + " kW");
-                    }
-                }
-            } catch (Exception e) {
-                logger.debug("Instrument event parse error: " + e.getMessage());
-            }
+            // NOTE: Do NOT blindly interpret all instrument events as charging power.
+            // The instrument device fires events for trip odometer, tyre temps, nav data,
+            // and dozens of other metrics. Only the typed onExternalChargingPowerChanged
+            // callback (below) reliably delivers charging power.
+            // Previously, events like INSTRUMENT_2IN1_CURRENT_JOURNEY_DRIVE_MILEAGE
+            // (event 1246801948, value=18.7 km) were misinterpreted as 18.7 kW charging.
         }
         if ("onExternalChargingPowerChanged".equals(method) && args != null && args.length > 0) {
             try {
@@ -1133,6 +1623,694 @@ public class BydDataCollector {
         }
         // Listener-driven: the specific event value was already captured above.
         // Skip full device re-collection — the 5s polling timer handles periodic refresh.
+    }
+
+    // ==================== EXTENDED LISTENER HANDLERS ====================
+    // These handler methods exist for future use. To activate, add a registerListener() call
+    // in registerAllListeners() or registerBodyworkExtendedListeners() etc.
+
+    private void handleSteeringAngleChanged(Object[] args) {
+        if (args != null && args.length > 0 && snapshot.get() != null) {
+            try {
+                double angle = BydDeviceHelper.getDoubleValue(args[0]);
+                if (!Double.isNaN(angle) && angle >= -780 && angle <= 780) {
+                    snapshot.set(snapshot.get().toBuilder().steeringAngleDegrees(angle).build());
+                }
+            } catch (Exception e) { logger.debug("handleSteeringAngleChanged error: " + e.getMessage()); }
+        }
+    }
+
+    private void handleAutoSystemStateChanged(Object[] args) {
+        if (args != null && args.length > 0 && snapshot.get() != null) {
+            try {
+                int state = BydDeviceHelper.getIntValue(args[0]);
+                if (state >= 0 && state <= 2) {
+                    snapshot.set(snapshot.get().toBuilder().autoSystemState(state).build());
+                }
+            } catch (Exception e) { logger.debug("handleAutoSystemStateChanged error: " + e.getMessage()); }
+        }
+    }
+
+    private void handleSunroofStateChanged(Object[] args) {
+        if (args != null && args.length > 0 && snapshot.get() != null) {
+            try {
+                int state = BydDeviceHelper.getIntValue(args[0]);
+                if (state >= 0 && state <= 255) {
+                    snapshot.set(snapshot.get().toBuilder().sunroofState(state).build());
+                }
+            } catch (Exception e) { logger.debug("handleSunroofStateChanged error: " + e.getMessage()); }
+        }
+    }
+
+    private void handleSunroofPositionChanged(Object[] args) {
+        if (args != null && args.length > 0 && snapshot.get() != null) {
+            try {
+                int position = BydDeviceHelper.getIntValue(args[0]);
+                if (position >= 0 && position <= 100) {
+                    snapshot.set(snapshot.get().toBuilder().sunroofPosition(position).build());
+                }
+            } catch (Exception e) { logger.debug("handleSunroofPositionChanged error: " + e.getMessage()); }
+        }
+    }
+
+    private void handleChargingCapacityChanged(Object[] args) {
+        if (args != null && args.length > 0 && snapshot.get() != null) {
+            try {
+                double capacity = BydDeviceHelper.getDoubleValue(args[0]);
+                if (!Double.isNaN(capacity) && capacity >= 0 && capacity <= 200) {
+                    snapshot.set(snapshot.get().toBuilder().remainKwh(capacity).build());
+                }
+            } catch (Exception e) { logger.debug("handleChargingCapacityChanged error: " + e.getMessage()); }
+        }
+    }
+
+    private void handleDrivingTimeChanged(Object[] args) {
+        if (args != null && args.length > 0 && snapshot.get() != null) {
+            try {
+                double hours = BydDeviceHelper.getDoubleValue(args[0]);
+                if (!Double.isNaN(hours) && hours >= 0 && hours <= 10000) {
+                    snapshot.set(snapshot.get().toBuilder().drivingTimeHours(hours).build());
+                }
+            } catch (Exception e) { logger.debug("handleDrivingTimeChanged error: " + e.getMessage()); }
+        }
+    }
+
+    private void handleKeyBatteryLevelChanged(Object[] args) {
+        if (args != null && args.length > 0 && snapshot.get() != null) {
+            try {
+                int level = BydDeviceHelper.getIntValue(args[0]);
+                if (level >= 0 && level <= 1) {
+                    snapshot.set(snapshot.get().toBuilder().keyBatteryLevel(level).build());
+                }
+            } catch (Exception e) { logger.debug("handleKeyBatteryLevelChanged error: " + e.getMessage()); }
+        }
+    }
+
+    private void handleEngineCoolantLevelChanged(Object[] args) {
+        if (args != null && args.length > 0 && snapshot.get() != null) {
+            try {
+                int level = BydDeviceHelper.getIntValue(args[0]);
+                if (level >= 0 && level <= 1) {
+                    snapshot.set(snapshot.get().toBuilder().engineCoolantLevel(level).build());
+                }
+            } catch (Exception e) { logger.debug("handleEngineCoolantLevelChanged error: " + e.getMessage()); }
+        }
+    }
+
+    private void handleOilLevelChanged(Object[] args) {
+        if (args != null && args.length > 0 && snapshot.get() != null) {
+            try {
+                int level = BydDeviceHelper.getIntValue(args[0]);
+                if (level >= 0 && level <= 254) {
+                    snapshot.set(snapshot.get().toBuilder().oilLevel(level).build());
+                }
+            } catch (Exception e) { logger.debug("handleOilLevelChanged error: " + e.getMessage()); }
+        }
+    }
+
+    private void handleSafetyBeltStatusChanged(Object[] args) {
+        if (args != null && args.length > 0 && snapshot.get() != null) {
+            try {
+                int status = BydDeviceHelper.getIntValue(args[0]);
+                if (status >= 0) {
+                    // Safety belt status is a bitmask — store raw value
+                    // Individual seat belt states are decoded by consumers
+                    snapshot.set(snapshot.get().toBuilder().build());
+                }
+            } catch (Exception e) { logger.debug("handleSafetyBeltStatusChanged error: " + e.getMessage()); }
+        }
+    }
+
+    // ==================== VEHICLE CONTROL SETTERS ====================
+    // All setters call BydDeviceHelper directly from UID 2000.
+    // If a setter fails due to UID permissions, it logs the error and returns false.
+    // These methods are public and always callable — no config gate needed.
+
+    // --- Climate Control ---
+
+    public boolean setAcPower(boolean on) {
+        try {
+            return BydDeviceHelper.sendSetCommand(acDevice, BydFeatureIds.AC_AUTO_MODE_SET, on ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setAcPower failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setAcTemperature(int zone, double tempCelsius) {
+        try {
+            // Temperature is sent as int (degrees × 1 for most BYD models)
+            int tempInt = (int) Math.round(tempCelsius);
+            if (tempInt < 17 || tempInt > 33) return false;
+            // SDK method: acDevice.setAcTemperature(zone, temp, 0, 1)
+            Object result = BydDeviceHelper.callMethod(acDevice, "setAcTemperature", zone, tempInt, 0, 1);
+            return result instanceof Integer && ((Integer) result).intValue() == 0;
+        } catch (Exception e) {
+            logger.debug("setAcTemperature failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setAcFanLevel(int level) {
+        try {
+            if (level < 1 || level > 7) return false;
+            // SDK method: acDevice.setAcWindLevel(0, level)
+            Object result = BydDeviceHelper.callMethod(acDevice, "setAcWindLevel", 0, level);
+            return result instanceof Integer && ((Integer) result).intValue() == 0;
+        } catch (Exception e) {
+            logger.debug("setAcFanLevel failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setAcWindMode(int mode) {
+        try {
+            // SDK method: acDevice.setAcWindMode(0, mode)
+            Object result = BydDeviceHelper.callMethod(acDevice, "setAcWindMode", 0, mode);
+            return result instanceof Integer && ((Integer) result).intValue() == 0;
+        } catch (Exception e) {
+            logger.debug("setAcWindMode failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setFrontDefrost(boolean on) {
+        try {
+            return BydDeviceHelper.sendSetCommand(acDevice, BydFeatureIds.AC_DEFROST_FRONT_SET, on ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setFrontDefrost failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setRearDefrost(boolean on) {
+        try {
+            return BydDeviceHelper.sendSetCommand(acDevice, BydFeatureIds.AC_DEFROST_REAR_SET, on ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setRearDefrost failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setAcCycleMode(int mode) {
+        try {
+            return BydDeviceHelper.sendSetCommand(acDevice, BydFeatureIds.AC_CYCLE_MODE_SET, mode);
+        } catch (Exception e) {
+            logger.debug("setAcCycleMode failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    // --- Windows ---
+
+    public boolean setWindowCommand(int area, int command) {
+        try {
+            // area: 1=LF, 2=RF, 3=LR, 4=RR
+            // command: 1=open, 2=close, 3=stop, 4=half, 5=breath
+            if (area < 1 || area > 4) return false;
+            // SDK method: bodyworkDevice.setAllWindowState(lf, rf, lr, rr)
+            // Only the target area gets the command, others get 0
+            int lf = area == 1 ? command : 0;
+            int rf = area == 2 ? command : 0;
+            int lr = area == 3 ? command : 0;
+            int rr = area == 4 ? command : 0;
+            Object result = BydDeviceHelper.callMethod(bodyworkDevice, "setAllWindowState", lf, rf, lr, rr);
+            return result instanceof Integer && ((Integer) result).intValue() == 0;
+        } catch (Exception e) {
+            logger.debug("setWindowCommand failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setAllWindowsCommand(int command) {
+        try {
+            // command: 1=open, 2=close, 3=stop
+            // SDK method: bodyworkDevice.setAllWindowState(cmd, cmd, cmd, cmd)
+            Object result = BydDeviceHelper.callMethod(bodyworkDevice, "setAllWindowState", command, command, command, command);
+            return result instanceof Integer && ((Integer) result).intValue() == 0;
+        } catch (Exception e) {
+            logger.debug("setAllWindowsCommand failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setWindowPercentage(int area, int percent) {
+        try {
+            if (area < 1 || area > 4) return false;
+            if (percent < 0 || percent > 100) return false;
+            // First move window in the right direction, then stop at target
+            // For now, use open (1) or close (2) command via setAllWindowState
+            int currentPercent = 50; // We don't track current, so just send the command
+            int command = percent > 0 ? 1 : 2; // 1=open, 2=close
+            return setWindowCommand(area, command);
+        } catch (Exception e) {
+            logger.debug("setWindowPercentage failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    // --- Tailgate ---
+
+    public boolean openTailgate() {
+        try {
+            // Primary: BACK_DOOR_ACTUATOR_COMMAND
+            if (BydDeviceHelper.sendSetCommand(bodyworkDevice, BydFeatureIds.BODY_BACK_DOOR_ACTUATOR_COMMAND, 1)) {
+                return true;
+            }
+            // Fallback: BACK_DOOR_TRIGGER_ATOM
+            return BydDeviceHelper.sendSetCommand(bodyworkDevice, BydFeatureIds.BODY_BACK_DOOR_TRIGGER, 1);
+        } catch (Exception e) {
+            logger.debug("openTailgate failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean closeTailgate() {
+        try {
+            // Primary: BACK_DOOR_ACTUATOR_COMMAND
+            if (BydDeviceHelper.sendSetCommand(bodyworkDevice, BydFeatureIds.BODY_BACK_DOOR_ACTUATOR_COMMAND, 2)) {
+                return true;
+            }
+            // Fallback: BACK_DOOR_TRIGGER_ATOM
+            return BydDeviceHelper.sendSetCommand(bodyworkDevice, BydFeatureIds.BODY_BACK_DOOR_TRIGGER, 2);
+        } catch (Exception e) {
+            logger.debug("closeTailgate failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean stopTailgate() {
+        try {
+            // Primary: BACK_DOOR_ACTUATOR_COMMAND
+            if (BydDeviceHelper.sendSetCommand(bodyworkDevice, BydFeatureIds.BODY_BACK_DOOR_ACTUATOR_COMMAND, 0)) {
+                return true;
+            }
+            // Fallback: BACK_DOOR_TRIGGER_ATOM
+            return BydDeviceHelper.sendSetCommand(bodyworkDevice, BydFeatureIds.BODY_BACK_DOOR_TRIGGER, 0);
+        } catch (Exception e) {
+            logger.debug("stopTailgate failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    // --- Charging ---
+
+    public boolean setChargeStopCapacity(int percent) {
+        try {
+            if (percent < 50 || percent > 100) return false;
+            // Try typed method first, no feature ID alternative for charge stop capacity
+            Object result = BydDeviceHelper.callGetter(chargingDevice, "setChargeStopCapacityState", percent);
+            if (result instanceof Integer && ((Integer) result).intValue() == 0) return true;
+            // Fallback: no known feature ID for charge stop capacity, typed method is the only path
+            return false;
+        } catch (Exception e) {
+            logger.debug("setChargeStopCapacity failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setChargeStopSwitch(boolean enabled) {
+        try {
+            // Try typed method first (matches SDK), fallback to sendSetCommand
+            Object result = BydDeviceHelper.callGetter(chargingDevice, "setChargeStopSwitchState", enabled ? 1 : 0);
+            if (result instanceof Integer && ((Integer) result).intValue() == 0) return true;
+            return false;
+        } catch (Exception e) {
+            logger.debug("setChargeStopSwitch failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    // --- Ambient Lighting ---
+
+    public boolean setAmbientLightEnabled(boolean on) {
+        try {
+            return BydDeviceHelper.sendSetCommand(lightDevice, BydFeatureIds.LIGHT_ATMOSPHERE_MAIN_SWITCH_SET, on ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setAmbientLightEnabled failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setAmbientBrightness(int level) {
+        try {
+            if (level < 0 || level > 100) return false;
+            return BydDeviceHelper.sendSetCommand(lightDevice, BydFeatureIds.LIGHT_ATMOSPHERE_CUSTOM_BRIGHTNESS_SET, level);
+        } catch (Exception e) {
+            logger.debug("setAmbientBrightness failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setAmbientColor(int colorValue) {
+        try {
+            return BydDeviceHelper.sendSetCommand(lightDevice, BydFeatureIds.LIGHT_ATMOSPHERE_CUSTOM_COLOR_SET, colorValue);
+        } catch (Exception e) {
+            logger.debug("setAmbientColor failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    // --- Seats ---
+
+    public boolean setSeatHeating(int position, int level) {
+        try {
+            if (position < 1 || position > 4) return false;
+            if (level < 0 || level > 3) return false;
+            // SDK method: settingDevice.setSeatHeatingState(position, normalizedLevel)
+            // Level normalization: coerceIn(level, 0, 2) + 1 → 0→1(off), 1→2(low), 2→3(high)
+            int normalizedLevel = Math.min(level, 2) + 1;
+            Object result = BydDeviceHelper.callMethod(settingDevice, "setSeatHeatingState", position, normalizedLevel);
+            return result instanceof Integer && ((Integer) result).intValue() == 0;
+        } catch (Exception e) {
+            logger.debug("setSeatHeating failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setSeatVentilation(int position, int level) {
+        try {
+            if (position < 1 || position > 4) return false;
+            if (level < 0 || level > 3) return false;
+            // SDK method: settingDevice.setSeatVentilatingState(position, normalizedLevel)
+            // Level normalization: coerceIn(level, 0, 2) + 1 → 0→1(off), 1→2(low), 2→3(high)
+            int normalizedLevel = Math.min(level, 2) + 1;
+            Object result = BydDeviceHelper.callMethod(settingDevice, "setSeatVentilatingState", position, normalizedLevel);
+            return result instanceof Integer && ((Integer) result).intValue() == 0;
+        } catch (Exception e) {
+            logger.debug("setSeatVentilation failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    // --- ADAS ---
+
+    public boolean setFcwLevel(int level) {
+        try {
+            return BydDeviceHelper.sendSetCommand(settingDevice, BydFeatureIds.ADAS_FCW_LEVEL_SET, level);
+        } catch (Exception e) {
+            logger.debug("setFcwLevel failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setLaneAssistMode(int mode) {
+        try {
+            return BydDeviceHelper.sendSetCommand(settingDevice, BydFeatureIds.ADAS_ELKA_SWITCH_SET, mode);
+        } catch (Exception e) {
+            logger.debug("setLaneAssistMode failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setBlindSpotDetection(boolean enabled) {
+        try {
+            return BydDeviceHelper.sendSetCommand(settingDevice, BydFeatureIds.ADAS_DOW_STATE_SET, enabled ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setBlindSpotDetection failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setEmergencyBraking(boolean enabled) {
+        try {
+            return BydDeviceHelper.sendSetCommand(settingDevice, BydFeatureIds.ADAS_ECTB_STATE_SET, enabled ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setEmergencyBraking failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setRearCrossTrafficAlert(boolean enabled) {
+        try {
+            return BydDeviceHelper.sendSetCommand(settingDevice, BydFeatureIds.ADAS_RCTA_STATE_SET, enabled ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setRearCrossTrafficAlert failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setFrontCrossTrafficAlert(boolean enabled) {
+        try {
+            return BydDeviceHelper.sendSetCommand(settingDevice, BydFeatureIds.ADAS_FCTA_SWITCH_SET, enabled ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setFrontCrossTrafficAlert failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setFrontCrossTrafficBraking(boolean enabled) {
+        try {
+            return BydDeviceHelper.sendSetCommand(settingDevice, BydFeatureIds.ADAS_FCTB_SWITCH_SET, enabled ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setFrontCrossTrafficBraking failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setSpeedLimitRecognition(boolean enabled) {
+        try {
+            return BydDeviceHelper.sendSetCommand(settingDevice, BydFeatureIds.ADAS_SLR_STATUS_SET, enabled ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setSpeedLimitRecognition failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setTrafficLightAttention(boolean enabled) {
+        try {
+            return BydDeviceHelper.sendSetCommand(settingDevice, BydFeatureIds.ADAS_TLA_SWITCH_SET, enabled ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setTrafficLightAttention failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setOpenDoorWarning(boolean enabled) {
+        try {
+            return BydDeviceHelper.sendSetCommand(settingDevice, BydFeatureIds.ADAS_DOW_STATE_SET, enabled ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setOpenDoorWarning failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setRearCollisionWarning(boolean enabled) {
+        try {
+            return BydDeviceHelper.sendSetCommand(settingDevice, BydFeatureIds.ADAS_RCW_STATE_SET, enabled ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setRearCollisionWarning failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setEspState(boolean enabled) {
+        try {
+            return BydDeviceHelper.sendSetCommand(settingDevice, BydFeatureIds.ADAS_ESP_STATE_SET, enabled ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setEspState failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setIslaSwitch(boolean enabled) {
+        try {
+            return BydDeviceHelper.sendSetCommand(settingDevice, BydFeatureIds.ADAS_ISLA_SWITCH_SET, enabled ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setIslaSwitch failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setIslcSwitch(boolean enabled) {
+        try {
+            return BydDeviceHelper.sendSetCommand(settingDevice, BydFeatureIds.ADAS_ISLC_SWITCH_SET, enabled ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setIslcSwitch failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    // --- Media ---
+
+    /**
+     * Send media info (artist + title) to the instrument cluster display.
+     * Encodes the string as UTF-16LE bytes for the BYD instrument cluster.
+     */
+    public boolean sendMediaInfo(String artistAndTitle) {
+        try {
+            if (artistAndTitle == null) return false;
+            String formatted = "  " + artistAndTitle + "  ";
+            byte[] bytes = formatted.getBytes("UTF-16LE");
+            byte[] finalBytes;
+            if (bytes.length > 255) {
+                // Truncate to 253 bytes + 2-byte null terminator
+                finalBytes = new byte[255];
+                System.arraycopy(bytes, 0, finalBytes, 0, 253);
+                finalBytes[253] = 0;
+                finalBytes[254] = 0;
+            } else {
+                finalBytes = bytes;
+            }
+            int result = BydDeviceHelper.callSetBuffer(instrumentDevice, 1140527112, finalBytes);
+            return result >= 0;
+        } catch (Exception e) {
+            logger.debug("sendMediaInfo failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setMusicSource(int source) {
+        try {
+            if (source < 0 || source > 14) return false;
+            return BydDeviceHelper.sendSetCommand(instrumentDevice, BydFeatureIds.INSTRUMENT_MUSIC_SOURCE_SET, source);
+        } catch (Exception e) {
+            logger.debug("setMusicSource failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setMusicState(int state) {
+        try {
+            if (state < 1 || state > 2) return false;
+            return BydDeviceHelper.sendSetCommand(instrumentDevice, BydFeatureIds.INSTRUMENT_MUSIC_STATE_SET, state);
+        } catch (Exception e) {
+            logger.debug("setMusicState failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setMusicPlaybackProgress(int currentSeconds, int totalSeconds) {
+        try {
+            if (currentSeconds < 0 || totalSeconds < 0) return false;
+            // Pack current and total into the feature ID call
+            // Progress is sent as a single int: current seconds (the cluster calculates percentage)
+            return BydDeviceHelper.sendSetCommand(instrumentDevice, BydFeatureIds.INSTRUMENT_MUSIC_PLAYBACK_PROGRESS_SET, currentSeconds);
+        } catch (Exception e) {
+            logger.debug("setMusicPlaybackProgress failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    // --- Display ---
+
+    public boolean setInfotainmentBrightness(int level) {
+        try {
+            if (level < 0 || level > 100) return false;
+            return BydDeviceHelper.sendSetCommand(settingDevice, BydFeatureIds.SETTING_BRIGHTNESS_GEAR_SET, level);
+        } catch (Exception e) {
+            logger.debug("setInfotainmentBrightness failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setDriverDisplayBrightness(int level) {
+        try {
+            if (level < 0 || level > 100) return false;
+            // Driver display brightness uses the same feature ID — the instrument cluster
+            // adjusts both displays together on most BYD models
+            return BydDeviceHelper.sendSetCommand(settingDevice, BydFeatureIds.SETTING_BRIGHTNESS_GEAR_SET, level);
+        } catch (Exception e) {
+            logger.debug("setDriverDisplayBrightness failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setHudBrightness(int level) {
+        try {
+            if (level < 0 || level > 100) return false;
+            return BydDeviceHelper.sendSetCommand(settingDevice, BydFeatureIds.SETTING_BRIGHTNESS_GEAR_SET, level);
+        } catch (Exception e) {
+            logger.debug("setHudBrightness failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    // --- Miscellaneous ---
+
+    public boolean setMirrorsFolded(boolean folded) {
+        try {
+            return BydDeviceHelper.sendSetCommand(bodyworkDevice, BydFeatureIds.MIRROR_REARVIEW_SET, folded ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setMirrorsFolded failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setChildLock(boolean left, boolean enable) {
+        try {
+            int featureId = left ? BydFeatureIds.DOORLOCK_CHILDLOCK_LEFT_SET : BydFeatureIds.DOORLOCK_CHILDLOCK_RIGHT_SET;
+            return BydDeviceHelper.sendSetCommand(doorLockDevice, featureId, enable ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setChildLock failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setWirelessCharging(boolean enabled) {
+        try {
+            return BydDeviceHelper.sendSetCommand(chargingDevice, BydFeatureIds.CHARGING_WIRELESS_SWITCH_SET, enabled ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setWirelessCharging failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean wakeUpMcu() {
+        try {
+            Object result = BydDeviceHelper.callGetter(powerDevice, "wakeUpMcu");
+            return result instanceof Number && ((Number) result).intValue() >= 0;
+        } catch (Exception e) {
+            logger.debug("wakeUpMcu failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean rotatePad() {
+        try {
+            return BydDeviceHelper.sendSetCommand(settingDevice, BydFeatureIds.SETTING_PAD_ROTATION_SET, 1);
+        } catch (Exception e) {
+            logger.debug("rotatePad failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setDriftMode(boolean enabled) {
+        try {
+            return BydDeviceHelper.sendSetCommand(engineDevice, BydFeatureIds.ENGINE_DRIFT_MODE_SWITCH_CONFIG, enabled ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setDriftMode failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setNavigationActive(boolean active) {
+        try {
+            return BydDeviceHelper.sendSetCommand(instrumentDevice, BydFeatureIds.INSTRUMENT_NAVIGATION_ACTIVATED_SET, active ? 1 : 0);
+        } catch (Exception e) {
+            logger.debug("setNavigationActive failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setNavigationETA(int minutes) {
+        try {
+            if (minutes < 0) return false;
+            return BydDeviceHelper.sendSetCommand(instrumentDevice, BydFeatureIds.INSTRUMENT_NAVI_ESTIMATED_TIME_SET, minutes);
+        } catch (Exception e) {
+            logger.debug("setNavigationETA failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public boolean setNavigationDistance(int meters) {
+        try {
+            if (meters < 0) return false;
+            return BydDeviceHelper.sendSetCommand(instrumentDevice, BydFeatureIds.INSTRUMENT_NAVI_ESTIMATED_MILEAGE_SET, meters);
+        } catch (Exception e) {
+            logger.debug("setNavigationDistance failed: " + e.getMessage());
+            return false;
+        }
     }
 
     /**

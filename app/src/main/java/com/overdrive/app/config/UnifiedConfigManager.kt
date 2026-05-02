@@ -195,6 +195,8 @@ object UnifiedConfigManager {
         if (!surveillance.has("requiredBlocks")) surveillance.put("requiredBlocks", 3)
         if (!surveillance.has("sensitivity")) surveillance.put("sensitivity", 0.04)
         if (!surveillance.has("surveillanceEnabled")) surveillance.put("surveillanceEnabled", false)
+        if (!surveillance.has("deterrentAction")) surveillance.put("deterrentAction", "silent")
+        if (!surveillance.has("deterrentCooldownSeconds")) surveillance.put("deterrentCooldownSeconds", 15)
         
         // Recording defaults
         if (!recording.has("mode")) recording.put("mode", "NONE")  // Default: no recording
@@ -222,6 +224,12 @@ object UnifiedConfigManager {
             config.put("tripAnalytics", it)
         }
         if (!tripAnalytics.has("enabled")) tripAnalytics.put("enabled", false)
+        
+        // BYD Cloud defaults
+        val bydCloud = config.optJSONObject("bydCloud") ?: JSONObject().also {
+            config.put("bydCloud", it)
+        }
+        if (!bydCloud.has("enabled")) bydCloud.put("enabled", false)
     }
     
     /**
@@ -419,6 +427,25 @@ object UnifiedConfigManager {
     }
     
     /**
+     * Get BYD Cloud config section.
+     * Defaults to enabled=false if section doesn't exist.
+     */
+    @JvmStatic
+    fun getBydCloud(): JSONObject {
+        return loadConfig().optJSONObject("bydCloud") ?: JSONObject().apply {
+            put("enabled", false)
+        }
+    }
+    
+    /**
+     * Update BYD Cloud config section.
+     */
+    @JvmStatic
+    fun setBydCloud(bydCloud: JSONObject): Boolean {
+        return updateSection("bydCloud", bydCloud)
+    }
+    
+    /**
      * Update a specific section of the config.
      */
     @JvmStatic
@@ -539,6 +566,7 @@ object UnifiedConfigManager {
         config.put("proximityGuard", JSONObject())
         config.put("telemetryOverlay", JSONObject())
         config.put("tripAnalytics", JSONObject())
+        config.put("bydCloud", JSONObject())
         config.put("version", 1)
         config.put("lastModified", System.currentTimeMillis())
         applyDefaults(config)

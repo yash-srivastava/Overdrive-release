@@ -76,6 +76,46 @@ public final class BydDeviceHelper {
         return null;
     }
 
+    /**
+     * Call a method with two int parameters.
+     * Used for SDK methods like setAcWindLevel(int, int), setAcWindMode(int, int),
+     * setSeatHeatingState(int, int), setSeatVentilatingState(int, int).
+     */
+    public static Object callMethod(Object device, String methodName, int param1, int param2) {
+        if (device == null) return null;
+        try {
+            Method m = device.getClass().getMethod(methodName, int.class, int.class);
+            return m.invoke(device, param1, param2);
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            logger.debug(methodName + "(" + param1 + ", " + param2 + ") threw: " +
+                (cause != null ? cause.getClass().getSimpleName() + ": " + cause.getMessage() : "unknown"));
+        } catch (Exception e) {
+            logger.debug(methodName + "(" + param1 + ", " + param2 + ") failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Call a method with four int parameters.
+     * Used for SDK methods like setAcTemperature(int zone, int temp, int, int),
+     * setAllWindowState(int lf, int rf, int lr, int rr).
+     */
+    public static Object callMethod(Object device, String methodName, int p1, int p2, int p3, int p4) {
+        if (device == null) return null;
+        try {
+            Method m = device.getClass().getMethod(methodName, int.class, int.class, int.class, int.class);
+            return m.invoke(device, p1, p2, p3, p4);
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            logger.debug(methodName + "(" + p1 + ", " + p2 + ", " + p3 + ", " + p4 + ") threw: " +
+                (cause != null ? cause.getClass().getSimpleName() + ": " + cause.getMessage() : "unknown"));
+        } catch (Exception e) {
+            logger.debug(methodName + "(" + p1 + ", " + p2 + ", " + p3 + ", " + p4 + ") failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+        return null;
+    }
+
     private static Object callGetterDeclared(Object device, String methodName) {
         Class<?> cls = device.getClass();
         while (cls != null && cls != Object.class) {
@@ -242,9 +282,204 @@ public final class BydDeviceHelper {
         return false;
     }
 
+    // ==================== EXTENDED GETTER METHODS ====================
+
+    /**
+     * Call getDouble(int deviceType, int featureId) on a BYD device.
+     * Returns Double.NaN on any failure.
+     */
+    public static double callGetDouble(Object device, int featureId) {
+        if (device == null) return Double.NaN;
+        try {
+            int deviceType = resolveDeviceType(device);
+            if (deviceType == Integer.MIN_VALUE) return Double.NaN;
+            Method m = findMethodCached(device, "getDouble", getDoubleMethodCache,
+                    int.class, int.class);
+            if (m != null) {
+                Object result = m.invoke(device, deviceType, featureId);
+                if (result instanceof Number) return ((Number) result).doubleValue();
+            }
+        } catch (Exception e) {
+            logger.debug("callGetDouble failed for id=" + featureId + " — " + e.getMessage());
+        }
+        return Double.NaN;
+    }
+
+    /**
+     * Call getIntArray(int deviceType, int[] featureIds) on a BYD device.
+     * Returns null on any failure.
+     */
+    public static int[] callGetIntArray(Object device, int[] featureIds) {
+        if (device == null) return null;
+        try {
+            int deviceType = resolveDeviceType(device);
+            if (deviceType == Integer.MIN_VALUE) return null;
+            Method m = findMethodCached(device, "getIntArray", getIntArrayMethodCache,
+                    int.class, int[].class);
+            if (m != null) {
+                Object result = m.invoke(device, deviceType, featureIds);
+                if (result instanceof int[]) return (int[]) result;
+            }
+        } catch (Exception e) {
+            logger.debug("callGetIntArray failed — " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Call getDoubleArray(int deviceType, int[] featureIds) on a BYD device.
+     * The underlying SDK returns float[], so this method returns float[].
+     * Returns null on any failure.
+     */
+    public static float[] callGetDoubleArray(Object device, int[] featureIds) {
+        if (device == null) return null;
+        try {
+            int deviceType = resolveDeviceType(device);
+            if (deviceType == Integer.MIN_VALUE) return null;
+            Method m = findMethodCached(device, "getDoubleArray", getDoubleArrayMethodCache,
+                    int.class, int[].class);
+            if (m != null) {
+                Object result = m.invoke(device, deviceType, featureIds);
+                if (result instanceof float[]) return (float[]) result;
+            }
+        } catch (Exception e) {
+            logger.debug("callGetDoubleArray failed — " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Call getBuffer(int deviceType, int featureId) on a BYD device.
+     * Returns null on any failure.
+     */
+    public static byte[] callGetBuffer(Object device, int featureId) {
+        if (device == null) return null;
+        try {
+            int deviceType = resolveDeviceType(device);
+            if (deviceType == Integer.MIN_VALUE) return null;
+            Method m = findMethodCached(device, "getBuffer", getBufferMethodCache,
+                    int.class, int.class);
+            if (m != null) {
+                Object result = m.invoke(device, deviceType, featureId);
+                if (result instanceof byte[]) return (byte[]) result;
+            }
+        } catch (Exception e) {
+            logger.debug("callGetBuffer failed for id=" + featureId + " — " + e.getMessage());
+        }
+        return null;
+    }
+
+    // ==================== SETTER METHODS ====================
+
+    /**
+     * Send a set command using the BYDAutoEventValue pattern.
+     * Creates a BYDAutoEventValue, sets intValue, calls device.set(int[], BYDAutoEventValue).
+     * Falls back to callSetSingle if BYDAutoEventValue is not available.
+     */
+    public static boolean sendSetCommand(Object device, int featureId, int value) {
+        if (device == null) return false;
+        try {
+            Class<?> eventValueClass = Class.forName("android.hardware.bydauto.BYDAutoEventValue");
+            Object eventValue = eventValueClass.getConstructor(new Class[0]).newInstance(new Object[0]);
+            eventValueClass.getField("intValue").setInt(eventValue, value);
+            Method setMethod = device.getClass().getMethod("set", int[].class, eventValueClass);
+            Object result = setMethod.invoke(device, new int[]{featureId}, eventValue);
+            if (result instanceof Integer) {
+                return ((Integer) result).intValue() >= 0;
+            } else if (result instanceof Boolean) {
+                return ((Boolean) result).booleanValue();
+            }
+            return true; // non-null result, assume success
+        } catch (ClassNotFoundException e) {
+            // BYDAutoEventValue not available, fall back to base class set()
+            logger.debug("BYDAutoEventValue not found, falling back to callSetSingle");
+            return callSetSingle(device, featureId, value) >= 0;
+        } catch (Exception e) {
+            logger.debug("sendSetCommand failed for featureId=0x" + Integer.toHexString(featureId) + ": " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Call set(int deviceType, int featureId, int value) on a BYD device.
+     * Returns the SDK result code, or -1 on any failure.
+     */
+    public static int callSetSingle(Object device, int featureId, int value) {
+        if (device == null) return -1;
+        try {
+            int deviceType = resolveDeviceType(device);
+            if (deviceType == Integer.MIN_VALUE) return -1;
+            Method m = findMethodCached(device, "set", setSingleMethodCache,
+                    int.class, int.class, int.class);
+            if (m != null) {
+                Object result = m.invoke(device, deviceType, featureId, value);
+                if (result instanceof Number) return ((Number) result).intValue();
+            }
+        } catch (SecurityException e) {
+            logger.debug("callSetSingle permission denied for id=" + featureId + " — " + e.getMessage());
+        } catch (Exception e) {
+            logger.debug("callSetSingle failed for id=" + featureId + ", value=" + value + " — " + e.getMessage());
+        }
+        return -1;
+    }
+
+    /**
+     * Call set(int deviceType, int[] featureIds, int[] values) on a BYD device.
+     * Returns the SDK result code, or -1 on any failure.
+     */
+    public static int callSetBatch(Object device, int[] featureIds, int[] values) {
+        if (device == null) return -1;
+        try {
+            int deviceType = resolveDeviceType(device);
+            if (deviceType == Integer.MIN_VALUE) return -1;
+            Method m = findMethodCached(device, "set", setBatchMethodCache,
+                    int.class, int[].class, int[].class);
+            if (m != null) {
+                Object result = m.invoke(device, deviceType, featureIds, values);
+                if (result instanceof Number) return ((Number) result).intValue();
+            }
+        } catch (SecurityException e) {
+            logger.debug("callSetBatch permission denied — " + e.getMessage());
+        } catch (Exception e) {
+            logger.debug("callSetBatch failed — " + e.getMessage());
+        }
+        return -1;
+    }
+
+    /**
+     * Call set(int deviceType, int featureId, byte[] buffer) on a BYD device.
+     * Returns the SDK result code, or -1 on any failure.
+     */
+    public static int callSetBuffer(Object device, int featureId, byte[] buffer) {
+        if (device == null) return -1;
+        try {
+            int deviceType = resolveDeviceType(device);
+            if (deviceType == Integer.MIN_VALUE) return -1;
+            Method m = findMethodCached(device, "set", setBufferMethodCache,
+                    int.class, int.class, byte[].class);
+            if (m != null) {
+                Object result = m.invoke(device, deviceType, featureId, buffer);
+                if (result instanceof Number) return ((Number) result).intValue();
+            }
+        } catch (SecurityException e) {
+            logger.debug("callSetBuffer permission denied for id=" + featureId + " — " + e.getMessage());
+        } catch (Exception e) {
+            logger.debug("callSetBuffer failed for id=" + featureId + " — " + e.getMessage());
+        }
+        return -1;
+    }
+
     // ==================== INTERNAL HELPERS ====================
 
     private static final java.util.Map<Class<?>, Method> getMethodCache = new java.util.HashMap<>();
+    private static final java.util.Map<Class<?>, Method> getDoubleMethodCache = new java.util.HashMap<>();
+    private static final java.util.Map<Class<?>, Method> getIntArrayMethodCache = new java.util.HashMap<>();
+    private static final java.util.Map<Class<?>, Method> getDoubleArrayMethodCache = new java.util.HashMap<>();
+    private static final java.util.Map<Class<?>, Method> getBufferMethodCache = new java.util.HashMap<>();
+    private static final java.util.Map<Class<?>, Method> setSingleMethodCache = new java.util.HashMap<>();
+    private static final java.util.Map<Class<?>, Method> setBatchMethodCache = new java.util.HashMap<>();
+    private static final java.util.Map<Class<?>, Method> setBufferMethodCache = new java.util.HashMap<>();
+    private static final java.util.Map<Class<?>, Integer> deviceTypeCache = new java.util.HashMap<>();
 
     private static Method findGetMethod(Object device) {
         Class<?> cls = device.getClass();
@@ -267,6 +502,64 @@ public final class BydDeviceHelper {
             walk = walk.getSuperclass();
         }
         getMethodCache.put(cls, null);
+        return null;
+    }
+
+    /**
+     * Resolve the deviceType from a BYD device object via getDevicetype() or getType().
+     * Caches the result per device class. Returns Integer.MIN_VALUE on failure.
+     */
+    private static int resolveDeviceType(Object device) {
+        Class<?> cls = device.getClass();
+        if (deviceTypeCache.containsKey(cls)) return deviceTypeCache.get(cls);
+
+        // Try getDevicetype() first (AbsBYDAutoDevice)
+        try {
+            Method m = cls.getMethod("getDevicetype");
+            Object result = m.invoke(device);
+            if (result instanceof Number) {
+                int type = ((Number) result).intValue();
+                deviceTypeCache.put(cls, type);
+                return type;
+            }
+        } catch (Exception ignored) {}
+
+        // Fallback to getType()
+        try {
+            Method m = cls.getMethod("getType");
+            Object result = m.invoke(device);
+            if (result instanceof Number) {
+                int type = ((Number) result).intValue();
+                deviceTypeCache.put(cls, type);
+                return type;
+            }
+        } catch (Exception ignored) {}
+
+        logger.debug("Could not resolve deviceType for " + cls.getSimpleName());
+        deviceTypeCache.put(cls, Integer.MIN_VALUE);
+        return Integer.MIN_VALUE;
+    }
+
+    /**
+     * Find a method by name and parameter types on a device, walking up the class hierarchy.
+     * Caches the result per device class in the provided cache map.
+     */
+    private static Method findMethodCached(Object device, String methodName,
+            java.util.Map<Class<?>, Method> cache, Class<?>... paramTypes) {
+        Class<?> cls = device.getClass();
+        if (cache.containsKey(cls)) return cache.get(cls);
+
+        Class<?> walk = cls;
+        while (walk != null && walk != Object.class) {
+            try {
+                Method m = walk.getDeclaredMethod(methodName, paramTypes);
+                m.setAccessible(true);
+                cache.put(cls, m);
+                return m;
+            } catch (NoSuchMethodException ignored) {}
+            walk = walk.getSuperclass();
+        }
+        cache.put(cls, null);
         return null;
     }
 

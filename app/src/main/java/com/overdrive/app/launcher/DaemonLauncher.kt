@@ -148,9 +148,11 @@ class DaemonLauncher(
         // watchdog to relaunch the daemon, and the fresh watchdog we're about
         // to start loses the singleton lock race ("Another CameraDaemon instance
         // is already running. Exiting.").
+        // Also clear the disable sentinel — user is explicitly starting the daemon.
         val cleanupCmd = buildString {
+            append("rm -f /data/local/tmp/camera_daemon.disabled 2>/dev/null; ")
             append("pkill -9 -f 'start_cam_daemon' 2>/dev/null; ")
-            append("rm -f $scriptPath 2>/dev/null; ")
+            append("rm -f $scriptPath /data/local/tmp/cam_watchdog.pid 2>/dev/null; ")
             append("sleep 1; ")
             append("pkill -9 -f '$CAMERA_DAEMON_PROCESS' 2>/dev/null; ")
             append("killall -9 $CAMERA_DAEMON_PROCESS 2>/dev/null; ")
@@ -183,10 +185,16 @@ class DaemonLauncher(
             "# CameraDaemon Watchdog Script",
             "LOG_FILE=\"$CAMERA_DAEMON_LOG\"",
             "LOCK_FILE=\"/data/local/tmp/camera_daemon.lock\"",
+            "SENTINEL=\"/data/local/tmp/camera_daemon.disabled\"",
             "MAX_RETRIES=5",
             "RETRY_COUNT=0",
             "",
             "while true; do",
+            "  # Check disable sentinel — if present, daemon was intentionally stopped",
+            "  if [ -f \"\$SENTINEL\" ]; then",
+            "    echo \"[\$(date)] Daemon disabled by user (sentinel file exists). Exiting watchdog.\" >> \"\$LOG_FILE\"",
+            "    exit 0",
+            "  fi",
             "  echo \"[\$(date)] Starting CameraDaemon...\" >> \"\$LOG_FILE\"",
             "",
             "  CLASSPATH=/system/framework/bmmcamera.jar:$apkPath app_process " +
@@ -197,6 +205,11 @@ class DaemonLauncher(
                 "$outputDir $nativeLibDir >> \"\$LOG_FILE\" 2>&1",
             "",
             "  EXIT_CODE=\$?",
+            "  # Check sentinel again — daemon may have written it during shutdown",
+            "  if [ -f \"\$SENTINEL\" ]; then",
+            "    echo \"[\$(date)] Daemon disabled by user (sentinel written during shutdown). Exiting watchdog.\" >> \"\$LOG_FILE\"",
+            "    exit 0",
+            "  fi",
             "  if [ \$EXIT_CODE -eq 0 ]; then",
             "    echo \"[\$(date)] Daemon exited cleanly (code 0), restarting in 10s...\" >> \"\$LOG_FILE\"",
             "    RETRY_COUNT=0",
@@ -1412,7 +1425,8 @@ class DaemonLauncher(
      */
     private fun killDaemonViaPrivilegedShell(processName: String, callback: LaunchCallback) {
         val killCmd = if (processName == CAMERA_DAEMON_PROCESS) {
-            "pkill -9 -f 'start_cam_daemon'; rm -f /data/local/tmp/start_cam_daemon.sh; sleep 1; pkill -9 -f '$processName'; rm -f /data/local/tmp/camera_daemon.lock"
+            // Write disable sentinel FIRST, then kill watchdog, then daemon
+            "echo 'disabled by ui at \$(date)' > /data/local/tmp/camera_daemon.disabled; pkill -9 -f 'start_cam_daemon'; rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/cam_watchdog.pid; sleep 1; pkill -9 -f '$processName'; rm -f /data/local/tmp/camera_daemon.lock"
         } else {
             "pkill -9 -f '$processName'"
         }
@@ -1486,7 +1500,8 @@ class DaemonLauncher(
     private fun killDaemonViaBothShells(processName: String, callback: LaunchCallback) {
         // First try privileged shell
         val privKillCmd = if (processName == CAMERA_DAEMON_PROCESS) {
-            "pkill -9 -f 'start_cam_daemon'; rm -f /data/local/tmp/start_cam_daemon.sh; sleep 1; pkill -9 -f '$processName'; rm -f /data/local/tmp/camera_daemon.lock"
+            // Write disable sentinel FIRST, then kill watchdog, then daemon
+            "echo 'disabled by ui at \$(date)' > /data/local/tmp/camera_daemon.disabled; pkill -9 -f 'start_cam_daemon'; rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/cam_watchdog.pid; sleep 1; pkill -9 -f '$processName'; rm -f /data/local/tmp/camera_daemon.lock"
         } else {
             "pkill -9 -f '$processName'"
         }

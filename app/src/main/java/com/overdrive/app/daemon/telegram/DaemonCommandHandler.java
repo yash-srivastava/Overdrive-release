@@ -172,6 +172,8 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         
         // For camera daemon, also kill the restart wrapper script and delete it
         if ("byd_cam_daemon".equals(processName)) {
+            // Write disable sentinel FIRST — prevents watchdog from restarting
+            ctx.execShell("echo 'disabled by telegram at $(date)' > /data/local/tmp/camera_daemon.disabled");
             // Kill watchdog FIRST so it doesn't respawn the daemon
             ctx.execShell("pkill -9 -f 'start_cam_daemon' 2>/dev/null");
             // Also kill via PID file
@@ -298,6 +300,8 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         
         // Step 1: Kill old processes and clean up (same as DaemonLauncher)
         ctx.log("Cleaning up old processes...");
+        // Clear disable sentinel — user is explicitly starting the daemon
+        ctx.execShell("rm -f /data/local/tmp/camera_daemon.disabled 2>/dev/null");
         // Kill watchdog script FIRST, then daemon, then clean lock
         // Use multiple kill patterns to catch all variants
         ctx.execShell("pkill -9 -f 'start_cam_daemon' 2>/dev/null");
@@ -348,18 +352,30 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         ctx.execShell("echo 'echo $$ > \"$PIDFILE\"' >> " + scriptPath);
         ctx.execShell("echo '' >> " + scriptPath);
         ctx.execShell("echo 'while true; do' >> " + scriptPath);
+        ctx.execShell("echo '  # Check disable sentinel — if present, daemon was intentionally stopped' >> " + scriptPath);
+        ctx.execShell("echo '  if [ -f /data/local/tmp/camera_daemon.disabled ]; then' >> " + scriptPath);
+        ctx.execShell("echo '    echo \"[$(date)] Daemon disabled by user (sentinel file exists). Exiting watchdog.\" >> \"$LOG_FILE\"' >> " + scriptPath);
+        ctx.execShell("echo '    rm -f \"$PIDFILE\"' >> " + scriptPath);
+        ctx.execShell("echo '    exit 0' >> " + scriptPath);
+        ctx.execShell("echo '  fi' >> " + scriptPath);
         ctx.execShell("echo '  echo \"[$(date)] Starting CameraDaemon...\" >> \"$LOG_FILE\"' >> " + scriptPath);
         ctx.execShell("echo '' >> " + scriptPath);
         // The app_process line — write via heredoc to avoid escaping hell
         ctx.execShell("cat >> " + scriptPath + " << 'EOFLINE'\n  " + appProcessCmd + "\nEOFLINE");
         ctx.execShell("echo '' >> " + scriptPath);
         ctx.execShell("echo '  EXIT_CODE=$?' >> " + scriptPath);
+        ctx.execShell("echo '  # Check sentinel again — daemon may have written it during shutdown' >> " + scriptPath);
+        ctx.execShell("echo '  if [ -f /data/local/tmp/camera_daemon.disabled ]; then' >> " + scriptPath);
+        ctx.execShell("echo '    echo \"[$(date)] Daemon disabled by user (sentinel written during shutdown). Exiting watchdog.\" >> \"$LOG_FILE\"' >> " + scriptPath);
+        ctx.execShell("echo '    rm -f \"$PIDFILE\"' >> " + scriptPath);
+        ctx.execShell("echo '    exit 0' >> " + scriptPath);
+        ctx.execShell("echo '  fi' >> " + scriptPath);
         ctx.execShell("echo '  if [ $EXIT_CODE -ne 0 ]; then' >> " + scriptPath);
         ctx.execShell("echo '    echo \"[$(date)] Daemon exited with code $EXIT_CODE, NOT restarting.\" >> \"$LOG_FILE\"' >> " + scriptPath);
         ctx.execShell("echo '    break' >> " + scriptPath);
         ctx.execShell("echo '  fi' >> " + scriptPath);
-        ctx.execShell("echo '  echo \"[$(date)] Daemon exited with code 0, restarting in 3s...\" >> \"$LOG_FILE\"' >> " + scriptPath);
-        ctx.execShell("echo '  sleep 3' >> " + scriptPath);
+        ctx.execShell("echo '  echo \"[$(date)] Daemon exited cleanly (code 0), restarting in 10s...\" >> \"$LOG_FILE\"' >> " + scriptPath);
+        ctx.execShell("echo '  sleep 10' >> " + scriptPath);
         ctx.execShell("echo 'done' >> " + scriptPath);
         ctx.execShell("chmod 755 " + scriptPath);
         

@@ -472,78 +472,149 @@ public class GpuSurveillancePipeline {
         camera = new PanoramicCameraGpu(cameraWidth, cameraHeight);
         camera.setConsumers(recorder, downscaler, sentry);
         
-        // Camera config: saved config → or first-launch probe (ID 0 then ID 1).
-        // Both Seal (ID 1) and Atto 3 (ID 0) output a 4-camera strip at 5120x960 with surfaceMode 0.
-        // CRITICAL: Don't cycle through cameras — the Atto 3 HAL needs the camera to stay
-        // open for all 4 cameras to initialize in the strip.
-        logger.info("Vehicle model: " + getVehicleModel());
-        
-        boolean configured = false;
+        // Binder camera backend: reads from config, defaults to false (AVMCamera reflection).
+        // Enable via API or config to use bydcameramanager service instead of direct AVMCamera.
+        // This prevents glitching native camera apps and enables frame rate control.
         try {
             org.json.JSONObject cameraConfig = com.overdrive.app.config.UnifiedConfigManager
                 .loadConfig().optJSONObject("camera");
-            int savedId = cameraConfig != null ? cameraConfig.optInt("probedCameraId", -1) : -1;
-            int savedMode = cameraConfig != null ? cameraConfig.optInt("probedSurfaceMode", -1) : -1;
-            
-            if (savedId >= 0 && savedMode >= 0) {
-                // Use saved surface mode but ALWAYS start from ID 0 with probe enabled.
-                // On some models (Seal U), the HAL needs camera ID 0 to be opened briefly
-                // before ID 1 produces image data. Starting directly with saved ID 1
-                // results in BLACK frames.
-                logger.info("Saved camera config: id=" + savedId + ", surfaceMode=" + savedMode +
-                    " — starting from id=0 with probe (HAL warm-up)");
-                camera.setCameraId(0);
-                camera.setCameraSurfaceMode(savedMode);
-                camera.setAutoProbeCameras(true);
-                // SOTA: Always register probe callback so config is re-persisted
-                // if the saved config no longer works (e.g., after firmware update)
-                camera.setCameraProbeCallback((cameraId, surfaceMode) -> {
-                    logger.info("Probe found working camera: id=" + cameraId + ", surfaceMode=" + surfaceMode);
-                    try {
-                        org.json.JSONObject camCfg = new org.json.JSONObject();
-                        camCfg.put("probedCameraId", cameraId);
-                        camCfg.put("probedSurfaceMode", surfaceMode);
-                        com.overdrive.app.config.UnifiedConfigManager.updateSection("camera", camCfg);
-                        logger.info("Saved camera config for next launch");
-                    } catch (Exception ex) {
-                        logger.warn("Failed to save camera config: " + ex.getMessage());
-                    }
-                    // Check if there's a pending recording that was deferred
-                    // Wait briefly for encoder to receive first frame format
-                    new Thread(() -> {
-                        try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
-                        checkPendingRecording();
-                    }, "PendingRecCheck").start();
-                });
-                configured = true;
+            if (cameraConfig != null) {
+                boolean useBinder = cameraConfig.optBoolean("useBinderBackend", false);
+                int targetFps = cameraConfig.optInt("targetFps", 15);
+                camera.setTargetFps(targetFps);
+                if (useBinder) {
+                    camera.setUseBinderBackend(true);
+                    logger.info("Binder camera backend ENABLED (targetFps=" + targetFps + ")");
+                } else {
+                    logger.info("Camera targetFps=" + targetFps + " (from config)");
+                }
             }
         } catch (Exception e) {
-            logger.warn("Failed to load saved camera config: " + e.getMessage());
+            logger.warn("Failed to read binder backend config: " + e.getMessage());
         }
         
-        if (!configured) {
-            logger.info("No saved config — starting with id=0, surfaceMode=0 (probe enabled)");
-            camera.setCameraId(0);
-            camera.setCameraSurfaceMode(0);
+        // Camera config strategy:
+        // 1. BmmCameraInfo discovery → instant lookup, use if valid
+        // 2. Saved config from previous probe → use directly (no probe)
+        // 3. No saved config → use vehicle model defaults (Seal=ID1, Atto3=ID0)
+        // 4. Full auto-probe only when all above fail
+        String model = getVehicleModel();
+        logger.info("Vehicle model: " + model);
+        
+        boolean configured = false;
+        
+        // When binder backend is enabled, skip saved config and force auto-probe.
+        // The binder service may use different camera IDs than AVMCamera for panoramic.
+        // TODO: Remove this override after binder backend testing — save working binder IDs separately.
+        if (camera.isUseBinderBackend()) {
+            logger.info("Binder backend active — forcing auto-probe to discover panoramic camera ID");
             camera.setAutoProbeCameras(true);
-            camera.setCameraProbeCallback((cameraId, surfaceMode) -> {
-                logger.info("Probe found working camera: id=" + cameraId + ", surfaceMode=" + surfaceMode);
-                try {
-                    org.json.JSONObject camCfg = new org.json.JSONObject();
-                    camCfg.put("probedCameraId", cameraId);
-                    camCfg.put("probedSurfaceMode", surfaceMode);
-                    com.overdrive.app.config.UnifiedConfigManager.updateSection("camera", camCfg);
-                    logger.info("Saved camera config for next launch");
-                } catch (Exception ex) {
-                    logger.warn("Failed to save camera config: " + ex.getMessage());
-                }
-                // Check if there's a pending recording that was deferred
-                new Thread(() -> {
-                    try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
-                    checkPendingRecording();
-                }, "PendingRecCheck").start();
-            });
+            configured = true;  // Skip saved config / model defaults
         }
+        
+        // Step 1: BmmCameraInfo discovery — instant camera ID lookup via HAL metadata
+        if (!configured) {
+            try {
+                int discoveredId = com.overdrive.app.camera.AvmCameraHelper.discoverPanoCameraId();
+                if (discoveredId >= 0) {
+                    logger.info("Camera discovered via BmmCameraInfo: ID " + discoveredId);
+                    camera.setCameraId(discoveredId);
+                    camera.setCameraSurfaceMode(0);
+                    camera.setAutoProbeCameras(false);
+                    configured = true;
+                    
+                    // Save discovered ID so subsequent startups can use saved config path
+                    try {
+                        org.json.JSONObject camCfg = new org.json.JSONObject();
+                        camCfg.put("probedCameraId", discoveredId);
+                        camCfg.put("probedSurfaceMode", 0);
+                        com.overdrive.app.config.UnifiedConfigManager.updateSection("camera", camCfg);
+                        logger.info("Saved BmmCameraInfo discovery: id=" + discoveredId + ", surfaceMode=0");
+                    } catch (Exception ex) {
+                        logger.warn("Failed to save discovered camera config: " + ex.getMessage());
+                    }
+                }
+            } catch (Exception e) {
+                logger.warn("BmmCameraInfo discovery error: " + e.getMessage());
+            }
+        }
+        
+        // Step 2: Saved config from previous probe/discovery
+        if (!configured) {
+            try {
+                org.json.JSONObject cameraConfig = com.overdrive.app.config.UnifiedConfigManager
+                    .loadConfig().optJSONObject("camera");
+                int savedId = cameraConfig != null ? cameraConfig.optInt("probedCameraId", -1) : -1;
+                int savedMode = cameraConfig != null ? cameraConfig.optInt("probedSurfaceMode", -1) : -1;
+                
+                if (savedId >= 0 && savedMode >= 0) {
+                    // Use saved config directly — no probe, no HAL cycling
+                    logger.info("Using saved camera config: id=" + savedId + ", surfaceMode=" + savedMode);
+                    camera.setCameraId(savedId);
+                    camera.setCameraSurfaceMode(savedMode);
+                    camera.setAutoProbeCameras(false);
+                    configured = true;
+                }
+            } catch (Exception e) {
+                logger.warn("Failed to load saved camera config: " + e.getMessage());
+            }
+        }
+        
+        // Step 3: Vehicle model defaults
+        if (!configured) {
+            // No saved config — use vehicle model defaults
+            // Seal / Seal U / Song Plus: camera ID 1, surfaceMode 0
+            // Atto 3 / Yuan Plus / Dolphin: camera ID 0, surfaceMode 0
+            int defaultId;
+            if (model.toLowerCase().contains("seal") || model.toLowerCase().contains("song")) {
+                defaultId = 1;
+                logger.info("Seal/Song detected — using default camera ID 1");
+            } else {
+                defaultId = 0;
+                logger.info("Atto 3/Yuan/Dolphin/other — using default camera ID 0");
+            }
+            
+            camera.setCameraId(defaultId);
+            camera.setCameraSurfaceMode(0);
+            camera.setAutoProbeCameras(false);
+            configured = true;
+            
+            // Save this default so it's used on next launch
+            try {
+                org.json.JSONObject camCfg = new org.json.JSONObject();
+                camCfg.put("probedCameraId", defaultId);
+                camCfg.put("probedSurfaceMode", 0);
+                com.overdrive.app.config.UnifiedConfigManager.updateSection("camera", camCfg);
+                logger.info("Saved default camera config: id=" + defaultId + ", surfaceMode=0");
+            } catch (Exception ex) {
+                logger.warn("Failed to save default camera config: " + ex.getMessage());
+            }
+        }
+        
+        // Step 4: If still not configured (shouldn't happen — model defaults always apply),
+        // enable auto-probe as last resort
+        if (!configured) {
+            logger.warn("All camera config strategies failed — enabling auto-probe");
+            camera.setAutoProbeCameras(true);
+        }
+        
+        // Register probe callback — only used when manual probe is triggered via API
+        camera.setCameraProbeCallback((cameraId, surfaceMode) -> {
+            logger.info("Probe found working camera: id=" + cameraId + ", surfaceMode=" + surfaceMode);
+            try {
+                org.json.JSONObject camCfg = new org.json.JSONObject();
+                camCfg.put("probedCameraId", cameraId);
+                camCfg.put("probedSurfaceMode", surfaceMode);
+                com.overdrive.app.config.UnifiedConfigManager.updateSection("camera", camCfg);
+                logger.info("Saved camera config for next launch");
+            } catch (Exception ex) {
+                logger.warn("Failed to save camera config: " + ex.getMessage());
+            }
+            new Thread(() -> {
+                try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
+                checkPendingRecording();
+            }, "PendingRecCheck").start();
+        });
         
         // Always 4-camera mosaic — both devices output the same strip format
         if (recorder != null) {

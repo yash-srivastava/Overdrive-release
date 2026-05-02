@@ -453,6 +453,17 @@ public class QualitySettingsApiHandler {
         response.put("recordingCodec", currentCodec);
         response.put("lastModified", lastModified);
         
+        // Camera FPS setting
+        int currentFps = 15;
+        try {
+            org.json.JSONObject cameraConfig = com.overdrive.app.config.UnifiedConfigManager
+                .loadConfig().optJSONObject("camera");
+            if (cameraConfig != null) {
+                currentFps = cameraConfig.optInt("targetFps", 15);
+            }
+        } catch (Exception e) { /* use default */ }
+        response.put("cameraFps", currentFps);
+        
         // Add bitrate info for UI
         JSONObject bitrateInfo = new JSONObject();
         bitrateInfo.put("LOW", "2 Mbps (~15-20 MB/2min)");
@@ -465,6 +476,13 @@ public class QualitySettingsApiHandler {
         codecInfo.put("H264", "H.264/AVC (Compatible)");
         codecInfo.put("H265", "H.265/HEVC (50% smaller)");
         response.put("codecOptions", codecInfo);
+        
+        // Add FPS options for UI
+        JSONObject fpsInfo = new JSONObject();
+        fpsInfo.put("8", "8 FPS (Low power)");
+        fpsInfo.put("15", "15 FPS (Balanced)");
+        fpsInfo.put("25", "25 FPS (Smooth)");
+        response.put("fpsOptions", fpsInfo);
         
         HttpResponse.sendJson(out, response.toString());
     }
@@ -508,6 +526,28 @@ public class QualitySettingsApiHandler {
                     recordingCodec = codec;
                     CameraDaemon.log("Recording codec set to: " + codec);
                     CameraDaemon.setRecordingCodec(codec);
+                }
+            }
+            
+            if (settings.has("cameraFps")) {
+                int fps = settings.getInt("cameraFps");
+                if (fps == 8 || fps == 15 || fps == 25) {
+                    // Save to unified config
+                    try {
+                        org.json.JSONObject camCfg = com.overdrive.app.config.UnifiedConfigManager
+                            .loadConfig().optJSONObject("camera");
+                        if (camCfg == null) camCfg = new org.json.JSONObject();
+                        camCfg.put("targetFps", fps);
+                        com.overdrive.app.config.UnifiedConfigManager.updateSection("camera", camCfg);
+                    } catch (Exception e) {
+                        CameraDaemon.log("Failed to save camera FPS: " + e.getMessage());
+                    }
+                    // Apply to running camera (takes effect on next camera open/restart)
+                    com.overdrive.app.surveillance.GpuSurveillancePipeline pipeline = CameraDaemon.getGpuPipeline();
+                    if (pipeline != null && pipeline.getCamera() != null) {
+                        pipeline.getCamera().setTargetFps(fps);
+                    }
+                    CameraDaemon.log("Camera FPS set to: " + fps + " (applies on next camera restart)");
                 }
             }
             

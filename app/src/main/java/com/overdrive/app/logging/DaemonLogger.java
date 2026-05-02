@@ -206,9 +206,11 @@ public class DaemonLogger {
             }
         }
         
-        // Print to stdout only for daemon processes running via app_process (not in app context)
+        // Print to stdout for daemon processes running via app_process.
+        // Include timestamp so the shell wrapper's log file has timestamps
+        // on every line, not just the wrapper's own echo statements.
         if (globalConfig.enableStdoutLog) {
-            System.out.println(tag + ": " + message);
+            System.out.println(tag + ": [" + timestamp + "] " + message);
         }
         
         // File log if enabled globally AND for this specific tag

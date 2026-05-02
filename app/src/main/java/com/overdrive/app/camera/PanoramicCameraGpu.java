@@ -35,7 +35,6 @@ public class PanoramicCameraGpu {
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
     private static final int PHYSICAL_CAMERA_ID = 1;
     private static final int MAX_CAMERA_ID = 5;     // Probe camera IDs 0-5
-    private static final int MAX_SURFACE_MODE = 5;  // Probe surface modes 0-5
     
     // AVMCamera surface mode — 0 works on Seal, Atto 1 may need different value
     // Set via setCameraSurfaceMode() before start() for per-model override
@@ -112,13 +111,24 @@ public class PanoramicCameraGpu {
     private volatile long lastGlThreadHeartbeat = 0;
     private Thread watchdogThread;
     private static final long GL_THREAD_TIMEOUT_MS = 3000;
+    // Extended timeout for initial camera warmup — the BYD panoramic camera HAL
+    // can take several seconds to deliver the first frame. During this period the
+    // GL thread is legitimately blocked on frameSync.wait(), not deadlocked.
+    private static final long GL_THREAD_WARMUP_TIMEOUT_MS = 10000;
+    private volatile boolean firstFrameReceived = false;
     
     // SOTA: BYD camera coordinator for cooperative sharing and error recovery
     private BydCameraCoordinator cameraCoordinator;
     private volatile boolean cameraYielded = false;
     
     // Camera health monitor — detects stalled frames and triggers recovery
-    private static final long FRAME_STALL_THRESHOLD_MS = 2000;  // 2 seconds without frames
+    private static final long FRAME_STALL_THRESHOLD_MS = 4000;  // 4 seconds without frames (HAL issue)
+    // When native app is active, use a longer threshold to avoid false yields
+    // from transient CPU/IO load. The HAL needs time to settle into sharing mode.
+    private static final long FRAME_STALL_CONTENTION_THRESHOLD_MS = 3000;
+    // Require consecutive stalls before yielding — a single stall could be transient
+    private static final int CONTENTION_STALL_COUNT_TO_YIELD = 2;
+    private volatile int consecutiveContentionStalls = 0;
     
     // SOTA: Pre-yield listener — pipeline registers this to finalize recordings before yield
     public interface CameraYieldListener {
@@ -136,6 +146,15 @@ public class PanoramicCameraGpu {
     // Stats logging (time-based, not frame-based)
     private long lastStatsTime = 0;
     private static final long STATS_INTERVAL_MS = 120000;  // Every 2 minutes
+    
+    // BINDER CAMERA BACKEND: Experimental — opens camera through bydcameramanager
+    // service. Tested on Seal: camera opens but TX codes don't match firmware
+    // (IBYDCameraService has user management only, no camera control).
+    // AVMCamera is the correct path for camera control on current firmware.
+    // Keep code for future firmware versions that may have different service API.
+    private boolean useBinderBackend = false;
+    private BinderCameraBackend binderBackend;
+    private int targetFps = 15;  // Desired frame rate for binder backend
     
     /**
      * Creates a GPU-based panoramic camera.
@@ -197,6 +216,14 @@ public class PanoramicCameraGpu {
                                 if (cameraCoordinator != null && cameraObj != null) {
                                     cameraCoordinator.resetEventCallbackState();
                                     cameraCoordinator.setupEventCallback(cameraObj);
+                                }
+                                
+                                // Restart encoder drainer thread — it was stopped during
+                                // onPreYield → stopRecording → closeEventRecording.
+                                // Without this, triggerEventRecording creates a muxer but
+                                // no thread dequeues frames from the encoder to write them.
+                                if (encoder != null) {
+                                    encoder.restartDrainerAfterCameraClose();
                                 }
                                 
                                 // SOTA: Notify pipeline to resume recording
@@ -413,7 +440,9 @@ public class PanoramicCameraGpu {
     }
     
     /**
-     * Starts the BYD camera via reflection.
+     * Starts the BYD camera.
+     * Uses binder backend (bydcameramanager service) when useBinderBackend is true,
+     * otherwise falls back to direct AVMCamera reflection.
      */
     private void startCamera() throws Exception {
         // GATE: Don't open camera if yielded to native app via IBYDCameraUser callback
@@ -423,8 +452,63 @@ public class PanoramicCameraGpu {
             return;
         }
 
-        // Open physical camera via AVMCamera
         int cameraId = cameraIdOverride >= 0 ? cameraIdOverride : PHYSICAL_CAMERA_ID;
+
+        if (useBinderBackend) {
+            startCameraViaBinderService(cameraId);
+        } else {
+            startCameraViaAvmReflection(cameraId);
+        }
+
+        cameraYielded = false;
+        logger.info("Camera started (" + width + "x" + height + 
+            ", id=" + cameraId + ", surfaceMode=" + cameraSurfaceMode + 
+            ", backend=" + (useBinderBackend ? "binder" : "avmcamera") + ")");
+        
+        // Update coordinator with actual camera ID
+        if (cameraCoordinator != null) {
+            cameraCoordinator.setActiveCameraId(cameraId);
+        }
+    }
+
+    /**
+     * Opens camera through bydcameramanager/bmmcameraserver binder service.
+     * The service manages buffer sharing with native apps, preventing glitches.
+     * Also supports frame rate control via SET_FRAME_RATE transaction.
+     */
+    private void startCameraViaBinderService(int cameraId) throws Exception {
+        if (binderBackend == null) {
+            binderBackend = new BinderCameraBackend();
+        }
+
+        boolean started = binderBackend.startCamera(
+            cameraId, cameraSurface, width, height, targetFps);
+
+        if (!started) {
+            logger.warn("Binder backend failed — falling back to AVMCamera reflection");
+            startCameraViaAvmReflection(cameraId);
+            return;
+        }
+
+        // No cameraObj in binder mode — the service owns the camera session
+        cameraObj = null;
+        logger.info("Camera opened via binder service (fps=" + targetFps + ")");
+    }
+
+    /**
+     * Opens camera via direct AVMCamera reflection (original approach).
+     * Notifies IBYDCameraService before opening so the service can arbitrate
+     * with native apps (reverse camera, dashcam, AVM parking view).
+     *
+     * Cooperative sharing: if native app already has the camera, we join as
+     * SECONDARY (skip startPreview/setCameraFps since preview is already running).
+     */
+    private void startCameraViaAvmReflection(int cameraId) throws Exception {
+        // Notify camera service we're about to open
+        if (cameraCoordinator != null) {
+            cameraCoordinator.notifyPreOpenCamera();
+        }
+
         Class<?> avmClass = Class.forName("android.hardware.AVMCamera");
         Constructor<?> constructor = avmClass.getDeclaredConstructor(int.class);
         constructor.setAccessible(true);
@@ -441,19 +525,16 @@ public class PanoramicCameraGpu {
         mAddSurface.setAccessible(true);
         mAddSurface.invoke(cameraObj, cameraSurface, cameraSurfaceMode);
         
-        // Start preview
+        // Set FPS (may return false on some HAL versions — non-fatal)
+        AvmCameraHelper.setCameraFps(cameraObj, targetFps);
+        
+        // Start preview — required on BYD Seal HAL for real frame data.
+        // Without startPreview, the HAL delivers buffer notifications but
+        // the actual pixel data is BLACK (uninitialized).
         Method mStart = avmClass.getDeclaredMethod("startPreview");
         mStart.setAccessible(true);
         mStart.invoke(cameraObj);
-        
-        cameraYielded = false;
-        logger.info("Camera started (" + width + "x" + height + 
-            ", id=" + cameraId + ", surfaceMode=" + cameraSurfaceMode + ")");
-        
-        // Update coordinator with actual camera ID
-        if (cameraCoordinator != null) {
-            cameraCoordinator.setActiveCameraId(cameraId);
-        }
+        logger.info("Camera opened (id=" + cameraId + ", targetFps=" + targetFps + ")");
     }
     
     /**
@@ -502,6 +583,8 @@ public class PanoramicCameraGpu {
             cameraSurfaceTexture.updateTexImage();
             frameCounter++;
             lastFrameTime = System.currentTimeMillis();
+            firstFrameReceived = true;
+            consecutiveContentionStalls = 0;  // Frames flowing — clear stall counter
             
             // SOTA: Full-matrix auto-probe at frame 15 (~2 sec).
             // Sweeps camera IDs 0-5 × surface modes 0-5 to find the first
@@ -664,8 +747,8 @@ public class PanoramicCameraGpu {
                     aiFrameSkip = newSkip;
                 }
                 
-                logger.info(String.format("Stats: %d frames, %.1f FPS, uptime=%ds, aiSkip=%d",
-                        frameCounter, fps, elapsed / 1000, aiFrameSkip));
+                logger.info(String.format("Stats: %d frames, %.1f FPS (target=%d), uptime=%ds, aiSkip=%d",
+                        frameCounter, fps, targetFps, elapsed / 1000, aiFrameSkip));
             }
 
         } catch (Exception e) {
@@ -683,83 +766,84 @@ public class PanoramicCameraGpu {
     }
     
     /**
-     * SOTA: Advance to the next camera ID × surface mode combination during probe.
-     * Walks the matrix: (0,0) → (1,0) → ... → (5,0) → (0,1) → (1,1) → ... → (5,5).
-     * Surface mode is the outer loop because camera ID changes are cheaper than
-     * surface mode changes (surface mode affects the HAL's internal demux pipeline).
+     * SOTA: Advance to the next camera ID during probe.
+     * Surface mode 0 is confirmed working on all tested models — only probe camera IDs 0-5.
      * 
      * @param skipId Camera ID to skip (the one we just tested). -1 to start fresh.
      */
     private void advanceProbeToNext(int skipId) {
-        // Close current camera cleanly (simple close — no disablePreviewCallback)
+        // Close current camera cleanly
         if (cameraObj != null) {
             try {
-                Class<?> avmClass = Class.forName("android.hardware.AVMCamera");
-                Method mStop = avmClass.getDeclaredMethod("stopPreview");
-                mStop.setAccessible(true);
-                mStop.invoke(cameraObj);
-                Method mClose = avmClass.getDeclaredMethod("close");
-                mClose.setAccessible(true);
-                mClose.invoke(cameraObj);
+                BydCameraCoordinator.closeCamera(cameraObj, cameraSurfaceMode);
             } catch (Exception closeEx) {
                 logger.warn("Error closing camera for probe: " + closeEx.getMessage());
             }
             cameraObj = null;
+            if (cameraCoordinator != null) {
+                cameraCoordinator.resetEventCallbackState();
+            }
+        } else if (binderBackend != null && binderBackend.isCameraOpen()) {
+            binderBackend.stopCamera();
+            if (cameraCoordinator != null) {
+                cameraCoordinator.resetEventCallbackState();
+            }
         }
         
-        // Find next valid combination
+        // CRITICAL: Let the BYD camera HAL settle between close and next open.
+        // Without this delay, rapid camera cycling overwhelms the HAL service
+        // and triggers a system watchdog reboot.
+        try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
+        
+        // Probe camera IDs 0-5 with surface mode 0 (confirmed working on all models)
         boolean found = false;
-        while (probeNextSurfaceMode <= MAX_SURFACE_MODE) {
-            while (probeNextCameraId <= MAX_CAMERA_ID) {
-                int tryId = probeNextCameraId;
-                int tryMode = probeNextSurfaceMode;
-                probeNextCameraId++;
-                
-                // Skip the combo we just tested (if same surface mode)
-                if (tryId == skipId && tryMode == cameraSurfaceMode) {
-                    continue;
-                }
-                
-                logger.info("Auto-probe: trying camera ID " + tryId + 
-                    ", surfaceMode " + tryMode + 
-                    " [" + (tryMode * (MAX_CAMERA_ID + 1) + tryId + 1) + 
-                    "/" + ((MAX_CAMERA_ID + 1) * (MAX_SURFACE_MODE + 1)) + "]");
-                
-                cameraIdOverride = tryId;
-                cameraSurfaceMode = tryMode;
-                frameCounter = 0;
-                lastGlThreadHeartbeat = System.currentTimeMillis();
-                
-                // Recreate SurfaceTexture — HAL won't deliver continuous frames
-                // to a Surface previously connected to a different camera/mode
-                recreateCameraSurface();
-                lastGlThreadHeartbeat = System.currentTimeMillis();
-                
-                try {
-                    startCamera();
-                    if (cameraCoordinator != null && cameraObj != null) {
-                        cameraCoordinator.setupEventCallback(cameraObj);
-                    }
-                    found = true;
-                    break;
-                } catch (Exception e) {
-                    // Camera ID doesn't exist or can't open — skip to next
-                    logger.info("Auto-probe: camera ID " + tryId + 
-                        " surfaceMode " + tryMode + " failed to open: " + e.getMessage());
-                    cameraObj = null;
-                    continue;
-                }
+        while (probeNextCameraId <= MAX_CAMERA_ID) {
+            int tryId = probeNextCameraId;
+            probeNextCameraId++;
+            
+            // Skip the ID we just tested
+            if (tryId == skipId) {
+                continue;
             }
-            if (found) break;
-            // Move to next surface mode, reset camera ID
-            probeNextCameraId = 0;
-            probeNextSurfaceMode++;
+            
+            logger.info("Auto-probe: trying camera ID " + tryId + 
+                " [" + (tryId + 1) + "/" + (MAX_CAMERA_ID + 1) + "]");
+            
+            cameraIdOverride = tryId;
+            cameraSurfaceMode = 0;  // Surface mode 0 confirmed working
+            frameCounter = 0;
+            lastGlThreadHeartbeat = System.currentTimeMillis();
+            
+            // Recreate SurfaceTexture — HAL won't deliver continuous frames
+            // to a Surface previously connected to a different camera/mode
+            recreateCameraSurface();
+            lastGlThreadHeartbeat = System.currentTimeMillis();
+            
+            try {
+                // Brief pause before opening next camera — HAL needs time to release resources
+                try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+                
+                startCamera();
+                // Setup event callback (only for AVMCamera path — binder service handles its own events)
+                if (cameraCoordinator != null && cameraObj != null) {
+                    cameraCoordinator.setupEventCallback(cameraObj);
+                }
+                found = true;
+                break;
+            } catch (Exception e) {
+                // Camera ID doesn't exist or can't open — skip to next
+                logger.info("Auto-probe: camera ID " + tryId + " failed to open: " + e.getMessage());
+                cameraObj = null;
+                // Delay before trying next combo to avoid HAL overload
+                try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+                continue;
+            }
         }
         
         if (!found) {
             logger.error("Auto-probe: exhausted all " + 
-                ((MAX_CAMERA_ID + 1) * (MAX_SURFACE_MODE + 1)) + 
-                " camera ID × surfaceMode combinations — no working panoramic camera found");
+                (MAX_CAMERA_ID + 1) + 
+                " camera IDs — no working panoramic camera found");
             autoProbeCameras = false;
             probeStartId = -1;
             // Ungate consumers even on failure — better to record whatever we have
@@ -778,6 +862,7 @@ public class PanoramicCameraGpu {
      */
     private void startWatchdog() {
         lastGlThreadHeartbeat = System.currentTimeMillis();
+        firstFrameReceived = false;
         
         watchdogThread = new Thread(() -> {
             while (running) {
@@ -787,9 +872,22 @@ public class PanoramicCameraGpu {
                     long now = System.currentTimeMillis();
                     long timeSinceHeartbeat = now - lastGlThreadHeartbeat;
                     
-                    if (timeSinceHeartbeat > GL_THREAD_TIMEOUT_MS) {
+                    // Use extended timeout until the first camera frame arrives.
+                    // The BYD panoramic camera HAL can take 5-8 seconds to deliver
+                    // the first frame after open. During this period the GL thread
+                    // is blocked on frameSync.wait(100) which still updates the
+                    // heartbeat, but if the HAL is slow to even accept the surface
+                    // (e.g., I/O contention from MediaScanner broadcasts), the
+                    // heartbeat can stall. Killing the process here just causes a
+                    // restart loop that makes things worse.
+                    long effectiveTimeout = firstFrameReceived 
+                            ? GL_THREAD_TIMEOUT_MS 
+                            : GL_THREAD_WARMUP_TIMEOUT_MS;
+                    
+                    if (timeSinceHeartbeat > effectiveTimeout) {
                         logger.error( "CRITICAL: GL thread blocked for " + timeSinceHeartbeat + 
-                                "ms - forcing process restart");
+                                "ms - forcing process restart" +
+                                (firstFrameReceived ? "" : " (during camera warmup)"));
                         
                         // Try to flush logs before exit
                         try {
@@ -804,33 +902,57 @@ public class PanoramicCameraGpu {
                     // SOTA: Frame health monitor — detect stalled camera feed
                     // If GL thread is alive but no new frames for FRAME_STALL_THRESHOLD_MS,
                     // the camera HAL may be starved or dead.
-                    // Decision is contention-aware: if native app is active, yield.
-                    // If native app is NOT active, restart camera (HAL issue).
+                    // Decision is contention-aware: if native app is active, use longer
+                    // threshold and require consecutive stalls before yielding.
                     if (!cameraYielded && lastFrameTime > 0 && 
                         timeSinceHeartbeat < GL_THREAD_TIMEOUT_MS) {
                         long timeSinceFrame = now - lastFrameTime;
-                        if (timeSinceFrame > FRAME_STALL_THRESHOLD_MS) {
-                            logger.warn("FRAME STALL: No frames for " + timeSinceFrame + "ms");
+                        
+                        // Use longer threshold when native app is active — transient
+                        // CPU/IO stalls shouldn't trigger a yield that interrupts recording
+                        boolean nativeActive = cameraCoordinator != null && 
+                            cameraCoordinator.isNativeAppActive();
+                        long stallThreshold = nativeActive 
+                            ? FRAME_STALL_CONTENTION_THRESHOLD_MS 
+                            : FRAME_STALL_THRESHOLD_MS;
+                        
+                        if (timeSinceFrame > stallThreshold) {
+                            logger.warn("FRAME STALL: No frames for " + timeSinceFrame + "ms" +
+                                (nativeActive ? " (native app active)" : ""));
                             // Reset lastFrameTime to prevent repeated triggers
                             lastFrameTime = now;
                             
                             if (cameraCoordinator != null) {
-                                // Ask coordinator: is this contention or a HAL issue?
-                                boolean didYield = cameraCoordinator.onFrameStallDetected();
-                                if (!didYield) {
-                                    // Not contention — restart camera
+                                if (nativeActive) {
+                                    // Contention path: require consecutive stalls before yielding
+                                    consecutiveContentionStalls++;
+                                    if (consecutiveContentionStalls >= CONTENTION_STALL_COUNT_TO_YIELD) {
+                                        logger.warn("Consecutive contention stalls: " + 
+                                            consecutiveContentionStalls + " — yielding camera");
+                                        consecutiveContentionStalls = 0;
+                                        cameraCoordinator.onFrameStallDetected();
+                                    } else {
+                                        logger.info("Contention stall " + consecutiveContentionStalls + 
+                                            "/" + CONTENTION_STALL_COUNT_TO_YIELD + 
+                                            " — waiting for more evidence before yielding");
+                                    }
+                                } else {
+                                    // No native app — this is a HAL issue, restart camera
+                                    consecutiveContentionStalls = 0;
                                     logger.info("Frame stall is HAL issue — restarting camera");
                                     if (glHandler != null) {
                                         glHandler.post(() -> restartCameraAfterError());
                                     }
                                 }
-                                // If yielded, coordinator will handle re-acquire via onCloseCamera
                             } else {
                                 // No coordinator — just restart
                                 if (glHandler != null) {
                                     glHandler.post(() -> restartCameraAfterError());
                                 }
                             }
+                        } else if (nativeActive && timeSinceFrame < 500) {
+                            // Frames are flowing despite native app — reset stall counter
+                            consecutiveContentionStalls = 0;
                         }
                     }
                     
@@ -844,7 +966,10 @@ public class PanoramicCameraGpu {
         watchdogThread.start();
         
         logger.info( "GL thread watchdog started (timeout=" + GL_THREAD_TIMEOUT_MS + "ms, " +
-            "frameStall=" + FRAME_STALL_THRESHOLD_MS + "ms)");
+            "warmupTimeout=" + GL_THREAD_WARMUP_TIMEOUT_MS + "ms, " +
+            "frameStall=" + FRAME_STALL_THRESHOLD_MS + "ms, " +
+            "cameraId=" + (cameraIdOverride >= 0 ? cameraIdOverride : PHYSICAL_CAMERA_ID) + ", " +
+            "probe=" + (autoProbeCameras ? "ACTIVE" : "OFF") + ")");
     }
     
     /**
@@ -875,19 +1000,38 @@ public class PanoramicCameraGpu {
             clearStreamingComponents();
         }
         
-        // Wait for ALL encoder drainer threads to fully stop.
-        // The FORTIFY crash happens when a drainer thread accesses the camera's
-        // SurfaceTexture (via EGL) after the camera's native mutex is destroyed.
-        // 500ms is conservative but prevents the race condition.
-        try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+        // FORTIFY FIX: Stop encoder drainer threads BEFORE closing camera.
+        // The drainer thread calls MediaCodec.dequeueOutputBuffer() which internally
+        // accesses the camera's SurfaceTexture buffer queue via EGL. If we destroy
+        // the camera (and its native mutex) while the drainer is mid-dequeue,
+        // we get: FORTIFY: pthread_mutex_lock called on a destroyed mutex
+        if (encoder != null) {
+            encoder.stopDrainerForCameraClose();
+        }
+        if (streamEncoder != null) {
+            streamEncoder.stopDrainerForCameraClose();
+        }
         
         if (cameraObj != null) {
             BydCameraCoordinator.closeCamera(cameraObj, cameraSurfaceMode);
             cameraObj = null;
             if (cameraCoordinator != null) {
                 cameraCoordinator.resetEventCallbackState();
+                cameraCoordinator.notifyPosCloseCamera();
             }
             logger.info("Camera yielded — GL pipeline idle, waiting for onCloseCamera");
+        } else if (binderBackend != null && binderBackend.isCameraOpen()) {
+            binderBackend.stopCamera();
+            if (cameraCoordinator != null) {
+                cameraCoordinator.resetEventCallbackState();
+                cameraCoordinator.notifyPosCloseCamera();
+            }
+            logger.info("Camera yielded (binder) — GL pipeline idle, waiting for onCloseCamera");
+        }
+        
+        // Restart drainer threads after camera is closed (for pre-record buffer)
+        if (encoder != null) {
+            encoder.restartDrainerAfterCameraClose();
         }
     }
     
@@ -903,8 +1047,6 @@ public class PanoramicCameraGpu {
         
         try {
             // CRITICAL: Finalize active recording BEFORE closing camera.
-            // If the encoder is still consuming frames when we destroy the camera's
-            // native mutex, we get a FORTIFY abort (pthread_mutex_lock on destroyed mutex).
             if (yieldListener != null) {
                 try {
                     yieldListener.onPreYield();
@@ -914,24 +1056,33 @@ public class PanoramicCameraGpu {
                 }
             }
             
-            // CRITICAL: Detach streaming components so the stream encoder's drainer
-            // thread stops trying to read from the camera's SurfaceTexture.
-            // Without this, the drainer thread hits the destroyed mutex → FORTIFY crash.
+            // Detach streaming components
             if (streamScaler != null || streamEncoder != null) {
                 clearStreamingComponents();
                 logger.info("Pre-restart: streaming components detached");
             }
             
-            // Wait for encoder drainer threads to fully stop after detach
-            // 500ms prevents FORTIFY crash (pthread_mutex_lock on destroyed mutex)
-            Thread.sleep(500);
+            // FORTIFY FIX: Stop encoder drainer threads BEFORE closing camera.
+            if (encoder != null) {
+                encoder.stopDrainerForCameraClose();
+            }
+            if (streamEncoder != null) {
+                streamEncoder.stopDrainerForCameraClose();
+            }
             
-            // Close with proper cleanup
+            // Close with proper cleanup + notify service
             if (cameraObj != null) {
                 BydCameraCoordinator.closeCamera(cameraObj, cameraSurfaceMode);
                 cameraObj = null;
                 if (cameraCoordinator != null) {
                     cameraCoordinator.resetEventCallbackState();
+                    cameraCoordinator.notifyPosCloseCamera();
+                }
+            } else if (binderBackend != null && binderBackend.isCameraOpen()) {
+                binderBackend.stopCamera();
+                if (cameraCoordinator != null) {
+                    cameraCoordinator.resetEventCallbackState();
+                    cameraCoordinator.notifyPosCloseCamera();
                 }
             }
             
@@ -950,6 +1101,11 @@ public class PanoramicCameraGpu {
             
             // Reopen
             startCamera();
+            
+            // Restart encoder drainer now that camera is open again
+            if (encoder != null) {
+                encoder.restartDrainerAfterCameraClose();
+            }
             
             // Re-register event callback
             if (cameraCoordinator != null && cameraObj != null) {
@@ -992,11 +1148,26 @@ public class PanoramicCameraGpu {
             cameraCoordinator.unregister();
         }
         
-        // SOTA: Proper cleanup order — disablePreviewCallback → stopPreview → close
-        // Skipping disablePreviewCallback leaves the HAL dirty and triggers micro system update
+        // FORTIFY FIX: Stop encoder drainer threads BEFORE closing camera
+        if (encoder != null) {
+            encoder.stopDrainerForCameraClose();
+        }
+        if (streamEncoder != null) {
+            streamEncoder.stopDrainerForCameraClose();
+        }
+        
+        // Close camera with proper cleanup + notify service
         if (cameraObj != null) {
             BydCameraCoordinator.closeCamera(cameraObj, cameraSurfaceMode);
             cameraObj = null;
+            if (cameraCoordinator != null) {
+                cameraCoordinator.notifyPosCloseCamera();
+            }
+        }
+        
+        // Binder backend cleanup
+        if (binderBackend != null) {
+            binderBackend.stopCamera();
         }
         
         // Cleanup on GL thread
@@ -1244,6 +1415,52 @@ public class PanoramicCameraGpu {
     public void setCameraId(int id) {
         this.cameraIdOverride = id;
         logger.info("Camera ID override set to: " + id);
+    }
+    
+    /**
+     * Enables the binder camera backend (bydcameramanager service).
+     * When enabled, camera is opened through the system service instead of
+     * direct AVMCamera reflection. This prevents glitching native camera apps
+     * and enables frame rate control.
+     * Must be called before start().
+     */
+    public void setUseBinderBackend(boolean enabled) {
+        this.useBinderBackend = enabled;
+        logger.info("Binder camera backend: " + (enabled ? "ENABLED" : "DISABLED"));
+    }
+    
+    /**
+     * Whether the binder camera backend is enabled.
+     */
+    public boolean isUseBinderBackend() {
+        return useBinderBackend;
+    }
+    
+    /**
+     * Sets the target frame rate for the binder camera backend.
+     * Only effective when binder backend is enabled.
+     * Must be called before start().
+     * 
+     * @param fps Desired frames per second (e.g., 15, 25)
+     */
+    public void setTargetFps(int fps) {
+        this.targetFps = fps;
+        logger.info("Target FPS set to: " + fps);
+    }
+    
+    /**
+     * Gets the target FPS setting.
+     */
+    public int getTargetFps() {
+        return targetFps;
+    }
+    
+    /**
+     * Gets the binder camera backend instance (for diagnostics).
+     * Returns null if binder backend is not enabled.
+     */
+    public BinderCameraBackend getBinderBackend() {
+        return binderBackend;
     }
     
     /**

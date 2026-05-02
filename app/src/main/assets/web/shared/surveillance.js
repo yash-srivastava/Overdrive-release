@@ -94,9 +94,15 @@ BYD.surveillance = {
     async init() {
         await this.loadConfig();
         await this.loadStorageStats();
+        await this.loadCameraFps();
         this.savedConfig = JSON.parse(JSON.stringify(this.config));
         this.updateUI();
         this.startClock();
+        
+        // Load BYD Cloud status
+        if (window.BydCloud) {
+            BydCloud.loadStatus();
+        }
         
         // Show CDR cleanup card if SD card is selected on load
         this.updateCdrCleanupVisibility();
@@ -214,6 +220,40 @@ BYD.surveillance = {
             }
         } catch (e) {
             console.warn('Failed to load storage stats:', e);
+        }
+    },
+    
+    async loadCameraFps() {
+        try {
+            const resp = await fetch('/api/settings/quality');
+            const data = await resp.json();
+            if (data.success) {
+                this.config.cameraFps = data.cameraFps || 15;
+            }
+        } catch (e) {
+            console.warn('Failed to load camera FPS:', e);
+            this.config.cameraFps = 15;
+        }
+    },
+    
+    async setFps(fps) {
+        this.config.cameraFps = fps;
+        document.querySelectorAll('#survFpsBtns .btn-toggle').forEach(btn => 
+            btn.classList.toggle('active', btn.dataset.value === String(fps)));
+        
+        // Save immediately via quality API (shared with recording page)
+        try {
+            await fetch('/api/settings/quality', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cameraFps: fps })
+            });
+            if (BYD.utils && BYD.utils.toast) {
+                BYD.utils.toast('Camera FPS set to ' + fps + ' — takes effect on next ACC OFF', 'success');
+            }
+        } catch (e) {
+            console.error('Failed to save FPS:', e);
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to save FPS', 'error');
         }
     },
     
@@ -611,11 +651,18 @@ BYD.surveillance = {
         document.querySelectorAll('#codecBtns .btn-toggle').forEach(btn => 
             btn.classList.toggle('active', btn.dataset.value === this.config.recordingCodec));
         
+        // Camera FPS buttons
+        document.querySelectorAll('#survFpsBtns .btn-toggle').forEach(btn => 
+            btn.classList.toggle('active', btn.dataset.value === String(this.config.cameraFps || 15)));
+        
         this.updateStorageLimitUI();
         this.updateFileSizeEstimate();
         
         // V2 Motion Detection UI
         this.updateV2UI();
+        
+        // Deterrent Action UI
+        this.updateDeterrentUI();
         
         // Reset Apply button state after UI update (no unsaved changes after load)
         this.hasUnsavedChanges = false;
@@ -1346,8 +1393,254 @@ BYD.surveillance = {
         // not the user's preference. Surveillance can be enabled (preference=true) but not
         // active (gpuSurveillance=false) when ACC is ON. The toggle reflects the preference,
         // which is loaded from the config API, not from status.
+    },
+
+    // ── Deterrent Action ────────────────────────────────────────────────
+
+    updateDeterrent(value) {
+        this.config.deterrentAction = value;
+        // Save immediately (deterrent is independent of the Apply button)
+        fetch('/api/surveillance/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ deterrentAction: value })
+        }).then(() => {
+            this.updateDeterrentUI();
+        }).catch(e => console.warn('Failed to save deterrent:', e));
+    },
+
+    updateDeterrentUI() {
+        const action = this.config.deterrentAction || 'silent';
+        const select = document.getElementById('deterrentAction');
+        if (select) select.value = action;
+
+        const badge = document.getElementById('deterrentBadge');
+        if (badge) {
+            const labels = { silent: 'SILENT', flash_lights: 'FLASH', find_car: 'HORN' };
+            badge.textContent = labels[action] || 'SILENT';
+            badge.className = 'status-badge ' + (action === 'silent' ? 'inactive' : 'active');
+        }
+
+        // Show warning if cloud action selected but not configured
+        const warning = document.getElementById('deterrentWarning');
+        if (warning) {
+            const needsCloud = action !== 'silent';
+            const configured = this.config.bydCloudEnabled;
+            warning.style.display = (needsCloud && !configured) ? 'block' : 'none';
+        }
     }
 };
 
 // Alias for backward compatibility
 window.SurvSettings = BYD.surveillance;
+
+// ── BYD Cloud Account Setup ─────────────────────────────────────────────
+
+window.BydCloud = {
+    isConfigured: false,
+
+    async loadStatus() {
+        try {
+            const resp = await fetch('/api/bydcloud/status');
+            const data = await resp.json();
+            if (data.success && data.status) {
+                this.isConfigured = data.status.configured;
+                this.updateStatusUI(data.status);
+            }
+        } catch (e) {
+            console.warn('Failed to load BYD Cloud status:', e);
+        }
+    },
+
+    updateStatusUI(status) {
+        const badge = document.getElementById('bydCloudBadge');
+        const info = document.getElementById('bydCloudInfo');
+        const clearSection = document.getElementById('bydClearSection');
+        const testBtn = document.getElementById('bydTestBtn');
+        const saveBtn = document.getElementById('bydSaveBtn');
+        const emailInput = document.getElementById('bydEmail');
+        const pwdHint = document.getElementById('bydPasswordHint');
+        const pinHint = document.getElementById('bydPinHint');
+        const pwdInput = document.getElementById('bydPassword');
+        const pinInput = document.getElementById('bydPin');
+
+        if (status.verified) {
+            this.isConfigured = true;
+            if (badge) { badge.textContent = '\u25cf CONNECTED'; badge.className = 'status-badge active'; }
+            if (info) {
+                info.style.display = 'block';
+                document.getElementById('bydVinDisplay').textContent = status.vin || '\u2014';
+                document.getElementById('bydAccountDisplay').textContent = status.username || '\u2014';
+            }
+            if (clearSection) clearSection.style.display = 'block';
+            if (testBtn) { testBtn.disabled = false; testBtn.style.color = 'var(--text-primary)'; testBtn.style.borderColor = 'var(--brand-primary)'; }
+            if (emailInput) emailInput.value = status.username || '';
+            var regionSelect = document.getElementById('bydRegion');
+            if (regionSelect && status.region) regionSelect.value = status.region;
+            if (pwdInput) pwdInput.placeholder = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022  (leave blank to keep)';
+            if (pinInput) pinInput.placeholder = '\u2022\u2022\u2022\u2022\u2022\u2022';
+            if (pwdHint) pwdHint.textContent = 'Leave blank to keep current password';
+            if (pinHint) pinHint.textContent = 'Leave blank to keep current PIN';
+            if (saveBtn) saveBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Update Credentials';
+        } else {
+            this.isConfigured = status.configured || false;
+            if (status.configured && !status.verified) {
+                if (badge) { badge.textContent = 'SAVED'; badge.className = 'status-badge inactive'; }
+            } else {
+                if (badge) { badge.textContent = 'NOT SET'; badge.className = 'status-badge inactive'; }
+            }
+            if (info) info.style.display = 'none';
+            if (clearSection) clearSection.style.display = 'none';
+            if (testBtn) { testBtn.disabled = true; testBtn.style.color = 'var(--text-muted)'; testBtn.style.borderColor = 'var(--border-default)'; }
+            if (pwdInput) pwdInput.placeholder = 'BYD app password';
+            if (pinInput) pinInput.placeholder = '123456';
+            if (pwdHint) pwdHint.textContent = 'Your BYD app login password';
+            if (pinHint) pinHint.textContent = 'The 4-6 digit PIN you set in the official BYD app';
+            if (saveBtn) saveBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save Credentials';
+        }
+
+        BYD.surveillance.config.bydCloudEnabled = status.verified || false;
+        BYD.surveillance.updateDeterrentUI();
+    },
+
+    async saveCredentials() {
+        const email = document.getElementById('bydEmail').value.trim();
+        const password = document.getElementById('bydPassword').value.trim();
+        const pin = document.getElementById('bydPin').value.trim();
+        const region = document.getElementById('bydRegion').value;
+        const saveBtn = document.getElementById('bydSaveBtn');
+
+        if (!email) { this.showStatus('Email is required', 'error'); return; }
+        if (!this.isConfigured && (!password || !pin)) {
+            this.showStatus('Password and control PIN are required for first setup', 'error');
+            return;
+        }
+
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+        this.showStatus('Saving credentials and testing login...', 'info');
+
+        try {
+            const body = { username: email, region: region };
+            if (password) body.password = password;
+            if (pin) body.controlPin = pin;
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(function() { controller.abort(); }, 30000);
+
+            const resp = await fetch('/api/bydcloud/setup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            const data = await resp.json();
+
+            if (data.success) {
+                this.showStatus('\u2713 Saved and verified! VIN: ' + data.vin, 'success');
+                document.getElementById('bydPassword').value = '';
+                document.getElementById('bydPin').value = '';
+            } else {
+                this.showStatus('\u2717 ' + (data.error || 'Save failed'), 'error');
+            }
+        } catch (e) {
+            if (e.name === 'AbortError') {
+                this.showStatus('Request is taking long... checking status in a moment', 'info');
+                // The server might still be processing — wait and check
+                await new Promise(function(r) { setTimeout(r, 5000); });
+            } else {
+                this.showStatus('\u2717 Network error: ' + e.message, 'error');
+            }
+        } finally {
+            saveBtn.disabled = false;
+            await this.loadStatus();
+        }
+    },
+
+    async testConnection() {
+        const testBtn = document.getElementById('bydTestBtn');
+        testBtn.disabled = true;
+        testBtn.textContent = 'Testing...';
+        this.showStatus('Logging in and flashing lights...', 'info');
+
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(function() { controller.abort(); }, 30000);
+
+            const resp = await fetch('/api/bydcloud/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'flash_lights' }),
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            const data = await resp.json();
+            if (data.success) {
+                this.showStatus('\u2713 Flash command sent \u2014 check your car!', 'success');
+            } else {
+                this.showStatus('\u2717 ' + (data.error || 'Test failed'), 'error');
+            }
+        } catch (e) {
+            if (e.name === 'AbortError') {
+                this.showStatus('Command may have been sent \u2014 check your car', 'info');
+            } else {
+                this.showStatus('\u2717 ' + e.message, 'error');
+            }
+        } finally {
+            testBtn.disabled = false;
+            testBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg> Test Connection';
+        }
+    },
+
+    async clearCredentials() {
+        if (!confirm('Clear BYD Cloud credentials?\n\nDeterrent actions (flash lights, horn) will stop working until you set up again.')) return;
+
+        try {
+            await fetch('/api/bydcloud/clear', { method: 'POST' });
+            this.showStatus('Credentials cleared', 'info');
+            document.getElementById('bydEmail').value = '';
+            document.getElementById('bydPassword').value = '';
+            document.getElementById('bydPin').value = '';
+            const deterrentSelect = document.getElementById('deterrentAction');
+            if (deterrentSelect && deterrentSelect.value !== 'silent') {
+                deterrentSelect.value = 'silent';
+                BYD.surveillance.updateDeterrent('silent');
+            }
+            await this.loadStatus();
+        } catch (e) {
+            this.showStatus('\u2717 ' + e.message, 'error');
+        }
+    },
+
+    showStatus(message, type) {
+        const div = document.getElementById('bydCloudStatus');
+        if (!div) return;
+        div.style.display = 'block';
+        div.textContent = message;
+        const colors = {
+            success: { bg: 'rgba(34,197,94,0.1)', border: '#22c55e', color: '#16a34a' },
+            error:   { bg: 'rgba(239,68,68,0.1)', border: '#ef4444', color: '#dc2626' },
+            info:    { bg: 'rgba(59,130,246,0.1)', border: '#3b82f6', color: '#2563eb' }
+        };
+        const c = colors[type] || colors.info;
+        div.style.background = c.bg;
+        div.style.borderLeft = '3px solid ' + c.border;
+        div.style.color = c.color;
+        if (type !== 'error') {
+            setTimeout(function() { if (div.textContent === message) div.style.display = 'none'; }, 8000);
+        }
+    },
+
+    togglePasswordVisibility(inputId, btn) {
+        const input = document.getElementById(inputId);
+        if (!input) return;
+        if (input.type === 'password') {
+            input.type = 'text';
+            btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+        } else {
+            input.type = 'password';
+            btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+        }
+    }
+};

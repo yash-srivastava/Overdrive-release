@@ -13,6 +13,7 @@ BYD.recording = {
         streamingQuality: 'LQ',
         recordingBitrate: 'MEDIUM',
         recordingCodec: 'H264',
+        cameraFps: 15,
         recordingsLimitMb: 500,
         recordingsStorageType: 'INTERNAL',
         recordingMode: 'NONE',
@@ -85,6 +86,7 @@ BYD.recording = {
                     this.config.streamingQuality = data.streamingQuality || 'LQ';
                     this.config.recordingBitrate = data.recordingBitrate || 'MEDIUM';
                     this.config.recordingCodec = data.recordingCodec || 'H264';
+                    this.config.cameraFps = data.cameraFps || 15;
                     this.savedConfig = JSON.parse(JSON.stringify(this.config));
                     this.lastConfigTimestamp = newTimestamp;
                     this.updateUI();
@@ -146,6 +148,7 @@ BYD.recording = {
                 this.config.streamingQuality = data.streamingQuality || 'LQ';
                 this.config.recordingBitrate = data.recordingBitrate || 'MEDIUM';
                 this.config.recordingCodec = data.recordingCodec || 'H264';
+                this.config.cameraFps = data.cameraFps || 15;
                 this.lastConfigTimestamp = data.lastModified || Date.now();
             }
         } catch (e) {}
@@ -550,6 +553,8 @@ BYD.recording = {
             btn.classList.toggle('active', btn.dataset.value === this.config.recordingBitrate));
         document.querySelectorAll('#codecBtns .btn-toggle').forEach(btn => 
             btn.classList.toggle('active', btn.dataset.value === this.config.recordingCodec));
+        document.querySelectorAll('#fpsBtns .btn-toggle').forEach(btn => 
+            btn.classList.toggle('active', btn.dataset.value === String(this.config.cameraFps)));
         
         // Update recording mode radio buttons
         const modeRadio = document.querySelector(`input[name="recordingMode"][value="${this.config.recordingMode}"]`);
@@ -659,6 +664,13 @@ BYD.recording = {
         this.markChanged();
     },
 
+    setFps(fps) {
+        this.config.cameraFps = fps;
+        document.querySelectorAll('#fpsBtns .btn-toggle').forEach(btn => 
+            btn.classList.toggle('active', btn.dataset.value === String(fps)));
+        this.markChanged();
+    },
+
     updateFileSizeEstimate() {
         const bitrateMap = { 'LOW': 2, 'MEDIUM': 3, 'HIGH': 6 };
         const sizeMB = (bitrateMap[this.config.recordingBitrate] || 3) * 120 / 8 * 
@@ -685,7 +697,8 @@ BYD.recording = {
                     recordingQuality: this.config.recordingQuality,
                     streamingQuality: this.config.streamingQuality,
                     recordingBitrate: this.config.recordingBitrate,
-                    recordingCodec: this.config.recordingCodec
+                    recordingCodec: this.config.recordingCodec,
+                    cameraFps: this.config.cameraFps
                 })
             });
             const data = await resp.json();
@@ -744,6 +757,9 @@ BYD.recording = {
             
             let msg = 'Settings applied';
             if (this.config.recordingCodec === 'H265') msg += ' - H.265 will apply on next recording';
+            if (this.config.cameraFps !== (this.savedConfig ? this.savedConfig.cameraFps : 15)) {
+                msg += ' - FPS change takes effect on next ACC ON';
+            }
             
             // Show cleanup info if files will be deleted
             if (storageData.cleanup && storageData.cleanup.recordingsToDelete) {

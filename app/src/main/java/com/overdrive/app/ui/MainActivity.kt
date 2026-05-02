@@ -176,6 +176,14 @@ class MainActivity : AppCompatActivity() {
         
         // Status overlay: start immediately if permission granted, show guide if not
         startStatusOverlay()
+        
+        // If launched from boot receiver with minimize flag, move to back immediately.
+        // This keeps the process alive (important for daemon stability) without
+        // showing the app UI over the BYD home screen.
+        if (intent?.getBooleanExtra("minimize_on_start", false) == true) {
+            android.util.Log.i("MainActivity", "Boot launch — minimizing to background")
+            moveTaskToBack(true)
+        }
     }
     
     /**

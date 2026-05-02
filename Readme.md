@@ -192,7 +192,94 @@ If you want to use Zrok tunneling for remote access, you need your own Zrok invi
 - [Discord Server](https://discord.gg/PZutk9fg4h)
 - [Report Issues](https://github.com/yash-srivastava/Overdrive-release/issues)
 
+## Acknowledgments
+
+- **Native Bangcle Crypto Engine** — Full Java port of BYD's proprietary white-box AES encryption, based on the reverse engineering work by [Niek/BYD-re](https://github.com/Niek/BYD-re) and [jkaberg/pyBYD](https://github.com/jkaberg/pyBYD). Zero new dependencies — uses the existing OkHttp stack and Java crypto libraries.
+
 ## Changelog
+
+### v11 — May 2026: BYD Cloud Deterrent, Sentry Mode Alarm & Pipeline Fixes
+
+**✨ New Features**
+- **BYD Cloud Deterrent** — When surveillance detects a confirmed threat, OverDrive can now automatically flash the car's headlights or honk the horn via BYD's cloud API. Three modes available: Silent (record only), Flash Lights, and Horn + Lights. Recurring triggers every 15 seconds while motion continues
+- **BYD Cloud Account Setup** — One-time setup in Surveillance Settings to connect your BYD app account. Supports all 14 overseas server regions (EU, India, Australia, Singapore, Brazil, Japan, Korea, Saudi Arabia, Turkey, Mexico, Indonesia, Vietnam, Norway, Uzbekistan). Credentials are stored locally on the device and never sent to any third-party server — all communication goes directly to BYD's official API
+- **Native Bangcle Crypto Engine** — Full Java port of BYD's proprietary white-box AES encryption, based on the reverse engineering work by [Niek/BYD-re](https://github.com/Niek/BYD-re) and [jkaberg/pyBYD](https://github.com/jkaberg/pyBYD). Zero new dependencies — uses the existing OkHttp stack and Java crypto libraries. No Python runtime, no JavaScript bridge, no bloat
+- **Test Connection Button** — Verify your BYD Cloud setup works by flashing the car's lights directly from the settings page
+
+**⚡ Optimizations & Fixes**
+- **Camera/Recording Pipeline Optimizations** — Reduced memory allocations and improved frame throughput in the GPU surveillance and recording pipelines
+- **SOH & Charging Info Fixes** — Fixed State of Health and charging data not displaying correctly on some BYD models
+
+---
+
+### v10 — April 2026: Surveillance Overhaul, Camera Re-Config & MQTT SSL
+
+**✨ New Features**
+- **Camera Re-Configuration** — New setup flow to identify and assign the correct camera and video feeds for different BYD vehicles. Helps resolve mismatched or swapped camera inputs across trims and model years
+- **Status Pill Overlay** — Persistent floating indicator showing real-time recording and trip status. Automatically hides when ACC is off to save resources, reappears when you start the car
+- **MQTT SSL/TLS Support** — Secure connections to MQTT brokers now work properly. Home Assistant, Mosquitto with TLS, and other SSL-enabled brokers are fully supported
+- **Surveillance Detection Overhaul** — Major rework of the motion detection pipeline:
+  - Select any combination of cameras to trigger motion events
+  - Improved detection algorithm with significantly fewer false positives
+  - New filter settings for sensitivity, cooldown, and minimum motion area
+  - Preset configurations (Parking, Outdoor, etc.) for quick setup
+
+**⚡ Optimizations & Fixes**
+- **BYD Camera "No Signal" Fix** — Resolved the native camera signal loss issue that could occur when OverDrive is running alongside the BYD dashcam
+- **CPU Performance** — Reduced CPU cycles across the recording and surveillance pipeline, yielding roughly 10–15% lower CPU usage compared to the last release
+- **Event Deletion** — Fixed a bug where automated event deletion was not properly removing files from storage
+- **SOH & Energy Display** — Corrected State of Health estimation calculations, fixed kWh consumption showing incorrect values on trip details, and charging power now displays correctly
+
+---
+
+### v9 — April 2026: MQTT Telemetry, PHEV Support & Camera Reliability
+
+**✨ New Features**
+- **MQTT Telemetry** — Connect to up to 5 MQTT brokers to publish vehicle telemetry with configurable intervals, QoS, and proxy support. Full web UI with live status and telemetry preview, accessible from sidebar and Android drawer
+- **PHEV & Sealion 6 DM-i Support** — Plug-in hybrids now show correct remaining kWh, charging power, and battery health
+- **Terrain-Aware Driving Scores** — Driving DNA adjusts scoring thresholds based on GPS altitude (flat, hilly, climb, descent). Elevation visible on trip cards
+- **Trip Consumption Display** — Average consumption (kWh/100km) in trip summaries and detail view, with %/100km fallback for PHEVs
+- **Battery Health & SOH** — Battery health tracking with voltage history, cell temperatures, SOH estimation, and ABRP battery temperature uploads
+- **Zrok Token Reset** — Zrok reserved tunnel token can now be reset directly from the UI
+- **BYD Camera Arbitration** — OverDrive registers with the BYD camera service so the native dashcam no longer loses video signal
+
+**🐛 Bug Fixes**
+- Fixed "no video signal" on the native BYD AVM camera when OverDrive is running
+- Fixed double-recording and streaming issues across drive mode switches and camera interruptions
+- Fixed trips being lost on ACC OFF and improved trip distance accuracy with GPS fallback
+- Fixed SOC reading wrong source, charging power showing 0 kW, and SOH estimation accuracy
+- Fixed driving score penalties for one-pedal driving and smoothness jitter
+- Fixed performance chart time filters affecting the wrong chart
+- Fixed MP4 corruption on surveillance stop and video playback of deleted recordings
+- Fixed surveillance toggle and sentry state management across reboots and mode changes
+- Improved daemon stability — watchdog retries on transient crashes, fixed Telegram and Zrok launch issues
+
+---
+
+### v8 — April 2026: BYD Yuan Pro Support, Network Awareness & Sentry Reliability
+
+**⚡ Network Display**
+- Added a network status indicator on the left nav panel across all pages
+- Displays WiFi SSID, IP address, or Mobile Data connectivity status
+- Icon dynamically switches between WiFi, cellular, and disconnected states
+
+**🚗 BYD Yuan Pro Support**
+- Added full support for BYD Yuan Pro — sentry mode, surveillance, live streaming, ABRP telemetry, and all vehicle data features work out of the box
+
+**🎥 Sentry**
+- Fixed ACC status getting stuck on "ON" after turning off the car via BYD app
+- Resolved a gap in power level detection where the ON → ACC transition during BYD app shutdown was not triggering sentry mode re-entry
+
+**📹 Events & Recordings**
+- Fixed events page showing deleted or inaccessible ghost recordings from unmounted SD card paths
+- Videos that no longer exist on disk are now properly filtered out instead of showing as unplayable entries
+- Eliminated duplicate entries when the same recording exists across SD card and internal storage
+
+**🐛 Bug Fixes**
+- 🔋 **ACC State Reliability:** Hardened the ACC state notification path so CameraDaemon always receives the correct state, even when surveillance is disabled or suppressed by safe zones
+- 💾 **Storage Integrity:** Calendar date highlights and storage statistics now accurately reflect only readable, valid files on disk
+
+---
 
 ### v7 — April 2026
 - 🔓 Open sourced the project

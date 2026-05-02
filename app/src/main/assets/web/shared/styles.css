@@ -2538,6 +2538,58 @@ input, select { font-family: inherit; }
     color: #22c55e;
 }
 
+/* === FUEL CARD (PHEV only) === */
+.fuel-card {
+    background: linear-gradient(180deg, rgba(245,158,11,0.08) 0%, rgba(245,158,11,0.02) 100%);
+    border: 1px solid rgba(245,158,11,0.15);
+    border-radius: var(--radius-lg);
+    padding: 14px 16px;
+    margin-top: 12px;
+}
+.fuel-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.fuel-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    flex: 1;
+}
+.fuel-percent {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px;
+    font-weight: 700;
+    color: #F59E0B;
+}
+.fuel-bar-track {
+    height: 6px;
+    background: rgba(245,158,11,0.1);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.fuel-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #F59E0B, #FBBF24);
+    border-radius: 3px;
+    transition: width 0.6s ease;
+}
+.fuel-info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 8px;
+}
+.fuel-range {
+    font-size: 12px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
 /* Status icon in label */
 .status-icon {
     width: 14px;

@@ -330,6 +330,32 @@ public class BydCameraCoordinator {
     // ==================== Polling Fallback ====================
 
     /**
+     * Queries the current camera user's package name.
+     * Returns the package name of the app currently holding the camera,
+     * or null if no other app has it (or if we are the holder).
+     *
+     * Used at camera open time to decide PRIMARY vs SECONDARY mode.
+     */
+    public String queryCurrentCameraUser() {
+        // If registered as user, use the callback state
+        if (registeredAsUser && cameraUser != null) {
+            return cameraUser.isNativeAppHoldingCamera() ? "native" : null;
+        }
+        // Polling fallback via getCurrentCameraUser()
+        if (getCurrentCameraUserMethod != null && reflectionServiceProxy != null) {
+            try {
+                Object currentUser = getCurrentCameraUserMethod.invoke(reflectionServiceProxy);
+                if (currentUser != null) {
+                    Method getPkg = currentUser.getClass().getMethod("getPackageName");
+                    String pkg = (String) getPkg.invoke(currentUser);
+                    if (pkg != null && !"com.overdrive.app".equals(pkg)) return pkg;
+                }
+            } catch (Exception e) { /* ignore */ }
+        }
+        return null;
+    }
+
+    /**
      * Checks if another app currently holds the camera via getCurrentCameraUser() polling.
      * Only used when registerUser is not available.
      *
@@ -498,17 +524,91 @@ public class BydCameraCoordinator {
     }
 
     private void handleCameraEvent(int eventType) {
-        if (eventType == -10086 || eventType == 8) {
+        if (eventType == 1003) {
+            // EVT_TYPE_FIRST_FRAME — HAL confirmed first frame delivered
+            logger.info("Camera HAL: first frame delivered (event 1003)");
+        } else if (eventType == -10086 || eventType == 8) {
             logger.error("CAMERA HAL ERROR: event=" + eventType);
             if (yieldCallback != null) {
                 yieldCallback.onCameraError(eventType);
             }
+        } else if (eventType == 1002) {
+            // EVT_TYPE_SERVER_DIED — camera server process died
+            logger.error("CAMERA HAL: server died (event 1002)");
+            if (yieldCallback != null) {
+                yieldCallback.onCameraError(eventType);
+            }
+        } else if (eventType == 1000) {
+            // EVT_TYPE_ERR — generic camera error
+            logger.warn("Camera HAL error event: " + eventType);
         } else if (eventType != 0 && eventType != 1001) {
             logger.info("Camera event: " + eventType);
         }
     }
 
     // ==================== Proper Camera Cleanup ====================
+
+    /**
+     * Notify IBYDCameraService before opening camera.
+     * This tells the service we're about to use the camera, allowing it to
+     * arbitrate with other apps (reverse camera, dashcam, AVM parking view).
+     */
+    public void notifyPreOpenCamera() {
+        if (cameraUser == null) return;
+
+        if (typedServiceProxy != null) {
+            try {
+                typedServiceProxy.preOpenCamera(cameraUser);
+                logger.info("preOpenCamera notified via typed AIDL");
+                return;
+            } catch (Throwable e) {
+                logger.warn("preOpenCamera via typed proxy failed: " + e.getMessage());
+            }
+        }
+
+        if (reflectionServiceProxy != null) {
+            try {
+                Method m = reflectionServiceProxy.getClass()
+                    .getDeclaredMethod("preOpenCamera", IBYDCameraUser.class);
+                m.setAccessible(true);
+                m.invoke(reflectionServiceProxy, cameraUser);
+                logger.info("preOpenCamera notified via reflection");
+            } catch (Exception e) {
+                logger.warn("preOpenCamera via reflection failed: " + e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Notify IBYDCameraService after closing camera.
+     * This tells the service we've released the camera, allowing other apps
+     * to reclaim it without conflict.
+     */
+    public void notifyPosCloseCamera() {
+        if (cameraUser == null) return;
+
+        if (typedServiceProxy != null) {
+            try {
+                typedServiceProxy.posCloseCamera(cameraUser);
+                logger.info("posCloseCamera notified via typed AIDL");
+                return;
+            } catch (Throwable e) {
+                logger.warn("posCloseCamera via typed proxy failed: " + e.getMessage());
+            }
+        }
+
+        if (reflectionServiceProxy != null) {
+            try {
+                Method m = reflectionServiceProxy.getClass()
+                    .getDeclaredMethod("posCloseCamera", IBYDCameraUser.class);
+                m.setAccessible(true);
+                m.invoke(reflectionServiceProxy, cameraUser);
+                logger.info("posCloseCamera notified via reflection");
+            } catch (Exception e) {
+                logger.warn("posCloseCamera via reflection failed: " + e.getMessage());
+            }
+        }
+    }
 
     public static void closeCamera(Object cameraObj, int channelId) {
         if (cameraObj == null) return;

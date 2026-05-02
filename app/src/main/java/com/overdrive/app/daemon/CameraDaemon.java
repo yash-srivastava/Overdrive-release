@@ -124,6 +124,88 @@ public class CameraDaemon {
     /** Get the shared app context (for use by other components in this process). */
     public static android.content.Context getAppContext() { return sharedAppContext; }
     
+    /** Check if the shared context is a broken fallback (null base). */
+    private static boolean isContextBroken() {
+        if (sharedAppContext == null) return true;
+        return isContextBrokenFor(sharedAppContext);
+    }
+    
+    /** Check if a given context is a broken fallback (null base). */
+    private static boolean isContextBrokenFor(android.content.Context ctx) {
+        if (ctx == null) return true;
+        if (ctx instanceof PermissionBypassContext) {
+            try {
+                ctx.getMainLooper();
+                return false;
+            } catch (NullPointerException e) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * Re-initialize components that depend on a valid app context.
+     * Called on ACC ON after successfully recreating a broken context.
+     */
+    private static void reinitContextDependentComponents() {
+        // Re-init BydDataCollector (was 0/17 devices with broken context)
+        try {
+            com.overdrive.app.byd.BydDataCollector collector = com.overdrive.app.byd.BydDataCollector.getInstance();
+            collector.init(sharedAppContext);
+            collector.logSummary();
+            log("ACC ON: BydDataCollector re-initialized (" + collector.getData().availableDevices.length + " devices)");
+        } catch (Exception e) {
+            log("ACC ON: BydDataCollector re-init failed: " + e.getMessage());
+        }
+        
+        // Re-init GearMonitor with valid context
+        try {
+            com.overdrive.app.monitor.GearMonitor gearMonitor = com.overdrive.app.monitor.GearMonitor.getInstance();
+            gearMonitor.init(sharedAppContext);
+            if (telemetryDataCollector != null) {
+                gearMonitor.setTelemetrySource(telemetryDataCollector);
+            }
+            log("ACC ON: GearMonitor re-initialized with valid context");
+        } catch (Exception e) {
+            log("ACC ON: GearMonitor re-init failed: " + e.getMessage());
+        }
+        
+        // Re-init TelemetryDataCollector (BYD speed/gear/light devices were unavailable)
+        try {
+            if (telemetryDataCollector != null) {
+                telemetryDataCollector.init(sharedAppContext);
+                log("ACC ON: TelemetryDataCollector re-initialized");
+            }
+        } catch (Exception e) {
+            log("ACC ON: TelemetryDataCollector re-init failed: " + e.getMessage());
+        }
+        
+        // Re-init RecordingModeManager if it wasn't created (sharedAppContext was null at init time)
+        if (recordingModeManager == null && gpuPipeline != null) {
+            try {
+                recordingModeManager = new com.overdrive.app.recording.RecordingModeManager(
+                    sharedAppContext, gpuPipeline);
+                log("ACC ON: RecordingModeManager created with valid context");
+            } catch (Exception e) {
+                log("ACC ON: RecordingModeManager creation failed: " + e.getMessage());
+            }
+        }
+        
+        // Re-init VehicleDataMonitor
+        try {
+            com.overdrive.app.monitor.VehicleDataMonitor vehicleMonitor =
+                com.overdrive.app.monitor.VehicleDataMonitor.getInstance();
+            vehicleMonitor.init(sharedAppContext);
+            if (!vehicleMonitor.isRunning()) {
+                vehicleMonitor.start();
+            }
+            log("ACC ON: VehicleDataMonitor re-initialized");
+        } catch (Exception e) {
+            log("ACC ON: VehicleDataMonitor re-init failed: " + e.getMessage());
+        }
+    }
+    
     // Lock file for singleton enforcement
     private static final String LOCK_FILE = "/data/local/tmp/camera_daemon.lock";
     private static java.io.RandomAccessFile lockFile;
@@ -148,6 +230,9 @@ public class CameraDaemon {
         
         log("=== CAMERA DAEMON STARTING ===");
         log("PID: " + android.os.Process.myPid() + ", UID: " + android.os.Process.myUid());
+
+        // Grant all manifest permissions via shell (supplements PermissionBypassContext)
+        PermissionGranter.grantAllPermissions(APP_PACKAGE_NAME());
 
         // Global exception handler - NEVER let the daemon die from uncaught exceptions
         Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
@@ -312,12 +397,24 @@ public class CameraDaemon {
             tripAnalyticsManager.init(sharedAppContext, telemetryDataCollector, sohEstimator);
             log("Trip Analytics initialized (enabled=" + tripAnalyticsManager.isEnabled() + ")");
 
-            // Clear poisoned consumption buckets if this is a PHEV
-            // (old trips may have been recorded with wrong nominal capacity)
+            // ONE-TIME migration: Clear poisoned consumption buckets if this is a PHEV
+            // and the migration hasn't been done yet. Old trips may have been recorded
+            // with wrong nominal capacity (e.g., 60 kWh BEV default instead of 18.3 kWh PHEV).
+            // This must only run ONCE — running it every startup wipes all accumulated
+            // consumption data, which makes the personalized range estimator return null
+            // until enough new trips rebuild the buckets (minimum 3 samples per bucket).
+            java.io.File bucketMigrationMarker = new java.io.File("/data/local/tmp/overdrive_bucket_migration_done");
             if (sohEstimator != null && sohEstimator.getNominalCapacityKwh() > 0
                     && sohEstimator.getNominalCapacityKwh() < 30.0
-                    && tripAnalyticsManager.getDatabase() != null) {
+                    && tripAnalyticsManager.getDatabase() != null
+                    && !bucketMigrationMarker.exists()) {
                 tripAnalyticsManager.getDatabase().clearConsumptionBuckets();
+                log("One-time PHEV bucket migration: cleared poisoned consumption data");
+                try {
+                    new java.io.FileWriter(bucketMigrationMarker).close();
+                } catch (Exception e) {
+                    log("WARNING: Could not write bucket migration marker: " + e.getMessage());
+                }
             }
 
             // AUTO-START: If gear is already in a driving position (not P), start trip
@@ -540,11 +637,40 @@ public class CameraDaemon {
         return running.get();
     }
     
+    /**
+     * Sentinel file that signals the shell watchdog wrapper to NOT restart the daemon.
+     * Written by shutdown() when the daemon is intentionally disabled (UI/Telegram).
+     * The watchdog script checks for this file before each restart attempt.
+     * To re-enable, delete this file and start the watchdog script again.
+     */
+    private static final String DISABLE_SENTINEL = "/data/local/tmp/camera_daemon.disabled";
+    
     public static void shutdown() {
-        log("Shutdown requested...");
-        stopAllCameras();
+        log("Shutdown requested — writing disable sentinel and cleaning up...");
         running.set(false);
         
+        // Write disable sentinel FIRST — this tells the shell watchdog wrapper
+        // to NOT restart the daemon after we exit. Without this, the wrapper
+        // sees exit code 0 and respawns us immediately.
+        writeDisableSentinel();
+        
+        // Cancel PermissionGranter to stop orphaned pm grant processes
+        PermissionGranter.cancel();
+        
+        // Stop cameras and GPU pipeline
+        stopAllCameras();
+        if (gpuPipeline != null) {
+            try { gpuPipeline.stop(); } catch (Exception e) { log("GPU pipeline stop error: " + e.getMessage()); }
+        }
+        
+        // Stop all monitors
+        try { com.overdrive.app.monitor.VehicleDataMonitor.getInstance().stop(); } catch (Exception ignored) {}
+        try { com.overdrive.app.monitor.GpsMonitor.getInstance().stop(); } catch (Exception ignored) {}
+        try { com.overdrive.app.monitor.GearMonitor.getInstance().stop(); } catch (Exception ignored) {}
+        try { com.overdrive.app.monitor.PerformanceMonitor.getInstance().stop(); } catch (Exception ignored) {}
+        try { com.overdrive.app.monitor.SocHistoryDatabase.getInstance().stop(); } catch (Exception ignored) {}
+        
+        // Stop services
         if (tripAnalyticsManager != null) tripAnalyticsManager.shutdown();
         if (abrpTelemetryService != null) abrpTelemetryService.stop();
         if (mqttConnectionManager != null) mqttConnectionManager.stopAll();
@@ -552,11 +678,69 @@ public class CameraDaemon {
         if (httpServer != null) httpServer.stop();
         if (ipcServer != null) ipcServer.stop();
         
+        // Shutdown StorageManager (schedulers, executors)
+        try { com.overdrive.app.storage.StorageManager.getInstance().shutdown(); } catch (Exception ignored) {}
+        
         // Release singleton lock
         releaseSingletonLock();
         
-        log("Daemon killing self");
+        log("Daemon shutdown complete — killing self (watchdog will NOT restart)");
+        
+        // Also kill the shell watchdog wrapper process directly.
+        // The sentinel file prevents restart, but killing the wrapper ensures
+        // it doesn't linger as an idle process.
+        killWatchdogWrapper();
+        
         android.os.Process.killProcess(android.os.Process.myPid());
+    }
+    
+    /**
+     * Write the disable sentinel file that tells the shell watchdog wrapper
+     * to stop restarting the daemon.
+     */
+    private static void writeDisableSentinel() {
+        try {
+            java.io.FileWriter fw = new java.io.FileWriter(DISABLE_SENTINEL);
+            fw.write("disabled at " + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", 
+                java.util.Locale.US).format(new java.util.Date()) + "\n");
+            fw.write("pid=" + android.os.Process.myPid() + "\n");
+            fw.close();
+            log("Disable sentinel written: " + DISABLE_SENTINEL);
+        } catch (Exception e) {
+            log("WARNING: Failed to write disable sentinel: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Kill the shell watchdog wrapper process (start_cam_daemon.sh).
+     * Uses the PID file if available, falls back to pkill.
+     */
+    private static void killWatchdogWrapper() {
+        try {
+            // Try PID file first
+            java.io.File pidFile = new java.io.File("/data/local/tmp/cam_watchdog.pid");
+            if (pidFile.exists()) {
+                String pid = new java.util.Scanner(pidFile).useDelimiter("\\A").next().trim();
+                Runtime.getRuntime().exec(new String[]{"kill", "-9", pid});
+                log("Killed watchdog wrapper via PID file (pid=" + pid + ")");
+                pidFile.delete();
+            }
+            // Also pkill as fallback
+            Runtime.getRuntime().exec(new String[]{"pkill", "-9", "-f", "start_cam_daemon"});
+            // Delete the script so it can't be accidentally re-run
+            new java.io.File("/data/local/tmp/start_cam_daemon.sh").delete();
+        } catch (Exception e) {
+            log("Watchdog wrapper kill error (non-fatal): " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Check if the daemon has been intentionally disabled.
+     * Called by the shell watchdog wrapper before restarting.
+     * Also callable from Java to check state.
+     */
+    public static boolean isDisabledBySentinel() {
+        return new java.io.File(DISABLE_SENTINEL).exists();
     }
     
     /**
@@ -638,10 +822,87 @@ public class CameraDaemon {
             
             log("Acquired singleton lock (PID: " + android.os.Process.myPid() + ")");
             
-            // Register shutdown hook to release lock on process termination
+            // Register shutdown hook to release lock and clean up ALL resources on process termination.
+            // CRITICAL: System.exit(0) from the GL watchdog skips normal cleanup.
+            // Without this, the MediaCodec encoder, EGL context, camera HAL connection,
+            // and TFLite GPU delegate leak across restarts. After 3-4 rapid restarts,
+            // the Adreno 610 runs out of GPU contexts and the hardware encoder exhausts
+            // its codec instance limit, causing system-level freezes.
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                log("Shutdown hook: cleaning up all resources...");
+                
+                // 1. Stop PermissionGranter — prevent orphaned pm grant processes
+                //    from continuing to hammer PMS after we exit
+                try {
+                    PermissionGranter.cancel();
+                } catch (Exception e) {
+                    log("Shutdown hook: PermissionGranter cancel error: " + e.getMessage());
+                }
+                
+                // 2. Stop the GPU pipeline (releases MediaCodec encoder slot, camera HAL, EGL).
+                //    The encoder.release() and closeCamera() are synchronous.
+                //    releaseGl() is posted to the GL thread which may be blocked — that's
+                //    acceptable because EGL contexts are destroyed when the process exits.
+                try {
+                    if (gpuPipeline != null) {
+                        gpuPipeline.stop();
+                        log("Shutdown hook: GPU pipeline stopped");
+                    }
+                } catch (Exception e) {
+                    log("Shutdown hook: GPU pipeline cleanup error: " + e.getMessage());
+                }
+                
+                // 3. Stop all monitors (VehicleDataMonitor, GpsMonitor, GearMonitor,
+                //    PerformanceMonitor) — these hold BYD device listeners and schedulers
+                try {
+                    com.overdrive.app.monitor.VehicleDataMonitor.getInstance().stop();
+                } catch (Exception e) { /* may not be initialized */ }
+                try {
+                    com.overdrive.app.monitor.GpsMonitor.getInstance().stop();
+                } catch (Exception e) { /* may not be initialized */ }
+                try {
+                    com.overdrive.app.monitor.GearMonitor.getInstance().stop();
+                } catch (Exception e) { /* may not be initialized */ }
+                try {
+                    com.overdrive.app.monitor.PerformanceMonitor.getInstance().stop();
+                } catch (Exception e) { /* may not be initialized */ }
+                
+                // 4. Close SOC History Database (H2 JDBC connection + scheduler)
+                try {
+                    com.overdrive.app.monitor.SocHistoryDatabase.getInstance().stop();
+                } catch (Exception e) { /* may not be initialized */ }
+                
+                // 5. Stop services (MQTT, ABRP, Trip Analytics)
+                try {
+                    if (mqttConnectionManager != null) mqttConnectionManager.stopAll();
+                } catch (Exception e) { /* ignore */ }
+                try {
+                    if (abrpTelemetryService != null) abrpTelemetryService.stop();
+                } catch (Exception e) { /* ignore */ }
+                try {
+                    if (tripAnalyticsManager != null) tripAnalyticsManager.shutdown();
+                } catch (Exception e) { /* ignore */ }
+                
+                // 6. Stop servers (TCP, HTTP, IPC)
+                try {
+                    if (tcpServer != null) tcpServer.stop();
+                } catch (Exception e) { /* ignore */ }
+                try {
+                    if (httpServer != null) httpServer.stop();
+                } catch (Exception e) { /* ignore */ }
+                try {
+                    if (ipcServer != null) ipcServer.stop();
+                } catch (Exception e) { /* ignore */ }
+                
+                // 7. Shutdown StorageManager (schedulers, executors, SD card watchdog)
+                try {
+                    com.overdrive.app.storage.StorageManager.getInstance().shutdown();
+                } catch (Exception e) { /* ignore */ }
+                
+                // 8. Release singleton lock (must be last)
                 releaseSingletonLock();
-            }));
+                log("Shutdown hook: cleanup complete");
+            }, "DaemonShutdown"));
             
             return true;
             
@@ -1132,11 +1393,51 @@ public class CameraDaemon {
             // ACC ON - Stop SD card watchdog (system manages SD card normally when ACC is on)
             com.overdrive.app.storage.StorageManager.getInstance().stopSdCardWatchdog();
             
+            // Recreate app context if it was broken (system server was dead during init).
+            // ACC ON means the head unit is awake and binder services should be available.
+            // Run on a background thread because createAppContext() can block up to 10s
+            // (systemMain timeout) — must not freeze the ACC ON handler.
+            if (isContextBroken()) {
+                new Thread(() -> {
+                    log("ACC ON: sharedAppContext is broken — attempting recreation...");
+                    android.content.Context newContext = createAppContext();
+                    if (newContext != null && !isContextBrokenFor(newContext)) {
+                        sharedAppContext = newContext;
+                        log("ACC ON: App context recreated successfully");
+                        
+                        // Re-init components that failed with the broken context
+                        reinitContextDependentComponents();
+                        
+                        // Now start GearMonitor if it still isn't running
+                        com.overdrive.app.monitor.GearMonitor gm = com.overdrive.app.monitor.GearMonitor.getInstance();
+                        if (!gm.isRunning()) {
+                            try {
+                                gm.start();
+                                log("ACC ON: GearMonitor started after context recreation");
+                            } catch (Exception e) {
+                                log("ACC ON: GearMonitor start failed after recreation: " + e.getMessage());
+                            }
+                        }
+                        
+                        // Notify RecordingModeManager of current gear now that GearMonitor works
+                        if (recordingModeManager != null && gm.isRunning()) {
+                            recordingModeManager.onGearChanged(gm.getCurrentGear());
+                        }
+                    } else {
+                        log("ACC ON: Context recreation failed — system services may still be starting");
+                    }
+                }, "ContextRecreate").start();
+            }
+            
             // Restart GearMonitor (stopped on ACC OFF)
             com.overdrive.app.monitor.GearMonitor gearMonitor = com.overdrive.app.monitor.GearMonitor.getInstance();
             if (!gearMonitor.isRunning()) {
-                gearMonitor.start();
-                log("GearMonitor restarted (ACC ON)");
+                try {
+                    gearMonitor.start();
+                    log("GearMonitor restarted (ACC ON)");
+                } catch (Exception e) {
+                    log("GearMonitor restart failed (ACC ON): " + e.getMessage());
+                }
             }
             
             // Tell BydDataCollector to resume full polling (speed/engine/gearbox)
@@ -1870,8 +2171,10 @@ public class CameraDaemon {
         try {
             log("Initializing GPS Monitor with app context...");
             
-            // Grant location permissions via shell (daemon runs as root/system)
-            grantLocationPermissions();
+            // Location permissions are already granted by PermissionGranter on its
+            // background thread. No need to duplicate those 3 synchronous pm grant
+            // calls here — they were blocking initGpsMonitor for several seconds
+            // and adding redundant load to PackageManagerService.
             
             // Try to get or create shared app context
             if (sharedAppContext == null) {
@@ -1990,7 +2293,11 @@ public class CameraDaemon {
             if (telemetryDataCollector != null) {
                 gearMonitor.setTelemetrySource(telemetryDataCollector);
             }
-            gearMonitor.start();
+            try {
+                gearMonitor.start();
+            } catch (Exception e) {
+                log("GearMonitor start failed (will retry on ACC ON): " + e.getMessage());
+            }
             
             log("Gear Monitor initialized successfully");
             
@@ -2215,7 +2522,19 @@ public class CameraDaemon {
             return android.content.pm.PackageManager.PERMISSION_GRANTED;
         }
         
-        // Null-safe overrides for when base context is null (fallback mode)
+        // Null-safe overrides for when base context is null (fallback mode).
+        // CRITICAL: getMainLooper() must be overridden — BYDAutoDeviceManager calls
+        // context.getMainLooper() in its constructor, and ContextWrapper delegates
+        // to the base context which is null in fallback mode, causing NPE that
+        // makes all 18 BYD device monitors null.
+        @Override public android.os.Looper getMainLooper() {
+            try { return super.getMainLooper(); } catch (NullPointerException e) {
+                // Return the process main looper — BYD devices use it to register
+                // Handler callbacks for CAN bus data change listeners.
+                android.os.Looper looper = android.os.Looper.getMainLooper();
+                return looper != null ? looper : android.os.Looper.myLooper();
+            }
+        }
         @Override public android.content.Context getApplicationContext() {
             try { return super.getApplicationContext(); } catch (NullPointerException e) { return this; }
         }

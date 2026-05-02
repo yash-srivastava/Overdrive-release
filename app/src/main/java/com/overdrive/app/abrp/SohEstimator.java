@@ -43,6 +43,7 @@ public class SohEstimator {
 
     private double currentSoh = -1;
     private String estimationMethod = METHOD_INSTANTANEOUS;
+    private String sohSource = "instantaneous"; // "oem", "calibration", or "instantaneous"
     private int sampleCount = 0;
 
     public void setNominalCapacityKwh(double capacityKwh) {
@@ -484,6 +485,7 @@ public class SohEstimator {
 
         applyWeightedSoh(calibratedSoh, confidenceWeight);
         estimationMethod = METHOD_CALIBRATION;
+        sohSource = "calibration";
 
         logger.info("Calibration SOH: " + String.format("%.1f", calibratedSoh) + "% " +
             "(weight=" + String.format("%.2f", confidenceWeight) + ", temp=" +
@@ -500,6 +502,33 @@ public class SohEstimator {
     public void updateFromCalibration(double energyEnteredBatteryKwh, double socDelta) {
         updateFromCalibration(energyEnteredBatteryKwh, socDelta, 25.0, true);
     }
+
+    // ==================== OEM SOH ====================
+
+    /**
+     * Update SOH directly from the OEM battery health index (STATISTIC_BATTERY_HEALTHY_INDEX).
+     * When available, the OEM value is the most accurate SOH source — it comes directly
+     * from the BMS and supersedes both instantaneous and calibration estimates.
+     *
+     * @param oemSohPercent OEM SOH value from BYD BMS (expected range 60-110%)
+     */
+    public void updateFromOem(double oemSohPercent) {
+        if (Double.isNaN(oemSohPercent)) return;
+        if (oemSohPercent < 60 || oemSohPercent > 110) return;
+
+        if (!"oem".equals(sohSource)) {
+            logger.info("SOH source transitioning from " + sohSource + " to OEM: " +
+                String.format("%.1f", oemSohPercent) + "%");
+        }
+        currentSoh = oemSohPercent;
+        sohSource = "oem";
+        persistEstimate();
+    }
+
+    /**
+     * Returns the current SOH data source: "oem", "calibration", or "instantaneous".
+     */
+    public String getSohSource() { return sohSource; }
 
     // ==================== GETTERS ====================
 

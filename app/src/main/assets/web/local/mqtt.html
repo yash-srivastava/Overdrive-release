@@ -204,6 +204,23 @@
                         <span class="ev-personalized-val" id="evPersonalizedRange">-- km</span>
                     </div>
                 </div>
+
+                <!-- Fuel Card (PHEV only — hidden for BEVs) -->
+                <div class="status-card fuel-card" id="fuelCard" style="display:none;">
+                    <div class="fuel-header">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:18px;height:18px;color:#F59E0B;">
+                            <path d="M3 22V6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/>
+                            <path d="M3 22h10"/>
+                            <path d="M13 10h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V9.83a2 2 0 0 0-.59-1.42L18 6"/>
+                            <path d="M6 14v-3"/>
+                        </svg>
+                        <span class="fuel-title">Fuel</span>
+                        <span class="fuel-percent" id="fuelPercentValue">--%</span>
+                    </div>
+                    <div class="fuel-bar-track">
+                        <div class="fuel-bar-fill" id="fuelBarFill" style="width:0%"></div>
+                    </div>
+                </div>
             </div>
         </aside>
 

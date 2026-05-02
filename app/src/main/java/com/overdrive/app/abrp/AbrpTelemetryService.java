@@ -305,6 +305,16 @@ public class AbrpTelemetryService {
                 }
             }
 
+            // est_battery_range — EV range in km (ABRP standard field)
+            if (vd != null && vd.elecRangeKm != com.overdrive.app.byd.BydVehicleData.UNAVAILABLE && vd.elecRangeKm > 0) {
+                payload.put("est_battery_range", vd.elecRangeKm);
+            }
+
+            // Cabin temperature
+            if (vd != null && !Double.isNaN(vd.insideTempCelsius)) {
+                payload.put("car_temp", vd.insideTempCelsius);
+            }
+
         } catch (Exception e) {
             logger.error("Error collecting telemetry: " + e.getMessage());
         }

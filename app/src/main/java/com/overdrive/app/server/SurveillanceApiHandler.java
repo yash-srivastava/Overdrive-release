@@ -183,6 +183,17 @@ public class SurveillanceApiHandler {
         config.put("inSafeZone", safeMgr.isInSafeZone());
         config.put("safeZoneName", safeMgr.getCurrentZoneName());
         
+        // SOTA: Deterrent action setting
+        JSONObject survConfig = com.overdrive.app.config.UnifiedConfigManager.getSurveillance();
+        config.put("deterrentAction", survConfig.optString("deterrentAction", "silent"));
+        config.put("deterrentCooldownSeconds", survConfig.optInt("deterrentCooldownSeconds", 60));
+        
+        // SOTA: BYD Cloud connection status
+        JSONObject bydCloud = com.overdrive.app.config.UnifiedConfigManager.getBydCloud();
+        config.put("bydCloudEnabled", bydCloud.optBoolean("enabled", false));
+        config.put("bydCloudUsername", bydCloud.optString("username", ""));
+        config.put("bydCloudVin", bydCloud.optString("vin", ""));
+        
         // V2 Pipeline settings
         if (sentryConfig != null) {
             config.put("environmentPreset", sentryConfig.getEnvironmentPreset());
@@ -345,6 +356,28 @@ public class SurveillanceApiHandler {
                 sentryConfig.setFlashImmunity(val);
                 if (sentry != null) sentry.setFlashImmunity(val);
                 configChanged = true;
+            }
+            
+            // SOTA: Deterrent action setting (silent / flash_lights / find_car)
+            if (configJson.has("deterrentAction")) {
+                String action = configJson.optString("deterrentAction", "silent");
+                if ("silent".equals(action) || "flash_lights".equals(action) || "find_car".equals(action)) {
+                    com.overdrive.app.config.UnifiedConfigManager.updateValues(
+                            "surveillance", java.util.Collections.singletonMap("deterrentAction", action));
+                    CameraDaemon.log("Deterrent action set to: " + action);
+                    // Reset deterrent so it picks up new config
+                    try {
+                        com.overdrive.app.byd.cloud.BydCloudDeterrent.getInstance().reset();
+                    } catch (Exception ignored) {}
+                }
+            }
+            
+            if (configJson.has("deterrentCooldownSeconds")) {
+                int cooldown = configJson.optInt("deterrentCooldownSeconds", 60);
+                if (cooldown >= 10 && cooldown <= 600) {
+                    com.overdrive.app.config.UnifiedConfigManager.updateValues(
+                            "surveillance", java.util.Collections.singletonMap("deterrentCooldownSeconds", cooldown));
+                }
             }
             
             // SOTA: Handle distance slider (1-5) - ONLY controls minObjectSize (AI detection range)

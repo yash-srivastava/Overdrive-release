@@ -12,7 +12,9 @@ import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -946,30 +948,114 @@ public class StorageManager {
      * Note: chmod doesn't work on FUSE - rely on MediaScanner broadcast for cross-UID visibility.
      */
     public void fixAllPermissions() {
-        // Run MediaScanner broadcasts on a background thread to avoid blocking daemon startup
-        new Thread(() -> {
-            logInfo("Broadcasting files to MediaScanner for UI app access...");
-            
-            // Fix base directory
+        // Fix directory permissions synchronously (fast, no I/O contention)
         File baseDir = new File(INTERNAL_BASE_DIR);
         if (baseDir.exists()) {
             baseDir.setReadable(true, false);
             baseDir.setExecutable(true, false);
         }
-        
-        // Fix subdirectories
         fixDirectoryPermissions(recordingsDir);
         fixDirectoryPermissions(surveillanceDir);
         fixDirectoryPermissions(proximityDir);
         fixDirectoryPermissions(tripsDir);
         
-        // Broadcast ALL existing files to MediaScanner for cross-UID visibility
-        broadcastRecentFiles(recordingsDir, Long.MAX_VALUE);
-        broadcastRecentFiles(surveillanceDir, Long.MAX_VALUE);
-        broadcastRecentFiles(proximityDir, Long.MAX_VALUE);
+        // Make all existing files world-readable (chmod 666).
+        // Required for: (1) UI app (different UID) to read files directly,
+        // (2) FUSE layer on BYD Android to allow File.listFiles() to see them.
+        // This is fast (no shell processes) — just Java File.setReadable() calls.
+        makeFilesReadable(recordingsDir);
+        makeFilesReadable(surveillanceDir);
+        makeFilesReadable(proximityDir);
+        makeFilesReadable(tripsDir);
         
-        logInfo("MediaScanner broadcast complete");
+        // SOTA: Incremental MediaScanner broadcast — only broadcast files created
+        // since the last successful broadcast. Uses a marker file to track the
+        // timestamp of the last full scan. On first run (no marker), broadcasts
+        // everything once, then subsequent startups only broadcast new files.
+        //
+        // Additionally, broadcasts are throttled (50ms between each shell exec)
+        // to avoid saturating the I/O bus during camera pipeline startup.
+        // The old approach spawned 2 shell processes per file × hundreds of files
+        // = hundreds of concurrent process forks competing with the GPU pipeline.
+        new Thread(() -> {
+            long lastScanTimestamp = loadLastBroadcastTimestamp();
+            long scanStartTime = System.currentTimeMillis();
+            
+            int count = 0;
+            count += broadcastFilesSince(recordingsDir, lastScanTimestamp);
+            count += broadcastFilesSince(surveillanceDir, lastScanTimestamp);
+            count += broadcastFilesSince(proximityDir, lastScanTimestamp);
+            
+            saveLastBroadcastTimestamp(scanStartTime);
+            
+            if (count > 0) {
+                logInfo("MediaScanner broadcast complete: " + count + " new files indexed");
+            } else {
+                logDebug("MediaScanner: no new files to broadcast since last scan");
+            }
         }, "MediaScannerBroadcast").start();
+    }
+    
+    /** Marker file that stores the epoch millis of the last successful broadcast scan. */
+    private static final String BROADCAST_MARKER_FILE = "/data/local/tmp/overdrive_last_mediascan";
+    
+    /** Throttle delay between individual file broadcasts (ms). */
+    private static final long BROADCAST_THROTTLE_MS = 50;
+    
+    /**
+     * Load the timestamp of the last successful MediaScanner broadcast.
+     * Returns 0 if no marker exists (first run — will broadcast everything).
+     */
+    private long loadLastBroadcastTimestamp() {
+        try {
+            File marker = new File(BROADCAST_MARKER_FILE);
+            if (marker.exists()) {
+                String content = new java.util.Scanner(marker).useDelimiter("\\A").next().trim();
+                return Long.parseLong(content);
+            }
+        } catch (Exception e) {
+            logDebug("No broadcast marker found, will do full scan");
+        }
+        return 0;
+    }
+    
+    /**
+     * Save the timestamp of the current broadcast scan.
+     */
+    private void saveLastBroadcastTimestamp(long timestamp) {
+        try {
+            java.io.FileWriter fw = new java.io.FileWriter(BROADCAST_MARKER_FILE);
+            fw.write(String.valueOf(timestamp));
+            fw.close();
+        } catch (Exception e) {
+            logWarn("Failed to save broadcast marker: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Broadcast only files modified after the given timestamp.
+     * Throttled to avoid I/O contention with the GPU pipeline.
+     * @return number of files broadcast
+     */
+    private int broadcastFilesSince(File dir, long sinceTimestamp) {
+        if (dir == null || !dir.exists()) return 0;
+        
+        File[] files = dir.listFiles((d, name) -> name.endsWith(".mp4"));
+        if (files == null || files.length == 0) return 0;
+        
+        int count = 0;
+        for (File f : files) {
+            if (f.lastModified() > sinceTimestamp) {
+                broadcastFile(f);
+                count++;
+                
+                // Throttle: yield between broadcasts to avoid saturating I/O
+                if (count % 5 == 0) {
+                    try { Thread.sleep(BROADCAST_THROTTLE_MS); } catch (InterruptedException e) { break; }
+                }
+            }
+        }
+        return count;
     }
     
     // ==================== Limit Getters/Setters ====================
@@ -1150,6 +1236,61 @@ public class StorageManager {
     
     public String getSdCardPath() {
         return sdCardPath;
+    }
+    
+    // ==================== All Storage Locations (for scanning) ====================
+    
+    /**
+     * Get ALL directories that may contain recordings of a given type.
+     * Returns the active (configured) directory first, then any alternate locations
+     * where files may exist (e.g., internal when SD card is active, or vice versa).
+     * 
+     * This is the single source of truth for multi-location scanning.
+     * Callers should iterate all returned directories to find all files.
+     */
+    public List<File> getAllRecordingsDirs() {
+        return getAllDirsForType(recordingsDir, internalRecordingsDir, sdCardRecordingsDir);
+    }
+    
+    public List<File> getAllSurveillanceDirs() {
+        return getAllDirsForType(surveillanceDir, internalSurveillanceDir, sdCardSurveillanceDir);
+    }
+    
+    public List<File> getAllProximityDirs() {
+        return getAllDirsForType(proximityDir, internalProximityDir, sdCardProximityDir);
+    }
+    
+    public List<File> getAllTripsDirs() {
+        return getAllDirsForType(tripsDir, internalTripsDir, sdCardTripsDir);
+    }
+    
+    /**
+     * Build a deduplicated list of directories: active first, then alternates.
+     * Skips null entries and directories that match the active one.
+     */
+    private List<File> getAllDirsForType(File activeDir, File internalDir, File sdCardDir) {
+        List<File> dirs = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        
+        // Active directory first (always included)
+        if (activeDir != null) {
+            dirs.add(activeDir);
+            seen.add(activeDir.getAbsolutePath());
+        }
+        
+        // Internal directory (if different from active)
+        if (internalDir != null && !seen.contains(internalDir.getAbsolutePath())) {
+            dirs.add(internalDir);
+            seen.add(internalDir.getAbsolutePath());
+        }
+        
+        // SD card directory (if different from active)
+        if (sdCardDir != null && !seen.contains(sdCardDir.getAbsolutePath())) {
+            dirs.add(sdCardDir);
+            seen.add(sdCardDir.getAbsolutePath());
+        }
+        
+        return dirs;
     }
     
     /**
@@ -1741,7 +1882,13 @@ public class StorageManager {
     /**
      * Force Android MediaScanner to index a file so it appears in MediaStore
      * and becomes visible to standard apps with READ_EXTERNAL_STORAGE.
-     * SOTA: Essential for cross-UID file visibility on Android 10+.
+     * 
+     * CRITICAL: Both methods are required on BYD's Android 10:
+     * - `am broadcast MEDIA_SCANNER_SCAN_FILE` refreshes the FUSE permission cache
+     *   so that File.listFiles() on SD card paths can see the file. Without this,
+     *   the RecordingsApiHandler's scanDirectory() gets incomplete file listings.
+     * - `content insert` directly inserts into MediaStore for cross-UID visibility
+     *   (needed for the UI app running as a different UID).
      */
     private void broadcastFile(File file) {
         if (file == null || !file.exists()) return;
@@ -1749,15 +1896,15 @@ public class StorageManager {
         String path = file.getAbsolutePath();
         
         try {
-            // Method 1: am broadcast (traditional)
+            // Method 1: FUSE cache refresh via MediaScanner intent
+            // Required for File.listFiles() to work on SD card FUSE paths
             Runtime.getRuntime().exec(new String[]{
                 "am", "broadcast",
                 "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
                 "-d", "file://" + path
             });
             
-            // Method 2: content insert (more reliable for MediaStore)
-            // This directly inserts into MediaStore database
+            // Method 2: Direct MediaStore insert for cross-UID visibility
             Runtime.getRuntime().exec(new String[]{
                 "content", "insert",
                 "--uri", "content://media/external/video/media",

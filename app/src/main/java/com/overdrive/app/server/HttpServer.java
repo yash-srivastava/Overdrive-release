@@ -86,6 +86,29 @@ public class HttpServer {
             // Extract overlay icons for telemetry overlay
             extractAssetDir(assetManager, "overlay", new File("/data/local/tmp/overlay"));
             
+            // Extract BYD cloud crypto tables
+            try {
+                String bydAsset = "byd/bangcle_tables.bin";
+                String[] bydFiles = assetManager.list("byd");
+                if (bydFiles != null && bydFiles.length > 0) {
+                    File bydTablesFile = new File("/data/local/tmp/bangcle_tables.bin");
+                    if (!bydTablesFile.exists() || bydTablesFile.length() == 0) {
+                        try (InputStream in = assetManager.open(bydAsset);
+                             java.io.FileOutputStream fos = new java.io.FileOutputStream(bydTablesFile)) {
+                            byte[] buf = new byte[8192];
+                            int n;
+                            while ((n = in.read(buf)) != -1) {
+                                fos.write(buf, 0, n);
+                            }
+                        }
+                        bydTablesFile.setReadable(true, false);
+                        CameraDaemon.log("Extracted BYD Bangcle tables to " + bydTablesFile.getAbsolutePath() + " (" + bydTablesFile.length() + " bytes)");
+                    }
+                }
+            } catch (Exception e) {
+                CameraDaemon.log("Could not extract BYD Bangcle tables: " + e.getMessage());
+            }
+            
             CameraDaemon.log("Web assets extracted to " + WEB_ROOT);
         } catch (Exception e) {
             CameraDaemon.log("Failed to extract web assets: " + e.getMessage());
@@ -149,9 +172,9 @@ public class HttpServer {
                     try { serverSocket.close(); } catch (Exception e) {}
                 }
                 
-                serverSocket = new ServerSocket(port, 10, InetAddress.getByName("127.0.0.1"));
+                serverSocket = new ServerSocket(port, 10, InetAddress.getByName("0.0.0.0"));
                 serverSocket.setReuseAddress(true);
-                CameraDaemon.log("HTTP server listening on 127.0.0.1:" + port);
+                CameraDaemon.log("HTTP server listening on 0.0.0.0:" + port);
 
                 while (running && CameraDaemon.isRunning() && !serverSocket.isClosed()) {
                     try {
@@ -257,6 +280,11 @@ public class HttpServer {
 
             String method = parts[0];
             String path = parts[1];
+            
+            // Extend timeout for slow BYD cloud API calls (login + verify can take 10-15s)
+            if (path.startsWith("/api/bydcloud")) {
+                client.setSoTimeout(60000);
+            }
             
             // WebSocket upgrade on /ws path (check auth first for non-public paths)
             if (path.equals("/ws") && websocketKey != null && "websocket".equalsIgnoreCase(upgradeHeader)) {
@@ -410,6 +438,11 @@ public class HttpServer {
         }
         if (path.startsWith("/api/surveillance")) {
             return SurveillanceApiHandler.handle(method, path, body, out);
+        }
+        
+        // BYD Cloud API
+        if (path.startsWith("/api/bydcloud")) {
+            return BydCloudApiHandler.handle(method, path, body, out);
         }
         
         // Streaming API

@@ -54,7 +54,13 @@ public final class DaemonBootstrap {
             }
             log("App context created: " + appContext.getPackageName());
             
-            // Step 2: Verify Safe.s() decryption works (pure Java, no native libs needed)
+            // Step 2: Grant all manifest permissions via shell
+            // PermissionBypassContext fakes PERMISSION_GRANTED locally, but pm grant
+            // ensures the OS-level permission state is correct for cases where the
+            // BYD HAL native layer checks permissions outside our context wrapper.
+            PermissionGranter.grantAllPermissions(BOOTSTRAP_PACKAGE);
+            
+            // Step 3: Verify Safe.s() decryption works (pure Java, no native libs needed)
             if (verifySafeWorking()) {
                 log("Safe.s() verification PASSED");
             } else {

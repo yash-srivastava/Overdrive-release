@@ -59,6 +59,7 @@ public class BydVehicleData {
     public final int elecRangeKm;
     public final int fuelRangeKm;
     public final int bodyworkRangeKm;     // range from bodywork device
+    public final double fuelPercent;      // fuel tank level % (PHEV only, -1 = unavailable)
 
     // ==================== MILEAGE ====================
     public final int totalMileageKm;
@@ -116,6 +117,52 @@ public class BydVehicleData {
     // ==================== RADAR ====================
     public final int[] radarDistances;    // 9 sensors
 
+    // ==================== EXTENDED BATTERY ====================
+    public final double sohPercent;           // OEM SOH from STATISTIC_BATTERY_HEALTHY_INDEX
+    public final int keyBatteryLevel;         // 0=low, 1=normal
+    public final int battery12vLevel;         // LOW/NORMAL/INVALID from bodywork
+
+    // ==================== EXTENDED THERMAL ====================
+    public final double insideTempCelsius;    // Cabin temp from AC_TEMP_INSIDE
+
+    // ==================== EXTENDED CHARGING ====================
+    public final int chargingRestTimeHours;
+    public final int chargingRestTimeMinutes;
+
+    // ==================== EXTENDED DRIVING ====================
+    public final double drivingTimeHours;
+    public final double last50KmConsumption;  // kWh/100km
+    public final double steeringAngleDegrees;
+    public final int autoSystemState;         // 0=normal, 1=set_secure, 2=start_secure
+
+    // ==================== EXTENDED TRIP ====================
+    public final double currentTripMileageKm;
+    public final double currentTripTimeHours;
+    public final double currentTripConsumptionKwh;
+
+    // ==================== EXTENDED ENGINE ====================
+    public final int engineCoolantLevel;      // 0=normal, 1=low
+    public final int oilLevel;                // 0-254
+    public final String engineCode;           // e.g. "BYD473QF"
+
+    // ==================== EXTENDED BODYWORK ====================
+    public final int wiperState;
+    public final int sunroofState;
+    public final int sunroofPosition;
+    public final int sunshadePercent;
+    public final int wirelessChargingStatus;
+    public final boolean driftModeEnabled;
+
+    // ==================== EXTENDED TYRE ====================
+    public final int[] tyreTemperatures;      // [FL, FR, RL, RR] in °C
+
+    // ==================== EXTENDED SAFETY ====================
+    public final int[] passengerDetection;    // OMS detection per seat
+
+    // ==================== EXTENDED AIR QUALITY ====================
+    public final int pm25Inside;
+    public final int pm25Outside;
+
     // ==================== META ====================
     public final long timestamp;
     public final String[] availableDevices;
@@ -152,6 +199,7 @@ public class BydVehicleData {
         this.totalFuelCon = b.totalFuelCon;
         this.elecRangeKm = b.elecRangeKm;
         this.fuelRangeKm = b.fuelRangeKm;
+        this.fuelPercent = b.fuelPercent;
         this.bodyworkRangeKm = b.bodyworkRangeKm;
         this.totalMileageKm = b.totalMileageKm;
         this.evMileageKm = b.evMileageKm;
@@ -183,6 +231,33 @@ public class BydVehicleData {
         this.mcuStatus = b.mcuStatus;
         this.emergencyAlarmState = b.emergencyAlarmState;
         this.radarDistances = b.radarDistances;
+        // Extended fields
+        this.sohPercent = b.sohPercent;
+        this.keyBatteryLevel = b.keyBatteryLevel;
+        this.battery12vLevel = b.battery12vLevel;
+        this.insideTempCelsius = b.insideTempCelsius;
+        this.chargingRestTimeHours = b.chargingRestTimeHours;
+        this.chargingRestTimeMinutes = b.chargingRestTimeMinutes;
+        this.drivingTimeHours = b.drivingTimeHours;
+        this.last50KmConsumption = b.last50KmConsumption;
+        this.steeringAngleDegrees = b.steeringAngleDegrees;
+        this.autoSystemState = b.autoSystemState;
+        this.currentTripMileageKm = b.currentTripMileageKm;
+        this.currentTripTimeHours = b.currentTripTimeHours;
+        this.currentTripConsumptionKwh = b.currentTripConsumptionKwh;
+        this.engineCoolantLevel = b.engineCoolantLevel;
+        this.oilLevel = b.oilLevel;
+        this.engineCode = b.engineCode;
+        this.wiperState = b.wiperState;
+        this.sunroofState = b.sunroofState;
+        this.sunroofPosition = b.sunroofPosition;
+        this.sunshadePercent = b.sunshadePercent;
+        this.wirelessChargingStatus = b.wirelessChargingStatus;
+        this.driftModeEnabled = b.driftModeEnabled;
+        this.tyreTemperatures = b.tyreTemperatures;
+        this.passengerDetection = b.passengerDetection;
+        this.pm25Inside = b.pm25Inside;
+        this.pm25Outside = b.pm25Outside;
         this.timestamp = b.timestamp;
         this.availableDevices = b.availableDevices;
         this.unavailableDevices = b.unavailableDevices;
@@ -272,6 +347,7 @@ public class BydVehicleData {
             JSONObject rng = new JSONObject();
             if (elecRangeKm != UNAVAILABLE) rng.put("elecKm", elecRangeKm);
             if (fuelRangeKm != UNAVAILABLE) rng.put("fuelKm", fuelRangeKm);
+            if (!Double.isNaN(fuelPercent) && fuelPercent >= 0) rng.put("fuelPercent", fuelPercent);
             if (bodyworkRangeKm != UNAVAILABLE) rng.put("bodyworkKm", bodyworkRangeKm);
             j.put("range", rng);
 
@@ -362,6 +438,83 @@ public class BydVehicleData {
                 for (String d : availableDevices) ad.put(d);
                 j.put("availableDevices", ad);
             }
+
+            // ==================== EXTENDED SUB-OBJECTS ====================
+
+            // Extended Battery
+            JSONObject extBatt = new JSONObject();
+            putIfValid(extBatt, "sohPercent", sohPercent);
+            if (keyBatteryLevel != UNAVAILABLE) extBatt.put("keyBatteryLevel", keyBatteryLevel);
+            if (battery12vLevel != UNAVAILABLE) extBatt.put("battery12vLevel", battery12vLevel);
+            if (extBatt.length() > 0) j.put("extendedBattery", extBatt);
+
+            // Extended Thermal (insideTempCelsius)
+            // Note: insideTempCelsius is separate from the existing insideTempC in thermal
+            JSONObject extTherm = new JSONObject();
+            putIfValid(extTherm, "insideTempCelsius", insideTempCelsius);
+            if (extTherm.length() > 0) j.put("extendedThermal", extTherm);
+
+            // Extended Charging
+            JSONObject extChg = new JSONObject();
+            if (chargingRestTimeHours != UNAVAILABLE) extChg.put("restTimeHours", chargingRestTimeHours);
+            if (chargingRestTimeMinutes != UNAVAILABLE) extChg.put("restTimeMinutes", chargingRestTimeMinutes);
+            if (extChg.length() > 0) j.put("extendedCharging", extChg);
+
+            // Extended Driving
+            JSONObject extDrv = new JSONObject();
+            putIfValid(extDrv, "drivingTimeHours", drivingTimeHours);
+            putIfValid(extDrv, "last50KmConsumption", last50KmConsumption);
+            putIfValid(extDrv, "steeringAngleDegrees", steeringAngleDegrees);
+            if (autoSystemState != UNAVAILABLE) extDrv.put("autoSystemState", autoSystemState);
+            if (extDrv.length() > 0) j.put("extendedDriving", extDrv);
+
+            // Extended Trip
+            JSONObject extTrip = new JSONObject();
+            putIfValid(extTrip, "currentTripMileageKm", currentTripMileageKm);
+            putIfValid(extTrip, "currentTripTimeHours", currentTripTimeHours);
+            putIfValid(extTrip, "currentTripConsumptionKwh", currentTripConsumptionKwh);
+            if (extTrip.length() > 0) j.put("extendedTrip", extTrip);
+
+            // Extended Engine
+            JSONObject extEng = new JSONObject();
+            if (engineCoolantLevel != UNAVAILABLE) extEng.put("engineCoolantLevel", engineCoolantLevel);
+            if (oilLevel != UNAVAILABLE) extEng.put("oilLevel", oilLevel);
+            if (engineCode != null) extEng.put("engineCode", engineCode);
+            if (extEng.length() > 0) j.put("extendedEngine", extEng);
+
+            // Extended Bodywork
+            JSONObject extBody = new JSONObject();
+            if (wiperState != UNAVAILABLE) extBody.put("wiperState", wiperState);
+            if (sunroofState != UNAVAILABLE) extBody.put("sunroofState", sunroofState);
+            if (sunroofPosition != UNAVAILABLE) extBody.put("sunroofPosition", sunroofPosition);
+            if (sunshadePercent != UNAVAILABLE) extBody.put("sunshadePercent", sunshadePercent);
+            if (wirelessChargingStatus != UNAVAILABLE) extBody.put("wirelessChargingStatus", wirelessChargingStatus);
+            if (driftModeEnabled) extBody.put("driftModeEnabled", true);
+            if (extBody.length() > 0) j.put("extendedBodywork", extBody);
+
+            // Extended Tyre
+            if (tyreTemperatures != null) {
+                JSONObject extTyre = new JSONObject();
+                JSONArray tt = new JSONArray();
+                for (int t : tyreTemperatures) tt.put(t);
+                extTyre.put("tyreTemperatures", tt);
+                j.put("extendedTyre", extTyre);
+            }
+
+            // Extended Safety
+            if (passengerDetection != null) {
+                JSONObject extSafety = new JSONObject();
+                JSONArray pd = new JSONArray();
+                for (int p : passengerDetection) pd.put(p);
+                extSafety.put("passengerDetection", pd);
+                j.put("extendedSafety", extSafety);
+            }
+
+            // Extended Air Quality
+            JSONObject extAir = new JSONObject();
+            if (pm25Inside != UNAVAILABLE) extAir.put("pm25Inside", pm25Inside);
+            if (pm25Outside != UNAVAILABLE) extAir.put("pm25Outside", pm25Outside);
+            if (extAir.length() > 0) j.put("extendedAir", extAir);
         } catch (Exception ignored) {}
         return j;
     }
@@ -386,6 +539,7 @@ public class BydVehicleData {
         b.energyMode = energyMode; b.operationMode = operationMode;
         b.totalElecCon = totalElecCon; b.totalFuelCon = totalFuelCon;
         b.elecRangeKm = elecRangeKm; b.fuelRangeKm = fuelRangeKm;
+        b.fuelPercent = fuelPercent;
         b.bodyworkRangeKm = bodyworkRangeKm; b.totalMileageKm = totalMileageKm;
         b.evMileageKm = evMileageKm; b.chargingState = chargingState;
         b.chargingGunState = chargingGunState; b.chargerWorkState = chargerWorkState;
@@ -401,6 +555,23 @@ public class BydVehicleData {
         b.mcuStatus = mcuStatus; b.emergencyAlarmState = emergencyAlarmState;
         b.radarDistances = radarDistances; b.timestamp = timestamp;
         b.availableDevices = availableDevices; b.unavailableDevices = unavailableDevices;
+        // Extended fields
+        b.sohPercent = sohPercent; b.keyBatteryLevel = keyBatteryLevel;
+        b.battery12vLevel = battery12vLevel; b.insideTempCelsius = insideTempCelsius;
+        b.chargingRestTimeHours = chargingRestTimeHours;
+        b.chargingRestTimeMinutes = chargingRestTimeMinutes;
+        b.drivingTimeHours = drivingTimeHours; b.last50KmConsumption = last50KmConsumption;
+        b.steeringAngleDegrees = steeringAngleDegrees; b.autoSystemState = autoSystemState;
+        b.currentTripMileageKm = currentTripMileageKm;
+        b.currentTripTimeHours = currentTripTimeHours;
+        b.currentTripConsumptionKwh = currentTripConsumptionKwh;
+        b.engineCoolantLevel = engineCoolantLevel; b.oilLevel = oilLevel;
+        b.engineCode = engineCode; b.wiperState = wiperState;
+        b.sunroofState = sunroofState; b.sunroofPosition = sunroofPosition;
+        b.sunshadePercent = sunshadePercent; b.wirelessChargingStatus = wirelessChargingStatus;
+        b.driftModeEnabled = driftModeEnabled; b.tyreTemperatures = tyreTemperatures;
+        b.passengerDetection = passengerDetection;
+        b.pm25Inside = pm25Inside; b.pm25Outside = pm25Outside;
         return b;
     }
 
@@ -417,6 +588,7 @@ public class BydVehicleData {
         int energyMode = UNAVAILABLE, operationMode = UNAVAILABLE;
         double totalElecCon = NaN, totalFuelCon = NaN;
         int elecRangeKm = UNAVAILABLE, fuelRangeKm = UNAVAILABLE, bodyworkRangeKm = UNAVAILABLE;
+        double fuelPercent = NaN;
         int totalMileageKm = UNAVAILABLE, evMileageKm = UNAVAILABLE;
         int chargingState = UNAVAILABLE, chargingGunState = UNAVAILABLE, chargerWorkState = UNAVAILABLE;
         double chargingPowerKw = NaN, externalChargingPowerKw = NaN, hvPackVoltage = NaN;
@@ -429,6 +601,34 @@ public class BydVehicleData {
         int powerLevel = UNAVAILABLE, mcuStatus = UNAVAILABLE, emergencyAlarmState = UNAVAILABLE;
         long timestamp = System.currentTimeMillis();
         String[] availableDevices, unavailableDevices;
+
+        // Extended fields
+        double sohPercent = NaN;
+        int keyBatteryLevel = UNAVAILABLE;
+        int battery12vLevel = UNAVAILABLE;
+        double insideTempCelsius = NaN;
+        int chargingRestTimeHours = UNAVAILABLE;
+        int chargingRestTimeMinutes = UNAVAILABLE;
+        double drivingTimeHours = NaN;
+        double last50KmConsumption = NaN;
+        double steeringAngleDegrees = NaN;
+        int autoSystemState = UNAVAILABLE;
+        double currentTripMileageKm = NaN;
+        double currentTripTimeHours = NaN;
+        double currentTripConsumptionKwh = NaN;
+        int engineCoolantLevel = UNAVAILABLE;
+        int oilLevel = UNAVAILABLE;
+        String engineCode;
+        int wiperState = UNAVAILABLE;
+        int sunroofState = UNAVAILABLE;
+        int sunroofPosition = UNAVAILABLE;
+        int sunshadePercent = UNAVAILABLE;
+        int wirelessChargingStatus = UNAVAILABLE;
+        boolean driftModeEnabled;
+        int[] tyreTemperatures;
+        int[] passengerDetection;
+        int pm25Inside = UNAVAILABLE;
+        int pm25Outside = UNAVAILABLE;
 
         public Builder vin(String v) { vin = v; return this; }
         public Builder socPercent(double v) { socPercent = v; return this; }
@@ -460,6 +660,7 @@ public class BydVehicleData {
         public Builder totalFuelCon(double v) { totalFuelCon = v; return this; }
         public Builder elecRangeKm(int v) { elecRangeKm = v; return this; }
         public Builder fuelRangeKm(int v) { fuelRangeKm = v; return this; }
+        public Builder fuelPercent(double v) { fuelPercent = v; return this; }
         public Builder bodyworkRangeKm(int v) { bodyworkRangeKm = v; return this; }
         public Builder totalMileageKm(int v) { totalMileageKm = v; return this; }
         public Builder evMileageKm(int v) { evMileageKm = v; return this; }
@@ -493,6 +694,34 @@ public class BydVehicleData {
         public Builder radarDistances(int[] v) { radarDistances = v; return this; }
         public Builder availableDevices(String[] v) { availableDevices = v; return this; }
         public Builder unavailableDevices(String[] v) { unavailableDevices = v; return this; }
+
+        // Extended field setters
+        public Builder sohPercent(double v) { sohPercent = v; return this; }
+        public Builder keyBatteryLevel(int v) { keyBatteryLevel = v; return this; }
+        public Builder battery12vLevel(int v) { battery12vLevel = v; return this; }
+        public Builder insideTempCelsius(double v) { insideTempCelsius = v; return this; }
+        public Builder chargingRestTimeHours(int v) { chargingRestTimeHours = v; return this; }
+        public Builder chargingRestTimeMinutes(int v) { chargingRestTimeMinutes = v; return this; }
+        public Builder drivingTimeHours(double v) { drivingTimeHours = v; return this; }
+        public Builder last50KmConsumption(double v) { last50KmConsumption = v; return this; }
+        public Builder steeringAngleDegrees(double v) { steeringAngleDegrees = v; return this; }
+        public Builder autoSystemState(int v) { autoSystemState = v; return this; }
+        public Builder currentTripMileageKm(double v) { currentTripMileageKm = v; return this; }
+        public Builder currentTripTimeHours(double v) { currentTripTimeHours = v; return this; }
+        public Builder currentTripConsumptionKwh(double v) { currentTripConsumptionKwh = v; return this; }
+        public Builder engineCoolantLevel(int v) { engineCoolantLevel = v; return this; }
+        public Builder oilLevel(int v) { oilLevel = v; return this; }
+        public Builder engineCode(String v) { engineCode = v; return this; }
+        public Builder wiperState(int v) { wiperState = v; return this; }
+        public Builder sunroofState(int v) { sunroofState = v; return this; }
+        public Builder sunroofPosition(int v) { sunroofPosition = v; return this; }
+        public Builder sunshadePercent(int v) { sunshadePercent = v; return this; }
+        public Builder wirelessChargingStatus(int v) { wirelessChargingStatus = v; return this; }
+        public Builder driftModeEnabled(boolean v) { driftModeEnabled = v; return this; }
+        public Builder tyreTemperatures(int[] v) { tyreTemperatures = v; return this; }
+        public Builder passengerDetection(int[] v) { passengerDetection = v; return this; }
+        public Builder pm25Inside(int v) { pm25Inside = v; return this; }
+        public Builder pm25Outside(int v) { pm25Outside = v; return this; }
 
         public BydVehicleData build() {
             timestamp = System.currentTimeMillis();

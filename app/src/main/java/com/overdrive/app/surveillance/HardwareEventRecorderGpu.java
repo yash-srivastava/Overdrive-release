@@ -769,6 +769,13 @@ public class HardwareEventRecorderGpu {
                             codecMimeType.equals(MediaFormat.MIMETYPE_VIDEO_HEVC) ? "H.265" : "H.264",
                             bitrate / 1_000_000));
                     
+                    // Make file visible to events page and UI app
+                    try {
+                        com.overdrive.app.storage.StorageManager.getInstance().onFileSaved(finalFile);
+                    } catch (Exception e) {
+                        logger.warn("onFileSaved error: " + e.getMessage());
+                    }
+                    
                     try {
                         TelegramNotifier.notifyVideoRecorded(
                                 finalFile.getAbsolutePath(), null, (int) durationSec);
@@ -994,6 +1001,48 @@ public class HardwareEventRecorderGpu {
         
         // Stop disk writer after drainer (drainer may still be pushing to the queue)
         stopDiskWriterThread();
+    }
+    
+    /**
+     * FORTIFY FIX: Stops the drainer thread before camera close.
+     * 
+     * The drainer thread calls MediaCodec.dequeueOutputBuffer() which internally
+     * accesses the camera's SurfaceTexture buffer queue. If the camera is closed
+     * (destroying the native mutex) while the drainer is mid-dequeue, we get:
+     *   FORTIFY: pthread_mutex_lock called on a destroyed mutex
+     * 
+     * This method stops the drainer and waits for it to fully exit before returning,
+     * making it safe to close the camera afterwards.
+     * 
+     * Call restartDrainerAfterCameraClose() after the camera is reopened.
+     */
+    public void stopDrainerForCameraClose() {
+        logger.info("Stopping drainer for camera close...");
+        drainerRunning = false;
+        if (drainerThread != null) {
+            try {
+                drainerThread.interrupt();
+                drainerThread.join(1000);  // Wait up to 1 second for clean exit
+                if (drainerThread.isAlive()) {
+                    logger.warn("Drainer thread still alive after 1s — proceeding anyway");
+                }
+            } catch (InterruptedException e) {
+                // Ignore
+            }
+            drainerThread = null;
+        }
+        logger.info("Drainer stopped for camera close");
+    }
+    
+    /**
+     * Restarts the drainer thread after camera has been reopened.
+     * Call this after startCamera() succeeds.
+     */
+    public void restartDrainerAfterCameraClose() {
+        if (!drainerRunning) {
+            startDrainerThread();
+            logger.info("Drainer restarted after camera reopen");
+        }
     }
     
     // ==================== SOTA: Disk Writer Thread ====================
@@ -1245,6 +1294,13 @@ public class HardwareEventRecorderGpu {
                     float durationSec = recordedFrames / (float) fps;
                     logger.info(String.format("Segment %d saved: %s (%d frames, %.1f sec, %d KB)",
                             segmentNumber, finalFile.getName(), recordedFrames, durationSec, finalFile.length() / 1024));
+                    
+                    // Make file visible to events page and UI app
+                    try {
+                        com.overdrive.app.storage.StorageManager.getInstance().onFileSaved(finalFile);
+                    } catch (Exception e) {
+                        logger.warn("onFileSaved error: " + e.getMessage());
+                    }
                 } else {
                     logger.error("Failed to rename segment " + segmentNumber + " — deleting orphan");
                     tempFile.delete();

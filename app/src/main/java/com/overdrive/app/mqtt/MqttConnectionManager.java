@@ -486,6 +486,46 @@ public class MqttConnectionManager {
                 payload.put("gear", GearMonitor.gearToString(gearMonitor.getCurrentGear()));
             }
 
+            // ==================== EXTENDED TELEMETRY (BYD API overhaul) ====================
+            if (vd != null) {
+                // OEM SOH (raw value from BMS, separate from SohEstimator)
+                if (!Double.isNaN(vd.sohPercent)) payload.put("soh_oem", vd.sohPercent);
+
+                // Charging ETA
+                if (vd.chargingRestTimeHours != BydVehicleData.UNAVAILABLE)
+                    payload.put("charging_eta_hours", vd.chargingRestTimeHours);
+                if (vd.chargingRestTimeMinutes != BydVehicleData.UNAVAILABLE)
+                    payload.put("charging_eta_minutes", vd.chargingRestTimeMinutes);
+
+                // Trip data
+                if (!Double.isNaN(vd.currentTripMileageKm)) payload.put("trip_km", vd.currentTripMileageKm);
+                if (!Double.isNaN(vd.currentTripTimeHours)) payload.put("trip_hours", vd.currentTripTimeHours);
+                if (!Double.isNaN(vd.currentTripConsumptionKwh)) payload.put("trip_kwh", vd.currentTripConsumptionKwh);
+
+                // Efficiency
+                if (!Double.isNaN(vd.last50KmConsumption)) payload.put("consumption_50km", vd.last50KmConsumption);
+
+                // Driving time
+                if (!Double.isNaN(vd.drivingTimeHours)) payload.put("driving_time_hours", vd.drivingTimeHours);
+
+                // Key battery
+                if (vd.keyBatteryLevel != BydVehicleData.UNAVAILABLE) payload.put("key_battery", vd.keyBatteryLevel);
+
+                // EV range
+                if (vd.elecRangeKm != BydVehicleData.UNAVAILABLE) payload.put("ev_range_km", vd.elecRangeKm);
+
+                // Cabin temp
+                if (!Double.isNaN(vd.insideTempCelsius)) payload.put("cabin_temp", vd.insideTempCelsius);
+
+                // Tyre temps (if available)
+                if (vd.tyreTemperatures != null) {
+                    payload.put("tyre_temp_fl", vd.tyreTemperatures[0]);
+                    payload.put("tyre_temp_fr", vd.tyreTemperatures[1]);
+                    payload.put("tyre_temp_rl", vd.tyreTemperatures[2]);
+                    payload.put("tyre_temp_rr", vd.tyreTemperatures[3]);
+                }
+            }
+
         } catch (Exception e) {
             logger.error("Telemetry collection error: " + e.getMessage());
         }

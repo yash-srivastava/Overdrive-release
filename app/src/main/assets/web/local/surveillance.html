@@ -227,6 +227,23 @@
                         <span class="ev-personalized-val" id="evPersonalizedRange">-- km</span>
                     </div>
                 </div>
+
+                <!-- Fuel Card (PHEV only — hidden for BEVs) -->
+                <div class="status-card fuel-card" id="fuelCard" style="display:none;">
+                    <div class="fuel-header">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:18px;height:18px;color:#F59E0B;">
+                            <path d="M3 22V6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/>
+                            <path d="M3 22h10"/>
+                            <path d="M13 10h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V9.83a2 2 0 0 0-.59-1.42L18 6"/>
+                            <path d="M6 14v-3"/>
+                        </svg>
+                        <span class="fuel-title">Fuel</span>
+                        <span class="fuel-percent" id="fuelPercentValue">--%</span>
+                    </div>
+                    <div class="fuel-bar-track">
+                        <div class="fuel-bar-fill" id="fuelBarFill" style="width:0%"></div>
+                    </div>
+                </div>
             </div>
         </aside>
 
@@ -542,6 +559,133 @@
                     </div>
                 </div>
 
+                <!-- Deterrent Action -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                            Deterrent Action
+                        </div>
+                        <span class="status-badge inactive" id="deterrentBadge">SILENT</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="setting-row">
+                            <div class="setting-info">
+                                <div class="setting-name">On Motion Detected</div>
+                                <div class="setting-desc">What should OverDrive do when a threat is confirmed</div>
+                            </div>
+                            <div class="setting-control">
+                                <select class="select-control" id="deterrentAction" onchange="SurvSettings.updateDeterrent(this.value)">
+                                    <option value="silent">🔇 Silent (record only)</option>
+                                    <option value="flash_lights">💡 Flash Lights</option>
+                                    <option value="find_car">📢 Horn + Lights</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="setting-hint">Flash Lights and Horn + Lights use BYD's cloud API. The command bounces off BYD's servers to the car's T-Box. Requires BYD Cloud account setup below.</div>
+                        <div id="deterrentWarning" class="info-box" style="display:none; border-color:#f59e0b; background:rgba(245,158,11,0.08); margin-top:8px;">
+                            <div style="display:flex; align-items:center; gap:8px; color:#b45309;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                <span style="font-size:13px;">BYD Cloud account not configured. Set up your credentials below to enable cloud deterrents.</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BYD Cloud Account -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
+                            BYD Cloud Account
+                        </div>
+                        <span class="status-badge inactive" id="bydCloudBadge">NOT SET</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="setting-hint" style="margin-bottom:12px;">Connect your BYD app account to enable remote commands (door lock, flash lights, horn). Only derived key hashes are stored — your raw password is never saved.</div>
+                        
+                        <!-- Connected info (shown when configured) -->
+                        <div id="bydCloudInfo" style="display:none; margin-bottom:12px;">
+                            <div class="info-box">
+                                <div class="info-row"><span class="label">VIN</span><span class="value" id="bydVinDisplay">—</span></div>
+                                <div class="info-row"><span class="label">Account</span><span class="value" id="bydAccountDisplay">—</span></div>
+                            </div>
+                        </div>
+
+                        <!-- Credential form (always visible for setup or edit) -->
+                        <div class="setting-row">
+                            <div class="setting-info">
+                                <div class="setting-name">Server Region</div>
+                                <div class="setting-desc">Must match the region your BYD account was registered in. If unsure, try Europe (EU) first — it's the default for most overseas accounts.</div>
+                            </div>
+                            <div class="setting-control">
+                                <select class="select-control" id="bydRegion">
+                                    <option value="eu">🇪🇺 Europe (default)</option>
+                                    <option value="in">🇮🇳 India</option>
+                                    <option value="au">🇦🇺 Australia</option>
+                                    <option value="sg">🇸🇬 Singapore</option>
+                                    <option value="br">🇧🇷 Brazil</option>
+                                    <option value="jp">🇯🇵 Japan</option>
+                                    <option value="kr-ali">🇰🇷 Korea</option>
+                                    <option value="sa">🇸🇦 Saudi Arabia</option>
+                                    <option value="tr">🇹🇷 Turkey</option>
+                                    <option value="mx">🇲🇽 Mexico</option>
+                                    <option value="id">🇮🇩 Indonesia</option>
+                                    <option value="vn">🇻🇳 Vietnam</option>
+                                    <option value="no">🇳🇴 Norway</option>
+                                    <option value="uz">🇺🇿 Uzbekistan</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-info"><div class="setting-name">Email</div></div>
+                            <div class="setting-control">
+                                <input type="email" class="text-input" id="bydEmail" placeholder="your@email.com" style="width:100%;max-width:240px;padding:8px 12px;border:1px solid var(--border-default);border-radius:8px;background:var(--bg-elevated);color:var(--text-primary);font-size:13px;">
+                            </div>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-info">
+                                <div class="setting-name">Password</div>
+                                <div class="setting-desc" id="bydPasswordHint">Your BYD app login password</div>
+                            </div>
+                            <div class="setting-control" style="display:flex; align-items:center; gap:6px;">
+                                <input type="password" class="text-input" id="bydPassword" placeholder="BYD app password" style="width:100%;max-width:200px;padding:8px 12px;border:1px solid var(--border-default);border-radius:8px;background:var(--bg-elevated);color:var(--text-primary);font-size:13px;">
+                                <button type="button" onclick="BydCloud.togglePasswordVisibility('bydPassword', this)" style="background:none;border:1px solid var(--border-default);border-radius:8px;padding:6px 8px;cursor:pointer;color:var(--text-muted);flex-shrink:0;" title="Show/hide password">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="setting-row" style="border-bottom:none;">
+                            <div class="setting-info">
+                                <div class="setting-name">Control PIN</div>
+                                <div class="setting-desc" id="bydPinHint">The 4-6 digit PIN you set in the official BYD app</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="password" class="text-input" id="bydPin" placeholder="123456" maxlength="6" style="width:100%;max-width:120px;padding:8px 12px;border:1px solid var(--border-default);border-radius:8px;background:var(--bg-elevated);color:var(--text-primary);font-size:13px;text-align:center;letter-spacing:4px;">
+                            </div>
+                        </div>
+                        <div style="display:flex; gap:8px; margin-top:12px;">
+                            <button class="btn btn-primary" onclick="BydCloud.saveCredentials()" id="bydSaveBtn" style="flex:1;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                                Save Credentials
+                            </button>
+                            <button class="btn" onclick="BydCloud.testConnection()" id="bydTestBtn" disabled style="flex:1; border:1px solid var(--border-default); color:var(--text-muted);">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                                Test Connection
+                            </button>
+                        </div>
+                        <div id="bydCloudStatus" style="display:none; margin-top:10px; padding:10px 12px; border-radius:8px; font-size:13px;"></div>
+                        
+                        <!-- Clear button (only shown when configured) -->
+                        <div id="bydClearSection" style="display:none; margin-top:12px; padding-top:12px; border-top:1px solid var(--border-subtle);">
+                            <button class="btn btn-danger" onclick="BydCloud.clearCredentials()" style="width:100%;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                                Clear Credentials
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Recording Settings -->
                 <div class="card">
                     <div class="card-header">
@@ -598,6 +742,19 @@
                                 <div class="btn-group" id="codecBtns">
                                     <button class="btn-toggle active" data-value="H264" onclick="SurvSettings.setCodec('H264')">H.264</button>
                                     <button class="btn-toggle" data-value="H265" onclick="SurvSettings.setCodec('H265')">H.265</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="setting-row">
+                            <div class="setting-info">
+                                <div class="setting-name">Camera FPS</div>
+                                <div class="setting-desc">Shared with recording. Takes effect on next ACC OFF.</div>
+                            </div>
+                            <div class="setting-control">
+                                <div class="btn-group" id="survFpsBtns">
+                                    <button class="btn-toggle" data-value="8" onclick="SurvSettings.setFps(8)">8</button>
+                                    <button class="btn-toggle active" data-value="15" onclick="SurvSettings.setFps(15)">15</button>
+                                    <button class="btn-toggle" data-value="25" onclick="SurvSettings.setFps(25)">25</button>
                                 </div>
                             </div>
                         </div>

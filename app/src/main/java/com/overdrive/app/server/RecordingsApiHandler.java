@@ -267,29 +267,27 @@ public class RecordingsApiHandler {
     
     /**
      * Find a video file across all storage locations.
+     * Uses StorageManager to get all possible directories without hardcoding paths.
      */
     private static File findVideoFile(String filename) {
-        // Check new recordings location
-        File normalFile = new File(getRecordingsDir(), filename);
-        if (normalFile.exists() && normalFile.canRead() && normalFile.length() > 0) return normalFile;
-        
-        // Check new sentry location
-        File sentryFile = new File(getSentryDir(), filename);
-        if (sentryFile.exists() && sentryFile.canRead() && sentryFile.length() > 0) return sentryFile;
-        
-        // Check proximity location
-        File proximityFile = new File(StorageManager.getInstance().getProximityPath(), filename);
-        if (proximityFile.exists() && proximityFile.canRead() && proximityFile.length() > 0) return proximityFile;
-        
-        // Check the OTHER storage location (files may be in internal when active is SD, or vice versa)
         StorageManager sm = StorageManager.getInstance();
-        if (sm.isSdCardAvailable() && sm.getSdCardPath() != null) {
-            for (String subdir : new String[]{"recordings", "surveillance", "proximity"}) {
-                File sdFile = new File(sm.getSdCardPath(), "Overdrive/" + subdir + "/" + filename);
-                if (sdFile.exists() && sdFile.canRead() && sdFile.length() > 0) return sdFile;
-                File intFile = new File("/storage/emulated/0/Overdrive/" + subdir + "/" + filename);
-                if (intFile.exists() && intFile.canRead() && intFile.length() > 0) return intFile;
-            }
+        
+        // Search all recordings directories (active + alternate)
+        for (File dir : sm.getAllRecordingsDirs()) {
+            File f = new File(dir, filename);
+            if (f.exists() && f.canRead() && f.length() > 0) return f;
+        }
+        
+        // Search all surveillance directories (active + alternate)
+        for (File dir : sm.getAllSurveillanceDirs()) {
+            File f = new File(dir, filename);
+            if (f.exists() && f.canRead() && f.length() > 0) return f;
+        }
+        
+        // Search all proximity directories (active + alternate)
+        for (File dir : sm.getAllProximityDirs()) {
+            File f = new File(dir, filename);
+            if (f.exists() && f.canRead() && f.length() > 0) return f;
         }
         
         // Check legacy recordings location
@@ -322,62 +320,37 @@ public class RecordingsApiHandler {
     private static void listRecordings(OutputStream out, String typeFilter, String dateFilter, 
                                        int page, int pageSize) throws Exception {
         List<JSONObject> recordings = new ArrayList<>();
+        StorageManager sm = StorageManager.getInstance();
         
-        // Scan normal recordings (new location)
+        // Scan normal recordings from ALL locations (active + alternate + legacy)
         if (typeFilter == null || typeFilter.equals("normal")) {
-            File recordingsDir = new File(getRecordingsDir());
-            scanDirectory(recordingsDir, "normal", recordings, dateFilter);
-            
+            for (File dir : sm.getAllRecordingsDirs()) {
+                scanDirectory(dir, "normal", recordings, dateFilter);
+            }
             // Also scan legacy location for backward compatibility
             File legacyDir = new File(LEGACY_RECORDINGS_DIR);
-            if (legacyDir.exists() && !legacyDir.getAbsolutePath().equals(recordingsDir.getAbsolutePath())) {
+            if (legacyDir.exists()) {
                 scanDirectory(legacyDir, "normal", recordings, dateFilter);
             }
-            
-            // Also scan the other storage location (internal vs SD card)
-            // Files may exist in both locations due to storage fallback during recording
-            StorageManager sm = StorageManager.getInstance();
-            if (sm.isSdCardAvailable() && sm.getSdCardPath() != null) {
-                File sdRecDir = new File(sm.getSdCardPath(), "Overdrive/recordings");
-                File intRecDir = new File("/storage/emulated/0/Overdrive/recordings");
-                if (sdRecDir.exists() && !sdRecDir.getAbsolutePath().equals(recordingsDir.getAbsolutePath())) {
-                    scanDirectory(sdRecDir, "normal", recordings, dateFilter);
-                }
-                if (intRecDir.exists() && !intRecDir.getAbsolutePath().equals(recordingsDir.getAbsolutePath())) {
-                    scanDirectory(intRecDir, "normal", recordings, dateFilter);
-                }
-            }
         }
         
-        // Scan sentry events (new location)
+        // Scan sentry events from ALL locations (active + alternate + legacy)
         if (typeFilter == null || typeFilter.equals("sentry")) {
-            File sentryDir = new File(getSentryDir());
-            scanDirectory(sentryDir, "sentry", recordings, dateFilter);
-            
+            for (File dir : sm.getAllSurveillanceDirs()) {
+                scanDirectory(dir, "sentry", recordings, dateFilter);
+            }
             // Also scan legacy location for backward compatibility
             File legacySentryDir = new File(LEGACY_SENTRY_DIR);
-            if (legacySentryDir.exists() && !legacySentryDir.getAbsolutePath().equals(sentryDir.getAbsolutePath())) {
+            if (legacySentryDir.exists()) {
                 scanDirectory(legacySentryDir, "sentry", recordings, dateFilter);
-            }
-            
-            // Also scan the other storage location for sentry events
-            StorageManager sm2 = StorageManager.getInstance();
-            if (sm2.isSdCardAvailable() && sm2.getSdCardPath() != null) {
-                File sdSentryDir = new File(sm2.getSdCardPath(), "Overdrive/surveillance");
-                File intSentryDir = new File("/storage/emulated/0/Overdrive/surveillance");
-                if (sdSentryDir.exists() && !sdSentryDir.getAbsolutePath().equals(sentryDir.getAbsolutePath())) {
-                    scanDirectory(sdSentryDir, "sentry", recordings, dateFilter);
-                }
-                if (intSentryDir.exists() && !intSentryDir.getAbsolutePath().equals(sentryDir.getAbsolutePath())) {
-                    scanDirectory(intSentryDir, "sentry", recordings, dateFilter);
-                }
             }
         }
         
-        // Scan proximity events
+        // Scan proximity events from ALL locations (active + alternate)
         if (typeFilter == null || typeFilter.equals("proximity")) {
-            File proximityDir = new File(StorageManager.getInstance().getProximityPath());
-            scanDirectory(proximityDir, "proximity", recordings, dateFilter);
+            for (File dir : sm.getAllProximityDirs()) {
+                scanDirectory(dir, "proximity", recordings, dateFilter);
+            }
         }
         
         // Sort by timestamp descending (newest first)
@@ -524,43 +497,29 @@ public class RecordingsApiHandler {
         Set<String> dates = new HashSet<>();
         Map<String, Integer> countByDate = new HashMap<>();
         Map<String, Boolean> hasSentryByDate = new HashMap<>();
+        StorageManager sm = StorageManager.getInstance();
         
-        // Scan normal recordings (new + legacy)
-        File recordingsDir = new File(getRecordingsDir());
-        scanDatesInDirectory(recordingsDir, false, dates, countByDate, hasSentryByDate);
+        // Scan normal recordings from ALL locations (active + alternate + legacy)
+        for (File dir : sm.getAllRecordingsDirs()) {
+            scanDatesInDirectory(dir, false, dates, countByDate, hasSentryByDate);
+        }
         File legacyDir = new File(LEGACY_RECORDINGS_DIR);
-        if (legacyDir.exists() && !legacyDir.getAbsolutePath().equals(recordingsDir.getAbsolutePath())) {
+        if (legacyDir.exists()) {
             scanDatesInDirectory(legacyDir, false, dates, countByDate, hasSentryByDate);
         }
         
-        // Scan sentry events (new + legacy)
-        File sentryDir = new File(getSentryDir());
-        scanDatesInDirectory(sentryDir, true, dates, countByDate, hasSentryByDate);
+        // Scan sentry events from ALL locations (active + alternate + legacy)
+        for (File dir : sm.getAllSurveillanceDirs()) {
+            scanDatesInDirectory(dir, true, dates, countByDate, hasSentryByDate);
+        }
         File legacySentryDir = new File(LEGACY_SENTRY_DIR);
-        if (legacySentryDir.exists() && !legacySentryDir.getAbsolutePath().equals(sentryDir.getAbsolutePath())) {
+        if (legacySentryDir.exists()) {
             scanDatesInDirectory(legacySentryDir, true, dates, countByDate, hasSentryByDate);
         }
         
-        // Also scan the other storage location (files may exist on both internal and SD card)
-        StorageManager sm = StorageManager.getInstance();
-        if (sm.isSdCardAvailable() && sm.getSdCardPath() != null) {
-            File sdRecDir = new File(sm.getSdCardPath(), "Overdrive/recordings");
-            File intRecDir = new File("/storage/emulated/0/Overdrive/recordings");
-            File sdSentryDir = new File(sm.getSdCardPath(), "Overdrive/surveillance");
-            File intSentryDir = new File("/storage/emulated/0/Overdrive/surveillance");
-            
-            if (sdRecDir.exists() && !sdRecDir.getAbsolutePath().equals(recordingsDir.getAbsolutePath())) {
-                scanDatesInDirectory(sdRecDir, false, dates, countByDate, hasSentryByDate);
-            }
-            if (intRecDir.exists() && !intRecDir.getAbsolutePath().equals(recordingsDir.getAbsolutePath())) {
-                scanDatesInDirectory(intRecDir, false, dates, countByDate, hasSentryByDate);
-            }
-            if (sdSentryDir.exists() && !sdSentryDir.getAbsolutePath().equals(sentryDir.getAbsolutePath())) {
-                scanDatesInDirectory(sdSentryDir, true, dates, countByDate, hasSentryByDate);
-            }
-            if (intSentryDir.exists() && !intSentryDir.getAbsolutePath().equals(sentryDir.getAbsolutePath())) {
-                scanDatesInDirectory(intSentryDir, true, dates, countByDate, hasSentryByDate);
-            }
+        // Scan proximity events from ALL locations (active + alternate)
+        for (File dir : sm.getAllProximityDirs()) {
+            scanDatesInDirectory(dir, false, dates, countByDate, hasSentryByDate);
         }
         
         JSONArray datesArray = new JSONArray();
@@ -586,22 +545,35 @@ public class RecordingsApiHandler {
         File[] files = dir.listFiles((d, name) -> name.endsWith(".mp4"));
         if (files == null) return;
         
-        Pattern pattern = isSentry ? EVENT_PATTERN : CAM_PATTERN;
-        
         for (File file : files) {
             // Skip ghost files from unmounted SD card
             if (!file.canRead() || file.length() <= 0) continue;
             
-            Matcher m = pattern.matcher(file.getName());
-            if (m.matches()) {
-                String dateStr = isSentry ? m.group(1) : m.group(2);
-                // Convert YYYYMMDD to YYYY-MM-DD
+            String name = file.getName();
+            String dateStr = null;
+            boolean isSentryFile = false;
+            
+            // Try all patterns to extract date — handles mixed directories
+            Matcher eventMatcher = EVENT_PATTERN.matcher(name);
+            Matcher camMatcher = CAM_PATTERN.matcher(name);
+            Matcher proxMatcher = PROXIMITY_PATTERN.matcher(name);
+            
+            if (eventMatcher.matches()) {
+                dateStr = eventMatcher.group(1);
+                isSentryFile = true;
+            } else if (camMatcher.matches()) {
+                dateStr = camMatcher.group(2);
+            } else if (proxMatcher.matches()) {
+                dateStr = proxMatcher.group(1);
+            }
+            
+            if (dateStr != null && dateStr.length() == 8) {
                 String formattedDate = dateStr.substring(0, 4) + "-" + 
                                        dateStr.substring(4, 6) + "-" + 
                                        dateStr.substring(6, 8);
                 dates.add(formattedDate);
                 countByDate.merge(formattedDate, 1, Integer::sum);
-                if (isSentry) {
+                if (isSentryFile) {
                     hasSentryByDate.put(formattedDate, true);
                 }
             }
@@ -610,6 +582,7 @@ public class RecordingsApiHandler {
     
     /**
      * Get storage statistics.
+     * Scans ALL locations (active + alternate) via StorageManager, deduplicating by filename.
      */
     private static void getStorageStats(OutputStream out) throws Exception {
         StorageManager storage = StorageManager.getInstance();
@@ -618,38 +591,42 @@ public class RecordingsApiHandler {
         long sentrySize = 0, sentryCount = 0;
         long proximitySize = 0, proximityCount = 0;
         
-        // Today's counts
         long normalTodayCount = 0;
         long sentryTodayCount = 0;
         long proximityTodayCount = 0;
         
-        // Get today's date string for matching (YYYYMMDD format)
         String todayStr = new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date());
         
-        // Normal recordings (new location)
-        File recordingsDir = new File(getRecordingsDir());
-        if (recordingsDir.exists() && recordingsDir.canRead()) {
-            File[] files = recordingsDir.listFiles((d, name) -> name.endsWith(".mp4"));
-            if (files != null) {
-                for (File f : files) {
-                    if (!f.canRead() || f.length() <= 0) continue;
-                    normalSize += f.length();
-                    normalCount++;
-                    // Check if file is from today
-                    if (isFileFromToday(f.getName(), todayStr, CAM_PATTERN, 2)) {
-                        normalTodayCount++;
-                    }
+        // Track seen filenames to avoid double-counting files that exist in both locations
+        Set<String> seenNormal = new HashSet<>();
+        Set<String> seenSentry = new HashSet<>();
+        Set<String> seenProximity = new HashSet<>();
+        
+        // Normal recordings from ALL locations
+        for (File dir : storage.getAllRecordingsDirs()) {
+            if (!dir.exists() || !dir.canRead()) continue;
+            File[] files = dir.listFiles((d, name) -> name.endsWith(".mp4"));
+            if (files == null) continue;
+            for (File f : files) {
+                if (!f.canRead() || f.length() <= 0) continue;
+                if (seenNormal.contains(f.getName())) continue;
+                seenNormal.add(f.getName());
+                normalSize += f.length();
+                normalCount++;
+                if (isFileFromToday(f.getName(), todayStr, CAM_PATTERN, 2)) {
+                    normalTodayCount++;
                 }
             }
         }
-        
-        // Also count legacy location
+        // Legacy location
         File legacyDir = new File(LEGACY_RECORDINGS_DIR);
-        if (legacyDir.exists() && legacyDir.canRead() && !legacyDir.getAbsolutePath().equals(recordingsDir.getAbsolutePath())) {
+        if (legacyDir.exists() && legacyDir.canRead()) {
             File[] files = legacyDir.listFiles((d, name) -> name.endsWith(".mp4"));
             if (files != null) {
                 for (File f : files) {
                     if (!f.canRead() || f.length() <= 0) continue;
+                    if (seenNormal.contains(f.getName())) continue;
+                    seenNormal.add(f.getName());
                     normalSize += f.length();
                     normalCount++;
                     if (isFileFromToday(f.getName(), todayStr, CAM_PATTERN, 2)) {
@@ -659,29 +636,31 @@ public class RecordingsApiHandler {
             }
         }
         
-        // Sentry events (new location)
-        File sentryDir = new File(getSentryDir());
-        if (sentryDir.exists() && sentryDir.canRead()) {
-            File[] files = sentryDir.listFiles((d, name) -> name.endsWith(".mp4"));
-            if (files != null) {
-                for (File f : files) {
-                    if (!f.canRead() || f.length() <= 0) continue;
-                    sentrySize += f.length();
-                    sentryCount++;
-                    if (isFileFromToday(f.getName(), todayStr, EVENT_PATTERN, 1)) {
-                        sentryTodayCount++;
-                    }
+        // Sentry events from ALL locations
+        for (File dir : storage.getAllSurveillanceDirs()) {
+            if (!dir.exists() || !dir.canRead()) continue;
+            File[] files = dir.listFiles((d, name) -> name.endsWith(".mp4"));
+            if (files == null) continue;
+            for (File f : files) {
+                if (!f.canRead() || f.length() <= 0) continue;
+                if (seenSentry.contains(f.getName())) continue;
+                seenSentry.add(f.getName());
+                sentrySize += f.length();
+                sentryCount++;
+                if (isFileFromToday(f.getName(), todayStr, EVENT_PATTERN, 1)) {
+                    sentryTodayCount++;
                 }
             }
         }
-        
-        // Also count legacy location
+        // Legacy sentry location
         File legacySentryDir = new File(LEGACY_SENTRY_DIR);
-        if (legacySentryDir.exists() && legacySentryDir.canRead() && !legacySentryDir.getAbsolutePath().equals(sentryDir.getAbsolutePath())) {
+        if (legacySentryDir.exists() && legacySentryDir.canRead()) {
             File[] files = legacySentryDir.listFiles((d, name) -> name.endsWith(".mp4"));
             if (files != null) {
                 for (File f : files) {
                     if (!f.canRead() || f.length() <= 0) continue;
+                    if (seenSentry.contains(f.getName())) continue;
+                    seenSentry.add(f.getName());
                     sentrySize += f.length();
                     sentryCount++;
                     if (isFileFromToday(f.getName(), todayStr, EVENT_PATTERN, 1)) {
@@ -691,25 +670,27 @@ public class RecordingsApiHandler {
             }
         }
         
-        // Proximity events
-        File proximityDir = new File(storage.getProximityPath());
-        if (proximityDir.exists() && proximityDir.canRead()) {
-            File[] files = proximityDir.listFiles((d, name) -> name.endsWith(".mp4"));
-            if (files != null) {
-                for (File f : files) {
-                    if (!f.canRead() || f.length() <= 0) continue;
-                    proximitySize += f.length();
-                    proximityCount++;
-                    if (isFileFromToday(f.getName(), todayStr, PROXIMITY_PATTERN, 1)) {
-                        proximityTodayCount++;
-                    }
+        // Proximity events from ALL locations
+        for (File dir : storage.getAllProximityDirs()) {
+            if (!dir.exists() || !dir.canRead()) continue;
+            File[] files = dir.listFiles((d, name) -> name.endsWith(".mp4"));
+            if (files == null) continue;
+            for (File f : files) {
+                if (!f.canRead() || f.length() <= 0) continue;
+                if (seenProximity.contains(f.getName())) continue;
+                seenProximity.add(f.getName());
+                proximitySize += f.length();
+                proximityCount++;
+                if (isFileFromToday(f.getName(), todayStr, PROXIMITY_PATTERN, 1)) {
+                    proximityTodayCount++;
                 }
             }
         }
         
-        // Get available space
-        long availableSpace = recordingsDir.exists() ? recordingsDir.getFreeSpace() : 0;
-        long totalSpace = recordingsDir.exists() ? recordingsDir.getTotalSpace() : 0;
+        // Get available space from the active recordings directory
+        File activeRecDir = storage.getRecordingsDir();
+        long availableSpace = activeRecDir.exists() ? activeRecDir.getFreeSpace() : 0;
+        long totalSpace = activeRecDir.exists() ? activeRecDir.getTotalSpace() : 0;
         
         JSONObject response = new JSONObject();
         response.put("success", true);
@@ -911,19 +892,28 @@ public class RecordingsApiHandler {
     
     /**
      * Find a JSON sidecar file across all storage locations.
+     * Uses StorageManager to get all possible directories without hardcoding paths.
      */
     private static File findJsonSidecar(String jsonFilename) {
-        // Check surveillance directory
-        File sentryFile = new File(getSentryDir(), jsonFilename);
-        if (sentryFile.exists()) return sentryFile;
+        StorageManager sm = StorageManager.getInstance();
         
-        // Check recordings directory
-        File normalFile = new File(getRecordingsDir(), jsonFilename);
-        if (normalFile.exists()) return normalFile;
+        // Check all surveillance directories
+        for (File dir : sm.getAllSurveillanceDirs()) {
+            File f = new File(dir, jsonFilename);
+            if (f.exists()) return f;
+        }
         
-        // Check proximity directory
-        File proximityFile = new File(StorageManager.getInstance().getProximityPath(), jsonFilename);
-        if (proximityFile.exists()) return proximityFile;
+        // Check all recordings directories
+        for (File dir : sm.getAllRecordingsDirs()) {
+            File f = new File(dir, jsonFilename);
+            if (f.exists()) return f;
+        }
+        
+        // Check all proximity directories
+        for (File dir : sm.getAllProximityDirs()) {
+            File f = new File(dir, jsonFilename);
+            if (f.exists()) return f;
+        }
         
         return null;
     }

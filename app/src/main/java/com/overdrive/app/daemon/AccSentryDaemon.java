@@ -3,7 +3,6 @@ package com.overdrive.app.daemon;
 import android.content.Context;
 import android.hardware.bydauto.bodywork.AbsBYDAutoBodyworkListener;
 import android.hardware.bydauto.power.BYDAutoPowerDevice;
-import android.os.IAccModeManager;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
@@ -198,29 +197,100 @@ public class AccSentryDaemon {
     }
     
     /**
-     * Toggles the "Remote Surveillance" power flags in the Gateway/BCM.
-     * This tells the BCM: "I am in Remote Surveillance Mode. Do NOT cut the 5V Peripheral Rail."
+     * Sets a hidden BYD configuration value via BYDAutoPowerDevice.
+     * Used for power hold/release signals (e.g., -1442840502).
      * 
-     * - ID 782237711: "Remote Power Mode" (Keeps 5V rails active)
-     * - ID 782237728: "Data Module Power" (Keeps Modem/USB active)
+     * @param configId The power config ID
+     * @param value The value to set
+     */
+    private static void setPowerConfig(int configId, int value) {
+        BYDAutoPowerDevice device = getPowerDevice();
+        if (device == null) {
+            log("Cannot set Power Config - device unavailable");
+            return;
+        }
+        
+        try {
+            Class<?> valueClass = Class.forName("android.hardware.bydauto.BYDAutoEventValue");
+            Object valueObj = valueClass.newInstance();
+            
+            java.lang.reflect.Field intValueField = valueClass.getField("intValue");
+            intValueField.setInt(valueObj, value);
+            
+            try {
+                java.lang.reflect.Field typeField = valueClass.getField("valueType");
+                typeField.setInt(valueObj, 1);
+            } catch (Exception ignored) {}
+            
+            Method setMethod = device.getClass().getMethod("set", int[].class, valueClass);
+            int[] ids = { configId };
+            setMethod.invoke(device, ids, valueObj);
+            
+            log("Power Config [" + configId + "] set to: " + value);
+        } catch (Exception e) {
+            log("Failed to set Power Config [" + configId + "]: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Toggles the "Remote Surveillance" power flags in the Gateway/BCM.
+     * Matches Diplus C1310c implementation exactly:
+     * 
+     * DISABLE path:
+     *   - SpecialDevice 782237711 = 0 (sentry keep-alive OFF)
+     *   - SpecialDevice 782237728 = 2 (allow sleep — value is 2, NOT 0)
+     *   - PowerDevice  -1442840502 = 0 (release power hold)
+     * 
+     * ENABLE path (MCU status 1 or 10):
+     *   - SpecialDevice 782237711 = 1 (sentry keep-alive ON)
+     *   - SpecialDevice 782237728 = 1 (wake request ON)
+     *   - PowerDevice  -1442840502 is NOT set (it's a release-only signal)
+     * 
+     * ENABLE path (MCU needs wake):
+     *   - wakeUpMcu() loop — signals are NOT set until MCU is ready
      * 
      * @param enable true to keep peripherals powered, false to restore stock behavior
      */
     private static void configurePeripheralPower(boolean enable) {
         log("Configuring Peripheral Power (USB/Data): " + (enable ? "ON" : "OFF"));
         
-        if (enable) {
-            // ENABLE SENTRY POWER MODE
-            // Forces BCM to keep peripheral rails hot during ACC OFF
-            setSpecialConfig(SPECIAL_CONFIG_REMOTE_POWER_MODE, 1);  // 1 = ON
-            setSpecialConfig(SPECIAL_CONFIG_DATA_MODULE_POWER, 1);  // 1 = ON
-            setSpecialConfig(-1442840502, 1);
+        if (!enable) {
+            // DISABLE — restore stock, allow MCU to cut power
+            setSpecialConfig(SPECIAL_CONFIG_REMOTE_POWER_MODE, 0);  // Sentry keep-alive OFF
+            setSpecialConfig(SPECIAL_CONFIG_DATA_MODULE_POWER, 2);  // Allow sleep (value=2, NOT 0)
+            setPowerConfig(-1442840502, 0);                         // Release power hold (PowerDevice, not SpecialDevice)
         } else {
-            // DISABLE SENTRY POWER MODE (Restore stock behavior)
-            // Allows BCM to cut peripheral power normally
-            setSpecialConfig(SPECIAL_CONFIG_REMOTE_POWER_MODE, 0);  // 0 = OFF
-            setSpecialConfig(SPECIAL_CONFIG_DATA_MODULE_POWER, 0);  // 0 = OFF
-            setSpecialConfig(-1442840502, 0);
+            // ENABLE — check MCU state first
+            int mcuStatus = getMcuStatus();
+            log("MCU status for peripheral power: " + mcuStatus);
+            
+            if (mcuStatus == 1 || mcuStatus == 10) {
+                // MCU is in normal standby — use signal-based path
+                setSpecialConfig(SPECIAL_CONFIG_REMOTE_POWER_MODE, 1);  // Sentry keep-alive ON
+                setSpecialConfig(SPECIAL_CONFIG_DATA_MODULE_POWER, 1);  // Wake request ON
+                // NOTE: -1442840502 is NOT set to 1 here — it's a release-only signal
+            } else {
+                // MCU needs active wake — use wakeUpMcu() then retry
+                log("MCU not ready (status=" + mcuStatus + "), waking up and retrying...");
+                wakeUpMcu();
+                // Retry after 1 second to allow MCU to stabilize
+                new Thread(() -> {
+                    try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+                    int retryStatus = getMcuStatus();
+                    log("MCU status after wake: " + retryStatus);
+                    if (retryStatus == 1 || retryStatus == 10) {
+                        setSpecialConfig(SPECIAL_CONFIG_REMOTE_POWER_MODE, 1);
+                        setSpecialConfig(SPECIAL_CONFIG_DATA_MODULE_POWER, 1);
+                    } else {
+                        // One more attempt
+                        wakeUpMcu();
+                        try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+                        setSpecialConfig(SPECIAL_CONFIG_REMOTE_POWER_MODE, 1);
+                        setSpecialConfig(SPECIAL_CONFIG_DATA_MODULE_POWER, 1);
+                        log("Forced peripheral power enable after second wake attempt");
+                    }
+                }).start();
+            }
         }
     }
     
@@ -487,8 +557,12 @@ public class AccSentryDaemon {
 
     // ==================== ACC WHITELIST ====================
     /**
-     * OLD METHOD - Kept for reference but not used.
-     * The new whitelistFromShellUid() is more reliable.
+     * Whitelist app package from ACC power management killing.
+     * 
+     * Loads the real system IAccModeManager$Stub via Class.forName from the boot
+     * classloader, guaranteeing the correct transaction code is used.
+     * 
+     * Fallback: direct binder transact with TX code 2 (confirmed working).
      */
     private static void whitelistAppPackageOld() {
         String pkg = APP_PACKAGE_NAME();
@@ -497,7 +571,6 @@ public class AccSentryDaemon {
         boolean success = false;
 
         try {
-            // Get the Binder directly from ServiceManager
             Class<?> serviceManager = Class.forName("android.os.ServiceManager");
             Method getService = serviceManager.getMethod("getService", String.class);
             IBinder binder = (IBinder) getService.invoke(null, SERVICE_ACCMODEMANAGER());
@@ -505,22 +578,29 @@ public class AccSentryDaemon {
             if (binder != null) {
                 log("Got accmodemanager binder: " + binder);
 
-                // === STRATEGY 1: Stub Injection ===
+                // === STRATEGY 1: Load real system stub via Class.forName ===
                 try {
-                    IAccModeManager service = IAccModeManager.Stub.asInterface(binder);
-                    if (service != null) {
-                        service.setPkg2AccWhiteList(pkg);
-                        log("Whitelisted successfully via Stub Injection!");
+                    Class<?> stubClass = Class.forName("android.os.IAccModeManager$Stub");
+                    Method asInterface = stubClass.getMethod("asInterface", IBinder.class);
+                    Object manager = asInterface.invoke(null, binder);
+
+                    if (manager != null) {
+                        Method setPkg = manager.getClass().getMethod("setPkg2AccWhiteList", String.class);
+                        setPkg.invoke(manager, pkg);
+                        log("Whitelisted successfully via system stub!");
                         success = true;
+                    } else {
+                        log("System stub asInterface returned null");
                     }
                 } catch (Exception e) {
-                    log("Stub injection failed (Wrong TX ID?): " + e.getMessage());
+                    String msg = (e.getCause() != null) ? e.getCause().getMessage() : e.getMessage();
+                    log("System stub method failed: " + msg);
                 }
 
-                // === STRATEGY 2: Brute Force (Fallback) ===
+                // === STRATEGY 2: Direct binder transact with known TX code 2 ===
                 if (!success) {
-                    log("Stub failed, attempting Brute Force...");
-                    success = whitelistViaBruteForce(binder, pkg);
+                    log("System stub failed, trying direct transact (TX code 2)...");
+                    success = whitelistViaDirectTransact(binder, pkg);
                 }
 
             } else {
@@ -536,36 +616,50 @@ public class AccSentryDaemon {
         }
     }
 
-    private static boolean whitelistViaBruteForce(IBinder binder, String packageName) {
-        log("Trying brute force transaction codes for setPkg2AccWhiteList...");
-        
-        for (int code = 1; code <= 10; code++) {
-            try {
-                android.os.Parcel data = android.os.Parcel.obtain();
-                android.os.Parcel reply = android.os.Parcel.obtain();
-                try {
-                    data.writeInterfaceToken("android.os.IAccModeManager");
-                    data.writeString(packageName);
-                    
-                    boolean transactSuccess = binder.transact(code, data, reply, 0);
-                    if (transactSuccess) {
-                        try {
-                            reply.readException();
-                            log("Whitelist SUCCESS with transaction code " + code);
-                            return true;
-                        } catch (Exception e) {
-                            log("TX code " + code + " exception: " + e.getMessage());
-                        }
-                    }
-                } finally {
-                    data.recycle();
-                    reply.recycle();
-                }
-            } catch (Exception e) {
+    /**
+     * Direct binder transact fallback using TX code 2 (confirmed working).
+     * If TX code 2 fails, scans codes 1-5 for firmware variations.
+     */
+    private static boolean whitelistViaDirectTransact(IBinder binder, String packageName) {
+        if (tryTransactCode(binder, packageName, 2)) {
+            return true;
+        }
+
+        log("TX code 2 failed, scanning codes 1-5...");
+        for (int code = 1; code <= 5; code++) {
+            if (code == 2) continue;
+            if (tryTransactCode(binder, packageName, code)) {
+                return true;
             }
         }
-        
-        log("Brute force whitelist: no working transaction code found");
+
+        log("Direct transact: no working transaction code found");
+        return false;
+    }
+
+    private static boolean tryTransactCode(IBinder binder, String packageName, int code) {
+        try {
+            android.os.Parcel data = android.os.Parcel.obtain();
+            android.os.Parcel reply = android.os.Parcel.obtain();
+            try {
+                data.writeInterfaceToken("android.os.IAccModeManager");
+                data.writeString(packageName);
+
+                boolean transactSuccess = binder.transact(code, data, reply, 0);
+                if (transactSuccess) {
+                    reply.readException();
+                    log("Whitelist SUCCESS with transaction code " + code);
+                    return true;
+                }
+            } catch (Exception e) {
+                log("TX code " + code + ": " + e.getMessage());
+            } finally {
+                data.recycle();
+                reply.recycle();
+            }
+        } catch (Exception e) {
+            // Parcel obtain failed
+        }
         return false;
     }
 
@@ -730,7 +824,10 @@ public class AccSentryDaemon {
                 // 2. Wake MCU immediately (triggers DC-DC converter for stable power)
                 immediateWakeUpMcu();
                 
-                // 3. Small delay to let MCU stabilize power rails
+                // 3. Configure peripheral power to keep USB/data rails active
+                configurePeripheralPower(true);
+                
+                // 4. Small delay to let MCU stabilize power rails
                 try { Thread.sleep(300); } catch (InterruptedException ignored) {}
                 
                 // 4. THEN wake the system (screen/CPU)
@@ -788,6 +885,7 @@ public class AccSentryDaemon {
         // below and calling setBacklightState(false) after we've already turned the screen on.
         // This race caused intermittent 20-30 second screen blackouts after vehicle ON.
         inSentryMode = false;
+        doorLockListenerArmed = false;
 
         // CRITICAL: Always notify CameraDaemon that ACC is ON, regardless of surveillance state.
         // disableSurveillance() may skip IPC if surveillanceEnabled is already false
@@ -797,6 +895,12 @@ public class AccSentryDaemon {
 
         // Disable surveillance
         disableSurveillance();
+        
+        // Clear safe zone suppression flag (clean slate for next sentry session)
+        try { CameraDaemon.setSafeZoneSuppressed(false); } catch (Exception ignored) {}
+        
+        // Restore stock peripheral power behavior (allow MCU to cut power)
+        configurePeripheralPower(false);
         
         // Stop Telegram daemon if it was auto-started
         stopTelegramDaemonIfAutoStarted();
@@ -1731,6 +1835,20 @@ public class AccSentryDaemon {
 
         log("Enabling surveillance...");
 
+        // Check safe zone — don't start surveillance if parked in a safe zone.
+        // Mark as suppressed so onLeftSafeZone() can re-arm if the car is towed out.
+        try {
+            com.overdrive.app.surveillance.SafeLocationManager safeLocMgr = 
+                com.overdrive.app.surveillance.SafeLocationManager.getInstance();
+            if (safeLocMgr.isFeatureEnabled() && safeLocMgr.isInSafeZone()) {
+                log("In safe zone '" + safeLocMgr.getCurrentZoneName() + "' — skipping surveillance");
+                CameraDaemon.setSafeZoneSuppressed(true);
+                return;
+            }
+        } catch (Exception e) {
+            log("Safe zone check failed: " + e.getMessage() + " — proceeding with surveillance");
+        }
+
         // Retry with backoff — CameraDaemon may not be up yet after boot
         int maxRetries = 10;
         long retryDelayMs = 3000; // Start with 3 seconds
@@ -1812,6 +1930,7 @@ public class AccSentryDaemon {
     // from the vehicle being detected as a sentry event.
     
     private static Object doorLockDevice = null;
+    private static Object otaDevice = null;  // BYDAutoOtaDevice — alternative lock state source
     private static volatile boolean doorLockListenerArmed = false;
     // Timeout: if doors aren't locked within this window, arm surveillance anyway
     // (user may have walked away without locking, or lock event wasn't detected)
@@ -1901,11 +2020,59 @@ public class AccSentryDaemon {
                             log("Door LOCKED via listener event — arming surveillance");
                             enableSurveillance();
                         }
+                        
+                        // Door UNLOCK while in sentry = owner returning — suppress surveillance
+                        // to avoid recording yourself getting in. ACC ON will fully exit sentry.
+                        if (state == DOOR_STATE_UNLOCK && doorLockListenerArmed && inSentryMode && surveillanceEnabled) {
+                            log("Door UNLOCKED via listener event — suppressing surveillance (owner returning)");
+                            disableSurveillance();
+                            doorLockListenerArmed = false;
+                        }
                     }
                 });
             log("Door lock listener registered: " + registered);
         } catch (Exception e) {
             log("Door lock listener registration failed: " + e.getMessage() + " — relying on polling");
+        }
+        
+        // ALSO register BYDAutoOtaDevice listener — Diplus uses this as an alternative
+        // lock state source. onLFDoorLockStateChanged fires for the central lock and
+        // may work even when the DoorLockDevice module is asleep during ACC OFF.
+        try {
+            otaDevice = com.overdrive.app.byd.BydDeviceHelper.getDevice(
+                "android.hardware.bydauto.ota.BYDAutoOtaDevice",
+                new PermissionBypassContext(appContext));
+            
+            if (otaDevice != null) {
+                boolean otaRegistered = com.overdrive.app.byd.BydDeviceHelper.registerListener(
+                    otaDevice,
+                    (methodName, args) -> {
+                        // onLFDoorLockStateChanged(int state) — central lock state from OTA device
+                        if ("onLFDoorLockStateChanged".equals(methodName) && args != null && args.length >= 1) {
+                            int state = ((Number) args[0]).intValue();
+                            log("OTA lock EVENT: onLFDoorLockStateChanged state=" + state);
+                            
+                            // Typically: 0=unlocked, 1=locked (verify on your vehicle)
+                            if (state == 1 && !doorLockListenerArmed && inSentryMode) {
+                                doorLockListenerArmed = true;
+                                log("Door LOCKED via OTA listener — arming surveillance");
+                                enableSurveillance();
+                            }
+                            
+                            // OTA unlock — suppress surveillance (owner returning)
+                            if (state == 0 && doorLockListenerArmed && inSentryMode && surveillanceEnabled) {
+                                log("Door UNLOCKED via OTA listener — suppressing surveillance (owner returning)");
+                                disableSurveillance();
+                                doorLockListenerArmed = false;
+                            }
+                        }
+                    });
+                log("OTA door lock listener registered: " + otaRegistered);
+            } else {
+                log("BYDAutoOtaDevice not available — relying on DoorLockDevice + polling");
+            }
+        } catch (Exception e) {
+            log("OTA listener registration failed: " + e.getMessage());
         }
         
         // Poll for door lock state with timeout (backup for listener)
