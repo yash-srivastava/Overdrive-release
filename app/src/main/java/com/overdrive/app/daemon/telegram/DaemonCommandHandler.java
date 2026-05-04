@@ -490,6 +490,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 break;
                 
             case "zrok":
+                // Does not handle self hosted zrok. Can this call DaemonStartupManager.startDaemon instead?
                 // Zrok tunnel — use RESERVED mode with saved token (same as app UI)
                 // Falls back to public mode only if no reserved token exists
                 String identityCheck = ctx.execShell("test -f /data/local/tmp/.zrok/environment.json && echo yes || echo no");

@@ -6,15 +6,17 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
+import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.switchmaterial.SwitchMaterial
+import com.google.android.material.textfield.TextInputLayout
 import com.overdrive.app.ui.adapter.DaemonAdapter
 import com.overdrive.app.ui.viewmodel.DaemonsViewModel
 import com.overdrive.app.ui.model.DaemonType
-import com.overdrive.app.ui.model.DaemonState
 import com.overdrive.app.R
 
 /**
@@ -116,38 +118,65 @@ class DaemonsFragment : Fragment() {
         
         // First get current token to show in dialog
         daemonsViewModel.zrokController.getEnableToken { currentToken ->
-            activity?.runOnUiThread {
-                val dialogView = LayoutInflater.from(context).inflate(R.layout.dialog_zrok_token, null)
-                val editToken = dialogView.findViewById<EditText>(R.id.editZrokToken)
-                
-                // Pre-fill with current token if exists
-                currentToken?.let { editToken.setText(it) }
-                
-                val dialog = AlertDialog.Builder(context)
-                    .setTitle("🌐 Zrok Tunnel Token")
-                    .setMessage("Enter your Zrok enable token.\nGet one at: zrok.io")
-                    .setView(dialogView)
-                    .setPositiveButton("Save") { _, _ ->
-                        val token = editToken.text.toString().trim()
-                        if (token.isNotEmpty()) {
-                            saveZrokToken(token)
-                        } else {
-                            Toast.makeText(context, "Token cannot be empty", Toast.LENGTH_SHORT).show()
+            daemonsViewModel.zrokController.getZrokEndpoint { currentEndpoint ->
+                activity?.runOnUiThread {
+                    val dialogView =
+                        LayoutInflater.from(context).inflate(R.layout.dialog_zrok_token, null)
+                    val editToken = dialogView.findViewById<EditText>(R.id.editZrokToken)
+
+                    // Pre-fill with current token if exists
+                    currentToken?.let { editToken.setText(it) }
+
+                    val endpointSwitch = dialogView.findViewById<SwitchMaterial>(R.id.switchEndpoint)
+                    val editEndpoint = dialogView.findViewById<EditText>(R.id.editZrokEndpoint)
+                    val editEndpointParent = dialogView.findViewById<TextInputLayout>(R.id.editZrokEndpointParent)
+                    val editEndpointHint = dialogView.findViewById<TextView>(R.id.editZrokEndpointHint)
+                    currentEndpoint?.let {
+                        editEndpoint.setText(it)
+
+                        // Show the hidden endpoint box if endpoint exists
+                        endpointSwitch.isChecked = true
+                        editEndpointParent.visibility = View.VISIBLE
+                        editEndpointHint.visibility = View.VISIBLE
+                    }
+
+                    endpointSwitch.setOnCheckedChangeListener { _, isChecked ->
+                        val visibility = if (isChecked) View.VISIBLE else View.GONE
+                        editEndpointParent.visibility = visibility
+                        editEndpointHint.visibility = visibility
+                    }
+
+                    val dialog = AlertDialog.Builder(context)
+                        .setTitle("🌐 Zrok Tunnel Token")
+                        .setMessage("Enter your Zrok enable token.\nGet one at: zrok.io")
+                        .setView(dialogView)
+                        .setPositiveButton("Save") { _, _ ->
+                            val token = editToken.text.toString().trim()
+                            val endpoint = editEndpoint.text.toString().trim()
+                            if (endpointSwitch.isChecked && endpoint.isEmpty()) {
+                                Toast.makeText(context, "Endpoint missing. Either disable self hosted option or provide endpoint.", Toast.LENGTH_SHORT)
+                                    .show()
+                            } else if (token.isEmpty()) {
+                                Toast.makeText(context, "Token cannot be empty", Toast.LENGTH_SHORT).show()
+                            } else {
+                                saveZrokSettings(token, if (endpointSwitch.isChecked) endpoint else null)
+                            }
                         }
-                    }
-                    .setNegativeButton("Cancel", null)
-                    .setNeutralButton("Delete") { _, _ ->
-                        deleteZrokToken()
-                    }
-                    .create()
-                
-                // Wire up the Reset Environment button
-                dialogView.findViewById<View>(R.id.btnResetZrokEnvironment)?.setOnClickListener {
-                    dialog.dismiss()
-                    confirmResetZrokEnvironment()
+                        .setNegativeButton("Cancel", null)
+                        .setNeutralButton("Delete") { _, _ ->
+                            deleteZrokSettings()
+                        }
+                        .create()
+
+                    // Wire up the Reset Environment button
+                    dialogView.findViewById<View>(R.id.btnResetZrokEnvironment)
+                        ?.setOnClickListener {
+                            dialog.dismiss()
+                            confirmResetZrokEnvironment()
+                        }
+
+                    dialog.show()
                 }
-                
-                dialog.show()
             }
         }
     }
@@ -189,7 +218,7 @@ class DaemonsFragment : Fragment() {
         daemonsViewModel.zrokController.disableEnvironment(object : com.overdrive.app.ui.daemon.DaemonCallback {
             override fun onStatusChanged(status: com.overdrive.app.ui.model.DaemonStatus, message: String) {
                 // Environment disabled, now delete the enable token
-                daemonsViewModel.zrokController.deleteEnableToken { success ->
+                daemonsViewModel.zrokController.deleteZrokSettings { success ->
                     activity?.runOnUiThread {
                         if (success) {
                             Toast.makeText(context, "✅ Zrok environment reset. Enter a new token to set up again.", Toast.LENGTH_LONG).show()
@@ -203,7 +232,7 @@ class DaemonsFragment : Fragment() {
             
             override fun onError(error: String) {
                 // Even if disable fails, still try to delete the token
-                daemonsViewModel.zrokController.deleteEnableToken { _ ->
+                daemonsViewModel.zrokController.deleteZrokSettings { _ ->
                     activity?.runOnUiThread {
                         Toast.makeText(context, "Environment reset (with warnings: $error)", Toast.LENGTH_LONG).show()
                         daemonsViewModel.updateZrokNeedsConfig("No token configured. Tap to set up.")
@@ -213,22 +242,26 @@ class DaemonsFragment : Fragment() {
         })
     }
     
-    private fun saveZrokToken(token: String) {
+    private fun saveZrokSettings(token: String, endpoint: String?) {
         daemonsViewModel.zrokController.saveEnableToken(token) { success ->
-            activity?.runOnUiThread {
-                if (success) {
-                    Toast.makeText(context, "✅ Token saved", Toast.LENGTH_SHORT).show()
-                    // Refresh Zrok status
-                    daemonsViewModel.refreshDaemonStatus(DaemonType.ZROK_TUNNEL)
-                } else {
-                    Toast.makeText(context, "❌ Failed to save token", Toast.LENGTH_SHORT).show()
+            daemonsViewModel.zrokController.saveZrokEndpoint(endpoint) { endpointSuccess ->
+                activity?.runOnUiThread {
+                    if (success && (endpoint == null || endpointSuccess)) {
+                        Toast.makeText(context, "✅ Settings saved", Toast.LENGTH_SHORT).show()
+                        // Refresh Zrok status
+                        daemonsViewModel.refreshDaemonStatus(DaemonType.ZROK_TUNNEL)
+                    } else if (!success) {
+                        Toast.makeText(context, "❌ Failed to save token", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "❌ Failed to save Zrok endpoint", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         }
     }
     
-    private fun deleteZrokToken() {
-        daemonsViewModel.zrokController.deleteEnableToken { success ->
+    private fun deleteZrokSettings() {
+        daemonsViewModel.zrokController.deleteZrokSettings { success ->
             activity?.runOnUiThread {
                 if (success) {
                     Toast.makeText(context, "Token deleted", Toast.LENGTH_SHORT).show()

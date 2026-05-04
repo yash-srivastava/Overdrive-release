@@ -66,14 +66,6 @@ class ZrokController(
     }
     
     /**
-     * Get the permanent URL (only valid if using reserved mode).
-     * Uses auto-generated unique name: overdrive<random>
-     */
-    fun getPermanentUrl(): String {
-        return "https://${ZrokLauncher.uniqueName}.share.zrok.io"
-    }
-    
-    /**
      * Get the unique name for this device.
      */
     fun getUniqueName(): String {
@@ -122,10 +114,9 @@ class ZrokController(
         }
         
         if (reservedToken != null) {
-            val permanentUrl = getPermanentUrl()
-            callback.onStatusChanged(DaemonStatus.STARTING, "Target: $permanentUrl")
+            callback.onStatusChanged(DaemonStatus.STARTING, "Target: ${ZrokLauncher.uniqueName}")
             
-            zrokLauncher.launchZrokReserved(reservedToken, permanentUrl, object : ZrokLauncher.ZrokCallback {
+            zrokLauncher.launchZrokReserved(reservedToken, object : ZrokLauncher.ZrokCallback {
                 override fun onLog(message: String) {
                     // Filter out noise, look for errors
                     if (message.contains("error", true) || message.contains("panic", true)) {
@@ -276,6 +267,13 @@ class ZrokController(
     fun getEnableToken(callback: (String?) -> Unit) {
         zrokLauncher.loadEnableToken(callback)
     }
+
+    /**
+     * Get the current enable token from unified storage.
+     */
+    fun getZrokEndpoint(callback: (String?) -> Unit) {
+        zrokLauncher.loadZrokEndpoint(callback)
+    }
     
     /**
      * Save enable token to unified storage (/data/local/tmp/.zrok/enable_token).
@@ -284,19 +282,27 @@ class ZrokController(
     fun saveEnableToken(token: String, callback: ((Boolean) -> Unit)? = null) {
         zrokLauncher.saveEnableToken(token, callback)
     }
+
+    /**
+     * Save zrok endpoint to unified storage (/data/local/tmp/.zrok/endpoint).
+     * Single source of truth - no sync needed.
+     */
+    fun saveZrokEndpoint(endpoint: String?, callback: ((Boolean) -> Unit)? = null) {
+        zrokLauncher.saveZrokEndpoint(endpoint, callback)
+    }
     
     /**
      * Delete enable token from unified storage.
      */
-    fun deleteEnableToken(callback: ((Boolean) -> Unit)? = null) {
-        zrokLauncher.deleteEnableToken(callback)
+    fun deleteZrokSettings(callback: ((Boolean) -> Unit)? = null) {
+        zrokLauncher.deleteZrokSettings(callback)
     }
     
     /**
      * Ensure token is loaded before starting tunnel.
      */
     fun ensureTokenLoaded(callback: (Boolean) -> Unit) {
-        zrokLauncher.ensureTokenLoaded(callback)
+        zrokLauncher.ensureSettingsLoaded(callback)
     }
     
     /**

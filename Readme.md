@@ -103,6 +103,14 @@ Free, open-source tunneling with no bandwidth limits at `https://<your-share>.sh
 3. Enter token in OverDrive settings
 4. Done — tunnel URL is auto-generated
 
+**Advanced self-hosted setup:**
+1. Follow the [zrok setup guide](https://netfoundry.io/docs/zrok/category/self-hosting)
+2. Copy the enable token from the create account command
+3. Enter the token and zrok controller endpoint in OverDrive settings
+    If wanting access outside network, ensure the zrok controller, ziti controller and ziti router are port forwarded
+    The zrok frontend can have access restricted using caddy
+4. Done — tunnel URL is auto-generated
+
 ## Tech Specs
 
 | Category | Detail |
@@ -178,7 +186,6 @@ If you want to use Zrok tunneling for remote access, you need your own Zrok invi
 
 1. Sign up at [zrok.io](https://zrok.io) and get your invite token from email
 2. Enter the token in the app: Daemons → Zrok settings
-3. If building from source, also replace `YOUR_ZROK_TOKEN` in `app/src/main/java/com/overdrive/app/daemon/telegram/DaemonCommandHandler.java` with your token (this is only used for the Telegram bot's `/tunnel zrok` command)
 
 ## Privacy
 

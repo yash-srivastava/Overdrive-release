@@ -31,6 +31,45 @@
         android:textColor="@color/text_muted"
         android:textSize="12sp" />
 
+    <com.google.android.material.switchmaterial.SwitchMaterial
+        android:id="@+id/switchEndpoint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:checked="false"
+        android:paddingVertical="8dp"
+        android:text="Use self hosted Zrok (Advanced)"
+        android:textColor="@color/text_muted" />
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/editZrokEndpointParent"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Zrok Endpoint"
+        android:visibility="gone"
+        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/editZrokEndpoint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="textVisiblePassword"
+            android:fontFamily="monospace"
+            android:textSize="14sp"
+            android:maxLines="1"
+            android:imeOptions="actionDone" />
+
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <TextView
+        android:id="@+id/editZrokEndpointHint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="Zrok controller endpoint for self hosted zrok. Follow this guide to set up https://netfoundry.io/docs/zrok/category/self-hosting"
+        android:textColor="@color/text_muted"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"

@@ -118,6 +118,7 @@ public class SystemCommandHandler implements TelegramCommandHandler {
                 tunnelType = "Zrok";
                 // SOTA FIX: Use grep instead of cat to avoid loading entire log into memory
                 String grepResult = ctx.execShell("grep -o 'https://[a-z0-9]*\\.share\\.zrok\\.io' /data/local/tmp/zrok.log 2>/dev/null | head -1");
+                // Does not handle self hosted zrok. Will fall back to tunnel_url for now
                 if (grepResult != null && grepResult.startsWith("https://")) {
                     url = grepResult.trim();
                 }
