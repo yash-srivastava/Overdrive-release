@@ -610,156 +610,166 @@ public class BydDataCollector {
         if (statisticDevice == null) return;
         try {
             // ==================== TOTAL MILEAGE ====================
-            // Feature ID path first (matches BYDAutoDevice.getInt(STATISTIC_TOTAL_MILEAGE))
-            try {
-                Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_TOTAL_MILEAGE, Integer.class);
-                if (val != null) {
-                    int raw = BydDeviceHelper.getIntValue(val);
-                    if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
-                        && raw != BydFeatureIds.INVALID_VALUE_2 && raw > 0) {
-                        b.totalMileageKm((int) Math.round(raw * distanceToKmFactor));
-                    }
-                }
-            } catch (Exception e) {
-                logger.debug("collectStatistic totalMileage feature ID error: " + e.getMessage());
+            // Named getter primary, feature ID fallback
+            Object mileage = BydDeviceHelper.callGetter(statisticDevice, "getTotalMileageValue");
+            if (mileage instanceof Number) {
+                int raw = ((Number) mileage).intValue();
+                if (raw > 0) b.totalMileageKm((int) Math.round(raw * distanceToKmFactor));
             }
-            // Fallback to typed getter if feature ID didn't populate
             if (b.totalMileageKm == BydVehicleData.UNAVAILABLE) {
-                Object mileage = BydDeviceHelper.callGetter(statisticDevice, "getTotalMileageValue");
-                if (mileage instanceof Number) {
-                    int raw = ((Number) mileage).intValue();
-                    if (raw > 0) b.totalMileageKm((int) Math.round(raw * distanceToKmFactor));
+                try {
+                    Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_TOTAL_MILEAGE, Integer.class);
+                    if (val != null) {
+                        int raw = BydDeviceHelper.getIntValue(val);
+                        if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
+                            && raw != BydFeatureIds.INVALID_VALUE_2 && raw > 0) {
+                            b.totalMileageKm((int) Math.round(raw * distanceToKmFactor));
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.debug("collectStatistic totalMileage feature ID error: " + e.getMessage());
                 }
             }
 
             // ==================== EV MILEAGE ====================
-            // Feature ID path first (matches BYDAutoDevice.getInt(STATISTIC_MILEAGE_EV))
-            try {
-                Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_MILEAGE_EV, Integer.class);
-                if (val != null) {
-                    int raw = BydDeviceHelper.getIntValue(val);
-                    if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
-                        && raw != BydFeatureIds.INVALID_VALUE_2 && raw > 0) {
-                        b.evMileageKm((int) Math.round(raw * distanceToKmFactor));
-                    }
-                }
-            } catch (Exception e) {
-                logger.debug("collectStatistic evMileage feature ID error: " + e.getMessage());
+            // Named getter primary, feature ID fallback
+            Object evMileage = BydDeviceHelper.callGetter(statisticDevice, "getEVMileageValue");
+            if (evMileage instanceof Number) {
+                int raw = ((Number) evMileage).intValue();
+                if (raw > 0) b.evMileageKm((int) Math.round(raw * distanceToKmFactor));
             }
-            // Fallback to typed getter if feature ID didn't populate
             if (b.evMileageKm == BydVehicleData.UNAVAILABLE) {
-                Object evMileage = BydDeviceHelper.callGetter(statisticDevice, "getEVMileageValue");
-                if (evMileage instanceof Number) {
-                    int raw = ((Number) evMileage).intValue();
-                    if (raw > 0) b.evMileageKm((int) Math.round(raw * distanceToKmFactor));
+                try {
+                    Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_MILEAGE_EV, Integer.class);
+                    if (val != null) {
+                        int raw = BydDeviceHelper.getIntValue(val);
+                        if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
+                            && raw != BydFeatureIds.INVALID_VALUE_2 && raw > 0) {
+                            b.evMileageKm((int) Math.round(raw * distanceToKmFactor));
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.debug("collectStatistic evMileage feature ID error: " + e.getMessage());
                 }
             }
 
             // ==================== SOC (ELEC PERCENTAGE) ====================
-            // Feature ID path first (matches BYDAutoDevice.getInt(STATISTIC_ELEC_PERCENTAGE))
-            // This is the primary SOC source — display SOC %
-            try {
-                Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_ELEC_PERCENTAGE, Integer.class);
-                if (val != null) {
-                    int raw = BydDeviceHelper.getIntValue(val);
-                    if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
-                        && raw != BydFeatureIds.INVALID_VALUE_2 && raw >= 0 && raw <= 100) {
-                        b.socPercent((double) raw);
-                    }
-                }
-            } catch (Exception e) {
-                logger.debug("collectStatistic socPercent feature ID error: " + e.getMessage());
+            // Named getter primary, then feature ID fallback
+            Object elecPct = BydDeviceHelper.callGetter(statisticDevice, "getElecPercentageValue");
+            if (elecPct instanceof Number) {
+                double soc = ((Number) elecPct).doubleValue();
+                if (soc >= 0 && soc <= 100) b.socPercent(soc);
             }
-            // Fallback to typed getter if feature ID didn't populate
             if (Double.isNaN(b.socPercent)) {
-                Object elecPct = BydDeviceHelper.callGetter(statisticDevice, "getElecPercentageValue");
-                if (elecPct instanceof Number) {
-                    double soc = ((Number) elecPct).doubleValue();
-                    if (soc >= 0 && soc <= 100) b.socPercent(soc);
+                try {
+                    Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_ELEC_PERCENTAGE, Integer.class);
+                    if (val != null) {
+                        int raw = BydDeviceHelper.getIntValue(val);
+                        if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
+                            && raw != BydFeatureIds.INVALID_VALUE_2 && raw >= 0 && raw <= 100) {
+                            b.socPercent((double) raw);
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.debug("collectStatistic socPercent feature ID error: " + e.getMessage());
                 }
             }
 
-            // ==================== WATER TEMP (no feature ID in Statistic class) ====================
+            // ==================== WATER TEMP ====================
             Object waterTemp = BydDeviceHelper.callGetter(statisticDevice, "getWaterTemperature");
             if (waterTemp instanceof Number) b.waterTempC(((Number) waterTemp).intValue());
 
-            // ==================== TOTAL ELEC CONSUMPTION (no feature ID — different from THIS_TRIP) ====================
+            // ==================== TOTAL ELEC CONSUMPTION ====================
             Object totalElec = BydDeviceHelper.callGetter(statisticDevice, "getTotalElecConValue");
             if (totalElec instanceof Number) b.totalElecCon(((Number) totalElec).doubleValue());
 
-            // ==================== TOTAL FUEL CONSUMPTION (no feature ID) ====================
+            // ==================== TOTAL FUEL CONSUMPTION ====================
             Object totalFuel = BydDeviceHelper.callGetter(statisticDevice, "getTotalFuelConValue");
             if (totalFuel instanceof Number) b.totalFuelCon(((Number) totalFuel).doubleValue());
 
             // ==================== ELECTRIC DRIVING RANGE ====================
-            // Feature ID path first (matches BYDAutoDevice.getInt(STATISTIC_ELEC_DRIVING_RANGE))
-            try {
-                Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_ELEC_DRIVING_RANGE, Integer.class);
-                if (val != null) {
-                    int raw = BydDeviceHelper.getIntValue(val);
-                    if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
-                        && raw != BydFeatureIds.INVALID_VALUE_2 && raw > 0) {
-                        b.elecRangeKm((int) Math.round(raw * distanceToKmFactor));
-                    }
-                }
-            } catch (Exception e) {
-                logger.debug("collectStatistic elecRange feature ID error: " + e.getMessage());
+            // Named getter primary, feature ID fallback
+            Object elecRange = BydDeviceHelper.callGetter(statisticDevice, "getElecDrivingRangeValue");
+            if (elecRange instanceof Number) {
+                int raw = ((Number) elecRange).intValue();
+                if (raw > 0) b.elecRangeKm((int) Math.round(raw * distanceToKmFactor));
             }
-            // Fallback to typed getter if feature ID didn't populate
             if (b.elecRangeKm == BydVehicleData.UNAVAILABLE) {
-                Object elecRange = BydDeviceHelper.callGetter(statisticDevice, "getElecDrivingRangeValue");
-                if (elecRange instanceof Number) {
-                    int raw = ((Number) elecRange).intValue();
-                    if (raw > 0) b.elecRangeKm((int) Math.round(raw * distanceToKmFactor));
+                try {
+                    Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_ELEC_DRIVING_RANGE, Integer.class);
+                    if (val != null) {
+                        int raw = BydDeviceHelper.getIntValue(val);
+                        if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
+                            && raw != BydFeatureIds.INVALID_VALUE_2 && raw > 0) {
+                            b.elecRangeKm((int) Math.round(raw * distanceToKmFactor));
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.debug("collectStatistic elecRange feature ID error: " + e.getMessage());
                 }
             }
 
-            // ==================== FUEL DRIVING RANGE ====================
-            // Feature ID path first (matches BYDAutoDevice.getInt(STATISTIC_FUEL_DRIVING_RANGE))
+            // ==================== FUEL PERCENTAGE & FUEL RANGE (PHEV only) ====================
+            // BEVs return bogus CAN bus values for fuel (e.g. constant 62% on a Seal).
+            // Gate on nominal battery capacity: PHEVs < 30 kWh, BEVs > 30 kWh.
+            boolean isPhev = false;
             try {
-                Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_FUEL_DRIVING_RANGE, Integer.class);
-                if (val != null) {
-                    int raw = BydDeviceHelper.getIntValue(val);
-                    if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
-                        && raw != BydFeatureIds.INVALID_VALUE_2 && raw > 0) {
-                        b.fuelRangeKm((int) Math.round(raw * distanceToKmFactor));
-                    }
+                com.overdrive.app.abrp.SohEstimator sohEst =
+                    com.overdrive.app.monitor.SocHistoryDatabase.getInstance().getSohEstimator();
+                if (sohEst != null && sohEst.getNominalCapacityKwh() > 0) {
+                    isPhev = sohEst.getNominalCapacityKwh() < 30.0;
                 }
             } catch (Exception e) {
-                logger.debug("collectStatistic fuelRange feature ID error: " + e.getMessage());
+                logger.debug("PHEV detection failed: " + e.getMessage());
             }
-            // Fallback to typed getter if feature ID didn't populate
-            if (b.fuelRangeKm == BydVehicleData.UNAVAILABLE) {
+
+            // ==================== FUEL DRIVING RANGE (PHEV only) ====================
+            if (isPhev) {
+                // Named getter primary, feature ID fallback
                 Object fuelRange = BydDeviceHelper.callGetter(statisticDevice, "getFuelDrivingRangeValue");
                 if (fuelRange instanceof Number) {
                     int raw = ((Number) fuelRange).intValue();
                     if (raw > 0) b.fuelRangeKm((int) Math.round(raw * distanceToKmFactor));
                 }
-            }
-
-            // ==================== FUEL PERCENTAGE (PHEV only — returns 0 on BEVs) ====================
-            // Priority 1: Feature ID path (STATISTIC_FUEL_PERCENTAGE) — more reliable on PHEVs.
-            // The typed getter getFuelPercentageValue() returns stale values on some DiLink versions.
-            try {
-                Object fuelFeatureVal = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_FUEL_PERCENTAGE, Integer.class);
-                if (fuelFeatureVal != null) {
-                    int fuelRaw = BydDeviceHelper.getIntValue(fuelFeatureVal);
-                    if (fuelRaw > 0 && fuelRaw <= 100) {
-                        b.fuelPercent(fuelRaw);
-                        logger.debug("Fuel percentage from feature ID: " + fuelRaw + "%");
+                if (b.fuelRangeKm == BydVehicleData.UNAVAILABLE) {
+                    try {
+                        Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_FUEL_DRIVING_RANGE, Integer.class);
+                        if (val != null) {
+                            int raw = BydDeviceHelper.getIntValue(val);
+                            if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
+                                && raw != BydFeatureIds.INVALID_VALUE_2 && raw > 0) {
+                                b.fuelRangeKm((int) Math.round(raw * distanceToKmFactor));
+                            }
+                        }
+                    } catch (Exception e) {
+                        logger.debug("collectStatistic fuelRange feature ID error: " + e.getMessage());
                     }
                 }
-            } catch (Exception e) {
-                logger.debug("Fuel percentage feature ID read failed: " + e.getMessage());
             }
-            // Priority 2: Typed getter fallback (if feature ID didn't populate)
-            if (Double.isNaN(b.fuelPercent)) {
+
+            // ==================== FUEL PERCENTAGE (PHEV only) ====================
+            if (isPhev) {
+                // Named getter primary
                 Object fuelPct = BydDeviceHelper.callGetter(statisticDevice, "getFuelPercentageValue");
                 if (fuelPct instanceof Number) {
-                    double pct = ((Number) fuelPct).doubleValue();
+                    int pct = ((Number) fuelPct).intValue();
                     if (pct > 0 && pct <= 100) {
                         b.fuelPercent(pct);
-                        logger.debug("Fuel percentage from getter: " + pct + "%");
+                    }
+                }
+                // Feature ID fallback
+                if (Double.isNaN(b.fuelPercent)) {
+                    try {
+                        Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_FUEL_PERCENTAGE, Integer.class);
+                        if (val != null) {
+                            int raw = BydDeviceHelper.getIntValue(val);
+                            if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
+                                && raw != BydFeatureIds.INVALID_VALUE_2 && raw > 0 && raw <= 100) {
+                                b.fuelPercent(raw);
+                            }
+                        }
+                    } catch (Exception e) {
+                        logger.debug("Fuel percentage feature ID failed: " + e.getMessage());
                     }
                 }
             }
@@ -811,9 +821,14 @@ public class BydDataCollector {
     private void collectCharging(BydVehicleData.Builder b) {
         if (chargingDevice == null) return;
         try {
-            // ==================== BATTERY MANAGEMENT DEVICE STATE ====================
-            // Feature ID path first (matches BYDAutoDevice.get(CHARGING_BATTERRY_DEVICE_STATE))
-            // 0=ready, 1=charging, 2=finished, 3=discharging, etc.
+            // Named getters for init read
+            Object gunState = BydDeviceHelper.callGetter(chargingDevice, "getChargingGunState");
+            if (gunState instanceof Number) b.chargingGunState(((Number) gunState).intValue());
+
+            Object charger = BydDeviceHelper.callGetter(chargingDevice, "getChargerWorkState");
+            if (charger instanceof Number) b.chargerWorkState(((Number) charger).intValue());
+
+            // Feature ID for battery device state, fallback to named getter
             try {
                 Object val = BydDeviceHelper.callGet(chargingDevice, BydFeatureIds.CHARGING_BATTERY_DEVICE_STATE, Integer.class);
                 if (val != null) {
@@ -826,57 +841,103 @@ public class BydDataCollector {
             } catch (Exception e) {
                 logger.debug("collectCharging batteryState feature ID error: " + e.getMessage());
             }
-            // Fallback to typed getter if feature ID didn't populate
             if (b.chargingState == BydVehicleData.UNAVAILABLE) {
                 Object battState = BydDeviceHelper.callGetter(chargingDevice, "getBatteryManagementDeviceState");
                 if (battState instanceof Number) {
-                    int state = ((Number) battState).intValue();
-                    b.chargingState(state);
+                    b.chargingState(((Number) battState).intValue());
                 }
             }
-            
+
             // Clear stale charging power when not actively charging
-            // Phantom 0.1 kW values persist on the CAN bus after unplugging
             if (b.chargingState != BydVehicleData.UNAVAILABLE && b.chargingState != 1) {
                 b.chargingPowerKw(Double.NaN);
                 b.externalChargingPowerKw(Double.NaN);
             }
 
-            // Gun connection state (0=none, 1=AC, 2=AC fast, 3=DC, 4=V2L)
-            Object gunState = BydDeviceHelper.callGetter(chargingDevice, "getChargingGunState");
-            if (gunState instanceof Number) b.chargingGunState(((Number) gunState).intValue());
+            // Charging power via named getter — only accept if charging
+            if (b.chargingState == 1) {
+                Object power = BydDeviceHelper.callGetter(chargingDevice, "getChargingPower");
+                if (power instanceof Number) {
+                    double kw = ((Number) power).doubleValue();
+                    if (Math.abs(kw) > 0.01 && Math.abs(kw) < 350) {
+                        b.chargingPowerKw(kw);
+                    }
+                }
+            }
 
-            // ==================== CHARGER WORK STATE ====================
-            // Feature ID path first (matches BYDAutoDevice.get(CHARGING_CHARGER_WORK_STATE))
+            // Charging type (0=DEFAULT, 3=VTOG)
+            Object type = BydDeviceHelper.callGetter(chargingDevice, "getChargingType");
+            if (type instanceof Number) b.chargingType(((Number) type).intValue());
+
+            // VTOL detection — gunState==5 OR chargingType==3
+            boolean isVtol = false;
+            if (b.chargingGunState == 5) isVtol = true;
+            if (b.chargingType == 3) isVtol = true;
+            b.vtolCharging(isVtol);
+
+            // Charging capacity (kWh)
+            Object cap = BydDeviceHelper.callGetter(chargingDevice, "getChargingCapacity");
+            if (cap instanceof Number) {
+                double capKwh = ((Number) cap).doubleValue();
+                if (capKwh > 0) b.chargingCapacityKwh(capKwh);
+            }
+
+            // Charging percent from chargingDevice
+            Object pct = BydDeviceHelper.callGetter(chargingDevice, "getChargingPercent");
+            if (pct instanceof Number) {
+                int chgPct = ((Number) pct).intValue();
+                if (chgPct >= 0 && chgPct <= 100) b.chargingPercent(chgPct);
+            }
+
+            // Charger work state via feature ID fallback
+            if (b.chargerWorkState == BydVehicleData.UNAVAILABLE) {
+                try {
+                    Object val = BydDeviceHelper.callGet(chargingDevice, BydFeatureIds.CHARGING_CHARGER_WORK_STATE, Integer.class);
+                    if (val != null) {
+                        int raw = BydDeviceHelper.getIntValue(val);
+                        if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
+                            && raw != BydFeatureIds.INVALID_VALUE_2 && raw >= 0) {
+                            b.chargerWorkState(raw);
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.debug("collectCharging chargerWorkState feature ID error: " + e.getMessage());
+                }
+            }
+
+            // Wireless charging states via feature IDs
             try {
-                Object val = BydDeviceHelper.callGet(chargingDevice, BydFeatureIds.CHARGING_CHARGER_WORK_STATE, Integer.class);
-                if (val != null) {
-                    int raw = BydDeviceHelper.getIntValue(val);
-                    if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
-                        && raw != BydFeatureIds.INVALID_VALUE_2 && raw >= 0) {
-                        b.chargerWorkState(raw);
+                Object wlLeft = BydDeviceHelper.callGet(chargingDevice, BydFeatureIds.CHARGING_WIRELESS_LEFT_STATE, Integer.class);
+                if (wlLeft != null) {
+                    int raw = BydDeviceHelper.getIntValue(wlLeft);
+                    if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE) {
+                        b.wirelessChargingLeftState(raw);
                     }
                 }
             } catch (Exception e) {
-                logger.debug("collectCharging chargerWorkState feature ID error: " + e.getMessage());
+                logger.debug("collectCharging wirelessLeft error: " + e.getMessage());
             }
-            // Fallback to typed getter if feature ID didn't populate
-            if (b.chargerWorkState == BydVehicleData.UNAVAILABLE) {
-                Object charger = BydDeviceHelper.callGetter(chargingDevice, "getChargerWorkState");
-                if (charger instanceof Number) b.chargerWorkState(((Number) charger).intValue());
-            }
-
-            // Charging power — only use getter value if non-zero.
-            // The getter often returns 0 on BYD models even while charging.
-            // The real value comes from the onDataEventChanged callback (event 666894360).
-            // Writing 0 here would overwrite the callback's valid value.
-            Object power = BydDeviceHelper.callGetter(chargingDevice, "getChargingPower");
-            if (power instanceof Number) {
-                double kw = ((Number) power).doubleValue();
-                if (Math.abs(kw) > 0.01 && Math.abs(kw) < 500) {
-                    b.chargingPowerKw(kw);
-                    logger.debug("ChargingDevice.getChargingPower() = " + kw + " kW");
+            try {
+                Object wlRight = BydDeviceHelper.callGet(chargingDevice, BydFeatureIds.CHARGING_WIRELESS_RIGHT_STATE, Integer.class);
+                if (wlRight != null) {
+                    int raw = BydDeviceHelper.getIntValue(wlRight);
+                    if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE) {
+                        b.wirelessChargingRightState(raw);
+                    }
                 }
+            } catch (Exception e) {
+                logger.debug("collectCharging wirelessRight error: " + e.getMessage());
+            }
+            try {
+                Object wlState = BydDeviceHelper.callGet(chargingDevice, BydFeatureIds.CHARGING_WIRELESS_STATE, Integer.class);
+                if (wlState != null) {
+                    int raw = BydDeviceHelper.getIntValue(wlState);
+                    if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE) {
+                        b.wirelessChargingStatus(raw);
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("collectCharging wirelessState error: " + e.getMessage());
             }
         } catch (Exception e) {
             logger.debug("collectCharging error: " + e.getMessage());
@@ -886,20 +947,74 @@ public class BydDataCollector {
     private void collectInstrument(BydVehicleData.Builder b) {
         if (instrumentDevice == null) return;
         try {
+            // Named getter for outside temperature
             Object extTemp = BydDeviceHelper.callGetter(instrumentDevice, "getOutCarTemperature");
             if (extTemp instanceof Number) {
                 int t = ((Number) extTemp).intValue();
                 if (t >= -50 && t <= 60) b.outsideTempC(t);
             }
-            // External charging power — only use getter value if non-zero.
-            // Same issue as ChargingDevice: getter returns 0 but callback delivers real value.
-            Object extPower = BydDeviceHelper.callGetter(instrumentDevice, "getExternalChargingPower");
-            if (extPower instanceof Number) {
-                double p = ((Number) extPower).doubleValue();
-                if (Math.abs(p) > 0.01 && p >= -500 && p <= 500) {
-                    b.externalChargingPowerKw(p);
-                    logger.debug("InstrumentDevice.getExternalChargingPower() = " + p + " kW");
+
+            // Named getter for external charging power — only accept if charging
+            if (b.chargingState == 1) {
+                Object extPower = BydDeviceHelper.callGetter(instrumentDevice, "getExternalChargingPower");
+                if (extPower instanceof Number) {
+                    double p = ((Number) extPower).doubleValue();
+                    if (Math.abs(p) > 0.01 && p >= -350 && p <= 350) {
+                        b.externalChargingPowerKw(p);
+                    }
                 }
+            }
+
+            // Charging power via instrument feature ID (842006552) — only accept if charging
+            if (b.chargingState == 1 && (Double.isNaN(b.chargingPowerKw) || b.chargingPowerKw == 0)) {
+                try {
+                    Object val = BydDeviceHelper.callGet(instrumentDevice,
+                            BydFeatureIds.INSTRUMENT_CHARGING_CHARGE_POWER_DD, Double.class);
+                    if (val != null) {
+                        double kw = BydDeviceHelper.getDoubleValue(val);
+                        if (!Double.isNaN(kw) && Math.abs(kw) > 0.01 && Math.abs(kw) < 350) {
+                            b.chargingPowerKw(kw);
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.debug("collectInstrument chargingPower feature ID error: " + e.getMessage());
+                }
+            }
+
+            // Charging percent via instrument feature ID (842006544) — only when charging
+            if (b.chargingState == 1 && b.chargingPercent == BydVehicleData.UNAVAILABLE) {
+                try {
+                    Object val = BydDeviceHelper.callGet(instrumentDevice,
+                            BydFeatureIds.INSTRUMENT_CHARGING_CHARGE_PERCENT_DD, Integer.class);
+                    if (val != null) {
+                        int raw = BydDeviceHelper.getIntValue(val);
+                        if (raw >= 0 && raw <= 100) {
+                            b.chargingPercent(raw);
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.debug("collectInstrument chargingPercent feature ID error: " + e.getMessage());
+                }
+            }
+
+            // Charging rest time via instrument feature IDs (primary path)
+            // Fallback to chargingDevice.getChargingRestTime() is in collectChargingExtended()
+            // Validates: 255 = not available, hours 0-23, minutes 0-59
+            try {
+                Object hourVal = BydDeviceHelper.callGet(instrumentDevice,
+                        BydFeatureIds.INSTRUMENT_CHARGING_CHARGE_REST_HOUR_DD, Integer.class);
+                Object minVal = BydDeviceHelper.callGet(instrumentDevice,
+                        BydFeatureIds.INSTRUMENT_CHARGING_CHARGE_REST_MINUTE_DD, Integer.class);
+                if (hourVal != null && minVal != null) {
+                    int hours = BydDeviceHelper.getIntValue(hourVal);
+                    int minutes = BydDeviceHelper.getIntValue(minVal);
+                    if (hours != 255 && minutes != 255 && hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+                        b.chargingRestTimeHours(hours);
+                        b.chargingRestTimeMinutes(minutes);
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("collectInstrument chargingRestTime feature ID error: " + e.getMessage());
             }
         } catch (Exception e) {
             logger.debug("collectInstrument error: " + e.getMessage());
@@ -989,7 +1104,7 @@ public class BydDataCollector {
             // On PHEVs (Sealion 6 DM-i), the PowerDevice EV subsystem returns stale kWh
             // values when the ICE is running. The BodyworkDevice path (getBatteryPowerHEV +
             // onBatteryPowerHEVChanged listener) is the correct CAN bus path for kWh on
-            // both BEVs and PHEVs — matching the OEM Diplus app's approach.
+            // both BEVs and PHEVs.
         } catch (Exception e) {
             logger.debug("collectPower error: " + e.getMessage());
         }
@@ -1123,24 +1238,48 @@ public class BydDataCollector {
     private void collectStatisticExtended(BydVehicleData.Builder b) {
         if (statisticDevice == null) return;
 
-        // SOH from STATISTIC_BATTERY_HEALTHY_INDEX
+        // SOH: typed getter, then feature ID fallback. Validated 0-100.
         try {
-            Object sohVal = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_BATTERY_HEALTHY_INDEX, Integer.class);
-            if (sohVal != null) {
-                int raw = BydDeviceHelper.getIntValue(sohVal);
-                if (raw >= 60 && raw <= 110) {
-                    b.sohPercent(raw);
-
-                    // Wire OEM SOH into SohEstimator — OEM value supersedes estimation
-                    try {
-                        com.overdrive.app.abrp.SohEstimator soh =
-                            com.overdrive.app.monitor.SocHistoryDatabase.getInstance().getSohEstimator();
-                        if (soh != null) {
-                            soh.updateFromOem(raw);
+            Integer sohValue = null;
+            
+            try {
+                Object result = BydDeviceHelper.callGetter(statisticDevice, "getStatisticBatteryHealthyIndex");
+                if (result instanceof Integer) {
+                    sohValue = (Integer) result;
+                } else if (result instanceof Double) {
+                    sohValue = (int) ((Double) result).doubleValue();
+                } else if (result instanceof Float) {
+                    sohValue = (int) ((Float) result).floatValue();
+                }
+            } catch (Exception e) {
+                logger.debug("SOH getter failed: " + e.getMessage());
+            }
+            
+            if (sohValue == null || sohValue < 0 || sohValue > 100) {
+                try {
+                    Object sohVal = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_BATTERY_HEALTHY_INDEX, Integer.class);
+                    if (sohVal != null) {
+                        int raw = BydDeviceHelper.getIntValue(sohVal);
+                        if (raw >= 0 && raw <= 100) {
+                            sohValue = raw;
                         }
-                    } catch (Exception e) {
-                        logger.debug("collectStatisticExtended SohEstimator update error: " + e.getMessage());
                     }
+                } catch (Exception e) {
+                    logger.debug("SOH feature ID failed: " + e.getMessage());
+                }
+            }
+            
+            if (sohValue != null && sohValue >= 0 && sohValue <= 100) {
+                b.sohPercent(sohValue);
+
+                try {
+                    com.overdrive.app.abrp.SohEstimator soh =
+                        com.overdrive.app.monitor.SocHistoryDatabase.getInstance().getSohEstimator();
+                    if (soh != null) {
+                        soh.updateFromOem(sohValue);
+                    }
+                } catch (Exception e) {
+                    logger.debug("collectStatisticExtended SohEstimator update error: " + e.getMessage());
                 }
             }
         } catch (Exception e) {
@@ -1281,18 +1420,27 @@ public class BydDataCollector {
     private void collectChargingExtended(BydVehicleData.Builder b) {
         if (chargingDevice == null) return;
 
-        // Charging rest time — returns int[2] = {hours, minutes}
-        try {
-            Object restTime = BydDeviceHelper.callGetter(chargingDevice, "getChargingRestTime");
-            if (restTime instanceof int[]) {
-                int[] times = (int[]) restTime;
-                if (times.length >= 2) {
-                    if (times[0] >= 0) b.chargingRestTimeHours(times[0]);
-                    if (times[1] >= 0) b.chargingRestTimeMinutes(times[1]);
+        // Fallback: chargingDevice.getChargingRestTime() when instrument feature IDs
+        // didn't populate in collectInstrument(). Checks gun state first — if NONE, skip.
+        if (b.chargingRestTimeHours == BydVehicleData.UNAVAILABLE) {
+            try {
+                if (b.chargingGunState != 1) {
+                    Object restTime = BydDeviceHelper.callGetter(chargingDevice, "getChargingRestTime");
+                    if (restTime instanceof int[]) {
+                        int[] times = (int[]) restTime;
+                        if (times.length >= 2) {
+                            int hours = times[0];
+                            int minutes = times[1];
+                            if (hours != 255 && minutes != 255 && hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+                                b.chargingRestTimeHours(hours);
+                                b.chargingRestTimeMinutes(minutes);
+                            }
+                        }
+                    }
                 }
+            } catch (Exception e) {
+                logger.debug("collectChargingExtended restTime error: " + e.getMessage());
             }
-        } catch (Exception e) {
-            logger.debug("collectChargingExtended error: " + e.getMessage());
         }
     }
 
@@ -1450,6 +1598,10 @@ public class BydDataCollector {
             logger.info("  Radar listener registered");
             count++;
         }
+        if (BydDeviceHelper.registerListener(otaDevice, this::onOtaCallback)) {
+            logger.info("  OTA listener registered");
+            count++;
+        }
 
         // Display-only devices — no periodic polling, listener-driven only.
         // These update the snapshot when BYD HAL pushes CAN bus state changes.
@@ -1508,6 +1660,88 @@ public class BydDataCollector {
     private volatile long lastGenericCallbackTime = 0;
 
     private void onGenericCallback(String method, Object[] args) {
+        // Typed callbacks for real-time updates
+        if ("onElecPercentageChanged".equals(method) && args != null && args.length > 0) {
+            try {
+                double soc = ((Number) args[0]).doubleValue();
+                if (soc >= 0 && soc <= 100) {
+                    BydVehicleData current = snapshot.get();
+                    if (current != null) {
+                        snapshot.set(current.toBuilder().socPercent(soc).build());
+                    }
+                }
+            } catch (Exception e) { /* ignore */ }
+            return;
+        }
+        if ("onFuelPercentageChanged".equals(method) && args != null && args.length > 0) {
+            try {
+                int fuel = ((Number) args[0]).intValue();
+                if (fuel > 0 && fuel <= 100) {
+                    boolean isPhev = false;
+                    try {
+                        com.overdrive.app.abrp.SohEstimator sohEst =
+                            com.overdrive.app.monitor.SocHistoryDatabase.getInstance().getSohEstimator();
+                        if (sohEst != null && sohEst.getNominalCapacityKwh() > 0) {
+                            isPhev = sohEst.getNominalCapacityKwh() < 30.0;
+                        }
+                    } catch (Exception ignored) {}
+                    if (isPhev) {
+                        BydVehicleData current = snapshot.get();
+                        if (current != null) {
+                            snapshot.set(current.toBuilder().fuelPercent(fuel).build());
+                        }
+                    }
+                }
+            } catch (Exception e) { /* ignore */ }
+            return;
+        }
+        if ("onSpeedChanged".equals(method) && args != null && args.length > 0) {
+            try {
+                double speed = ((Number) args[0]).doubleValue();
+                if (speed != BydFeatureIds.SDK_NOT_AVAILABLE) {
+                    BydVehicleData current = snapshot.get();
+                    if (current != null) {
+                        snapshot.set(current.toBuilder().speedKmh(speed * distanceToKmFactor).build());
+                    }
+                }
+            } catch (Exception e) { /* ignore */ }
+            return;
+        }
+        if ("onEngineSpeedChanged".equals(method) && args != null && args.length > 0) {
+            try {
+                int rpm = ((Number) args[0]).intValue();
+                if (rpm >= 0 && rpm <= 8000) {
+                    BydVehicleData current = snapshot.get();
+                    if (current != null) {
+                        snapshot.set(current.toBuilder().engineSpeedRpm(rpm).build());
+                    }
+                }
+            } catch (Exception e) { /* ignore */ }
+            return;
+        }
+        if ("onBatteryPowerVoltageChanged".equals(method) && args != null && args.length > 0) {
+            try {
+                double voltage = ((Number) args[0]).doubleValue();
+                if (voltage > 0 && voltage < 20) {
+                    BydVehicleData current = snapshot.get();
+                    if (current != null) {
+                        snapshot.set(current.toBuilder().voltage12v(voltage).build());
+                    }
+                }
+            } catch (Exception e) { /* ignore */ }
+            return;
+        }
+        if ("onChargingGunStateChanged".equals(method) && args != null && args.length > 0) {
+            try {
+                int gunState = ((Number) args[0]).intValue();
+                BydVehicleData current = snapshot.get();
+                if (current != null) {
+                    snapshot.set(current.toBuilder().chargingGunState(gunState).build());
+                }
+            } catch (Exception e) { /* ignore */ }
+            return;
+        }
+
         // Capture HV pack voltage from statistic device event.
         // BYD CAN bus fires StatisticDevice events at ~10Hz — throttle to 1Hz max.
         if ("onDataEventChanged".equals(method) && args != null && args.length >= 2) {
@@ -1555,6 +1789,17 @@ public class BydDataCollector {
     private volatile long lastChargingPowerLogTime = 0;
 
     private void onChargingCallback(String method, Object[] args) {
+        // Typed callbacks for real-time charging updates
+        if ("onChargingGunStateChanged".equals(method) && args != null && args.length > 0) {
+            try {
+                int gunState = ((Number) args[0]).intValue();
+                BydVehicleData current = snapshot.get();
+                if (current != null) {
+                    snapshot.set(current.toBuilder().chargingGunState(gunState).build());
+                }
+            } catch (Exception e) { /* ignore */ }
+            return;
+        }
         // Handle the new-style BYDAutoEvent callbacks
         if ("onDataEventChanged".equals(method) && args != null && args.length >= 2) {
             try {
@@ -1565,7 +1810,7 @@ public class BydDataCollector {
                 // If this looks like a charging power value (reasonable kW range)
                 // Only accept if the car is actually charging — phantom 0.1 kW values
                 // come from the CAN bus even when the charger is unplugged.
-                if (!Double.isNaN(dVal) && Math.abs(dVal) > 0.1 && Math.abs(dVal) < 500) {
+                if (!Double.isNaN(dVal) && Math.abs(dVal) > 0.1 && Math.abs(dVal) < 350) {
                     BydVehicleData current = snapshot.get();
                     if (current != null) {
                         boolean isCharging = current.chargingState == 1;  // CHARGING_BATTERY_STATE_CHARGING
@@ -1586,7 +1831,7 @@ public class BydDataCollector {
         if ("onChargingPowerChanged".equals(method) && args != null && args.length > 0) {
             try {
                 double power = ((Number) args[0]).doubleValue();
-                if (Math.abs(power) < 500 && power != 0) {
+                if (Math.abs(power) < 350 && power != 0) {
                     BydVehicleData current = snapshot.get();
                     if (current != null) {
                         snapshot.set(current.toBuilder().chargingPowerKw(power).build());
@@ -1597,6 +1842,20 @@ public class BydDataCollector {
         }
         // Listener-driven: the specific event value was already captured above.
         // Skip full device re-collection — the 5s polling timer handles periodic refresh.
+    }
+
+    private void onOtaCallback(String method, Object[] args) {
+        if ("onBatteryPowerVoltageChanged".equals(method) && args != null && args.length > 0) {
+            try {
+                double voltage = ((Number) args[0]).doubleValue();
+                if (voltage > 0 && voltage < 20) {
+                    BydVehicleData current = snapshot.get();
+                    if (current != null) {
+                        snapshot.set(current.toBuilder().voltage12v(voltage).build());
+                    }
+                }
+            } catch (Exception e) { /* ignore */ }
+        }
     }
 
     private void onInstrumentCallback(String method, Object[] args) {
@@ -1612,7 +1871,7 @@ public class BydDataCollector {
         if ("onExternalChargingPowerChanged".equals(method) && args != null && args.length > 0) {
             try {
                 double power = ((Number) args[0]).doubleValue();
-                if (power > 0.1 && power <= 500) {
+                if (power > 0.1 && power <= 350) {
                     BydVehicleData current = snapshot.get();
                     if (current != null) {
                         snapshot.set(current.toBuilder().externalChargingPowerKw(power).build());

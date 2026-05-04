@@ -33,6 +33,8 @@ public class HttpResponse {
         String headers = "HTTP/1.1 200 OK\r\n" +
                         "Content-Type: application/json\r\n" +
                         "Access-Control-Allow-Origin: *\r\n" +
+                        "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n" +
+                        "Access-Control-Allow-Headers: Content-Type, Authorization\r\n" +
                         "Cache-Control: no-cache, no-store\r\n" +
                         "Content-Length: " + body.length + "\r\n" +
                         "Connection: close\r\n\r\n";
@@ -43,6 +45,23 @@ public class HttpResponse {
     
     public static void sendJsonSuccess(OutputStream out) throws Exception {
         sendJson(out, "{\"success\":true}");
+    }
+    
+    /**
+     * Send CORS preflight response for OPTIONS requests.
+     * Browsers send OPTIONS before cross-origin POST/PUT/DELETE with JSON content-type.
+     * Without this, the webapp (accessed via external URL/tunnel) cannot save settings.
+     */
+    public static void sendCorsPreflightResponse(OutputStream out) throws Exception {
+        String headers = "HTTP/1.1 204 No Content\r\n" +
+                        "Access-Control-Allow-Origin: *\r\n" +
+                        "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n" +
+                        "Access-Control-Allow-Headers: Content-Type, Authorization\r\n" +
+                        "Access-Control-Max-Age: 86400\r\n" +
+                        "Content-Length: 0\r\n" +
+                        "Connection: close\r\n\r\n";
+        out.write(headers.getBytes());
+        out.flush();
     }
     
     public static void sendJsonError(OutputStream out, String error) throws Exception {

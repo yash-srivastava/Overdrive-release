@@ -948,6 +948,15 @@ public class GpuSurveillancePipeline {
      * Stops recording.
      */
     public void stopRecording() {
+        // CRITICAL: Clear any pending (deferred) recording request FIRST.
+        // During cold start, startRecording() defers to checkPendingRecording() if the
+        // encoder isn't ready yet. If a gear change (D→N/P) triggers stopRecording()
+        // before the encoder is ready, the pending request survives and fires later —
+        // starting recording in the wrong gear state. Clearing it here prevents that.
+        pendingRecordingDir = null;
+        pendingRecordingPrefix = null;
+        recordingMode = false;
+        
         if (recorder != null) {
             recorder.stopRecording();
             

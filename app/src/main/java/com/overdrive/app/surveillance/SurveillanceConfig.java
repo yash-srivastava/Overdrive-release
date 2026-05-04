@@ -166,7 +166,7 @@ public class SurveillanceConfig {
     private String detectionZone = "normal";        // close, normal, extended
     private int loiteringTimeSeconds = 3;           // 1-10 seconds
     private int sensitivityLevel = 3;               // 1-5
-    private boolean[] cameraEnabled = {true, true, true, true};  // front, right, left, rear
+    private boolean[] cameraEnabled = {true, true, true, true};  // front, right, rear, left (matches quadrant order: Q0=front, Q1=right, Q2=rear, Q3=left)
     private boolean motionHeatmapEnabled = false;
     private boolean filterDebugLogEnabled = false;
     private int shadowFilterMode = 2;               // 0=OFF, 1=LIGHT, 2=NORMAL, 3=AGGRESSIVE

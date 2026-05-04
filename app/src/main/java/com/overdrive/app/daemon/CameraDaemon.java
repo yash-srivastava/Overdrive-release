@@ -292,6 +292,20 @@ public class CameraDaemon {
         // This ensures the encoder is created with the correct settings
         HttpServer.loadPersistedSettings();
         
+        // Seed version file if it doesn't exist yet (daemon runs as shell, can write /data/local/tmp/)
+        // This ensures the /status API always returns the correct app version
+        try {
+            java.io.File versionFile = new java.io.File(com.overdrive.app.updater.AppUpdater.VERSION_FILE);
+            if (!versionFile.exists()) {
+                java.io.FileWriter fw = new java.io.FileWriter(versionFile);
+                fw.write(com.overdrive.app.BuildConfig.VERSION_NAME);
+                fw.close();
+                log("Seeded version file: " + com.overdrive.app.BuildConfig.VERSION_NAME);
+            }
+        } catch (Exception e) {
+            log("Could not seed version file: " + e.getMessage());
+        }
+        
         // Initialize surveillance module (will use loaded settings)
         initSurveillance();
         

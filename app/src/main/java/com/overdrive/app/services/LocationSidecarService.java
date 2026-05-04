@@ -260,6 +260,10 @@ public class LocationSidecarService extends Service implements LocationListener 
     public void onLocationChanged(Location location) {
         if (location == null) return;
         
+        double prevLat = latitude;
+        double prevLng = longitude;
+        boolean hadFix = (prevLat != 0.0 || prevLng != 0.0);
+        
         latitude = location.getLatitude();
         longitude = location.getLongitude();
         speed = location.hasSpeed() ? location.getSpeed() : 0.0f;
@@ -267,7 +271,14 @@ public class LocationSidecarService extends Service implements LocationListener 
         accuracy = location.hasAccuracy() ? location.getAccuracy() : 0.0f;
         altitude = location.hasAltitude() ? location.getAltitude() : 0.0;
         
-        Log.i(TAG, "Location update: " + latitude + ", " + longitude);
+        // Only log the first fix at INFO; suppress steady-state spam.
+        // Individual fixes go to DEBUG so they're still available via
+        // `adb logcat *:V` but don't fill the normal log.
+        if (!hadFix) {
+            Log.i(TAG, "First location fix: " + latitude + ", " + longitude);
+        } else {
+            Log.d(TAG, "Location update: " + latitude + ", " + longitude);
+        }
         
         // Send to daemon via IPC
         sendGpsViaTcp();

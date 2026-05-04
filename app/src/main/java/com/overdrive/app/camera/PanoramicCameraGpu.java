@@ -623,14 +623,17 @@ public class PanoramicCameraGpu {
                         // Advance to next combination in the matrix
                         advanceProbeToNext(currentId);
                     } else if (!hasData) {
-                        // Saved config produces BLACK — enter full probe mode
-                        logger.warn("Saved camera config (id=" + currentId + 
-                            ", surfaceMode=" + cameraSurfaceMode + ") produces BLACK — starting full probe");
-                        autoProbeCameras = true;
-                        probeComplete = false;  // Re-gate consumers during re-probe
-                        probeNextCameraId = 0;
-                        probeNextSurfaceMode = 0;
-                        advanceProbeToNext(-1);  // -1 = no current, start from 0,0
+                        // Saved config gave black frames. Log for diagnostics but do NOT re-probe —
+                        // black frames at frame 15 can be caused by HAL warmup, OEM dashcam
+                        // contention, or a genuinely dark scene (night), none of which warrant
+                        // disrupting the HAL with a 36-slot probe sweep. A runtime re-probe also
+                        // aggressively opens/closes the shared camera HAL which starves the OEM
+                        // dashcam of video for 30+ seconds. The saved config was validated
+                        // previously; trust it. If it ever becomes genuinely wrong, a manual
+                        // re-probe can still be forced via setAutoProbeCameras(true).
+                        logger.warn("Frame 15 readback BLACK for cam=" + currentId +
+                            ", surfaceMode=" + cameraSurfaceMode +
+                            " — NOT re-probing (saved config is authoritative, frames may warm up later)");
                     }
                 } catch (Exception e) {
                     logger.warn("Camera probe failed: " + e.getMessage());

@@ -283,7 +283,16 @@ public class SohEstimator {
             }
 
             String sohStr = props.getProperty(PROP_SOH_PERCENT);
-            if (sohStr != null) currentSoh = Double.parseDouble(sohStr);
+            if (sohStr != null) {
+                double persistedSoh = Double.parseDouble(sohStr);
+                // Reject out-of-range persisted values (e.g. 101 from old bogus BMS data).
+                // Valid SOH is 0-100; reject the rest to force re-estimation.
+                if (persistedSoh > 0 && persistedSoh <= 100) {
+                    currentSoh = persistedSoh;
+                } else {
+                    logger.info("Discarding persisted SOH " + persistedSoh + " — out of valid range 0-100");
+                }
+            }
 
             String method = props.getProperty(PROP_ESTIMATION_METHOD);
             if (method != null) estimationMethod = method;
@@ -514,7 +523,13 @@ public class SohEstimator {
      */
     public void updateFromOem(double oemSohPercent) {
         if (Double.isNaN(oemSohPercent)) return;
-        if (oemSohPercent < 60 || oemSohPercent > 110) return;
+        // Accept only realistic SOH values (60-100%).
+        // BMS sentinels like 101, 110, or 255 indicate "data not ready" —
+        // reject them to prevent bogus OEM values from overriding estimation.
+        if (oemSohPercent < 60 || oemSohPercent > 100) {
+            logger.debug("Rejecting OEM SOH " + oemSohPercent + " — outside valid range 60-100");
+            return;
+        }
 
         if (!"oem".equals(sohSource)) {
             logger.info("SOH source transitioning from " + sohSource + " to OEM: " +

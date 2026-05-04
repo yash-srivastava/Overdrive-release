@@ -203,8 +203,8 @@ public class SurveillanceApiHandler {
             boolean[] cameras = sentryConfig.getCameraEnabled();
             config.put("cameraFront", cameras[0]);
             config.put("cameraRight", cameras[1]);
-            config.put("cameraLeft", cameras[2]);
-            config.put("cameraRear", cameras[3]);
+            config.put("cameraRear", cameras[2]);
+            config.put("cameraLeft", cameras[3]);
             config.put("motionHeatmap", sentryConfig.isMotionHeatmapEnabled());
             config.put("filterDebugLog", sentryConfig.isFilterDebugLogEnabled());
             config.put("shadowFilter", sentryConfig.getShadowFilterMode());
@@ -500,17 +500,17 @@ public class SurveillanceApiHandler {
                 boolean[] existing = sentryConfig.getCameraEnabled();
                 boolean front = configJson.optBoolean("cameraFront", existing[0]);
                 boolean right = configJson.optBoolean("cameraRight", existing[1]);
-                boolean left  = configJson.optBoolean("cameraLeft",  existing[2]);
-                boolean rear  = configJson.optBoolean("cameraRear",  existing[3]);
+                boolean rear  = configJson.optBoolean("cameraRear",  existing[2]);
+                boolean left  = configJson.optBoolean("cameraLeft",  existing[3]);
                 sentryConfig.setCameraEnabled(0, front);
                 sentryConfig.setCameraEnabled(1, right);
-                sentryConfig.setCameraEnabled(2, left);
-                sentryConfig.setCameraEnabled(3, rear);
+                sentryConfig.setCameraEnabled(2, rear);
+                sentryConfig.setCameraEnabled(3, left);
                 if (sentry != null) {
                     sentry.setV2QuadrantEnabled(0, front);
                     sentry.setV2QuadrantEnabled(1, right);
-                    sentry.setV2QuadrantEnabled(2, left);
-                    sentry.setV2QuadrantEnabled(3, rear);
+                    sentry.setV2QuadrantEnabled(2, rear);
+                    sentry.setV2QuadrantEnabled(3, left);
                 }
                 configChanged = true;
             }

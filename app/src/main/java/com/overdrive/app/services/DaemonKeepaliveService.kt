@@ -70,6 +70,15 @@ class DaemonKeepaliveService : Service() {
             Log.e(TAG, "Failed to start daemons: ${e.message}")
         }
         
+        // Bring the status pill back if the process was restarted without the
+        // Activity running (e.g. system killed the process, then Android
+        // respawned this keepalive service via START_STICKY).
+        try {
+            com.overdrive.app.overlay.StatusOverlayService.startIfPermitted(applicationContext)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to kick status overlay: ${e.message}")
+        }
+        
         // START_STICKY ensures service restarts if killed
         return START_STICKY
     }

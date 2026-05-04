@@ -128,6 +128,12 @@ public class BydVehicleData {
     // ==================== EXTENDED CHARGING ====================
     public final int chargingRestTimeHours;
     public final int chargingRestTimeMinutes;
+    public final int chargingPercent;         // charging session progress % (from chargingDevice or instrument feature ID 842006544)
+    public final int chargingType;            // 0=DEFAULT, 3=VTOG (vehicle-to-grid)
+    public final boolean vtolCharging;        // V2L/V2G active
+    public final double chargingCapacityKwh;  // from chargingDevice.getChargingCapacity()
+    public final int wirelessChargingLeftState;
+    public final int wirelessChargingRightState;
 
     // ==================== EXTENDED DRIVING ====================
     public final double drivingTimeHours;
@@ -238,6 +244,12 @@ public class BydVehicleData {
         this.insideTempCelsius = b.insideTempCelsius;
         this.chargingRestTimeHours = b.chargingRestTimeHours;
         this.chargingRestTimeMinutes = b.chargingRestTimeMinutes;
+        this.chargingPercent = b.chargingPercent;
+        this.chargingType = b.chargingType;
+        this.vtolCharging = b.vtolCharging;
+        this.chargingCapacityKwh = b.chargingCapacityKwh;
+        this.wirelessChargingLeftState = b.wirelessChargingLeftState;
+        this.wirelessChargingRightState = b.wirelessChargingRightState;
         this.drivingTimeHours = b.drivingTimeHours;
         this.last50KmConsumption = b.last50KmConsumption;
         this.steeringAngleDegrees = b.steeringAngleDegrees;
@@ -458,6 +470,12 @@ public class BydVehicleData {
             JSONObject extChg = new JSONObject();
             if (chargingRestTimeHours != UNAVAILABLE) extChg.put("restTimeHours", chargingRestTimeHours);
             if (chargingRestTimeMinutes != UNAVAILABLE) extChg.put("restTimeMinutes", chargingRestTimeMinutes);
+            if (chargingPercent != UNAVAILABLE) extChg.put("chargingPercent", chargingPercent);
+            if (chargingType != UNAVAILABLE) extChg.put("chargingType", chargingType);
+            if (vtolCharging) extChg.put("vtolCharging", true);
+            putIfValid(extChg, "chargingCapacityKwh", chargingCapacityKwh);
+            if (wirelessChargingLeftState != UNAVAILABLE) extChg.put("wirelessChargingLeftState", wirelessChargingLeftState);
+            if (wirelessChargingRightState != UNAVAILABLE) extChg.put("wirelessChargingRightState", wirelessChargingRightState);
             if (extChg.length() > 0) j.put("extendedCharging", extChg);
 
             // Extended Driving
@@ -560,6 +578,12 @@ public class BydVehicleData {
         b.battery12vLevel = battery12vLevel; b.insideTempCelsius = insideTempCelsius;
         b.chargingRestTimeHours = chargingRestTimeHours;
         b.chargingRestTimeMinutes = chargingRestTimeMinutes;
+        b.chargingPercent = chargingPercent;
+        b.chargingType = chargingType;
+        b.vtolCharging = vtolCharging;
+        b.chargingCapacityKwh = chargingCapacityKwh;
+        b.wirelessChargingLeftState = wirelessChargingLeftState;
+        b.wirelessChargingRightState = wirelessChargingRightState;
         b.drivingTimeHours = drivingTimeHours; b.last50KmConsumption = last50KmConsumption;
         b.steeringAngleDegrees = steeringAngleDegrees; b.autoSystemState = autoSystemState;
         b.currentTripMileageKm = currentTripMileageKm;
@@ -609,6 +633,12 @@ public class BydVehicleData {
         double insideTempCelsius = NaN;
         int chargingRestTimeHours = UNAVAILABLE;
         int chargingRestTimeMinutes = UNAVAILABLE;
+        int chargingPercent = UNAVAILABLE;
+        int chargingType = UNAVAILABLE;
+        boolean vtolCharging;
+        double chargingCapacityKwh = NaN;
+        int wirelessChargingLeftState = UNAVAILABLE;
+        int wirelessChargingRightState = UNAVAILABLE;
         double drivingTimeHours = NaN;
         double last50KmConsumption = NaN;
         double steeringAngleDegrees = NaN;
@@ -702,6 +732,12 @@ public class BydVehicleData {
         public Builder insideTempCelsius(double v) { insideTempCelsius = v; return this; }
         public Builder chargingRestTimeHours(int v) { chargingRestTimeHours = v; return this; }
         public Builder chargingRestTimeMinutes(int v) { chargingRestTimeMinutes = v; return this; }
+        public Builder chargingPercent(int v) { chargingPercent = v; return this; }
+        public Builder chargingType(int v) { chargingType = v; return this; }
+        public Builder vtolCharging(boolean v) { vtolCharging = v; return this; }
+        public Builder chargingCapacityKwh(double v) { chargingCapacityKwh = v; return this; }
+        public Builder wirelessChargingLeftState(int v) { wirelessChargingLeftState = v; return this; }
+        public Builder wirelessChargingRightState(int v) { wirelessChargingRightState = v; return this; }
         public Builder drivingTimeHours(double v) { drivingTimeHours = v; return this; }
         public Builder last50KmConsumption(double v) { last50KmConsumption = v; return this; }
         public Builder steeringAngleDegrees(double v) { steeringAngleDegrees = v; return this; }

@@ -314,6 +314,16 @@ public class HttpServer {
                 return;
             }
             
+            // Handle CORS preflight (OPTIONS) requests for cross-origin webapp access.
+            // Browsers send OPTIONS before POST/PUT/DELETE with Content-Type: application/json.
+            // The in-app WebView is same-origin so it skips this, but the external webapp needs it.
+            // Must be handled BEFORE auth check — preflight requests don't carry cookies/tokens.
+            if (method.equals("OPTIONS")) {
+                HttpResponse.sendCorsPreflightResponse(out);
+                client.close();
+                return;
+            }
+            
             // Check authentication for all other paths
             if (!AuthMiddleware.checkAuth(path, cookieHeader, authHeader, out)) {
                 client.close();
@@ -539,6 +549,10 @@ public class HttpServer {
         JSONObject status = new JSONObject();
         status.put("status", "ok");
         status.put("deviceId", CameraDaemon.getDeviceId());
+        
+        // App version — read from persisted version file (written by AppUpdater)
+        // Falls back to BuildConfig.VERSION_NAME if file doesn't exist yet
+        status.put("appVersion", com.overdrive.app.updater.AppUpdater.getDisplayVersionFromFile());
         status.put("recording", TcpCommandServer.getRecordingCameras());
         status.put("viewing", TcpCommandServer.getViewOnlyCameras());
         status.put("active", TcpCommandServer.getActiveCameras());
@@ -620,7 +634,8 @@ public class HttpServer {
                     String sohStr = props.getProperty("soh_percent");
                     if (sohStr != null) {
                         double sohVal = Double.parseDouble(sohStr);
-                        if (sohVal > 0 && sohVal <= 110) {
+                        // Reject out-of-range values (e.g. 101 from bogus BMS sentinels)
+                        if (sohVal > 0 && sohVal <= 100) {
                             soh.put("percent", Math.round(sohVal * 10) / 10.0);
                             hasSoh = true;
                         }

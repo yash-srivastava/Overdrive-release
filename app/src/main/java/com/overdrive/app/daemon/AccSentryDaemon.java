@@ -2,6 +2,7 @@ package com.overdrive.app.daemon;
 
 import android.content.Context;
 import android.hardware.bydauto.bodywork.AbsBYDAutoBodyworkListener;
+import android.hardware.bydauto.doorlock.AbsBYDAutoDoorLockListener;
 import android.hardware.bydauto.power.BYDAutoPowerDevice;
 import android.os.IBinder;
 import android.os.Looper;
@@ -886,6 +887,9 @@ public class AccSentryDaemon {
         // This race caused intermittent 20-30 second screen blackouts after vehicle ON.
         inSentryMode = false;
         doorLockListenerArmed = false;
+
+        // Stop unlock polling thread (must be before disableSurveillance to avoid race)
+        stopUnlockPollThread();
 
         // CRITICAL: Always notify CameraDaemon that ACC is ON, regardless of surveillance state.
         // disableSurveillance() may skip IPC if surveillanceEnabled is already false
@@ -1936,6 +1940,11 @@ public class AccSentryDaemon {
     // (user may have walked away without locking, or lock event wasn't detected)
     private static final long DOOR_LOCK_ARM_TIMEOUT_MS = 30_000;  // 30 seconds
     
+    // Continuous unlock polling thread — runs while surveillance is armed to detect
+    // door unlock events even if the listener fails to fire (module sleep, etc.)
+    private static Thread unlockPollThread = null;
+    private static final long UNLOCK_POLL_INTERVAL_MS = 1_500;  // 1.5 seconds
+    
     // Door lock state constants (hardcoded from BYD SDK docs)
     // DOOR_LOCK_STATE_INVALID = 0, DOOR_LOCK_STATE_UNLOCK = 1, DOOR_LOCK_STATE_LOCK = 2
     private static final int DOOR_STATE_INVALID = 0;
@@ -1943,9 +1952,19 @@ public class AccSentryDaemon {
     private static final int DOOR_STATE_LOCK = 2;
     
     /**
-     * Initialize door lock device using BydDeviceHelper (proven pattern from BydDataCollector).
-     * Also registers an IBYDAutoListener for real-time lock state change events.
-     * Falls back to polling if listener registration fails.
+     * Initialize door lock device and register listener for real-time lock/unlock events.
+     * 
+     * CRITICAL FIX: The old code used BydDeviceHelper.registerListener() which creates a
+     * java.lang.reflect.Proxy for the IBYDAutoListener interface. This works for bodywork
+     * devices (AbsBYDAutoBodyworkListener implements IBYDAutoListener) but SILENTLY FAILS
+     * for door lock devices because:
+     *   - BYDAutoDoorLockDevice.registerListener() takes AbsBYDAutoDoorLockListener
+     *   - AbsBYDAutoDoorLockListener extends Object (NOT IBYDAutoListener)
+     *   - findRegisterMethod() looks for registerListener(IBYDAutoListener) → not found → returns null
+     *   - registerListener() returns false — listener was NEVER registered
+     * 
+     * The fix uses a proper AbsBYDAutoDoorLockListener subclass (same pattern as
+     * AccListener extends AbsBYDAutoBodyworkListener for ACC events).
      */
     private static void registerDoorLockListenerAndArmOnLock() {
         if (appContext == null) {
@@ -1986,13 +2005,13 @@ public class AccSentryDaemon {
                         Thread.sleep(10_000);
                         if (inSentryMode && !surveillanceEnabled) {
                             log("Grace period complete — arming surveillance");
-                            enableSurveillance();
+                            armSurveillanceAndStartUnlockWatch();
                         }
                     } catch (InterruptedException ignored) {}
                 }, "DoorLockGrace").start();
             } else {
                 log("Doors already locked — arming surveillance immediately");
-                enableSurveillance();
+                armSurveillanceAndStartUnlockWatch();
             }
             return;
         }
@@ -2000,44 +2019,15 @@ public class AccSentryDaemon {
         log("Doors unlocked — registering listener + polling for lock event...");
         doorLockListenerArmed = false;
         
-        // Register IBYDAutoListener for real-time door lock events
-        // BydDeviceHelper uses a Proxy on IBYDAutoListener interface which works
-        // even though AbsBYDAutoDoorLockListener is an abstract class.
-        try {
-            boolean registered = com.overdrive.app.byd.BydDeviceHelper.registerListener(
-                doorLockDevice,
-                (methodName, args) -> {
-                    // onDoorLockStatusChanged(int area, int state)
-                    if ("onDoorLockStatusChanged".equals(methodName) && args != null && args.length >= 2) {
-                        int area = ((Number) args[0]).intValue();
-                        int state = ((Number) args[1]).intValue();
-                        String stateName = doorStateToString(state);
-                        log("Door lock EVENT: area=" + area + " state=" + stateName + " (" + state + ")");
-                        
-                        // Any door locking means the user has locked the car
-                        if (state == DOOR_STATE_LOCK && !doorLockListenerArmed && inSentryMode) {
-                            doorLockListenerArmed = true;
-                            log("Door LOCKED via listener event — arming surveillance");
-                            enableSurveillance();
-                        }
-                        
-                        // Door UNLOCK while in sentry = owner returning — suppress surveillance
-                        // to avoid recording yourself getting in. ACC ON will fully exit sentry.
-                        if (state == DOOR_STATE_UNLOCK && doorLockListenerArmed && inSentryMode && surveillanceEnabled) {
-                            log("Door UNLOCKED via listener event — suppressing surveillance (owner returning)");
-                            disableSurveillance();
-                            doorLockListenerArmed = false;
-                        }
-                    }
-                });
-            log("Door lock listener registered: " + registered);
-        } catch (Exception e) {
-            log("Door lock listener registration failed: " + e.getMessage() + " — relying on polling");
-        }
+        // Register a proper AbsBYDAutoDoorLockListener subclass via reflection.
+        // BYDAutoDoorLockDevice.registerListener(AbsBYDAutoDoorLockListener) requires
+        // the actual abstract class, not an IBYDAutoListener proxy.
+        boolean listenerRegistered = registerDoorLockListenerDirect();
         
         // ALSO register BYDAutoOtaDevice listener — Diplus uses this as an alternative
         // lock state source. onLFDoorLockStateChanged fires for the central lock and
         // may work even when the DoorLockDevice module is asleep during ACC OFF.
+        // OTA device uses IBYDAutoListener interface, so BydDeviceHelper proxy works here.
         try {
             otaDevice = com.overdrive.app.byd.BydDeviceHelper.getDevice(
                 "android.hardware.bydauto.ota.BYDAutoOtaDevice",
@@ -2056,13 +2046,14 @@ public class AccSentryDaemon {
                             if (state == 1 && !doorLockListenerArmed && inSentryMode) {
                                 doorLockListenerArmed = true;
                                 log("Door LOCKED via OTA listener — arming surveillance");
-                                enableSurveillance();
+                                armSurveillanceAndStartUnlockWatch();
                             }
                             
                             // OTA unlock — suppress surveillance (owner returning)
                             if (state == 0 && doorLockListenerArmed && inSentryMode && surveillanceEnabled) {
                                 log("Door UNLOCKED via OTA listener — suppressing surveillance (owner returning)");
                                 disableSurveillance();
+                                stopUnlockPollThread();
                                 doorLockListenerArmed = false;
                             }
                         }
@@ -2078,38 +2069,232 @@ public class AccSentryDaemon {
         // Poll for door lock state with timeout (backup for listener)
         new Thread(() -> {
             long deadline = System.currentTimeMillis() + DOOR_LOCK_ARM_TIMEOUT_MS;
-            log("Door lock poll started (timeout=" + (DOOR_LOCK_ARM_TIMEOUT_MS / 1000) + "s)");
+            log("Door lock arm poll started (timeout=" + (DOOR_LOCK_ARM_TIMEOUT_MS / 1000) + "s)");
             
             while (inSentryMode && System.currentTimeMillis() < deadline) {
                 try {
                     // If listener already armed, we're done
                     if (doorLockListenerArmed || surveillanceEnabled) {
-                        log("Door lock poll: surveillance already armed (listener=" + doorLockListenerArmed + ")");
+                        log("Door lock arm poll: surveillance already armed (listener=" + doorLockListenerArmed + ")");
                         return;
                     }
                     
                     if (isDriverDoorLocked()) {
-                        log("All doors LOCKED (via poll) — arming surveillance");
-                        enableSurveillance();
+                        log("All doors LOCKED (via DoorLock poll) — arming surveillance");
+                        armSurveillanceAndStartUnlockWatch();
                         return;
                     }
-                    Thread.sleep(2000);  // Check every 2 seconds
+                    
+                    // Also check OTA device LF door lock as a second source
+                    if (otaDevice != null) {
+                        Object otaResult = com.overdrive.app.byd.BydDeviceHelper.callGetter(
+                            otaDevice, "getLFDoorLockState");
+                        if (otaResult instanceof Number) {
+                            int otaState = ((Number) otaResult).intValue();
+                            // OTA: 1=locked
+                            if (otaState == 1) {
+                                log("Door LOCKED detected via OTA poll (getLFDoorLockState=1) — arming surveillance");
+                                armSurveillanceAndStartUnlockWatch();
+                                return;
+                            }
+                        }
+                    }
+                    
+                    Thread.sleep(1500);
                 } catch (InterruptedException e) {
                     if (!inSentryMode) {
-                        log("Door lock poll cancelled — exited sentry mode");
+                        log("Door lock arm poll cancelled — exited sentry mode");
                         return;
                     }
                 } catch (Exception e) {
-                    log("Door lock poll error: " + e.getMessage());
+                    log("Door lock arm poll error: " + e.getMessage());
                     break;
                 }
             }
             
             if (inSentryMode && !surveillanceEnabled && !doorLockListenerArmed) {
                 log("Door lock timeout (" + (DOOR_LOCK_ARM_TIMEOUT_MS / 1000) + "s) — arming surveillance anyway");
-                enableSurveillance();
+                armSurveillanceAndStartUnlockWatch();
             }
         }, "DoorLockPoll").start();
+    }
+    
+    /**
+     * Register a proper AbsBYDAutoDoorLockListener on the BYDAutoDoorLockDevice.
+     * 
+     * Uses the same pattern as the commander app's registerBodyworkListener():
+     *   1. Load the listener class by name via Class.forName()
+     *   2. Find registerListener(listenerClass) on the device
+     *   3. Invoke with our concrete listener instance
+     * 
+     * We load the class by name to ensure we get the system framework's class
+     * (not our compile-time stub), matching the classloader the device expects.
+     * 
+     * @return true if listener was registered successfully
+     */
+    private static boolean registerDoorLockListenerDirect() {
+        try {
+            // Create our DoorLockListener instance (concrete subclass of AbsBYDAutoDoorLockListener)
+            DoorLockListener listener = new DoorLockListener();
+            
+            // Load the listener class by name — same pattern as commander app.
+            // This gets the system framework's class, which is what the device's
+            // registerListener method parameter type resolves to.
+            Class<?> listenerClass = Class.forName("android.hardware.bydauto.doorlock.AbsBYDAutoDoorLockListener");
+            Method registerMethod = doorLockDevice.getClass().getMethod("registerListener", listenerClass);
+            registerMethod.invoke(doorLockDevice, listener);
+            
+            log("Door lock listener registered via AbsBYDAutoDoorLockListener: SUCCESS");
+            return true;
+        } catch (NoSuchMethodException e) {
+            log("Door lock registerListener(AbsBYDAutoDoorLockListener) not found: " + e.getMessage());
+            log("Falling back to polling-only mode for door lock events");
+        } catch (Exception e) {
+            log("Door lock listener registration failed: " + e.getMessage());
+            log("Falling back to polling-only mode for door lock events");
+        }
+        return false;
+    }
+    
+    /**
+     * Arm surveillance and start the continuous unlock polling thread.
+     * This replaces direct enableSurveillance() calls in the door lock flow
+     * to ensure unlock detection is always active.
+     */
+    private static void armSurveillanceAndStartUnlockWatch() {
+        doorLockListenerArmed = true;
+        enableSurveillance();
+        startUnlockPollThread();
+    }
+    
+    /**
+     * Continuous unlock polling thread — runs while surveillance is armed.
+     * This is a safety net for unlock detection in case the listener doesn't fire
+     * (module sleep, listener registration failure, etc.).
+     * 
+     * Polls door lock state every 3 seconds. When an unlock is detected,
+     * suppresses surveillance (owner returning) and stops polling.
+     */
+    private static void startUnlockPollThread() {
+        stopUnlockPollThread();  // Clean up any existing thread
+        
+        unlockPollThread = new Thread(() -> {
+            log("Unlock poll thread started (interval=" + (UNLOCK_POLL_INTERVAL_MS / 1000) + "s)");
+            
+            // Track previous state to detect transitions.
+            // When the door lock module is asleep (INVALID=0), an unlock via key fob
+            // may only briefly flash UNLOCK(1) before the module sleeps again.
+            // We detect unlock by: state changed from LOCK(2) or INVALID(0) to UNLOCK(1),
+            // OR the module woke up (was INVALID, now shows any non-LOCK state).
+            int prevState = -1;
+            
+            while (inSentryMode && doorLockListenerArmed && surveillanceEnabled) {
+                try {
+                    Thread.sleep(UNLOCK_POLL_INTERVAL_MS);
+                    
+                    if (!inSentryMode || !doorLockListenerArmed || !surveillanceEnabled) {
+                        break;
+                    }
+                    
+                    if (doorLockDevice != null) {
+                        Object result = com.overdrive.app.byd.BydDeviceHelper.callGetter(
+                            doorLockDevice, "getDoorLockStatus", 1);
+                        int state = (result instanceof Number) ? ((Number) result).intValue() : -1;
+                        
+                        // Detect unlock: explicit UNLOCK state
+                        if (state == DOOR_STATE_UNLOCK) {
+                            log("Door UNLOCKED detected via poll (state=" + state + ") — suppressing surveillance");
+                            disableSurveillance();
+                            doorLockListenerArmed = false;
+                            return;
+                        }
+                        
+                        // Detect unlock: module was asleep (INVALID) during armed state,
+                        // now woke up but is NOT locked. This happens when the key fob
+                        // unlock wakes the module — it may not report UNLOCK(1) but
+                        // it won't report LOCK(2) either.
+                        if (prevState == DOOR_STATE_INVALID && state != DOOR_STATE_INVALID 
+                                && state != DOOR_STATE_LOCK && state != -1) {
+                            log("Door lock module woke up with non-LOCK state=" + state + 
+                                " (prev=INVALID) — treating as UNLOCK");
+                            disableSurveillance();
+                            doorLockListenerArmed = false;
+                            return;
+                        }
+                        
+                        // Also check OTA device LF door lock as a second source
+                        if (otaDevice != null) {
+                            Object otaResult = com.overdrive.app.byd.BydDeviceHelper.callGetter(
+                                otaDevice, "getLFDoorLockState");
+                            if (otaResult instanceof Number) {
+                                int otaState = ((Number) otaResult).intValue();
+                                // OTA: 0=unlocked, 1=locked
+                                if (otaState == 0) {
+                                    log("Door UNLOCKED detected via OTA poll (getLFDoorLockState=0) — suppressing surveillance");
+                                    disableSurveillance();
+                                    doorLockListenerArmed = false;
+                                    return;
+                                }
+                            }
+                        }
+                        
+                        prevState = state;
+                    }
+                } catch (InterruptedException e) {
+                    log("Unlock poll thread interrupted");
+                    return;
+                } catch (Exception e) {
+                    log("Unlock poll error: " + e.getMessage());
+                }
+            }
+            
+            log("Unlock poll thread exiting (sentry=" + inSentryMode + 
+                " armed=" + doorLockListenerArmed + " surveillance=" + surveillanceEnabled + ")");
+        }, "UnlockPoll");
+        unlockPollThread.setDaemon(true);
+        unlockPollThread.start();
+    }
+    
+    /**
+     * Stop the continuous unlock polling thread.
+     */
+    private static void stopUnlockPollThread() {
+        Thread t = unlockPollThread;
+        if (t != null && t.isAlive()) {
+            t.interrupt();
+            unlockPollThread = null;
+            log("Unlock poll thread stopped");
+        }
+    }
+    
+    /**
+     * Concrete listener for door lock events.
+     * Extends AbsBYDAutoDoorLockListener (the abstract class that BYDAutoDoorLockDevice
+     * expects in its registerListener method).
+     * 
+     * This is the same pattern as AccListener extends AbsBYDAutoBodyworkListener.
+     */
+    private static class DoorLockListener extends AbsBYDAutoDoorLockListener {
+        @Override
+        public void onDoorLockStatusChanged(int area, int state) {
+            String stateName = doorStateToString(state);
+            log("Door lock EVENT: area=" + area + " state=" + stateName + " (" + state + ")");
+            
+            // Any door locking means the user has locked the car
+            if (state == DOOR_STATE_LOCK && !doorLockListenerArmed && inSentryMode) {
+                log("Door LOCKED via listener event — arming surveillance");
+                armSurveillanceAndStartUnlockWatch();
+            }
+            
+            // Door UNLOCK while in sentry = owner returning — suppress surveillance
+            // to avoid recording yourself getting in. ACC ON will fully exit sentry.
+            if (state == DOOR_STATE_UNLOCK && doorLockListenerArmed && inSentryMode && surveillanceEnabled) {
+                log("Door UNLOCKED via listener event — suppressing surveillance (owner returning)");
+                disableSurveillance();
+                stopUnlockPollThread();
+                doorLockListenerArmed = false;
+            }
+        }
     }
     
     /**
@@ -2123,42 +2308,59 @@ public class AccSentryDaemon {
      * If any door were physically unlocked/open, the car stays semi-awake.
      */
     private static boolean isDriverDoorLocked() {
-        if (doorLockDevice == null) {
-            log("Door lock check: device is null");
+        if (doorLockDevice == null && otaDevice == null) {
+            log("Door lock check: no devices available");
             return false;
         }
         
-        // Use BydDeviceHelper.callGetter with area index (same as BydDataCollector)
-        // Area 1 = DOOR_LOCK_AREA_LEFT_FRONT (driver's door)
-        Object result = com.overdrive.app.byd.BydDeviceHelper.callGetter(
-            doorLockDevice, "getDoorLockStatus", 1);
-        
-        int state = (result instanceof Number) ? ((Number) result).intValue() : -1;
-        String stateName = doorStateToString(state);
-        log("Door lock poll: driver door=" + stateName + " (raw=" + state + ")");
-        
-        if (state == DOOR_STATE_LOCK) {
-            return true;
-        }
-        
-        // When ACC is OFF, the door lock module sleeps and returns INVALID (0) for all doors.
-        // Check if ALL electronic doors are INVALID — if so, the module is asleep which means
-        // the car is fully shut down and secured. Treat this as "locked".
-        if (state == DOOR_STATE_INVALID) {
-            boolean allInvalid = true;
-            // Check areas 1-5 (the 4 doors + back, skip child locks 6-7)
-            for (int area = 1; area <= 5; area++) {
-                Object r = com.overdrive.app.byd.BydDeviceHelper.callGetter(
-                    doorLockDevice, "getDoorLockStatus", area);
-                int s = (r instanceof Number) ? ((Number) r).intValue() : -1;
-                if (s != DOOR_STATE_INVALID) {
-                    allInvalid = false;
-                    break;
+        // Source 1: DoorLockDevice.getDoorLockStatus(1)
+        if (doorLockDevice != null) {
+            Object result = com.overdrive.app.byd.BydDeviceHelper.callGetter(
+                doorLockDevice, "getDoorLockStatus", 1);
+            
+            int state = (result instanceof Number) ? ((Number) result).intValue() : -1;
+            String stateName = doorStateToString(state);
+            log("Door lock poll: driver door=" + stateName + " (raw=" + state + ")");
+            
+            if (state == DOOR_STATE_LOCK) {
+                return true;
+            }
+            
+            // When ACC is OFF, the door lock module sleeps and returns INVALID (0) for all doors.
+            // Check if ALL electronic doors are INVALID — if so, the module is asleep which means
+            // the car is fully shut down and secured. Treat this as "locked".
+            if (state == DOOR_STATE_INVALID) {
+                boolean allInvalid = true;
+                for (int area = 1; area <= 5; area++) {
+                    Object r = com.overdrive.app.byd.BydDeviceHelper.callGetter(
+                        doorLockDevice, "getDoorLockStatus", area);
+                    int s = (r instanceof Number) ? ((Number) r).intValue() : -1;
+                    if (s != DOOR_STATE_INVALID) {
+                        allInvalid = false;
+                        break;
+                    }
+                }
+                if (allInvalid) {
+                    log("Door lock module asleep (all doors INVALID) — treating as LOCKED");
+                    return true;
                 }
             }
-            if (allInvalid) {
-                log("Door lock module asleep (all doors INVALID) — treating as LOCKED");
-                return true;
+        }
+        
+        // Source 2: OTA device LF door lock state (DiPlus uses this as alternative source)
+        if (otaDevice != null) {
+            try {
+                Object otaResult = com.overdrive.app.byd.BydDeviceHelper.callGetter(
+                    otaDevice, "getLFDoorLockState");
+                if (otaResult instanceof Number) {
+                    int otaState = ((Number) otaResult).intValue();
+                    log("Door lock poll: OTA LF door=" + otaState);
+                    if (otaState == 1) {
+                        return true;
+                    }
+                }
+            } catch (Exception e) {
+                log("OTA door lock check failed: " + e.getMessage());
             }
         }
         

@@ -158,6 +158,19 @@ public class SurveillanceEngineGpu {
     // SOTA: Event timeline collector for JSON sidecar files
     private final EventTimelineCollector timelineCollector = new EventTimelineCollector();
     
+    // SOTA: Detection baseline for filtering static objects from YOLO output.
+    // Maintains a per-quadrant "living memory" of known scene objects so that
+    // motion-triggered YOLO detections of parked cars, trash cans, etc. are
+    // suppressed — only NEW or MOVED objects trigger recording.
+    private final DetectionBaseline detectionBaseline = new DetectionBaseline();
+    // Track whether baseline has been seeded (one-time on sentry enable)
+    private volatile boolean baselineSeeded = false;
+    // Track last YOLO detections per quadrant for event-end baseline update
+    @SuppressWarnings("unchecked")
+    private final java.util.List<com.overdrive.app.ai.Detection>[] lastYoloDetections = new java.util.List[MotionPipelineV2.NUM_QUADRANTS];
+    // Track which quadrant had the last event (for event-end baseline update)
+    private int lastEventQuadrant = -1;
+    
     // Output directory
     private File eventOutputDir;
     private File currentEventFile;
@@ -525,6 +538,34 @@ public class SurveillanceEngineGpu {
         // Run V2 pipeline (includes C++ Global Illumination Sync)
         MotionPipelineV2.QuadrantResult[] results = pipelineV2.processFrame(
                 currentFrame, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT);
+        
+        // SOTA: Seed detection baseline once after camera warmup (frame 30 = ~3s at 10 FPS).
+        // Runs YOLO on each quadrant to catalog what's already in the scene (parked cars,
+        // trash cans, etc.) so future motion-triggered detections can filter them out.
+        // Cost: 4 inferences, one-time. Runs on AI executor thread to avoid blocking motion pipeline.
+        if (!baselineSeeded && frameCount == 30 && useObjectDetection && yoloDetector != null) {
+            baselineSeeded = true;  // Set immediately to prevent re-entry
+            final byte[] seedFrame = new byte[smallRgbFrame.length];
+            System.arraycopy(smallRgbFrame, 0, seedFrame, 0, smallRgbFrame.length);
+            aiExecutor.execute(() -> {
+                logger.info("Seeding detection baseline (frame 30)...");
+                int qW = THUMBNAIL_WIDTH / 2;
+                int qH = THUMBNAIL_HEIGHT / 2;
+                for (int q = 0; q < MotionPipelineV2.NUM_QUADRANTS; q++) {
+                    try {
+                        byte[] quadCrop = cropFromMosaic(seedFrame, q, qW, qH);
+                        if (quadCrop != null) {
+                            java.util.List<com.overdrive.app.ai.Detection> dets =
+                                    yoloDetector.detect(quadCrop, qW, qH, aiConfidence, true, true, false, true, minObjectSize);
+                            detectionBaseline.seedFromDetections(q, dets, qW, qH);
+                        }
+                    } catch (Exception e) {
+                        logger.warn("Baseline seed failed for Q" + q + ": " + e.getMessage());
+                    }
+                }
+                logger.info("Detection baseline seeded for all quadrants");
+            });
+        }
         
         // Check if any quadrant detected motion at MEDIUM or higher threat.
         int maxThreat = pipelineV2.getMaxThreatLevel();
@@ -1068,6 +1109,34 @@ public class SurveillanceEngineGpu {
                         logger.info(String.format("Auto NORMAL mode (avgLuma=%.0f >= 95)", avgLuma));
                     }
                     pipelineV2.applyConfig(pipelineV2Config);
+                    
+                    // SOTA: Refresh detection baseline on lighting transition.
+                    // Dawn/dusk changes affect detector confidence scores and object
+                    // appearance. Refresh all quadrants to keep baseline accurate.
+                    // Cost: 4 inferences, happens 2-3 times per night.
+                    // Runs on AI executor thread to avoid blocking motion pipeline.
+                    if (baselineSeeded && useObjectDetection && yoloDetector != null) {
+                        logger.info("Queuing detection baseline refresh (lighting transition)...");
+                        final byte[] frameSnapshot = new byte[smallRgbFrame.length];
+                        System.arraycopy(smallRgbFrame, 0, frameSnapshot, 0, smallRgbFrame.length);
+                        aiExecutor.execute(() -> {
+                            logger.info("Refreshing detection baseline (lighting transition)...");
+                            int qW = THUMBNAIL_WIDTH / 2;
+                            int qH = THUMBNAIL_HEIGHT / 2;
+                            for (int qr = 0; qr < MotionPipelineV2.NUM_QUADRANTS; qr++) {
+                                try {
+                                    byte[] quadCrop = cropFromMosaic(frameSnapshot, qr, qW, qH);
+                                    if (quadCrop != null) {
+                                        java.util.List<com.overdrive.app.ai.Detection> dets =
+                                                yoloDetector.detect(quadCrop, qW, qH, aiConfidence, true, true, false, true, minObjectSize);
+                                        detectionBaseline.refreshQuadrant(qr, dets, qW, qH);
+                                    }
+                                } catch (Exception e) {
+                                    logger.warn("Baseline refresh failed for Q" + qr + ": " + e.getMessage());
+                                }
+                            }
+                        });
+                    }
                 }
             }
             
@@ -1303,6 +1372,66 @@ public class SurveillanceEngineGpu {
                     
                     int relevantCount = motionFiltered.size();
                     motionFilteredCount = relevantCount;
+                    
+                    if (relevantCount > 0) {
+                        // SOTA: Record person detections for spatial veto baseline tracking.
+                        // This must happen BEFORE baseline filtering so the person positions
+                        // are available for the spatial veto check during event-end update.
+                        int qWNorm = usedFoveated ? FoveatedCropper.CROP_SIZE : (THUMBNAIL_WIDTH / 2);
+                        int qHNorm = usedFoveated ? FoveatedCropper.CROP_SIZE : (THUMBNAIL_HEIGHT / 2);
+                        for (com.overdrive.app.ai.Detection det : motionFiltered) {
+                            if (det.getClassId() == 0) {  // person
+                                detectionBaseline.recordPersonDetection(qIdx, det, qWNorm, qHNorm);
+                            }
+                        }
+                        
+                        // SOTA: Filter detections against baseline — suppress known static objects.
+                        // Only NEW or MOVED objects pass through. This eliminates false recordings
+                        // from shadows/headlights that trigger motion near parked cars or trash cans.
+                        // Skip baseline filtering for person detections (class 0) — a person is
+                        // never a legitimate static background object for a sentry system.
+                        java.util.List<com.overdrive.app.ai.Detection> baselineFiltered = new java.util.ArrayList<>();
+                        int baselineSuppressed = 0;
+                        for (com.overdrive.app.ai.Detection det : motionFiltered) {
+                            if (det.getClassId() == 0) {
+                                // Person — always pass through, never check baseline
+                                baselineFiltered.add(det);
+                            } else if (detectionBaseline.isInBaseline(det, qIdx, qWNorm, qHNorm)) {
+                                // Known static object — suppress
+                                baselineSuppressed++;
+                            } else {
+                                // New or moved non-person object — pass through
+                                baselineFiltered.add(det);
+                            }
+                        }
+                        
+                        if (baselineSuppressed > 0) {
+                            logger.info("Baseline filter Q" + qIdx + ": " + baselineSuppressed + 
+                                    " static objects suppressed, " + baselineFiltered.size() + " new/moved pass");
+                        }
+                        
+                        // Store last detections for event-end baseline update (use unfiltered
+                        // motionFiltered list — baseline update needs to see ALL objects including
+                        // those that were suppressed, so it can maintain/update their entries)
+                        lastYoloDetections[qIdx] = new java.util.ArrayList<>(motionFiltered);
+                        lastEventQuadrant = qIdx;
+                        
+                        // SOTA: Threat-level decision matrix — for THREAT_LOW, require at least
+                        // one non-baseline detection to commit recording. THREAT_MEDIUM and HIGH
+                        // always record (motion evidence is sufficient).
+                        int currentThreat = pipelineV2 != null ? pipelineV2.getMaxThreatLevel() : MotionPipelineV2.THREAT_MEDIUM;
+                        if (currentThreat <= MotionPipelineV2.THREAT_LOW && baselineFiltered.isEmpty()) {
+                            // THREAT_LOW + all detections are known static objects → suppress
+                            logger.info("Threat-level gate: THREAT_LOW + no new objects → suppressing AI trigger for Q" + qIdx);
+                            relevantCount = 0;
+                            motionFilteredCount = 0;
+                        } else {
+                            // Use baseline-filtered detections for downstream processing
+                            motionFiltered = baselineFiltered;
+                            relevantCount = motionFiltered.size();
+                            motionFilteredCount = relevantCount;
+                        }
+                    }
                     
                     if (relevantCount > 0) {
                         long timeSinceMotion = System.currentTimeMillis() - lastMotionTime;
@@ -1606,7 +1735,7 @@ public class SurveillanceEngineGpu {
      * We convert to pixel coordinates in the full mosaic, then use SurveillanceConfig's
      * camera calibration to estimate distance in meters.
      * 
-     * @param quadrant Quadrant index (0=front, 1=right, 2=left, 3=rear)
+     * @param quadrant Quadrant index (0=front, 1=right, 2=rear, 3=left)
      * @param centroidBlockY Centroid Y in block coordinates (0-6)
      * @return Estimated distance in meters, or -1 if unavailable
      */
@@ -1790,6 +1919,18 @@ public class SurveillanceEngineGpu {
             return;
         }
         
+        // SOTA: Update detection baseline from the last YOLO detections of this event.
+        // This is the event-driven baseline update — zero extra inferences.
+        // Only updates the quadrant where the event happened.
+        if (lastEventQuadrant >= 0 && lastYoloDetections[lastEventQuadrant] != null) {
+            int qW = THUMBNAIL_WIDTH / 2;
+            int qH = THUMBNAIL_HEIGHT / 2;
+            detectionBaseline.updateFromEventEnd(lastEventQuadrant,
+                    lastYoloDetections[lastEventQuadrant], qW, qH);
+            lastYoloDetections[lastEventQuadrant] = null;
+            lastEventQuadrant = -1;
+        }
+        
         // Stop immediately (post-record already handled by timeout)
         recorder.stopEventRecording(true, 0);
         recording = false;
@@ -1853,6 +1994,14 @@ public class SurveillanceEngineGpu {
         // Reset cross-quadrant tracker for clean session
         crossQuadrantTracker.reset();
         
+        // Reset detection baseline for clean session
+        detectionBaseline.reset();
+        baselineSeeded = false;
+        for (int q = 0; q < MotionPipelineV2.NUM_QUADRANTS; q++) {
+            lastYoloDetections[q] = null;
+        }
+        lastEventQuadrant = -1;
+        
         // Initialize native texture tracker (YOLO + NCC hybrid VOT)
         try {
             NativeMotion.initTracker();
@@ -1880,6 +2029,10 @@ public class SurveillanceEngineGpu {
         } catch (Exception e) {
             logger.warn("Could not set surveillance inactive state: " + e.getMessage());
         }
+        
+        // Reset detection baseline for clean session
+        detectionBaseline.reset();
+        baselineSeeded = false;
         
         logger.info("Surveillance disabled");
     }

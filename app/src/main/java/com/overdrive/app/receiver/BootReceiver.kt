@@ -55,14 +55,30 @@ class BootReceiver : BroadcastReceiver() {
         }
         
         when (action) {
-            // Boot events - always start daemons
+            // Boot events - start daemons and launch activity minimized.
+            // Launching the activity keeps the app process alive (Android is less
+            // likely to kill a process with a recent activity) and runs essential
+            // initialization (storage, device ID, BYD whitelist). We immediately
+            // move it to the back so the user sees their home screen, not OverDrive.
             Intent.ACTION_BOOT_COMPLETED,
             "android.intent.action.LOCKED_BOOT_COMPLETED",
             "android.intent.action.QUICKBOOT_POWERON",
-            "com.htc.intent.action.QUICKBOOT_POWERON",
+            "com.htc.intent.action.QUICKBOOT_POWERON" -> {
+                startDaemons(context, action)
+                try {
+                    val launchIntent = Intent(context, com.overdrive.app.ui.MainActivity::class.java)
+                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    launchIntent.putExtra("minimize_on_start", true)
+                    context.startActivity(launchIntent)
+                    Log.d(TAG, "App launched minimized on boot")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to launch app: ${e.message}")
+                }
+            }
+            
+            // App update - start daemons and bring app to foreground
             Intent.ACTION_MY_PACKAGE_REPLACED -> {
                 startDaemons(context, action)
-                // After app update, bring the app to foreground
                 try {
                     val launchIntent = Intent(context, com.overdrive.app.ui.MainActivity::class.java)
                     launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)

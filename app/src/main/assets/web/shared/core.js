@@ -61,6 +61,12 @@ BYD.core = {
                 if (el) el.textContent = status.deviceId;
             }
 
+            // App version
+            if (status.appVersion) {
+                const el = document.getElementById('appVersion');
+                if (el) el.textContent = 'v' + status.appVersion;
+            }
+
             // 12V Battery
             if (status.battery) {
                 const el = document.getElementById('batteryValue');
@@ -267,22 +273,22 @@ BYD.core = {
         // Personalized range from trip analytics
         this.updatePersonalizedRange();
 
-        // Fuel card (PHEV only) — show if fuelPercent > 0
-        // DEBUG: always show card for testing (remove fuelPct > 0 check later)
+        // Fuel card (PHEV only) — show only if real fuel data is available
         const fuelCard = document.getElementById('fuelCard');
         if (fuelCard && status.range) {
             var fuelPct = status.range.fuelPercent;
             var fuelKm = status.range.fuelKm;
-            // DEBUG: mock data if no real fuel data available
-            if (!fuelPct || fuelPct <= 0) { fuelPct = 62; fuelKm = 340; }
-            fuelCard.style.display = '';
-            const fuelPercentEl = document.getElementById('fuelPercentValue');
-            const fuelBarFill = document.getElementById('fuelBarFill');
-            if (fuelPercentEl) fuelPercentEl.textContent = Math.round(fuelPct) + '%';
-            if (fuelBarFill) fuelBarFill.style.width = Math.min(100, fuelPct) + '%';
-            // Color the percent based on level
-            if (fuelPercentEl) {
-                fuelPercentEl.style.color = fuelPct <= 15 ? '#EF4444' : fuelPct <= 30 ? '#F59E0B' : '#FBBF24';
+            if (fuelPct && fuelPct > 0) {
+                fuelCard.style.display = '';
+                const fuelPercentEl = document.getElementById('fuelPercentValue');
+                const fuelBarFill = document.getElementById('fuelBarFill');
+                if (fuelPercentEl) fuelPercentEl.textContent = Math.round(fuelPct) + '%';
+                if (fuelBarFill) fuelBarFill.style.width = Math.min(100, fuelPct) + '%';
+                if (fuelPercentEl) {
+                    fuelPercentEl.style.color = fuelPct <= 15 ? '#EF4444' : fuelPct <= 30 ? '#F59E0B' : '#FBBF24';
+                }
+            } else {
+                fuelCard.style.display = 'none';
             }
         }
     },

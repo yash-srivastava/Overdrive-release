@@ -187,7 +187,12 @@ public class RecordingModeManager {
             final Mode modeToActivate = currentMode;
             new Thread(() -> {
                 try {
-                    Thread.sleep(5000);
+                    // Give OEM dashcam / AVM / reverse camera time to initialize their camera
+                    // session before we reopen. BYD native camera apps typically need 3-6s after
+                    // ACC ON to bind to the panoramic HAL; use 10s for margin. This prevents
+                    // simultaneous open/close contention at the HAL during the ACC transition
+                    // which can leave the OEM dashcam with "no video signal" until reboot.
+                    Thread.sleep(10000);
                 } catch (InterruptedException ignored) {}
                 
                 synchronized (RecordingModeManager.this) {
@@ -287,17 +292,22 @@ public class RecordingModeManager {
     }
     
     /**
-     * Check if gear is a driving gear (D/R/S/M).
+     * Check if gear is a driving gear (D/R/S/M/N).
+     * N is included because BYD Auto Hold reports N while the car is stopped at a
+     * traffic light with the driver's foot off the brake. Excluding N would cause
+     * DRIVE_MODE recording to stop/start on every Auto Hold engage/release cycle.
+     * This matches TripDetector.isDrivingGear which also includes N.
      */
     public static boolean isDrivingGear(int gear) {
-        return gear == GEAR_D || gear == GEAR_R || gear == GEAR_S || gear == GEAR_M;
+        return gear == GEAR_D || gear == GEAR_R || gear == GEAR_N || gear == GEAR_S || gear == GEAR_M;
     }
     
     /**
-     * Check if gear is a parked/stationary gear (P/N).
+     * Check if gear is a parked gear (P only).
+     * N is NOT parked — see isDrivingGear comment about Auto Hold.
      */
     public static boolean isParkedGear(int gear) {
-        return gear == GEAR_P || gear == GEAR_N;
+        return gear == GEAR_P;
     }
     
     /**

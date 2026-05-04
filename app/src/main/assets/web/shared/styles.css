@@ -180,6 +180,14 @@ input, select { font-family: inherit; }
     letter-spacing: 0.05em;
 }
 
+.brand-version {
+    font-size: 10px;
+    color: var(--brand-primary);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    opacity: 0.8;
+}
+
 /* === SIDEBAR NAV === */
 .sidebar-nav {
     padding: 16px 12px;

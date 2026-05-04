@@ -814,6 +814,7 @@ public class SurveillanceIpcServer implements Runnable {
             }
             
             // Per-camera enable/disable
+            // Quadrant mapping: Q0=front, Q1=right, Q2=rear, Q3=left
             if (config.has("cameraFront")) {
                 boolean enabled = config.optBoolean("cameraFront", true);
                 sentryConfig.setCameraEnabled(0, enabled);
@@ -826,14 +827,14 @@ public class SurveillanceIpcServer implements Runnable {
                 if (sentry != null) sentry.setV2QuadrantEnabled(1, enabled);
                 configChanged = true;
             }
-            if (config.has("cameraLeft")) {
-                boolean enabled = config.optBoolean("cameraLeft", true);
+            if (config.has("cameraRear")) {
+                boolean enabled = config.optBoolean("cameraRear", true);
                 sentryConfig.setCameraEnabled(2, enabled);
                 if (sentry != null) sentry.setV2QuadrantEnabled(2, enabled);
                 configChanged = true;
             }
-            if (config.has("cameraRear")) {
-                boolean enabled = config.optBoolean("cameraRear", true);
+            if (config.has("cameraLeft")) {
+                boolean enabled = config.optBoolean("cameraLeft", true);
                 sentryConfig.setCameraEnabled(3, enabled);
                 if (sentry != null) sentry.setV2QuadrantEnabled(3, enabled);
                 configChanged = true;
