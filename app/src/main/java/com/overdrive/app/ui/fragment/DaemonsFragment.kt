@@ -114,6 +114,7 @@ class DaemonsFragment : Fragment() {
         when (type) {
             DaemonType.ZROK_TUNNEL -> showZrokTokenDialog()
             DaemonType.TAILSCALE_TUNNEL -> showTailscaleSettingsDialog()
+            DaemonType.CLOUDFLARED_TUNNEL -> showCloudflaredSettingsDialog()
             else -> {
                 // Other daemons don't need configuration yet
                 Toast.makeText(context, "No configuration needed for ${type.displayName}", Toast.LENGTH_SHORT).show()
