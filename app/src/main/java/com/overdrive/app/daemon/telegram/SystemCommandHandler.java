@@ -4,11 +4,18 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStreamReader;
+import static com.overdrive.app.launcher.TunnelLauncherKt.CLOUDFLARED_TUNNEL_URL;
+
+import com.overdrive.app.ui.util.PreferencesManager;
+
 
 /**
  * Handles system commands: /daemons, /url, /help
  */
 public class SystemCommandHandler implements TelegramCommandHandler {
+
+    boolean isPaid = PreferencesManager.isCloudflarePaid();
+    public String token = PreferencesManager.getCloudflareToken();
     
     @Override
     public boolean canHandle(String command) {
@@ -112,18 +119,33 @@ public class SystemCommandHandler implements TelegramCommandHandler {
             int pending = 0;
 
             if (cfUp) {
-                String url = null;
-                String grepResult = ctx.execShell("grep -o 'https://[a-z0-9-]*\\.trycloudflare\\.com' /data/local/tmp/cloudflared.log 2>/dev/null | grep -v 'api\\.' | head -1");
-                if (grepResult != null && grepResult.startsWith("https://") && grepResult.contains("-")) {
-                    url = grepResult.trim();
+
+                if (isPaid && !token.isEmpty()) {
+                    if(!CLOUDFLARED_TUNNEL_URL.isEmpty()) {
+                        sb.append("• *Cloudflared:* ").append(CLOUDFLARED_TUNNEL_URL).append("\n");
+                        resolved++;
+                    }
+                    else{
+                            sb.append("• *Cloudflared:* _starting, URL not available yet_\n");
+                            pending++;
+                    }
                 }
-                if (url != null) {
-                    sb.append("• *Cloudflared:* ").append(url).append("\n");
-                    resolved++;
-                } else {
-                    sb.append("• *Cloudflared:* _starting, URL not available yet_\n");
-                    pending++;
+                else{
+                    String url = null;
+                    String grepResult = ctx.execShell("grep -o 'https://[a-z0-9-]*\\.trycloudflare\\.com' /data/local/tmp/cloudflared.log 2>/dev/null | grep -v 'api\\.' | head -1");
+                    if (grepResult != null && grepResult.startsWith("https://") && grepResult.contains("-")) {
+                        url = grepResult.trim();
+                    }
+                    if (url != null) {
+                        sb.append("• *Cloudflared:* ").append(url).append("\n");
+                        resolved++;
+                    } else {
+                        sb.append("• *Cloudflared:* _starting, URL not available yet_\n");
+                        pending++;
+                    }
                 }
+
+
             }
 
             if (zrokUp) {

@@ -24,6 +24,9 @@ import com.overdrive.app.ui.model.DaemonType
 import com.overdrive.app.R
 import com.overdrive.app.ui.model.DaemonStatus
 import com.overdrive.app.ui.util.QrCodeGenerator
+import com.overdrive.app.ui.util.PreferencesManager
+import com.google.android.material.textfield.TextInputEditText
+import com.google.android.material.textfield.TextInputLayout
 
 /**
  * Fragment for managing background daemons.
@@ -162,6 +165,51 @@ class DaemonsFragment : Fragment() {
         }
     }
 
+    /**
+     * Show dialog to configure Cloudflared.
+     */
+    private fun showCloudflaredSettingsDialog() {
+        val context = context ?: return
+
+        val dialogView = LayoutInflater.from(context).inflate(R.layout.dialog_cloudflared_settings, null)
+        val etToken = dialogView.findViewById<TextInputEditText>(R.id.etCloudflareToken)
+        val swPaid = dialogView.findViewById<SwitchMaterial>(R.id.swCloudflarePaid)
+        val tilToken = dialogView.findViewById<TextInputLayout>(R.id.tilCloudflareToken)
+
+        // Load current values
+        val isPaid = PreferencesManager.isCloudflarePaid()
+        swPaid.isChecked = isPaid
+        etToken.setText(PreferencesManager.getCloudflareToken())
+
+        // Initial state
+        tilToken.isEnabled = isPaid
+
+        swPaid.setOnCheckedChangeListener { _, isChecked ->
+            tilToken.isEnabled = isChecked
+        }
+
+        AlertDialog.Builder(context, R.style.Theme_Overdrive_Dialog)
+            .setTitle("☁️ Cloudflared Settings")
+            .setView(dialogView)
+            .setPositiveButton("Salvar") { _, _ ->
+                val paid = swPaid.isChecked
+                val token = etToken.text?.toString()?.trim() ?: ""
+
+                PreferencesManager.setCloudflarePaid(paid)
+                PreferencesManager.setCloudflareToken(token)
+
+                if (paid && token.isEmpty()) {
+                    Toast.makeText(context, "Token removido. O túnel pago não poderá iniciar.", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(context, "Configurações salvas.", Toast.LENGTH_SHORT).show()
+                }
+
+                // Refresh state to update "needs configuration" indicator
+                daemonsViewModel.refreshDaemonStatus(DaemonType.CLOUDFLARED_TUNNEL)
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
     /**
      * Show dialog to configure and login to Tailscale.
      */

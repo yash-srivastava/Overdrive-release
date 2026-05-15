@@ -90,4 +90,6 @@
     <string name="slider_max_30s">30s</string>
     <string name="slider_min_100mb">100MB</string>
     <string name="slider_max_1000mb">1000MB</string>
+
+    <string name="cloudflare_paid_version">Cloudflare Paid Version</string>
 </resources>

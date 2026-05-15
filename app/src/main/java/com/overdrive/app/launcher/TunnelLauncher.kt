@@ -2,6 +2,8 @@ package com.overdrive.app.launcher
 
 import android.content.Context
 import com.overdrive.app.logging.LogManager
+import com.overdrive.app.ui.util.PreferencesManager
+
 
 /**
  * Launches tunnel processes via ADB shell for remote access.
@@ -9,6 +11,13 @@ import com.overdrive.app.logging.LogManager
  * Currently supports Cloudflared tunnel only.
  * Uses AdbShellExecutor for shell operations.
  */
+
+@JvmField
+var CLOUDFLARED_TUNNEL_URL="";
+
+
+val isPaid = PreferencesManager.isCloudflarePaid()
+val token = PreferencesManager.getCloudflareToken()
 class TunnelLauncher(
     private val context: Context,
     private val adbShellExecutor: AdbShellExecutor,
@@ -180,6 +189,8 @@ class TunnelLauncher(
     }
     
     private fun launchCloudflaredWithConfig(callback: TunnelCallback, useProxy: Boolean) {
+
+
         val cmd = buildString {
             append("nohup sh -c '")
 
@@ -199,10 +210,18 @@ class TunnelLauncher(
 // FIX: Removed invalid flags. Added 'retries' and 'grace-period'.
 // --grace-period 45s: Waits 45s before panicking (Covers the 24s blackout)
 // --retries 20: Keeps trying to reconnect for a long time
-            append("$CLOUDFLARED_TMP_PATH tunnel --url http://127.0.0.1:8080 ")
-            append("--edge-ip-version 4 --protocol http2 --no-autoupdate ")
-            append("--retries 20 --grace-period 45s")
-            append("' > $CLOUDFLARED_LOG 2>&1 &")
+            append("${com.overdrive.app.launcher.TunnelLauncher.Companion.CLOUDFLARED_TMP_PATH} tunnel ")
+            if (isPaid && token.isNotEmpty()) {
+                callback.onLog("Launching paid tunnel with token...")
+                append("run --token $token --url http://127.0.0.1:8080")
+            } else {
+                callback.onLog("Launching free quick tunnel (trycloudflare)...")
+                append("--url http://127.0.0.1:8080")
+                append("--edge-ip-version 4 --protocol http2 --no-autoupdate ")
+                append("--retries 20 --grace-period 45s")
+            }
+            append("' > ${com.overdrive.app.launcher.TunnelLauncher.Companion.CLOUDFLARED_LOG} 2>&1 &")
+
         }
         
         logManager.debug(TAG, "Executing: $cmd")
@@ -244,48 +263,97 @@ class TunnelLauncher(
         }
         
         Thread.sleep(1000)
-        
-        adbShellExecutor.execute(
-            command = "cat $CLOUDFLARED_LOG 2>/dev/null",
-            callback = object : AdbShellExecutor.ShellCallback {
-                override fun onSuccess(logContent: String) {
-                    // URL pattern: https://xxx-xxx.trycloudflare.com
-                    val cfUrlPattern = Regex("https://([a-z0-9]+-[a-z0-9-]+)\\.trycloudflare\\.com")
-                    val match = cfUrlPattern.find(logContent)
-                    
-                    if (match != null) {
-                        val tunnelUrl = match.value
-                        logManager.info(TAG, "Tunnel established: $tunnelUrl")
-                        callback.onLog("Tunnel established: $tunnelUrl")
-                        callback.onTunnelUrl(tunnelUrl)
-                        return
+
+
+        if (isPaid && token.isNotEmpty()) {
+            adbShellExecutor.execute(
+                command = "cat ${com.overdrive.app.launcher.TunnelLauncher.Companion.CLOUDFLARED_LOG} | grep --line-buffered -iE 'ingress|hostname'",
+                callback = object : AdbShellExecutor.ShellCallback {
+                    override fun onSuccess(output: String) {
+                        val cfUrlPattern = Regex("[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}")
+                        val match = cfUrlPattern.find(output)
+                        //logManager.info(TAG, output)
+
+
+                        if (match != null) {
+                            val tunnelUrl = "https://"+match.value
+                            logManager.info(com.overdrive.app.launcher.TunnelLauncher.Companion.TAG, "Tunnel established: $tunnelUrl")
+                            callback.onLog("Tunnel established: $tunnelUrl")
+                            callback.onTunnelUrl(tunnelUrl)
+                            return
+                        }
+
+                        // Check for proxy errors
+                        if (output.contains("proxyconnect") ||
+                            (output.contains("proxy") && output.contains("refused"))) {
+                            logManager.error(com.overdrive.app.launcher.TunnelLauncher.Companion.TAG, "Proxy error - is sing-box running?")
+                            callback.onError("Proxy Error: Is sing-box running on port 8119?\n${output.takeLast(200)}")
+                            return
+                        }
+
+                        // Check for connection errors
+                        if (output.contains("connection refused") || output.contains("dial tcp")) {
+                            logManager.error(com.overdrive.app.launcher.TunnelLauncher.Companion.TAG, "Connection error: $output")
+                            callback.onError("Cloudflared connection error: ${output.takeLast(300)}")
+                            return
+                        }
+
+                        callback.onLog("Waiting... ($attempt/30)")
+                        waitForTunnelUrl(callback, attempt + 1)
                     }
-                    
-                    // Check for proxy errors
-                    if (logContent.contains("proxyconnect") ||
-                        (logContent.contains("proxy") && logContent.contains("refused"))) {
-                        logManager.error(TAG, "Proxy error - is sing-box running?")
-                        callback.onError("Proxy Error: Is sing-box running on port 8119?\n${logContent.takeLast(200)}")
-                        return
+
+                    override fun onError(error: String) {
+                        callback.onLog("Waiting... ($attempt/30)")
+                        waitForTunnelUrl(callback, attempt + 1)
                     }
-                    
-                    // Check for connection errors
-                    if (logContent.contains("connection refused") || logContent.contains("dial tcp")) {
-                        logManager.error(TAG, "Connection error: $logContent")
-                        callback.onError("Cloudflared connection error: ${logContent.takeLast(300)}")
-                        return
-                    }
-                    
-                    callback.onLog("Waiting... ($attempt/30)")
-                    waitForTunnelUrl(callback, attempt + 1)
                 }
-                
-                override fun onError(error: String) {
-                    callback.onLog("Waiting... ($attempt/30)")
-                    waitForTunnelUrl(callback, attempt + 1)
+            )
+        }
+        else{
+            adbShellExecutor.execute(
+                command = "cat $CLOUDFLARED_LOG 2>/dev/null",
+                callback = object : AdbShellExecutor.ShellCallback {
+                    override fun onSuccess(logContent: String) {
+                        // URL pattern: https://xxx-xxx.trycloudflare.com
+                        val cfUrlPattern = Regex("https://([a-z0-9]+-[a-z0-9-]+)\\.trycloudflare\\.com")
+                        val match = cfUrlPattern.find(logContent)
+
+                        if (match != null) {
+                            val tunnelUrl = match.value
+                            logManager.info(TAG, "Tunnel established: $tunnelUrl")
+                            callback.onLog("Tunnel established: $tunnelUrl")
+                            callback.onTunnelUrl(tunnelUrl)
+                            return
+                        }
+
+                        // Check for proxy errors
+                        if (logContent.contains("proxyconnect") ||
+                            (logContent.contains("proxy") && logContent.contains("refused"))) {
+                            logManager.error(TAG, "Proxy error - is sing-box running?")
+                            callback.onError("Proxy Error: Is sing-box running on port 8119?\n${logContent.takeLast(200)}")
+                            return
+                        }
+
+                        // Check for connection errors
+                        if (logContent.contains("connection refused") || logContent.contains("dial tcp")) {
+                            logManager.error(TAG, "Connection error: $logContent")
+                            callback.onError("Cloudflared connection error: ${logContent.takeLast(300)}")
+                            return
+                        }
+
+                        callback.onLog("Waiting... ($attempt/30)")
+                        waitForTunnelUrl(callback, attempt + 1)
+                    }
+
+                    override fun onError(error: String) {
+                        callback.onLog("Waiting... ($attempt/30)")
+                        waitForTunnelUrl(callback, attempt + 1)
+                    }
                 }
-            }
-        )
+            )
+        }
+
+
     }
     
     /**
@@ -340,29 +408,65 @@ class TunnelLauncher(
      * SOTA FIX: Use grep instead of cat to avoid loading entire log into memory.
      */
     fun getTunnelUrl(callback: (String?) -> Unit) {
-        // Use grep to find URL directly instead of loading entire log
-        // This eliminates large memory allocations from reading log files
-        adbShellExecutor.execute(
-            command = "grep -o 'https://[a-z0-9-]*\\.trycloudflare\\.com' $CLOUDFLARED_LOG 2>/dev/null | grep -v 'api\\.' | head -1",
-            callback = object : AdbShellExecutor.ShellCallback {
-                override fun onSuccess(output: String) {
-                    val url = output.trim()
-                    if (url.isNotEmpty() && url.startsWith("https://") && url.contains("-")) {
-                        logManager.info(TAG, "Found tunnel URL: $url")
-                        callback(url)
-                    } else {
-                        logManager.debug(TAG, "No tunnel URL found in log")
+
+
+        if (isPaid && token.isNotEmpty()) {
+
+            val pattern = "[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
+            val keywords = "ingress|hostname"
+            val filterOut = "127.0.0.1"
+
+            val extractCmd = "grep --line-buffered -iE '$keywords' ${com.overdrive.app.launcher.TunnelLauncher.Companion.CLOUDFLARED_LOG} 2>/dev/null | grep --line-buffered -oE '$pattern' | grep -vE '$filterOut' | tail -1"
+            //command = "grep -o 'https://[a-z0-9-]*\\.trycloudflare\\.com' $CLOUDFLARED_LOG 2>/dev/null | grep -v 'api\\.' | head -1",
+            adbShellExecutor.execute(
+                command = extractCmd,
+                callback = object : AdbShellExecutor.ShellCallback {
+                    override fun onSuccess(output: String) {
+                        val url = "https://"+output.trim()
+                        if (url.isNotEmpty()) {
+                            logManager.info(com.overdrive.app.launcher.TunnelLauncher.Companion.TAG, "Found tunnel URL: $url")
+                            com.overdrive.app.launcher.CLOUDFLARED_TUNNEL_URL =url
+                            callback(url)
+                        } else {
+                            logManager.debug(com.overdrive.app.launcher.TunnelLauncher.Companion.TAG, "No tunnel URL found in log")
+                            com.overdrive.app.launcher.CLOUDFLARED_TUNNEL_URL =""
+                            callback(null)
+                        }
+                    }
+
+                    override fun onError(error: String) {
+                        // Log file doesn't exist - tunnel needs restart to get URL
+                        logManager.warn(com.overdrive.app.launcher.TunnelLauncher.Companion.TAG, "Cloudflared log not found - tunnel may need restart")
                         callback(null)
                     }
                 }
-                
-                override fun onError(error: String) {
-                    // Log file doesn't exist - tunnel needs restart to get URL
-                    logManager.warn(TAG, "Cloudflared log not found - tunnel may need restart")
-                    callback(null)
+            )
+        }
+        else {
+            // Use grep to find URL directly instead of loading entire log
+            // This eliminates large memory allocations from reading log files
+            adbShellExecutor.execute(
+                command = "grep -o 'https://[a-z0-9-]*\\.trycloudflare\\.com' $CLOUDFLARED_LOG 2>/dev/null | grep -v 'api\\.' | head -1",
+                callback = object : AdbShellExecutor.ShellCallback {
+                    override fun onSuccess(output: String) {
+                        val url = output.trim()
+                        if (url.isNotEmpty() && url.startsWith("https://") && url.contains("-")) {
+                            logManager.info(TAG, "Found tunnel URL: $url")
+                            callback(url)
+                        } else {
+                            logManager.debug(TAG, "No tunnel URL found in log")
+                            callback(null)
+                        }
+                    }
+
+                    override fun onError(error: String) {
+                        // Log file doesn't exist - tunnel needs restart to get URL
+                        logManager.warn(TAG, "Cloudflared log not found - tunnel may need restart")
+                        callback(null)
+                    }
                 }
-            }
-        )
+            )
+        }
     }
     
     /**

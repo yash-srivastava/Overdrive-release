@@ -24,6 +24,9 @@ object PreferencesManager {
     private const val KEY_ZROK_UNIQUE_NAME = "zrok_unique_name"
     private const val KEY_ZROK_ENABLE_TOKEN = "zrok_enable_token"
     private const val KEY_LOGS_EXPANDED = "logs_expanded"
+    private const val KEY_CLOUDFLARE_TOKEN = "cloudflare_token"
+    private const val KEY_CLOUDFLARE_CUSTOM_URL = "cloudflare_custom_url"
+    private const val KEY_CLOUDFLARE_PAID = "cloudflare_paid"
     
     private var prefs: SharedPreferences? = null
     
@@ -78,6 +81,35 @@ object PreferencesManager {
     
     private fun requirePrefs(): SharedPreferences {
         return prefs ?: throw IllegalStateException("PreferencesManager not initialized. Call init() first.")
+    }
+
+    // Token Cloudflare
+    @JvmStatic
+    fun getCloudflareToken(): String {
+        return com.overdrive.app.ui.util.PreferencesManager.requirePrefs()
+            .getString(com.overdrive.app.ui.util.PreferencesManager.KEY_CLOUDFLARE_TOKEN, "") ?: ""
+    }
+
+    fun setCloudflareToken(token: String) {
+        com.overdrive.app.ui.util.PreferencesManager.requirePrefs()
+            .edit().putString(com.overdrive.app.ui.util.PreferencesManager.KEY_CLOUDFLARE_TOKEN, token).apply()
+    }
+
+
+    // Cloudflare Paid Version
+    @JvmStatic
+    fun isCloudflarePaid(): Boolean {
+        return com.overdrive.app.ui.util.PreferencesManager.requirePrefs()
+            .getBoolean(com.overdrive.app.ui.util.PreferencesManager.KEY_CLOUDFLARE_PAID, false)
+    }
+
+    fun setCloudflarePaid(paid: Boolean) {
+        com.overdrive.app.ui.util.PreferencesManager.requirePrefs()
+            .edit().putBoolean(com.overdrive.app.ui.util.PreferencesManager.KEY_CLOUDFLARE_PAID, paid).apply()
+    }
+
+    fun isCloudflareConfigured(): Boolean {
+        return !isCloudflarePaid() || getCloudflareToken().isNotEmpty()
     }
     
     // Access Mode

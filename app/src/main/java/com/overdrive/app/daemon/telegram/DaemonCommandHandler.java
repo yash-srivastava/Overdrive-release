@@ -4,6 +4,8 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.util.Properties;
+import com.overdrive.app.ui.util.PreferencesManager;
+import static com.overdrive.app.launcher.TunnelLauncherKt.CLOUDFLARED_TUNNEL_URL;
 
 /**
  * Handles /daemon commands for starting/stopping daemons.
@@ -13,8 +15,10 @@ import java.util.Properties;
  * Writes daemon state to /data/local/tmp/daemon_telegram_state.properties
  * so health checks can honor Telegram-initiated stops.
  */
+
 public class DaemonCommandHandler implements TelegramCommandHandler {
-    
+    boolean isPaid = PreferencesManager.isCloudflarePaid();
+    public String token = PreferencesManager.getCloudflareToken();
     private static final String TAG = "DaemonCmd";
     private static final String STATE_FILE = "/data/local/tmp/daemon_telegram_state.properties";
     
@@ -478,12 +482,22 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 } else {
                     ctx.log("Direct connection (no proxy)...");
                 }
-                
-                // Same flags as UI version
-                cfCmd.append("/data/local/tmp/cloudflared tunnel --url http://127.0.0.1:8080 ");
-                cfCmd.append("--edge-ip-version 4 --protocol http2 --no-autoupdate ");
-                cfCmd.append("--retries 20 --grace-period 45s");
-                cfCmd.append("' > /data/local/tmp/cloudflared.log 2>&1 &");
+
+
+                if (isPaid && !token.isEmpty()) {
+                    cfCmd.append("/data/local/tmp/cloudflared tunnel ");
+                    //fCmd.append("--edge-ip-version 4 --protocol http2 --no-autoupdate ");
+                    cfCmd.append("run --token ").append(token);
+                    cfCmd.append("' > /data/local/tmp/cloudflared.log 2>&1 &");
+                }
+                else {
+                    cfCmd.append("/data/local/tmp/cloudflared tunnel --url http://127.0.0.1:8080 ");
+                    cfCmd.append("--edge-ip-version 4 --protocol http2 --no-autoupdate ");
+                    cfCmd.append("--retries 20 --grace-period 45s");
+                    cfCmd.append("' > /data/local/tmp/cloudflared.log 2>&1 &");
+                }
+                    // Same flags as UI version
+
                 
                 cmd = cfCmd.toString();
                 processName = "cloudflared";
@@ -610,41 +624,59 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         
         boolean started = isDaemonRunning(processName, ctx);
         ctx.log("Shell daemon " + (started ? "started" : "FAILED") + ": " + name);
-        
-        // For cloudflared, wait longer and try to get the URL
-        if (started && "cloudflared".equals(name)) {
-            ctx.log("Waiting for tunnel URL...");
-            String tunnelUrl = null;
-            for (int i = 0; i < 15; i++) { // Wait up to 15 seconds
-                try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
-                // SOTA FIX: Use grep instead of cat to avoid loading entire log into memory
-                String grepResult = ctx.execShell("grep -o 'https://[a-z0-9-]*\\.trycloudflare\\.com' /data/local/tmp/cloudflared.log 2>/dev/null | grep -v 'api\\.' | head -1");
-                if (grepResult != null && grepResult.startsWith("https://") && grepResult.contains("-")) {
-                    tunnelUrl = grepResult.trim();
-                    ctx.log("Tunnel URL: " + tunnelUrl);
-                    // Save URL to file for /url command
-                    saveTunnelUrl(tunnelUrl, ctx);
-                    break;
-                }
-                // Check for errors (only read last few lines)
-                String tailLog = ctx.execShell("tail -5 /data/local/tmp/cloudflared.log 2>/dev/null");
-                if (tailLog != null) {
-                    if (tailLog.contains("proxyconnect") || 
-                        (tailLog.contains("proxy") && tailLog.contains("refused"))) {
-                        ctx.log("Proxy error - is sing-box running?");
+
+
+
+
+
+
+            // For cloudflared, wait longer and try to get the URL
+            if (started && "cloudflared".equals(name)) {
+                ctx.log("Waiting for tunnel URL...");
+                String tunnelUrl = null;
+                for (int i = 0; i < 15; i++) { // Wait up to 15 seconds
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException ignored) {
+                    }
+
+
+                    if (isPaid && !token.isEmpty() && !CLOUDFLARED_TUNNEL_URL.isEmpty()) {
+                        tunnelUrl = CLOUDFLARED_TUNNEL_URL;
+                        saveTunnelUrl(tunnelUrl, ctx);
+                        break;
+                    } else {
+                        // SOTA FIX: Use grep instead of cat to avoid loading entire log into memory
+                        String grepResult = ctx.execShell("grep -o 'https://[a-z0-9-]*\\.trycloudflare\\.com' /data/local/tmp/cloudflared.log 2>/dev/null | grep -v 'api\\.' | head -1");
+                        if (grepResult != null && grepResult.startsWith("https://") && grepResult.contains("-")) {
+                            tunnelUrl = grepResult.trim();
+                            ctx.log("Tunnel URL: " + tunnelUrl);
+                            // Save URL to file for /url command
+                            saveTunnelUrl(tunnelUrl, ctx);
+                            break;
+                        }
+                    }
+                        // Check for errors (only read last few lines)
+                        String tailLog = ctx.execShell("tail -5 /data/local/tmp/cloudflared.log 2>/dev/null");
+                        if (tailLog != null) {
+                            if (tailLog.contains("proxyconnect") ||
+                                    (tailLog.contains("proxy") && tailLog.contains("refused"))) {
+                                ctx.log("Proxy error - is sing-box running?");
+                                return false;
+                            }
+                        }
+                    }
+
+                if (tunnelUrl == null) {
+                    // Check if process is still running
+                    if (!isDaemonRunning(processName, ctx)) {
+                        ctx.log("Cloudflared exited - check /data/local/tmp/cloudflared.log");
                         return false;
                     }
+                    ctx.log("Tunnel started but URL not yet available");
                 }
             }
-            if (tunnelUrl == null) {
-                // Check if process is still running
-                if (!isDaemonRunning(processName, ctx)) {
-                    ctx.log("Cloudflared exited - check /data/local/tmp/cloudflared.log");
-                    return false;
-                }
-                ctx.log("Tunnel started but URL not yet available");
-            }
-        }
+
         
         // For zrok, wait and try to get the URL (similar to cloudflared)
         if (started && "zrok".equals(name)) {

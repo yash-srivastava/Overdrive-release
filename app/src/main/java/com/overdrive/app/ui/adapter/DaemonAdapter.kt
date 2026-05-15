@@ -122,7 +122,7 @@ class DaemonAdapter(
             ivExpand.rotation = if (isExpanded) 180f else 0f
             
             // Show configure icon for configurable daemons (always visible for Zrok and Tailscale)
-            val isConfigurable = (state.type == DaemonType.ZROK_TUNNEL || state.type == DaemonType.TAILSCALE_TUNNEL) && onConfigureClick != null
+            val isConfigurable = (state.type == DaemonType.CLOUDFLARED_TUNNEL || state.type == DaemonType.ZROK_TUNNEL || state.type == DaemonType.TAILSCALE_TUNNEL) && onConfigureClick != null
             ivConfigure.visibility = if (isConfigurable) View.VISIBLE else View.GONE
             if (isConfigurable) {
                 ivConfigure.setOnClickListener {
