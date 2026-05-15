@@ -18,15 +18,15 @@ set(OPENCV_INCLUDE_DIR "${OPENCV_DIR}/include")
 if(EXISTS "${OPENCV_LIB_DIR}/libopencv_core.a" AND EXISTS "${OPENCV_INCLUDE_DIR}/opencv2")
     message(STATUS "opencv-mobile found at ${OPENCV_LIB_DIR}")
     set(OPENCV_AVAILABLE TRUE)
-    
+
     # opencv-mobile static libraries (order matters for linking!)
     # Link in reverse dependency order: video -> imgproc -> core
     set(OPENCV_LIBS
-        "${OPENCV_LIB_DIR}/libopencv_video.a"
-        "${OPENCV_LIB_DIR}/libopencv_imgproc.a"
-        "${OPENCV_LIB_DIR}/libopencv_core.a"
+            "${OPENCV_LIB_DIR}/libopencv_video.a"
+            "${OPENCV_LIB_DIR}/libopencv_imgproc.a"
+            "${OPENCV_LIB_DIR}/libopencv_core.a"
     )
-    
+
     # Verify all required libs exist
     foreach(lib ${OPENCV_LIBS})
         if(NOT EXISTS ${lib})
@@ -49,16 +49,16 @@ endif()
 
 # ==================== Surveillance Library ====================
 set(SURVEILLANCE_SOURCES
-    surveillance/native_motion.cpp
-    surveillance/motion_pipeline_v2.cpp
-    surveillance/texture_tracker.cpp
+        surveillance/native_motion.cpp
+        surveillance/motion_pipeline_v2.cpp
+        surveillance/texture_tracker.cpp
 )
 
 add_library(surveillance SHARED ${SURVEILLANCE_SOURCES})
 
 target_include_directories(surveillance PRIVATE
-    ${CMAKE_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/surveillance
+        ${CMAKE_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/surveillance
 )
 
 # Base libraries
@@ -67,7 +67,7 @@ set(SURVEILLANCE_LIBS android log m)
 # Add OpenCV if available
 if(OPENCV_AVAILABLE)
     target_include_directories(surveillance PRIVATE ${OPENCV_DIR}/include)
-    
+
     if(OPENCV_USE_SHARED)
         # Old shared library path
         list(APPEND SURVEILLANCE_LIBS opencv)
@@ -83,7 +83,7 @@ if(OPENCV_AVAILABLE)
             list(APPEND SURVEILLANCE_LIBS ${OPENCV_LIBS} -fopenmp -static-openmp z)
         endif()
     endif()
-    
+
     target_compile_definitions(surveillance PRIVATE HAVE_OPENCV=1)
 else()
     target_compile_definitions(surveillance PRIVATE HAVE_OPENCV=0)
@@ -95,15 +95,15 @@ target_link_libraries(surveillance ${SURVEILLANCE_LIBS})
 # Hide all symbols except JNI exports (JNIEXPORT uses __attribute__((visibility("default"))))
 # This makes reverse engineering much harder - internal functions are not visible in .so
 target_compile_options(surveillance PRIVATE
-    -fvisibility=hidden          # Hide all symbols by default
-    -fvisibility-inlines-hidden  # Hide inline functions
-    -ffunction-sections          # Put each function in its own section
-    -fdata-sections              # Put each data item in its own section
+        -fvisibility=hidden          # Hide all symbols by default
+        -fvisibility-inlines-hidden  # Hide inline functions
+        -ffunction-sections          # Put each function in its own section
+        -fdata-sections              # Put each data item in its own section
 )
 
 # Strip symbols and remove unused sections in release
 set_target_properties(surveillance PROPERTIES
-    LINK_FLAGS "-Wl,--gc-sections,--strip-all,--exclude-libs,ALL"
+        LINK_FLAGS "-Wl,--gc-sections,--strip-all,--exclude-libs,ALL"
 )
 
 # ==================== NEON SIMD Optimization ====================
