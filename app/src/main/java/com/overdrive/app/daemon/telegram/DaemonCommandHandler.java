@@ -17,8 +17,7 @@ import static com.overdrive.app.launcher.TunnelLauncherKt.CLOUDFLARED_TUNNEL_URL
  */
 
 public class DaemonCommandHandler implements TelegramCommandHandler {
-    boolean isPaid = PreferencesManager.isCloudflarePaid();
-    public String token = PreferencesManager.getCloudflareToken();
+
     private static final String TAG = "DaemonCmd";
     private static final String STATE_FILE = "/data/local/tmp/daemon_telegram_state.properties";
     
@@ -483,6 +482,8 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                     ctx.log("Direct connection (no proxy)...");
                 }
 
+                boolean isPaid = PreferencesManager.isCloudflarePaid();
+                String token = PreferencesManager.getCloudflareToken();
 
                 if (isPaid && !token.isEmpty()) {
                     cfCmd.append("/data/local/tmp/cloudflared tunnel ");
@@ -639,7 +640,8 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                         Thread.sleep(1000);
                     } catch (InterruptedException ignored) {
                     }
-
+                    boolean isPaid = PreferencesManager.isCloudflarePaid();
+                    String token = PreferencesManager.getCloudflareToken();
 
                     if (isPaid && !token.isEmpty() && !CLOUDFLARED_TUNNEL_URL.isEmpty()) {
                         tunnelUrl = CLOUDFLARED_TUNNEL_URL;

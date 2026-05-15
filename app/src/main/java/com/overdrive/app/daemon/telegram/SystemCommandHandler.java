@@ -14,8 +14,6 @@ import com.overdrive.app.ui.util.PreferencesManager;
  */
 public class SystemCommandHandler implements TelegramCommandHandler {
 
-    boolean isPaid = PreferencesManager.isCloudflarePaid();
-    public String token = PreferencesManager.getCloudflareToken();
     
     @Override
     public boolean canHandle(String command) {
@@ -117,7 +115,8 @@ public class SystemCommandHandler implements TelegramCommandHandler {
             sb.append("🌐 *Tunnel URLs*\n\n");
             int resolved = 0;
             int pending = 0;
-
+            boolean isPaid = PreferencesManager.isCloudflarePaid();
+            String token = PreferencesManager.getCloudflareToken();
             if (cfUp) {
 
                 if (isPaid && !token.isEmpty()) {

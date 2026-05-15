@@ -106,6 +106,7 @@ object PreferencesManager {
     fun setCloudflarePaid(paid: Boolean) {
         com.overdrive.app.ui.util.PreferencesManager.requirePrefs()
             .edit().putBoolean(com.overdrive.app.ui.util.PreferencesManager.KEY_CLOUDFLARE_PAID, paid).apply()
+
     }
 
     fun isCloudflareConfigured(): Boolean {
