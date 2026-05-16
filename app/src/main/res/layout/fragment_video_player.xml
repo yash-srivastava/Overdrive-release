@@ -28,7 +28,7 @@
             android:layout_height="40dp"
             android:src="@drawable/ic_back"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Back"
+            android:contentDescription="@string/cd_back"
             android:tint="#FFFFFF"
             android:scaleType="centerInside" />
 
@@ -38,7 +38,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginStart="8dp"
-            android:text="Recording"
+            android:text="@string/player_title_recording"
             android:textColor="#FFFFFF"
             android:textSize="16sp"
             android:fontFamily="sans-serif-medium"
@@ -107,7 +107,7 @@
                 android:layout_height="40dp"
                 android:src="@android:drawable/ic_media_pause"
                 android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="Play/Pause"
+                android:contentDescription="@string/cd_play_pause"
                 android:tint="#FFFFFF"
                 android:scaleType="centerInside" />
 
@@ -115,7 +115,7 @@
                 android:id="@+id/tvCurrentTime"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="0:00"
+                android:text="@string/player_time_zero"
                 android:textColor="#FFFFFF"
                 android:textSize="13sp"
                 android:fontFamily="monospace"
@@ -124,7 +124,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text=" / "
+                android:text="@string/player_time_separator"
                 android:textColor="#80FFFFFF"
                 android:textSize="13sp" />
 
@@ -133,7 +133,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="0:00"
+                android:text="@string/player_time_zero"
                 android:textColor="#FFFFFF"
                 android:textSize="13sp"
                 android:fontFamily="monospace" />

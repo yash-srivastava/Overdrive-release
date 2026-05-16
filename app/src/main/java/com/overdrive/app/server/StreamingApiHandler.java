@@ -70,7 +70,7 @@ public class StreamingApiHandler {
                         ", running=" + (pipeline != null && pipeline.isRunning()));
         
         if (pipeline == null) {
-            HttpResponse.sendJsonError(out, "Pipeline not initialized");
+            HttpResponse.sendJsonError(out, Messages.get("errors.streaming_pipeline_not_initialized"));
             return;
         }
         
@@ -87,7 +87,7 @@ public class StreamingApiHandler {
                 Thread.sleep(500);
             } catch (Exception e) {
                 CameraDaemon.log("handleEnableStreaming: failed to start pipeline - " + e.getMessage());
-                HttpResponse.sendJsonError(out, "Failed to start pipeline: " + e.getMessage());
+                HttpResponse.sendJsonError(out, Messages.get("errors.streaming_start_failed_with_detail", e.getMessage()));
                 return;
             }
         }
@@ -96,7 +96,7 @@ public class StreamingApiHandler {
             CameraDaemon.log("handleEnableStreaming: already enabled");
             JSONObject response = new JSONObject();
             response.put("success", true);
-            response.put("message", "Streaming already enabled");
+            response.put("message", Messages.get("messages.streaming_already_enabled"));
             response.put("wsPort", 8887);
             HttpResponse.sendJson(out, response.toString());
             return;
@@ -110,7 +110,7 @@ public class StreamingApiHandler {
             CameraDaemon.log("handleEnableStreaming: success");
             JSONObject response = new JSONObject();
             response.put("success", true);
-            response.put("message", "Streaming enabled");
+            response.put("message", Messages.get("messages.streaming_enabled"));
             response.put("wsPort", 8887);
             response.put("quality", q.name());
             response.put("resolution", q.width + "x" + q.height);
@@ -128,7 +128,7 @@ public class StreamingApiHandler {
         GpuSurveillancePipeline pipeline = CameraDaemon.getGpuPipeline();
         
         if (pipeline == null) {
-            HttpResponse.sendJsonError(out, "Pipeline not available");
+            HttpResponse.sendJsonError(out, Messages.get("errors.streaming_pipeline_not_available"));
             return;
         }
         
@@ -136,7 +136,7 @@ public class StreamingApiHandler {
         
         JSONObject response = new JSONObject();
         response.put("success", true);
-        response.put("message", "Streaming disabled");
+        response.put("message", Messages.get("messages.streaming_disabled"));
         HttpResponse.sendJson(out, response.toString());
     }
     
@@ -207,12 +207,12 @@ public class StreamingApiHandler {
         GpuSurveillancePipeline pipeline = CameraDaemon.getGpuPipeline();
         
         if (pipeline == null) {
-            HttpResponse.sendJsonError(out, "Pipeline not available");
+            HttpResponse.sendJsonError(out, Messages.get("errors.streaming_pipeline_not_available"));
             return;
         }
         
         if (viewMode < 0 || viewMode > 5) {
-            HttpResponse.sendJsonError(out, "Invalid view mode. Use 0=Mosaic, 1=Front, 2=Right, 3=Rear, 4=Left, 5=Raw strip");
+            HttpResponse.sendJsonError(out, Messages.get("errors.streaming_invalid_view_mode"));
             return;
         }
         
@@ -235,7 +235,7 @@ public class StreamingApiHandler {
                 pipeline.start();
                 Thread.sleep(500);
             } catch (Exception e) {
-                HttpResponse.sendJsonError(out, "Failed to start pipeline: " + e.getMessage());
+                HttpResponse.sendJsonError(out, Messages.get("errors.streaming_start_failed_with_detail", e.getMessage()));
                 return;
             }
         }
@@ -248,7 +248,7 @@ public class StreamingApiHandler {
                 pipeline.enableStreaming(q.width, q.height, q.fps, q.bitrate);
                 Thread.sleep(500);
             } catch (Exception e) {
-                HttpResponse.sendJsonError(out, "Failed to enable streaming: " + e.getMessage());
+                HttpResponse.sendJsonError(out, Messages.get("errors.streaming_enable_failed_with_detail", e.getMessage()));
                 return;
             }
         }

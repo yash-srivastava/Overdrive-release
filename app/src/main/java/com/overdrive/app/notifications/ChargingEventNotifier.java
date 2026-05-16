@@ -3,6 +3,7 @@ package com.overdrive.app.notifications;
 import com.overdrive.app.byd.BydDataCollector;
 import com.overdrive.app.byd.BydVehicleData;
 import com.overdrive.app.monitor.ChargingStateData;
+import com.overdrive.app.server.Messages;
 
 import org.json.JSONObject;
 
@@ -239,7 +240,7 @@ public final class ChargingEventNotifier {
         publish(new NotificationEvent(
                 "vehicle.charging.started",
                 NotificationEvent.Severity.INFO,
-                "Charging started",
+                Messages.get("notifications.charging_started"),
                 body.toString(),
                 "charging-session",
                 null,
@@ -266,7 +267,7 @@ public final class ChargingEventNotifier {
         publish(new NotificationEvent(
                 "vehicle.charging.stopped",
                 NotificationEvent.Severity.INFO,
-                "Charging stopped",
+                Messages.get("notifications.charging_stopped"),
                 body.toString(),
                 "charging-session",
                 null,
@@ -283,8 +284,9 @@ public final class ChargingEventNotifier {
         publish(new NotificationEvent(
                 "vehicle.charging.full",
                 NotificationEvent.Severity.INFO,
-                "Charging complete",
-                "Battery at " + (int) Math.round(socPercent) + "% — ready to unplug",
+                Messages.get("notifications.charging_complete"),
+                Messages.get("notifications.battery_ready_to_unplug",
+                        (int) Math.round(socPercent)),
                 "charging-full",
                 null,
                 data));
@@ -302,7 +304,7 @@ public final class ChargingEventNotifier {
         publish(new NotificationEvent(
                 "vehicle.charging.fault",
                 NotificationEvent.Severity.CRITICAL,
-                "Charging fault",
+                Messages.get("notifications.charging_fault"),
                 label,
                 "charging-fault",
                 null,

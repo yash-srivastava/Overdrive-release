@@ -5,79 +5,79 @@
         <item
             android:id="@+id/dashboardFragment"
             android:icon="@drawable/ic_dashboard"
-            android:title="Dashboard" />
+            android:title="@string/menu_dashboard" />
 
         <item
             android:id="@+id/daemonsFragment"
             android:icon="@drawable/ic_daemons"
-            android:title="Daemons" />
+            android:title="@string/menu_daemons" />
 
         <item
             android:id="@+id/eventsFragment"
             android:icon="@drawable/ic_events"
-            android:title="Events" />
+            android:title="@string/menu_events" />
 
         <item
             android:id="@+id/recordingFragment"
             android:icon="@drawable/ic_recording"
-            android:title="Recording" />
+            android:title="@string/menu_recording" />
 
         <item
             android:id="@+id/sentryConfigFragment"
             android:icon="@drawable/ic_sentry"
-            android:title="Surveillance" />
+            android:title="@string/menu_surveillance" />
 
         <item
             android:id="@+id/adbConsoleFragment"
             android:icon="@drawable/ic_console"
-            android:title="ADB Console" />
+            android:title="@string/menu_adb_console" />
 
         <item
             android:id="@+id/telegramSettingsFragment"
             android:icon="@drawable/ic_telegram"
-            android:title="Telegram" />
+            android:title="@string/menu_telegram" />
 
         <item
             android:id="@+id/abrpSettingsFragment"
             android:icon="@drawable/ic_route"
-            android:title="ABRP" />
+            android:title="@string/menu_abrp" />
 
         <item
             android:id="@+id/mqttFragment"
             android:icon="@drawable/ic_mqtt"
-            android:title="MQTT" />
+            android:title="@string/menu_mqtt" />
 
         <item
             android:id="@+id/tripsFragment"
             android:icon="@drawable/ic_trips"
-            android:title="Trips" />
+            android:title="@string/menu_trips" />
 
         <item
             android:id="@+id/vehicleControlFragment"
             android:icon="@drawable/ic_vehicle_control"
-            android:title="Vehicle Control" />
+            android:title="@string/menu_vehicle_control" />
 
         <item
             android:id="@+id/nav_reconfigure_camera"
             android:icon="@drawable/ic_camera_probe"
-            android:title="Reconfigure Camera"
+            android:title="@string/menu_reconfigure_camera"
             android:checkable="false" />
 
         <item
             android:id="@+id/nav_battery_health"
             android:icon="@drawable/ic_battery_health"
-            android:title="Battery Health (SOH)"
+            android:title="@string/menu_battery_health_soh"
             android:checkable="false" />
 
         <item
             android:id="@+id/nav_check_update"
             android:icon="@drawable/ic_update"
-            android:title="Check for Updates" />
+            android:title="@string/menu_check_for_updates" />
 
         <item
             android:id="@+id/nav_reset_data"
             android:icon="@drawable/ic_delete"
-            android:title="Reset Data"
+            android:title="@string/menu_reset_data"
             android:checkable="false" />
     </group>
 
@@ -86,7 +86,7 @@
         <item
             android:id="@+id/nav_traffic_monitor"
             android:icon="@drawable/ic_traffic_monitor"
-            android:title="Traffic Monitor: Checking..."
+            android:title="@string/menu_traffic_monitor_checking"
             android:checkable="false" />
     </group>
 

@@ -28,7 +28,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Home"
+                android:text="@string/safe_loc_default_name"
                 android:textColor="@color/text_primary"
                 android:textSize="14sp"
                 android:fontFamily="sans-serif-medium" />
@@ -37,7 +37,7 @@
                 android:id="@+id/tvZoneRadius"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="150m"
+                android:text="@string/safe_loc_default_radius"
                 android:textColor="@color/text_muted"
                 android:textSize="12sp"
                 android:layout_marginEnd="8dp" />
@@ -53,7 +53,7 @@
                 android:layout_height="32dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_menu_delete"
-                android:contentDescription="Delete zone"
+                android:contentDescription="@string/cd_delete_zone"
                 app:tint="@color/text_muted" />
 
         </LinearLayout>
@@ -63,7 +63,7 @@
             android:id="@+id/tvZoneCoords"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="31.2304, 121.4737"
+            android:text="@string/safe_loc_default_coords"
             android:textColor="@color/text_muted"
             android:textSize="11sp"
             android:layout_marginTop="4dp" />
@@ -85,13 +85,13 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="50m"
+                android:text="@string/safe_loc_min_radius"
                 android:textColor="@color/text_muted"
                 android:textSize="10sp" />
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="500m"
+                android:text="@string/safe_loc_max_radius"
                 android:textColor="@color/text_muted"
                 android:textSize="10sp" />
         </LinearLayout>

@@ -63,7 +63,7 @@ public class GpsApiHandler {
         
         JSONObject response = new JSONObject();
         response.put("success", true);
-        response.put("message", "GPS tracking started");
+        response.put("message", Messages.get("messages.gps_tracking_started"));
         response.put("location", gps.getLocationJson());
         
         HttpResponse.sendJson(out, response.toString());
@@ -75,7 +75,7 @@ public class GpsApiHandler {
         
         JSONObject response = new JSONObject();
         response.put("success", true);
-        response.put("message", "GPS tracking stopped");
+        response.put("message", Messages.get("messages.gps_tracking_stopped"));
         
         HttpResponse.sendJson(out, response.toString());
     }

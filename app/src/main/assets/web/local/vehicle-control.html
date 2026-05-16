@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Vehicle Control - OverDrive</title>
+    <title data-i18n="app.vehicle_control_title">Vehicle Control - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon.webp">
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="../shared/app-icon.webp">
@@ -25,8 +25,8 @@
                         <img src="../shared/app-icon.webp" alt="OverDrive">
                     </div>
                     <div class="brand-text">
-                        <span class="brand-name">OverDrive</span>
-                        <span class="brand-tagline">Sentry System</span>
+                        <span class="brand-name" data-i18n="app.name">OverDrive</span>
+                        <span class="brand-tagline" data-i18n="app.tagline">Sentry System</span>
                         <span class="brand-version" id="appVersion"></span>
                     </div>
                 </div>
@@ -42,7 +42,7 @@
                         <path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/>
                         <path d="M2 12a9 9 0 0 0 8 8"/><circle cx="2" cy="12" r="2"/>
                     </svg>
-                    <span>Live View</span>
+                    <span data-i18n="nav.live_view">Live View</span>
                 </a>
                 <a href="events.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -51,26 +51,26 @@
                         <line x1="8" y1="2" x2="8" y2="6"/>
                         <line x1="3" y1="10" x2="21" y2="10"/>
                     </svg>
-                    <span>Events</span>
+                    <span data-i18n="nav.events">Events</span>
                 </a>
                 <a href="surveillance.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                     </svg>
-                    <span>Surveillance</span>
+                    <span data-i18n="nav.surveillance">Surveillance</span>
                 </a>
                 <a href="recording.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="m22 8-6 4 6 4V8Z"/>
                         <rect width="14" height="12" x="2" y="6" rx="2"/>
                     </svg>
-                    <span>Recordings</span>
+                    <span data-i18n="nav.recordings">Recordings</span>
                 </a>
                 <a href="performance.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
                     </svg>
-                    <span>Performance</span>
+                    <span data-i18n="nav.performance">Performance</span>
                 </a>
                 <a href="abrp.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -79,7 +79,7 @@
                         <circle cx="6" cy="6" r="3"/>
                         <circle cx="6" cy="18" r="3"/>
                     </svg>
-                    <span>ABRP</span>
+                    <span data-i18n="nav.abrp">ABRP</span>
                 </a>
                 <a href="mqtt.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -89,45 +89,45 @@
                         <path d="M5.64 18.36A9 9 0 0 1 3 12a9 9 0 0 1 2.64-6.36"/>
                         <path d="M18.36 5.64A9 9 0 0 1 21 12a9 9 0 0 1-2.64 6.36"/>
                     </svg>
-                    <span>MQTT</span>
+                    <span data-i18n="nav.mqtt">MQTT</span>
                 </a>
                 <a href="trips.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 17h2v-7l4 4 4-4 4 4 4-4v7h2"/>
                         <path d="M4 5h16"/>
                     </svg>
-                    <span>Trips</span>
+                    <span data-i18n="nav.trips">Trips</span>
                 </a>
                 <a href="notifications.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
                         <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
                     </svg>
-                    <span>Notifications</span>
+                    <span data-i18n="nav.notifications">Notifications</span>
                 </a>
                 <a href="vehicle-control.html" class="nav-link active">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="3" y="11" width="18" height="11" rx="2"/>
                         <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                     </svg>
-                    <span>Vehicle Control</span>
+                    <span data-i18n="nav.vehicle_control">Vehicle Control</span>
                 </a>
             </nav>
             <div class="sidebar-footer">
                 <div class="status-card">
                     <div class="status-row">
-                        <span class="status-label">
+                        <span class="status-label" data-i18n="status.device">
                             <span class="status-dot" id="connDot"></span>
                             Device
                         </span>
                         <span class="status-value" id="deviceId">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">ACC</span>
+                        <span class="status-label" data-i18n="status.acc">ACC</span>
                         <span class="status-value" id="accValue">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">
+                        <span class="status-label" data-i18n="status.battery_12v">
                             <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="6" y="7" width="12" height="10" rx="1"/><path d="M6 10H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h2"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/>
                             </svg>
@@ -136,11 +136,11 @@
                         <span class="status-value" id="batteryValue">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">Sentry</span>
-                        <span class="status-value" id="survStatus">OFF</span>
+                        <span class="status-label" data-i18n="status.sentry">Sentry</span>
+                        <span class="status-value" id="survStatus" data-i18n="status.off">OFF</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">
+                        <span class="status-label" data-i18n="status.network">
                             <span id="networkIcon"><svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg></span>Net
                         </span>
                         <span class="status-value" id="networkValue">--</span>
@@ -149,7 +149,7 @@
                 <!-- EV Battery & Charging Card -->
                 <div class="status-card ev-card" id="evCard">
                     <div class="ev-header-row">
-                        <span class="ev-title">Vehicle Status</span>
+                        <span class="ev-title" data-i18n="status.vehicle_status">Vehicle Status</span>
                         <span class="ev-percent-text" id="evPercentValue">--%</span>
                     </div>
                     <div class="ev-svg-container">
@@ -252,8 +252,8 @@
 
                     <div class="vc-loading" id="vcLoading">
                         <div class="vc-loading-spinner"></div>
-                        <div class="vc-loading-text">Loading model...</div>
-                        <button class="vc-loading-retry" id="vcLoadingRetry" style="display:none">Retry</button>
+                        <div class="vc-loading-text" data-i18n="vehicle.loading_model">Loading model...</div>
+                        <button class="vc-loading-retry" id="vcLoadingRetry" style="display:none" data-i18n="common.retry">Retry</button>
                     </div>
 
                     <!-- Floating mobile nav button -->
@@ -266,10 +266,10 @@
                     <!-- Floating status — row 1: connection state pills only -->
                     <div class="vc-status-bar">
                         <div class="vc-pill">
-                            <span class="dot green"></span><span id="lockStatus">Locked</span>
+                            <span class="dot green"></span><span id="lockStatus" data-i18n="vehicle.locked">Locked</span>
                         </div>
                         <div class="vc-pill" id="cloudStatus">
-                            <span class="dot amber"></span><span id="cloudStatusText">Checking...</span>
+                            <span class="dot amber"></span><span id="cloudStatusText" data-i18n="vehicle.checking">Checking...</span>
                         </div>
                     </div>
                     <!-- Floating status — row 2: vehicle appearance controls.
@@ -327,12 +327,11 @@
                                     <line x1="12" y1="16" x2="12.01" y2="16"/>
                                 </svg>
                             </div>
-                            <div class="vc-modal-title">Cloud Account Required</div>
-                            <div class="vc-modal-text">
-                                This action requires a connected <strong>BYD Cloud</strong> account.<br>
-                                Go to <strong>Surveillance Settings</strong> to link your credentials.
+                            <div class="vc-modal-title" data-i18n="vehicle.cloud_required">Cloud Account Required</div>
+                            <div class="vc-modal-text" data-i18n="vehicle.cloud_required_text">
+                                This action requires a connected BYD Cloud account. Go to Surveillance Settings to link your credentials.
                             </div>
-                            <button class="vc-modal-btn" id="cloudModalDismiss">Got it</button>
+                            <button class="vc-modal-btn" id="cloudModalDismiss" data-i18n="vehicle.got_it">Got it</button>
                         </div>
                     </div>
                 </div>
@@ -345,37 +344,37 @@
                         <div class="vc-panel-row" id="panelSecurity" style="display:none;">
                             <button class="vc-tile" id="btnLock" title="Lock">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                                <span>Lock</span>
+                                <span data-i18n="vehicle.lock">Lock</span>
                             </button>
-                            <button class="vc-tile" id="btnUnlock" title="Unlock">
+                            <button class="vc-tile" id="btnUnlock" title="Unlock" data-i18n-attr="title:vehicle.unlock">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 5-5 5 5 0 0 1 5 5"/></svg>
-                                <span>Unlock</span>
+                                <span data-i18n="vehicle.unlock">Unlock</span>
                             </button>
-                            <button class="vc-tile" id="btnFlash" title="Flash">
+                            <button class="vc-tile" id="btnFlash" title="Flash" data-i18n-attr="title:vehicle.flash">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                                <span>Flash</span>
+                                <span data-i18n="vehicle.flash">Flash</span>
                             </button>
                         </div>
                         <!-- Trunk controls -->
                         <div class="vc-panel-row" id="panelTrunk" style="display:none;">
                             <button class="vc-tile" id="btnTrunkOpen" title="Open Trunk">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z"/><polyline points="12 11 12 6"/><polyline points="9 8 12 5 15 8"/></svg>
-                                <span>Open</span>
+                                <span data-i18n="vehicle.open">Open</span>
                             </button>
-                            <button class="vc-tile" id="btnTrunkClose" title="Close Trunk">
+                            <button class="vc-tile" id="btnTrunkClose" title="Close Trunk" data-i18n-attr="title:vehicle.close_trunk">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z"/><polyline points="12 9 12 14"/><polyline points="9 12 12 15 15 12"/></svg>
-                                <span>Close</span>
+                                <span data-i18n="common.close">Close</span>
                             </button>
                         </div>
                         <!-- Climate controls -->
                         <div class="vc-panel-row" id="panelClimate" style="display:none;">
                             <button class="vc-tile" id="btnAcOn" title="AC On">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
-                                <span>AC On</span>
+                                <span data-i18n="vehicle.ac_on">AC On</span>
                             </button>
-                            <button class="vc-tile" id="btnAcOff" title="AC Off">
+                            <button class="vc-tile" id="btnAcOff" title="AC Off" data-i18n-attr="title:vehicle.ac_off">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="5" y1="5" x2="19" y2="19"/></svg>
-                                <span>AC Off</span>
+                                <span data-i18n="vehicle.ac_off">AC Off</span>
                             </button>
                             <button class="vc-mini" id="btnTempDown" title="Temp Down">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -399,7 +398,7 @@
                                 <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
                                     <path d="M13.5 1.5c.3 2.4-.6 4.2-2.5 6-2.4 2.3-4 4.3-4 7.5a7 7 0 0 0 14 0c0-3-1.6-5.5-4-7.8.4 1.4-.2 2.5-1.4 2.8-1 .2-1.6-.5-1.6-1.6 0-2.4 0-4.6-.5-6.9z"/>
                                 </svg>
-                                <span>D.Heat</span>
+                                <span data-i18n="vehicle.driver_heat">D.Heat</span>
                             </button>
                             <button class="vc-tile cool" id="btnSeatCool1" title="Driver Seat Cool">
                                 <!-- Snowflake — clean ice glyph for cool. -->
@@ -413,14 +412,14 @@
                                     <polyline points="4 9 7 12 4 15"/>
                                     <polyline points="20 9 17 12 20 15"/>
                                 </svg>
-                                <span>D.Cool</span>
+                                <span data-i18n="vehicle.driver_cool">D.Cool</span>
                             </button>
                             <button class="vc-tile heat" id="btnSeatHeat2" title="Passenger Seat Heat">
                                 <!-- Flame — same icon as D.Heat (same function). -->
                                 <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
                                     <path d="M13.5 1.5c.3 2.4-.6 4.2-2.5 6-2.4 2.3-4 4.3-4 7.5a7 7 0 0 0 14 0c0-3-1.6-5.5-4-7.8.4 1.4-.2 2.5-1.4 2.8-1 .2-1.6-.5-1.6-1.6 0-2.4 0-4.6-.5-6.9z"/>
                                 </svg>
-                                <span>P.Heat</span>
+                                <span data-i18n="vehicle.passenger_heat">P.Heat</span>
                             </button>
                             <button class="vc-tile cool" id="btnSeatCool2" title="Passenger Seat Cool">
                                 <!-- Snowflake — same icon as D.Cool (same function). -->
@@ -434,7 +433,15 @@
                                     <polyline points="4 9 7 12 4 15"/>
                                     <polyline points="20 9 17 12 20 15"/>
                                 </svg>
-                                <span>P.Cool</span>
+                                <span data-i18n="vehicle.passenger_cool">P.Cool</span>
+                            </button>
+                            <button class="vc-tile" id="btnSeatMemory1" title="Position 1" data-i18n-attr="title:vehicle.seat_pos_1_title">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M9 19 5 7m4 12h9" stroke-width="2.5"/><path d="M9.5 6a8 8 0 0 1 9 9"/><path d="M12 4 9.5 6 12 8.5m4 4.5 2.5 2 2.5-2"/></svg>
+                                <span data-i18n="vehicle.seat_pos_1">Pos 1</span>
+                            </button>
+                            <button class="vc-tile" id="btnSeatMemory2" title="Position 2" data-i18n-attr="title:vehicle.seat_pos_2_title">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M9 19 5 7m4 12h9" stroke-width="2.5"/><path d="M9.5 6a8 8 0 0 1 9 9"/><path d="M12 4 9.5 6 12 8.5m4 4.5 2.5 2 2.5-2"/></svg>
+                                <span data-i18n="vehicle.seat_pos_2">Pos 2</span>
                             </button>
                         </div>
                         <!-- Windows controls — per-window preset levels (closed / 25 / 50 / 75 / open) -->
@@ -480,14 +487,14 @@
                                 </div>
                             </div>
                             <div class="vc-window-row">
-                                <div class="vc-window-label"><span class="label-area">All Windows</span></div>
+                                <div class="vc-window-label"><span class="label-area" data-i18n="vehicle.all_windows">All Windows</span></div>
                                 <div class="vc-window-presets">
                                     <button class="vc-preset" id="btnWinAllClose" title="All Windows Closed">0</button>
                                     <button class="vc-preset" id="btnWinAllOpen" title="All Windows Open">100</button>
                                 </div>
                             </div>
                             <div class="vc-window-row" data-area="sunroof" data-area-num="5">
-                                <div class="vc-window-label"><span class="label-area">Sunroof</span><span class="label-pct" id="winLabel_sunroof">--%</span></div>
+                                <div class="vc-window-label"><span class="label-area" data-i18n="vehicle.sunroof">Sunroof</span><span class="label-pct" id="winLabel_sunroof">--%</span></div>
                                 <div class="vc-window-presets">
                                     <button class="vc-preset" data-preset="0" title="Closed">0</button>
                                     <button class="vc-preset" data-preset="25" title="25% open">¼</button>
@@ -497,7 +504,7 @@
                                 </div>
                             </div>
                             <div class="vc-window-row" data-area="sunshade" data-area-num="6">
-                                <div class="vc-window-label"><span class="label-area">Sunshade</span><span class="label-pct" id="winLabel_sunshade">--%</span></div>
+                                <div class="vc-window-label"><span class="label-area" data-i18n="vehicle.sunshade">Sunshade</span><span class="label-pct" id="winLabel_sunshade">--%</span></div>
                                 <div class="vc-window-presets">
                                     <button class="vc-preset" data-preset="0" title="Closed">0</button>
                                     <button class="vc-preset" data-preset="25" title="25% open">¼</button>
@@ -507,6 +514,20 @@
                                 </div>
                             </div>
                         </div>
+                        <!-- Lights controls -->
+                        <div class="vc-panel-row" id="panelLights" style="display:none;">
+                            <button class="vc-tile" id="btnDRL" title="Daytime running lights" data-i18n-attr="title:vehicle.btn_drl_title">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 7H8a5 5 0 0 0 0 10h2Z"/><circle cx="14" cy="8" r=".6"/><circle cx="14" cy="12" r=".6"/><circle cx="14" cy="16" r=".6"/><circle cx="17.5" cy="8" r=".4"/><circle cx="17.5" cy="12" r=".4"/><circle cx="17.5" cy="16" r=".4"/><circle cx="21" cy="8" r=".2"/><circle cx="21" cy="12" r=".2"/><circle cx="21" cy="16" r=".2"/></svg>
+                                <span data-i18n="vehicle.btn_drl">DRL</span>
+                            </button>
+                        </div>
+                        <!-- ADAS controls -->
+                        <div class="vc-panel-row" id="panelAdas" style="display:none;">
+                            <button class="vc-tile" id="btnSLW" title="Speed limit warning" data-i18n-attr="title:vehicle.btn_slw_title">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 17.5a8.5 8.5 0 1 1 15-5.5m-15 5.5 2-1m-4-4.5h2m0-5.5L7 8m4.5-4v2m6 .5L16 8m4.5 4h-2"/><path d="m13 12 3-4" stroke-width="1"/><circle cx="12" cy="14" r="1"/><path d="m12.9 16-2 1.6H9.3V20h1.6l2 1.6zm2 1.6 2.4 2.4m0-2.4L14.9 20" stroke-width="1"/></svg>
+                                <span data-i18n="vehicle.btn_slw">SLW</span>
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Category tabs — always visible -->
@@ -514,17 +535,17 @@
                         <button class="vc-tab has-active" data-panel="panelSecurity" onclick="VC.togglePanel('panelSecurity', this)">
                             <span class="tab-dot"></span>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                            <span>Security</span>
+                            <span data-i18n="vehicle.tab_security">Security</span>
                         </button>
                         <button class="vc-tab" data-panel="panelTrunk" onclick="VC.togglePanel('panelTrunk', this)">
                             <span class="tab-dot"></span>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z"/><polyline points="12 11 12 6"/></svg>
-                            <span>Trunk</span>
+                            <span data-i18n="vehicle.tab_trunk">Trunk</span>
                         </button>
                         <button class="vc-tab" data-panel="panelClimate" onclick="VC.togglePanel('panelClimate', this)">
                             <span class="tab-dot"></span>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
-                            <span>Climate</span>
+                            <span data-i18n="vehicle.tab_climate">Climate</span>
                         </button>
                         <button class="vc-tab" data-panel="panelSeats" onclick="VC.togglePanel('panelSeats', this)">
                             <span class="tab-dot"></span>
@@ -536,12 +557,22 @@
                                 <path d="M5 19v-4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4"/>
                                 <path d="M7 19v2M17 19v2"/>
                             </svg>
-                            <span>Seats</span>
+                            <span data-i18n="vehicle.tab_seats">Seats</span>
                         </button>
                         <button class="vc-tab" data-panel="panelWindows" onclick="VC.togglePanel('panelWindows', this)">
                             <span class="tab-dot"></span>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="9" height="9" rx="1"/><rect x="13" y="2" width="9" height="9" rx="1"/><rect x="2" y="13" width="9" height="9" rx="1"/><rect x="13" y="13" width="9" height="9" rx="1"/></svg>
-                            <span>Windows</span>
+                            <span data-i18n="vehicle.tab_windows">Windows</span>
+                        </button>
+                        <button class="vc-tab" data-panel="panelLights" onclick="VC.togglePanel('panelLights', this)">
+                            <span class="tab-dot"></span>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 13v1m5-12a1 1 0 0 1 1 1v4a3 3 0 0 1-.6 1.8l-.6.8A4 4 0 0 0 16 12v8a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-8a4 4 0 0 0-.8-2.4l-.6-.8A3 3 0 0 1 6 7V3a1 1 0 0 1 1-1zM6 6h12"/></svg>
+                            <span data-i18n="vehicle.tab_lights">Lights</span>
+                        </button>
+                        <button class="vc-tab" data-panel="panelAdas" onclick="VC.togglePanel('panelAdas', this)">
+                            <span class="tab-dot"></span>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34M4 6h.01M2.29 9.62a10 10 0 1 0 19.02-1.27"/><path d="M16.24 7.76a6 6 0 1 0-8.01 8.91M12 18h.01m5.98-6.34a6 6 0 0 1-2.22 5.01"/><circle cx="12" cy="12" r="2"/><path d="m13.41 10.59 5.66-5.66"/></svg>
+                            <span data-i18n="vehicle.tab_adas">ADAS</span>
                         </button>
                     </div>
                 </div>
@@ -583,7 +614,9 @@
         // Kick off sidebar status polling. core.js doesn't auto-init (other
         // pages call BYD.core.init() from their own bootstrap blocks).
         if (window.BYD && BYD.core && typeof BYD.core.init === 'function') {
-            BYD.core.init();
+            BYD.i18n.init().then(function () {
+                BYD.core.init();
+            });
         }
     </script>
 </body>

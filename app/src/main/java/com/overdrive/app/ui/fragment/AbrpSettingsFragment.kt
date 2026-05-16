@@ -110,9 +110,9 @@ class AbrpSettingsFragment : Fragment() {
         if (tokenConfig.hasToken()) {
             val token = tokenConfig.getToken() ?: ""
             val masked = maskToken(token)
-            tvTokenStatus.text = "Token: $masked"
+            tvTokenStatus.text = getString(R.string.abrp_token_label_format, masked)
         } else {
-            tvTokenStatus.text = "Not configured"
+            tvTokenStatus.text = getString(R.string.abrp_not_configured_short)
         }
 
         // Load current ABRP status from daemon via IPC
@@ -142,12 +142,12 @@ class AbrpSettingsFragment : Fragment() {
     private fun saveAndTestToken() {
         val token = etAbrpToken.text?.toString()?.trim() ?: ""
         if (token.isEmpty()) {
-            Toast.makeText(context, "Enter ABRP user token", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, getString(R.string.toast_enter_abrp_token), Toast.LENGTH_SHORT).show()
             return
         }
 
         btnSaveTest.isEnabled = false
-        tvTokenStatus.text = "Testing..."
+        tvTokenStatus.text = getString(R.string.abrp_token_status_testing)
 
         executor.execute {
             // 1. Save token to encrypted local storage
@@ -169,12 +169,12 @@ class AbrpSettingsFragment : Fragment() {
                 val success = result != null && result.optBoolean("success", false)
                 if (success) {
                     val masked = maskToken(token)
-                    tvTokenStatus.text = "Token: $masked"
+                    tvTokenStatus.text = getString(R.string.abrp_token_status_format, masked)
                     switchAbrpEnabled.isChecked = true
-                    Toast.makeText(context, "ABRP token saved and service enabled", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, getString(R.string.toast_abrp_token_saved), Toast.LENGTH_SHORT).show()
                 } else {
-                    val msg = result?.optString("message", "Failed to configure ABRP") ?: "Failed to connect to daemon"
-                    tvTokenStatus.text = "⚠️ Save failed"
+                    val msg = result?.optString("message", getString(R.string.abrp_failed_to_configure)) ?: getString(R.string.abrp_failed_to_connect)
+                    tvTokenStatus.text = getString(R.string.abrp_save_failed_status)
                     Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                 }
             }
@@ -207,11 +207,11 @@ class AbrpSettingsFragment : Fragment() {
             activity?.runOnUiThread {
                 val success = result != null && result.optBoolean("success", false)
                 if (success) {
-                    Toast.makeText(context, if (enabled) "ABRP telemetry enabled" else "ABRP telemetry disabled", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, if (enabled) getString(R.string.toast_abrp_telemetry_enabled) else getString(R.string.toast_abrp_telemetry_disabled), Toast.LENGTH_SHORT).show()
                 } else {
                     // Revert toggle on failure
                     switchAbrpEnabled.isChecked = !enabled
-                    Toast.makeText(context, "Failed to update ABRP service", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, getString(R.string.toast_abrp_failed_update), Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -232,12 +232,12 @@ class AbrpSettingsFragment : Fragment() {
 
             activity?.runOnUiThread {
                 etAbrpToken.setText("")
-                tvTokenStatus.text = "Not configured"
+                tvTokenStatus.text = getString(R.string.abrp_not_configured)
                 switchAbrpEnabled.isChecked = false
-                tvConnectionStatus.text = "🔴 Disconnected"
-                tvLastUpload.text = "Never"
-                tvTelemetryPreview.text = "No telemetry data available"
-                Toast.makeText(context, "ABRP token deleted", Toast.LENGTH_SHORT).show()
+                tvConnectionStatus.text = getString(R.string.abrp_disconnected_status)
+                tvLastUpload.text = getString(R.string.abrp_never)
+                tvTelemetryPreview.text = getString(R.string.abrp_no_telemetry_text)
+                Toast.makeText(context, getString(R.string.toast_abrp_token_deleted), Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -270,9 +270,9 @@ class AbrpSettingsFragment : Fragment() {
         val running = status.optBoolean("running", false)
         val consecutiveFailures = status.optInt("consecutiveFailures", 0)
         tvConnectionStatus.text = when {
-            !running -> "🔴 Disconnected"
-            consecutiveFailures > 0 -> "🟡 Retrying ($consecutiveFailures failures)"
-            else -> "🟢 Connected"
+            !running -> getString(R.string.abrp_disconnected_status)
+            consecutiveFailures > 0 -> getString(R.string.abrp_retrying_status, consecutiveFailures)
+            else -> getString(R.string.abrp_connected_status)
         }
 
         // Last upload time
@@ -281,7 +281,7 @@ class AbrpSettingsFragment : Fragment() {
             val dateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
             dateFormat.format(Date(lastUploadTime))
         } else {
-            "Never"
+            getString(R.string.abrp_never)
         }
 
         // Telemetry preview
@@ -348,7 +348,7 @@ class AbrpSettingsFragment : Fragment() {
             override fun onLaunched() {}
             override fun onError(error: String) {
                 activity?.runOnUiThread {
-                    Toast.makeText(context, "Warning: Could not write daemon config", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, getString(R.string.toast_warning_daemon_config_write), Toast.LENGTH_SHORT).show()
                 }
             }
         })

@@ -146,6 +146,8 @@ input, select { font-family: inherit; }
     display: flex;
     align-items: center;
     gap: 12px;
+    min-width: 0; /* Allow brand-text to shrink + ellipsis when locale text is long */
+    flex: 1;
 }
 
 .brand-logo {
@@ -167,12 +169,17 @@ input, select { font-family: inherit; }
 .brand-text {
     display: flex;
     flex-direction: column;
+    min-width: 0; /* allow children to ellipsis instead of overflowing the sidebar */
+    flex: 1;
 }
 
 .brand-name {
     font-size: 18px;
     font-weight: 700;
     letter-spacing: -0.02em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .brand-tagline {
@@ -180,6 +187,11 @@ input, select { font-family: inherit; }
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
+    line-height: 1.2;
+    /* Allow up to 2 wrapped lines for longer locales (e.g. French "Système Sentinelle")
+       so the tagline never clips below the brand name. */
+    word-break: break-word;
+    overflow-wrap: anywhere;
 }
 
 .brand-version {
@@ -209,6 +221,18 @@ input, select { font-family: inherit; }
     font-size: 14px;
     font-weight: 500;
     transition: all 0.2s ease;
+    /* Long French/German labels (e.g. "Contrôle du véhicule") need to wrap
+       gracefully rather than overflow the sidebar. line-height keeps wrapped
+       links aligned with single-line ones. */
+    line-height: 1.25;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+
+.nav-link > span {
+    min-width: 0;
+    flex: 1;
 }
 
 .nav-link:hover {
@@ -256,6 +280,7 @@ input, select { font-family: inherit; }
     justify-content: space-between;
     align-items: center;
     font-size: 13px;
+    gap: 8px; /* never let label and value collide when locale text is long */
 }
 
 .status-row + .status-row { margin-top: 10px; }
@@ -265,11 +290,22 @@ input, select { font-family: inherit; }
     display: flex;
     align-items: center;
     gap: 8px;
+    min-width: 0; /* allow flex item to shrink so long labels don't push value off-screen */
+    flex: 1 1 auto;
+    /* Long status labels in French / German wrap gracefully rather than overflow */
+    line-height: 1.25;
+    word-break: break-word;
+    overflow-wrap: anywhere;
 }
 
 .status-value {
     font-weight: 600;
     font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    flex-shrink: 0;        /* numeric / status values keep their full width */
+    text-align: right;
+    max-width: 60%;        /* but not so wide they squash the label */
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .status-value.on { color: var(--success); }
@@ -290,7 +326,10 @@ input, select { font-family: inherit; }
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 120px;
+    /* 140px instead of 120 so localized labels like "Données mobiles"
+       (FR: "Mobile Data") fit without clipping while WiFi SSIDs still
+       truncate cleanly when very long. */
+    max-width: 140px;
 }
 .net-ip {
     font-size: 0.7em;
@@ -2776,3 +2815,180 @@ input, select { font-family: inherit; }
     font-weight: 600;
     box-shadow: 0 0 12px rgba(249, 115, 22, 0.3);
 }
+
+/* === LANGUAGE PICKER === */
+/* Globe chip in the sidebar footer. Inserts above the status card so it
+   reads as a control rather than a metric. */
+.lang-chip {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.lang-chip:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--border-default);
+}
+.lang-chip-globe {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+.lang-chip-text {
+    letter-spacing: 0.5px;
+    transition: opacity 0.2s;
+}
+
+/* Bottom-sheet picker. On wide screens it reads as a centered modal; on
+   narrow / head-unit displays it slides up from the bottom. */
+.lang-sheet-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 9000;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+}
+.lang-sheet-backdrop.open { opacity: 1; }
+
+.lang-sheet {
+    width: 100%;
+    max-width: 480px;
+    max-height: 80vh;
+    background: var(--bg-surface);
+    border-radius: 20px 20px 0 0;
+    display: flex;
+    flex-direction: column;
+    transform: translateY(100%);
+    transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.5);
+}
+.lang-sheet-backdrop.open .lang-sheet { transform: translateY(0); }
+
+@media (min-width: 768px) {
+    .lang-sheet-backdrop { align-items: center; }
+    .lang-sheet { border-radius: 20px; }
+}
+
+.lang-sheet-handle {
+    width: 36px;
+    height: 4px;
+    background: var(--border-default);
+    border-radius: 2px;
+    margin: 10px auto 0;
+}
+
+.lang-sheet-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px 12px;
+}
+.lang-sheet-title {
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+}
+.lang-sheet-close {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-full);
+    color: var(--text-muted);
+    transition: background 0.15s, color 0.15s;
+}
+.lang-sheet-close:hover {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+.lang-sheet-close svg { width: 18px; height: 18px; }
+
+.lang-sheet-search {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 20px 12px;
+    padding: 10px 12px;
+    background: var(--bg-elevated);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+}
+.lang-sheet-search svg {
+    width: 16px;
+    height: 16px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+.lang-sheet-search input {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--text-primary);
+    font-size: 14px;
+}
+.lang-sheet-search input::placeholder { color: var(--text-muted); }
+
+.lang-sheet-list {
+    list-style: none;
+    margin: 0;
+    padding: 0 8px 16px;
+    overflow-y: auto;
+    flex: 1;
+    -webkit-overflow-scrolling: touch;
+}
+.lang-sheet-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    margin: 2px 0;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.lang-sheet-item:hover,
+.lang-sheet-item:focus { background: var(--bg-hover); outline: none; }
+.lang-sheet-item.active { background: rgba(0, 212, 170, 0.1); }
+.lang-sheet-name {
+    flex: 1;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+.lang-sheet-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.lang-sheet-check {
+    width: 18px;
+    height: 18px;
+    color: var(--brand-primary);
+    flex-shrink: 0;
+}
+.lang-sheet-auto {
+    border-bottom: 1px solid var(--border-subtle);
+    margin-bottom: 6px;
+    padding-bottom: 14px;
+}
+.lang-sheet-auto .lang-sheet-name { color: var(--brand-primary); }

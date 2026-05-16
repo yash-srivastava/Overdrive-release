@@ -35,38 +35,31 @@ const TRIPS = {
         speedRed: '#EF4444',
     },
 
-    // Criteria metadata for tooltips and descriptions
+    // Criteria metadata for tooltips and descriptions.
+    // Strings come from BYD.i18n.t('trip.criteria.<key>.{label,desc,tip}'); the
+    // emoji icons stay inline because they're locale-neutral pictograms.
+    // The 'speed_discipline' key remaps from 'speedDiscipline' so JS callers
+    // that index by camelCase still work — see _criteriaKey() helper.
     criteriaInfo: {
-        anticipation: {
-            label: 'Anticipation',
-            icon: '🔮',
-            desc: 'How well you read traffic ahead and lift off the accelerator early before braking.',
-            tip: 'Coast more before red lights. Lift off the pedal 3–5 seconds earlier than usual.'
-        },
-        smoothness: {
-            label: 'Smoothness',
-            icon: '🌊',
-            desc: 'How gradually you apply and release the accelerator and brake pedals.',
-            tip: 'Pretend there\'s a glass of water on the dashboard. Smooth transitions keep it steady.'
-        },
-        speedDiscipline: {
-            label: 'Speed Discipline',
-            icon: '🎯',
-            desc: 'How consistently you maintain appropriate speeds without frequent speeding.',
-            tip: 'Use cruise control on highways. Staying within 5 km/h of the limit saves energy.'
-        },
-        efficiency: {
-            label: 'Efficiency',
-            icon: '⚡',
-            desc: 'Your energy consumption per km compared to the optimal baseline for your vehicle, route terrain, and conditions.',
-            tip: 'Pre-condition the cabin while plugged in. Scores adjust for terrain — hills won\'t penalize you unfairly.'
-        },
-        consistency: {
-            label: 'Consistency',
-            icon: '📐',
-            desc: 'How uniform your driving style is throughout the trip. Erratic behavior lowers this.',
-            tip: 'Pick a driving style and stick with it. Consistent habits build muscle memory.'
+        anticipation:    { icon: '🔮', i18n: 'anticipation' },
+        smoothness:      { icon: '🌊', i18n: 'smoothness' },
+        speedDiscipline: { icon: '🎯', i18n: 'speed_discipline' },
+        efficiency:      { icon: '⚡', i18n: 'efficiency' },
+        consistency:     { icon: '📐', i18n: 'consistency' }
+    },
+
+    /** Resolve a criterion field (label/desc/tip) through i18n. */
+    criterion: function (key, field) {
+        var info = this.criteriaInfo[key];
+        if (!info) return key;
+        var i18nKey = 'trip.criteria.' + info.i18n + '.' + field;
+        var translated = BYD.i18n.t(i18nKey);
+        if (field === 'tip' && info.i18n === 'speed_discipline') {
+            // Inject the user's actual speed unit so the tip reads naturally
+            // in metric or imperial without a second translation pass.
+            return BYD.i18n.t(i18nKey, { limit: '5 ' + BYD.units.speedLabel() });
         }
+        return translated;
     },
 
     // ==================== INIT ====================
@@ -220,7 +213,7 @@ const TRIPS = {
                 if (pathEl && s.storagePath) {
                     pathEl.textContent = s.storagePath;
                 } else if (pathEl) {
-                    pathEl.textContent = s.storageType === 'SD_CARD' ? 'SD Card / Overdrive / trips' : 'Internal / Overdrive / trips';
+                    pathEl.textContent = s.storageType === 'SD_CARD' ? BYD.i18n.t('trip.sd_path_default') : BYD.i18n.t('trip.internal_path_default');
                 }
 
                 // SD card status
@@ -235,10 +228,10 @@ const TRIPS = {
                     sdStatus.style.display = 'block';
                     if (s.sdCardAvailable) {
                         if (sdDot) { sdDot.classList.add('online'); sdDot.classList.remove('offline'); }
-                        if (sdText) sdText.textContent = 'SD Card: Available';
+                        if (sdText) sdText.textContent = BYD.i18n.t('trip.sd_card_available');
                     } else {
                         if (sdDot) { sdDot.classList.add('offline'); sdDot.classList.remove('online'); }
-                        if (sdText) sdText.textContent = 'SD Card: Not detected';
+                        if (sdText) sdText.textContent = BYD.i18n.t('trip.sd_card_not_detected');
                     }
                 } else if (sdStatus) {
                     sdStatus.style.display = 'none';
@@ -288,12 +281,12 @@ const TRIPS = {
 
     showApplyNeeded() {
         const btn = document.getElementById('storageApplyBtn');
-        if (btn) { btn.disabled = false; btn.textContent = 'Apply Changes'; }
+        if (btn) { btn.disabled = false; btn.textContent = BYD.i18n.t('trip.apply_changes'); }
     },
 
     resetApplyButton() {
         const btn = document.getElementById('storageApplyBtn');
-        if (btn) { btn.disabled = true; btn.textContent = 'Apply Changes'; }
+        if (btn) { btn.disabled = true; btn.textContent = BYD.i18n.t('trip.apply_changes'); }
     },
 
     async applyStorageSettings() {
@@ -302,7 +295,7 @@ const TRIPS = {
         if (this.pendingStorageType !== null) body.storageType = this.pendingStorageType;
         if (this.pendingStorageLimit !== null) body.storageLimitMb = this.pendingStorageLimit;
 
-        if (btn) { btn.disabled = true; btn.textContent = 'Applying...'; }
+        if (btn) { btn.disabled = true; btn.textContent = BYD.i18n.t('trip.applying'); }
 
         try {
             // Save storage settings
@@ -320,13 +313,13 @@ const TRIPS = {
             this.pendingStorageType = null;
             this.pendingStorageLimit = null;
             if (btn) {
-                btn.textContent = '\u2713 Applied';
-                setTimeout(() => { btn.textContent = 'Apply Changes'; btn.disabled = true; }, 2000);
+                btn.textContent = BYD.i18n.t('trip.applied_check');
+                setTimeout(() => { btn.textContent = BYD.i18n.t('trip.apply_changes'); btn.disabled = true; }, 2000);
             }
             await this.loadStorageSettings();
         } catch (e) {
             console.warn('[Trips] Apply storage failed:', e);
-            if (btn) { btn.disabled = false; btn.textContent = 'Apply Changes'; }
+            if (btn) { btn.disabled = false; btn.textContent = BYD.i18n.t('trip.apply_changes'); }
         }
     },
 
@@ -343,7 +336,7 @@ const TRIPS = {
             });
             const badge = document.getElementById('tripCdrBadge');
             if (badge) {
-                badge.textContent = enabled ? 'ON' : 'OFF';
+                badge.textContent = enabled ? BYD.i18n.t('status.on') : BYD.i18n.t('status.off');
                 badge.className = 'status-badge ' + (enabled ? 'active' : 'inactive');
             }
         } catch (e) { console.warn('[Trips] CDR toggle failed:', e); }
@@ -365,7 +358,7 @@ const TRIPS = {
     },
 
     async triggerCdrCleanup() {
-        if (!confirm('Delete old BYD dashcam files to free space?')) return;
+        if (!confirm(BYD.i18n.t('trip.cdr.delete_confirm'))) return;
         try {
             const resp = await fetch('/api/storage/external/cleanup', { method: 'POST' });
             const data = await resp.json();
@@ -392,7 +385,7 @@ const TRIPS = {
             if (sdStatus) sdStatus.style.display = 'block';
             if (data.sdCardAvailable) {
                 if (sdDot) { sdDot.classList.add('online'); sdDot.classList.remove('offline'); }
-                if (sdText) sdText.textContent = 'SD Card: Available';
+                if (sdText) sdText.textContent = BYD.i18n.t('trip.sd_card_available');
                 if (sdSpaceInfo && data.sdCardFree !== undefined) {
                     sdSpaceInfo.style.display = 'block';
                     this.setEl('tripSdFree', data.sdCardFreeFormatted || ((data.sdCardFree / (1024 * 1024 * 1024)).toFixed(1) + ' GB') + ' free');
@@ -400,7 +393,7 @@ const TRIPS = {
                 }
             } else {
                 if (sdDot) { sdDot.classList.add('offline'); sdDot.classList.remove('online'); }
-                if (sdText) sdText.textContent = 'SD Card: Not detected';
+                if (sdText) sdText.textContent = BYD.i18n.t('trip.sd_card_not_detected');
             }
 
             // CDR info
@@ -416,13 +409,13 @@ const TRIPS = {
             const monEl = document.getElementById('tripCdrMonitoring');
             if (monEl) {
                 if (!data.cleanupEnabled) {
-                    monEl.textContent = 'Disabled';
+                    monEl.textContent = BYD.i18n.t('common.disabled');
                     monEl.style.color = '';
                 } else if (data.monitoringActive) {
-                    monEl.textContent = 'Running';
+                    monEl.textContent = BYD.i18n.t('common.running');
                     monEl.style.color = '#22c55e';
                 } else {
-                    monEl.textContent = 'Idle';
+                    monEl.textContent = BYD.i18n.t('common.idle');
                     monEl.style.color = '#94a3b8';
                 }
             }
@@ -438,7 +431,7 @@ const TRIPS = {
             const cdrBadge = document.getElementById('tripCdrBadge');
             if (cdrEnabled) cdrEnabled.checked = data.cleanupEnabled || false;
             if (cdrBadge) {
-                cdrBadge.textContent = data.cleanupEnabled ? 'ON' : 'OFF';
+                cdrBadge.textContent = data.cleanupEnabled ? BYD.i18n.t('status.on') : BYD.i18n.t('status.off');
                 cdrBadge.className = 'status-badge ' + (data.cleanupEnabled ? 'active' : 'inactive');
             }
             if (data.reservedSpaceMb) {
@@ -475,7 +468,7 @@ const TRIPS = {
         const toggle = document.getElementById('calendarToggle');
         const btnText = document.getElementById('calendarBtnText');
         if (toggle) toggle.classList.remove('has-date');
-        if (btnText) btnText.textContent = 'Select Date';
+        if (btnText) btnText.textContent = BYD.i18n.t('trip.select_date');
         this.loadTrips(days, 0);
         this.loadSummary(days);
     },
@@ -613,7 +606,7 @@ const TRIPS = {
         this.selectedDate = new Date(this.calendarYear, this.calendarMonth, day);
         const toggle = document.getElementById('calendarToggle');
         const btnText = document.getElementById('calendarBtnText');
-        const dateStr = this.selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        const dateStr = this.selectedDate.toLocaleDateString(BYD.i18n.getLang(), { month: 'short', day: 'numeric', year: 'numeric' });
 
         if (toggle) toggle.classList.add('has-date');
         if (btnText) btnText.innerHTML = dateStr + ' <span class="clear-date-btn" onclick="event.stopPropagation(); TRIPS.clearDate()">✕</span>';
@@ -679,7 +672,7 @@ const TRIPS = {
         const toggle = document.getElementById('calendarToggle');
         const btnText = document.getElementById('calendarBtnText');
         if (toggle) toggle.classList.remove('has-date');
-        if (btnText) btnText.textContent = 'Select Date';
+        if (btnText) btnText.textContent = BYD.i18n.t('trip.select_date');
         this.quickFilter(7, document.querySelector('.filter-tab[data-days="7"]'));
     },
 
@@ -704,7 +697,7 @@ const TRIPS = {
             }
         }
 
-        if (countText) countText.textContent = count + (count === 1 ? ' trip stored' : ' trips stored');
+        if (countText) countText.textContent = BYD.i18n.plural('trip.stored', count);
     },
 
     // ==================== TRIP LIST ====================
@@ -766,7 +759,7 @@ const TRIPS = {
 
         const groups = {};
         trips.forEach(t => {
-            const day = new Date(t.startTime || t.start_time).toLocaleDateString('en-US', {
+            const day = new Date(t.startTime || t.start_time).toLocaleDateString(BYD.i18n.getLang(), {
                 weekday: 'long', month: 'short', day: 'numeric'
             });
             if (!groups[day]) groups[day] = [];
@@ -792,7 +785,7 @@ const TRIPS = {
         card.onclick = () => this.showDetail(trip.id);
 
         const startTime = new Date(trip.startTime || trip.start_time);
-        const timeStr = startTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        const timeStr = startTime.toLocaleTimeString(BYD.i18n.getLang(), { hour: '2-digit', minute: '2-digit' });
         const dist = (trip.distanceKm || trip.distance_km || 0).toFixed(1);
         const dur = this.formatDuration(trip.durationSeconds || trip.duration_seconds || 0);
         const avgScore = this.getAvgScore(trip);
@@ -843,7 +836,7 @@ const TRIPS = {
                 (elevStr ? '<span class="trip-capsule" style="color:#0EA5E9;">' + elevStr + '</span>' : '') +
                 (costStr ? '<span class="trip-capsule" style="color:var(--warning);"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> ' + costStr + '</span>' : '') +
             '</div>' +
-            '<button class="trip-delete-btn" onclick="event.stopPropagation(); TRIPS.deleteTrip(\'' + tripId + '\')" title="Delete trip">' +
+            '<button class="trip-delete-btn" onclick="event.stopPropagation(); TRIPS.deleteTrip(\'' + tripId + '\')" title="' + BYD.i18n.t('trip.delete_trip_title') + '">' +
                 '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>' +
             '</button>';
 
@@ -994,7 +987,10 @@ const TRIPS = {
             // Formula capsule below circle (single source of truth — no duplicate text)
             const formulaCapsule = document.getElementById('costFormulaCapsule');
             if (formulaCapsule) {
-                formulaCapsule.textContent = kwhPerKm.toFixed(3) + ' kWh/km × ' + this.currency + this.electricityRate + '/kWh';
+                formulaCapsule.textContent = BYD.i18n.t('trip.card.cost_formula', {
+                    kwh: kwhPerKm.toFixed(3),
+                    rate: this.currency + this.electricityRate
+                });
                 formulaCapsule.style.display = '';
             }
             const infoEl = document.getElementById('costPerKwhInfo');
@@ -1006,7 +1002,7 @@ const TRIPS = {
             noRate.style.display = 'none';
             dataDiv.style.display = 'block';
             this.setEl('costPerKmValue', '--');
-            this.setEl('costPerKwhInfo', 'Drive more trips to calculate');
+            this.setEl('costPerKwhInfo', BYD.i18n.t('trip.card.drive_more_to_calc'));
             const infoEl = document.getElementById('costPerKwhInfo');
             if (infoEl) infoEl.style.display = '';
             const formulaCapsule = document.getElementById('costFormulaCapsule');
@@ -1101,37 +1097,41 @@ const TRIPS = {
                 const tooltip = document.getElementById('rangeHeroTooltip');
                 if (tooltip) {
                     tooltip.style.display = '';
-                    let tt = '<div class="range-tooltip-title">Range Details</div>';
+                    let tt = '<div class="range-tooltip-title">' + BYD.i18n.t('trip.range_tooltip_title') + '</div>';
 
-                    tt += '<div class="range-tooltip-row"><span class="range-tooltip-label">Confidence</span><span class="range-tooltip-value">' + lower + ' – ' + upper + ' km</span></div>';
+                    tt += '<div class="range-tooltip-row"><span class="range-tooltip-label">' + BYD.i18n.t('trip.range_confidence') + '</span><span class="range-tooltip-value">' + lower + ' – ' + upper + ' km</span></div>';
 
                     // Conditions pills
                     const bucketKey = r.bucketKey || r.bucket_key || '';
                     const samples = r.sampleCount || r.sample_count || 0;
                     if (bucketKey) {
                         const parts = bucketKey.split('_');
-                        const speedLabels = { city: 'City', suburban: 'Suburban', highway: 'Highway' };
-                        const tempLabels = { cold: 'Cold', mild: 'Mild', hot: 'Hot' };
-                        const styleLabels = { low: 'Calm', mid: 'Balanced', high: 'Spirited' };
+                        const speedLabels = {
+                            city: BYD.i18n.t('trip.speed_label.city'),
+                            suburban: BYD.i18n.t('trip.speed_label.suburban'),
+                            highway: BYD.i18n.t('trip.speed_label.highway')
+                        };
+                        const tempLabels = { cold: BYD.i18n.t('trip.temp_label.cold'), mild: BYD.i18n.t('trip.temp_label.mild'), hot: BYD.i18n.t('trip.temp_label.hot') };
+                        const styleLabels = { low: BYD.i18n.t('trip.style_label.low'), mid: BYD.i18n.t('trip.style_label.mid'), high: BYD.i18n.t('trip.style_label.high') };
                         const speedColors = { city: 'rgba(99,102,241,0.15);color:#6366F1', suburban: 'rgba(0,212,170,0.15);color:var(--brand-primary)', highway: 'rgba(245,158,11,0.15);color:var(--warning)' };
                         const tempColors = { cold: 'rgba(14,165,233,0.15);color:#0EA5E9', mild: 'rgba(34,197,94,0.15);color:#22C55E', hot: 'rgba(239,68,68,0.15);color:var(--danger)' };
                         const styleColors = { low: 'rgba(34,197,94,0.15);color:#22C55E', mid: 'rgba(245,158,11,0.15);color:var(--warning)', high: 'rgba(239,68,68,0.15);color:var(--danger)' };
 
                         tt += '<div class="range-tooltip-conditions">';
-                        tt += '<div class="range-tooltip-conditions-label">Current conditions</div>';
+                        tt += '<div class="range-tooltip-conditions-label">' + BYD.i18n.t('trip.range_current_conditions') + '</div>';
                         tt += '<div class="range-tooltip-pills">';
                         tt += '<span class="range-tooltip-pill" style="background:' + (speedColors[parts[0]] || speedColors.suburban) + ';">' + (speedLabels[parts[0]] || parts[0]) + '</span>';
                         tt += '<span class="range-tooltip-pill" style="background:' + (tempColors[parts[1]] || tempColors.mild) + ';">' + (tempLabels[parts[1]] || parts[1]) + '</span>';
                         tt += '<span class="range-tooltip-pill" style="background:' + (styleColors[parts[2]] || styleColors.mid) + ';">' + (styleLabels[parts[2]] || parts[2]) + '</span>';
                         tt += '</div>';
-                        tt += '<div class="range-tooltip-samples">Based on ' + samples + ' trips in similar conditions</div>';
+                        tt += '<div class="range-tooltip-samples">' + BYD.i18n.t('trip.range_based_on', {count: samples}) + '</div>';
                         tt += '</div>';
                     }
 
                     tooltip.innerHTML = tt;
                 }
             } else {
-                content.innerHTML = '<div class="range-hero-no-data"><div>Drive more trips to unlock personalized range</div></div>';
+                content.innerHTML = '<div class="range-hero-no-data"><div>' + BYD.i18n.t('trip.drive_more_unlock') + '</div></div>';
                 this.renderCircleGauge('rangeCircleCanvas', 0, 'rgba(14,165,233,0.2)');
                 const capsule = document.getElementById('rangeDeltaCapsule');
                 if (capsule) capsule.style.display = 'none';
@@ -1157,9 +1157,10 @@ const TRIPS = {
             const trip = tripData.trip;
 
             const start = new Date(trip.startTime || trip.start_time);
-            this.setEl('detailTitle', start.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }));
-            this.setEl('detailSubtitle', start.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) +
-                ' – ' + new Date(trip.endTime || trip.end_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
+            const lang = BYD.i18n.getLang();
+            this.setEl('detailTitle', start.toLocaleDateString(lang, { weekday: 'long', month: 'long', day: 'numeric' }));
+            this.setEl('detailSubtitle', start.toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' }) +
+                ' – ' + new Date(trip.endTime || trip.end_time).toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' }));
             this.setEl('detailDistance', BYD.units.distVal(trip.distanceKm || trip.distance_km || 0).toFixed(1));
             this.setEl('detailDuration', this.formatDuration(trip.durationSeconds || trip.duration_seconds || 0));
             this.setEl('detailSocDelta', ((trip.socStart || trip.soc_start || 0) - (trip.socEnd || trip.soc_end || 0)).toFixed(1) + '%');
@@ -1193,7 +1194,7 @@ const TRIPS = {
             const gradProfile = trip.gradientProfile || trip.gradient_profile || '';
             const gradEl = document.getElementById('detailGradientPill');
             if (gradEl && gradProfile) {
-                const gradLabels = { FLAT: '🛣️ Flat', HILLY: '⛰️ Hilly', MOUNTAIN_CLIMB: '🏔️ Climb', MOUNTAIN_DESCENT: '⬇️ Descent' };
+                const gradLabels = { FLAT: BYD.i18n.t('trip.grad_profile.flat'), HILLY: BYD.i18n.t('trip.grad_profile.hilly'), MOUNTAIN_CLIMB: BYD.i18n.t('trip.grad_profile.climb'), MOUNTAIN_DESCENT: BYD.i18n.t('trip.grad_profile.descent') };
                 const gradColors = { FLAT: 'rgba(34,197,94,0.15);color:#22C55E', HILLY: 'rgba(245,158,11,0.15);color:#F59E0B', MOUNTAIN_CLIMB: 'rgba(239,68,68,0.15);color:#EF4444', MOUNTAIN_DESCENT: 'rgba(14,165,233,0.15);color:#0EA5E9' };
                 gradEl.innerHTML = gradLabels[gradProfile] || gradProfile;
                 gradEl.style.cssText = 'display:inline-flex;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;background:' + (gradColors[gradProfile] || gradColors.FLAT);
@@ -1468,7 +1469,7 @@ const TRIPS = {
             // Recent trips — clickable links
             html += '<div style="font-size:11px;color:var(--text-muted);margin:8px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">Trips on this route (' + data.count + ')</div>';
             similar.slice(0, 5).forEach(function(t) {
-                var date = new Date(t.startTime || t.start_time).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                var date = new Date(t.startTime || t.start_time).toLocaleDateString(BYD.i18n.getLang(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
                 var energy = (t.energyUsedKwh || t.energy_used_kwh || 0);
                 var cost = t.tripCost || t.trip_cost || 0;
                 var isBest = t.id === stats.bestTripId;
@@ -1542,7 +1543,7 @@ const TRIPS = {
         }
 
         overlay.style.display = 'block';
-        mapDiv.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);">Loading routes...</div>';
+        mapDiv.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);">' + BYD.i18n.t('trip.loading_routes') + '</div>';
 
         try {
             // Fetch GPS traces in parallel
@@ -1558,13 +1559,13 @@ const TRIPS = {
             const worstGps = data[2] && data[2].success ? data[2].gps : [];
 
             if (currentGps.length === 0) {
-                mapDiv.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);">No GPS data available</div>';
+                mapDiv.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);">' + BYD.i18n.t('trip.no_gps_data') + '</div>';
                 return;
             }
 
             // Create Leaflet map
             if (typeof L === 'undefined') {
-                mapDiv.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);">Map library not available</div>';
+                mapDiv.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);">' + BYD.i18n.t('trip.map_unavailable') + '</div>';
                 return;
             }
             mapDiv.innerHTML = '';
@@ -1596,7 +1597,7 @@ const TRIPS = {
                 iconSize: [32, 32],
                 iconAnchor: [16, 16]
             });
-            L.marker(startPoint, { icon: startIcon }).bindTooltip('Start', { permanent: false, direction: 'top' }).addTo(map);
+            L.marker(startPoint, { icon: startIcon }).bindTooltip(BYD.i18n.t('trip.marker_start'), { permanent: false, direction: 'top' }).addTo(map);
 
             // End marker (same as trip detail)
             var endPoint = currentGps[currentGps.length - 1];
@@ -1606,18 +1607,18 @@ const TRIPS = {
                 iconSize: [32, 32],
                 iconAnchor: [16, 16]
             });
-            L.marker(endPoint, { icon: endIcon }).bindTooltip('End', { permanent: false, direction: 'top' }).addTo(map);
+            L.marker(endPoint, { icon: endIcon }).bindTooltip(BYD.i18n.t('trip.marker_end'), { permanent: false, direction: 'top' }).addTo(map);
 
             map.fitBounds(bounds, { padding: [20, 20] });
 
             // Legend
-            legend.innerHTML = '<span style="display:flex;align-items:center;gap:4px;"><span style="width:20px;height:4px;background:#6366F1;border-radius:2px;"></span>Current</span>' +
-                '<span style="display:flex;align-items:center;gap:4px;"><span style="width:20px;height:4px;background:#22C55E;border-radius:2px;"></span>Best</span>' +
-                (worstGps.length > 0 ? '<span style="display:flex;align-items:center;gap:4px;"><span style="width:20px;height:4px;background:#EF4444;border-radius:2px;"></span>Worst</span>' : '');
+            legend.innerHTML = '<span style="display:flex;align-items:center;gap:4px;"><span style="width:20px;height:4px;background:#6366F1;border-radius:2px;"></span>' + BYD.i18n.t('trip.route_legend_current') + '</span>' +
+                '<span style="display:flex;align-items:center;gap:4px;"><span style="width:20px;height:4px;background:#22C55E;border-radius:2px;"></span>' + BYD.i18n.t('trip.route_legend_best') + '</span>' +
+                (worstGps.length > 0 ? '<span style="display:flex;align-items:center;gap:4px;"><span style="width:20px;height:4px;background:#EF4444;border-radius:2px;"></span>' + BYD.i18n.t('trip.route_legend_worst') + '</span>' : '');
 
         } catch (e) {
             console.warn('[Trips] Route map error:', e);
-            mapDiv.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);">Failed to load routes</div>';
+            mapDiv.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);">' + BYD.i18n.t('trip.routes_load_failed') + '</div>';
         }
     },
 
@@ -1648,7 +1649,7 @@ const TRIPS = {
         }
 
         if (!moments) {
-            list.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">No micro-moment data available</div>';
+            list.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">' + BYD.i18n.t('trip.no_micro_data') + '</div>';
             return;
         }
 
@@ -1745,11 +1746,12 @@ const TRIPS = {
         if (numberEl) numberEl.textContent = score;
         if (starEl) starEl.style.color = color;
 
-        let label, cls;
-        if (score >= 80) { label = 'Excellent Driver'; cls = 'excellent'; }
-        else if (score >= 60) { label = 'Good Driver'; cls = 'good'; }
-        else if (score >= 40) { label = 'Average Driver'; cls = 'average'; }
-        else { label = 'Needs Improvement'; cls = 'poor'; }
+        let label, cls, tierKey;
+        if (score >= 80) { tierKey = 'excellent'; cls = 'excellent'; }
+        else if (score >= 60) { tierKey = 'good'; cls = 'good'; }
+        else if (score >= 40) { tierKey = 'average'; cls = 'average'; }
+        else { tierKey = 'needs_improvement'; cls = 'poor'; }
+        label = BYD.i18n.t('trip.tier.' + tierKey);
 
         if (labelEl) {
             labelEl.textContent = label;
@@ -1780,7 +1782,7 @@ const TRIPS = {
         const tooltipTip = document.getElementById('scoreTooltipTip');
         const tierPills = document.querySelectorAll('.score-tier-pill');
 
-        if (tooltipTitle) tooltipTitle.textContent = label + ' — ' + score + '/100';
+        if (tooltipTitle) tooltipTitle.textContent = BYD.i18n.t('trip.score_summary', { label: label, score: score });
 
         // Highlight active tier
         tierPills.forEach(pill => {
@@ -1793,28 +1795,36 @@ const TRIPS = {
 
         // Dynamic description based on score tier
         if (tooltipDesc) {
-            if (score >= 80) tooltipDesc.textContent = 'Outstanding driving habits. You maximize regen, maintain smooth pedal inputs, and keep consistent speeds.';
-            else if (score >= 60) tooltipDesc.textContent = 'Solid driving with room to grow. Occasional hard braking or speed fluctuations bring the score down.';
-            else if (score >= 40) tooltipDesc.textContent = 'Moderate efficiency. Frequent speed changes or inconsistent pedal use are costing you range.';
-            else tooltipDesc.textContent = 'Aggressive patterns detected. Heavy acceleration and late braking are significantly reducing your range.';
+            var descKey;
+            if (score >= 80) descKey = 'excellent';
+            else if (score >= 60) descKey = 'good';
+            else if (score >= 40) descKey = 'average';
+            else descKey = 'poor';
+            tooltipDesc.textContent = BYD.i18n.t('trip.tier_desc.' + descKey);
         }
 
-        // Dynamic tip based on actual weakest DNA score
+        // Dynamic tip based on actual weakest DNA score. Score keys are read
+        // from the API (snake_case server, camelCase legacy alias); both shapes
+        // are supported so we don't break older daemons mid-rollout.
         if (tooltipTip && this.radarScoresCache) {
             const dna = this.radarScoresCache;
             const scores = [
-                { key: 'anticipation', val: dna.anticipation || dna.anticipation_score || 0, tip: 'Lift off the accelerator 3–5 seconds earlier before stops. Coast into red lights.' },
-                { key: 'smoothness', val: dna.smoothness || dna.smoothness_score || 0, tip: 'Apply pedals gradually — imagine balancing a glass of water on the dashboard.' },
-                { key: 'speedDiscipline', val: dna.speedDiscipline || dna.speed_discipline || 0, tip: 'Use cruise control and stay within 5 km/h of speed limits on highways.' },
-                { key: 'efficiency', val: dna.efficiency || dna.efficiency_score || 0, tip: 'Pre-condition the cabin while plugged in. Avoid full-throttle launches.' },
-                { key: 'consistency', val: dna.consistency || dna.consistency_score || 0, tip: 'Pick one driving style and maintain it. Erratic switching wastes energy.' }
+                { key: 'anticipation',    val: dna.anticipation || dna.anticipation_score || 0 },
+                { key: 'smoothness',      val: dna.smoothness || dna.smoothness_score || 0 },
+                { key: 'speedDiscipline', val: dna.speedDiscipline || dna.speed_discipline || 0 },
+                { key: 'efficiency',      val: dna.efficiency || dna.efficiency_score || 0 },
+                { key: 'consistency',     val: dna.consistency || dna.consistency_score || 0 }
             ];
             const weakest = scores.reduce((min, s) => s.val < min.val ? s : min, scores[0]);
-            const info = this.criteriaInfo[weakest.key];
-            const weakLabel = info ? info.label : weakest.key;
-            tooltipTip.textContent = '💡 Weakest area: ' + weakLabel + ' (' + weakest.val + '/100). ' + weakest.tip;
+            const weakLabel = this.criterion(weakest.key, 'label');
+            const weakTip = this.criterion(weakest.key, 'tip');
+            tooltipTip.textContent = BYD.i18n.t('trip.weakest_tip', {
+                area: weakLabel,
+                val: weakest.val,
+                tip: weakTip
+            });
         } else if (tooltipTip) {
-            tooltipTip.textContent = '💡 Drive more trips to get personalized improvement suggestions.';
+            tooltipTip.textContent = BYD.i18n.t('trip.drive_more_for_tips');
         }
     },
 
@@ -1965,10 +1975,10 @@ const TRIPS = {
             if (closest) {
                 const info = self.criteriaInfo[closest.key];
                 if (!info) return;
-                document.getElementById('radarTooltipTitle').textContent = info.icon + ' ' + info.label;
+                document.getElementById('radarTooltipTitle').textContent = info.icon + ' ' + self.criterion(closest.key, 'label');
                 document.getElementById('radarTooltipScore').textContent = closest.score + '/100';
-                document.getElementById('radarTooltipDesc').textContent = info.desc;
-                document.getElementById('radarTooltipTip').textContent = '💡 ' + info.tip;
+                document.getElementById('radarTooltipDesc').textContent = self.criterion(closest.key, 'desc');
+                document.getElementById('radarTooltipTip').textContent = '💡 ' + self.criterion(closest.key, 'tip');
 
                 // Position tooltip — always below and centered on dot
                 const wrapRect = wrap.getBoundingClientRect();
@@ -2444,7 +2454,7 @@ const TRIPS = {
             iconSize: [32, 32],
             iconAnchor: [16, 16]
         });
-        L.marker([points[0].la, points[0].lo], { icon: startIcon }).addTo(this.leafletMap).bindPopup('<b>Start</b>');
+        L.marker([points[0].la, points[0].lo], { icon: startIcon }).addTo(this.leafletMap).bindPopup('<b>' + BYD.i18n.t('trip.marker_start') + '</b>');
 
         // End marker
         var endIcon = L.divIcon({
@@ -2453,7 +2463,7 @@ const TRIPS = {
             iconSize: [32, 32],
             iconAnchor: [16, 16]
         });
-        L.marker([points[points.length - 1].la, points[points.length - 1].lo], { icon: endIcon }).addTo(this.leafletMap).bindPopup('<b>End</b>');
+        L.marker([points[points.length - 1].la, points[points.length - 1].lo], { icon: endIcon }).addTo(this.leafletMap).bindPopup('<b>' + BYD.i18n.t('trip.marker_end') + '</b>');
 
         // Slider marker — car icon (same as live view map)
         const carIcon = L.divIcon({
@@ -2527,7 +2537,7 @@ const TRIPS = {
     // ==================== DELETE ====================
 
     async deleteTrip(tripId) {
-        if (!confirm('Delete this trip? This cannot be undone.')) return;
+        if (!confirm(BYD.i18n.t('trip.delete_confirm'))) return;
         try {
             const resp = await fetch('/api/trips/' + tripId, { method: 'DELETE' });
             const data = await resp.json();

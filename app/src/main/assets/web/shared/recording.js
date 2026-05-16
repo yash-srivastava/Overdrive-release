@@ -227,10 +227,10 @@ BYD.recording = {
                 const limitEl = document.getElementById('storageLimit');
                 const fillEl = document.getElementById('storageFill');
                 
-                if (usedEl) usedEl.textContent = data.normalSizeFormatted + ' used';
-                
+                if (usedEl) usedEl.textContent = BYD.i18n.t('recording.storage_used', {size: data.normalSizeFormatted});
+
                 const limitMb = this.config.recordingsLimitMb || 500;
-                if (limitEl) limitEl.textContent = limitMb + ' MB limit';
+                if (limitEl) limitEl.textContent = BYD.i18n.t('recording.storage_limit_mb', {mb: limitMb});
                 
                 // Calculate percentage
                 const usedBytes = data.normalSize || 0;
@@ -266,14 +266,14 @@ BYD.recording = {
         }
         if (value) {
             const mb = this.config.recordingsLimitMb;
-            value.textContent = mb >= 1000 ? (mb / 1000) + ' GB' : mb + ' MB';
+            value.textContent = mb >= 1000 ? BYD.i18n.t('recording.unit_gb', {n: (mb / 1000)}) : BYD.i18n.t('recording.unit_mb', {n: mb});
         }
-        
+
         // Update range labels
         const minLabel = document.getElementById('recLimitMin');
         const maxLabel = document.getElementById('recLimitMax');
-        if (minLabel) minLabel.textContent = '100 MB';
-        if (maxLabel) maxLabel.textContent = maxLimit >= 1000 ? (maxLimit / 1000) + ' GB' : maxLimit + ' MB';
+        if (minLabel) minLabel.textContent = BYD.i18n.t('recording.unit_mb', {n: 100});
+        if (maxLabel) maxLabel.textContent = maxLimit >= 1000 ? BYD.i18n.t('recording.unit_gb', {n: (maxLimit / 1000)}) : BYD.i18n.t('recording.unit_mb', {n: maxLimit});
     },
     
     updateStorageTypeUI() {
@@ -286,7 +286,7 @@ BYD.recording = {
         if (sdCardBtn) {
             sdCardBtn.disabled = !this.storageInfo.sdCardAvailable;
             if (!this.storageInfo.sdCardAvailable) {
-                sdCardBtn.title = 'SD Card not available';
+                sdCardBtn.title = BYD.i18n.t('recording.sd_card_unavailable');
             } else {
                 sdCardBtn.title = '';
             }
@@ -303,15 +303,15 @@ BYD.recording = {
             
             if (this.storageInfo.sdCardAvailable) {
                 if (dotEl) dotEl.className = 'sd-status-dot online';
-                if (textEl) textEl.textContent = 'SD Card: Available';
+                if (textEl) textEl.textContent = BYD.i18n.t('recording.sd_card_available');
                 if (spaceEl) {
                     spaceEl.style.display = 'block';
-                    document.getElementById('recSdFree').textContent = this.formatSize(this.storageInfo.sdCardFreeSpace) + ' free';
-                    document.getElementById('recSdTotal').textContent = this.formatSize(this.storageInfo.sdCardTotalSpace) + ' total';
+                    document.getElementById('recSdFree').textContent = BYD.i18n.t('recording.size_free', {size: this.formatSize(this.storageInfo.sdCardFreeSpace)});
+                    document.getElementById('recSdTotal').textContent = BYD.i18n.t('recording.size_total', {size: this.formatSize(this.storageInfo.sdCardTotalSpace)});
                 }
             } else {
                 if (dotEl) dotEl.className = 'sd-status-dot offline';
-                if (textEl) textEl.textContent = 'SD Card: Not detected';
+                if (textEl) textEl.textContent = BYD.i18n.t('recording.sd_card_not_detected');
                 if (spaceEl) spaceEl.style.display = 'none';
             }
         }
@@ -320,7 +320,7 @@ BYD.recording = {
         const pathEl = document.getElementById('recStoragePath');
         if (pathEl && this.storageInfo.recordingsPath) {
             const shortPath = this.storageInfo.recordingsPath.replace('/storage/emulated/0/', '');
-            pathEl.textContent = 'Recordings saved to ' + shortPath;
+            pathEl.textContent = BYD.i18n.t('recording.saved_to', {path: shortPath});
         }
     },
     
@@ -333,7 +333,7 @@ BYD.recording = {
     
     setStorageType(type) {
         if (type === 'SD_CARD' && !this.storageInfo.sdCardAvailable) {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('SD Card not available', 'error');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.sd_card_unavailable'), 'error');
             return;
         }
         
@@ -410,7 +410,7 @@ BYD.recording = {
         // Update badge
         const badge = document.getElementById('cdrCleanupBadge');
         if (badge) {
-            badge.textContent = this.cdrConfig.enabled ? 'ON' : 'OFF';
+            badge.textContent = this.cdrConfig.enabled ? BYD.i18n.t('status.on') : BYD.i18n.t('status.off');
             badge.className = 'status-badge ' + (this.cdrConfig.enabled ? 'active' : 'inactive');
         }
         
@@ -418,13 +418,14 @@ BYD.recording = {
         const reservedSlider = document.getElementById('cdrReservedSlider');
         const reservedValue = document.getElementById('cdrReservedValue');
         if (reservedSlider) reservedSlider.value = this.cdrConfig.reservedSpaceMb;
-        if (reservedValue) reservedValue.textContent = this.cdrConfig.reservedSpaceMb >= 1000 ? 
-            (this.cdrConfig.reservedSpaceMb / 1000) + ' GB' : this.cdrConfig.reservedSpaceMb + ' MB';
-        
+        if (reservedValue) reservedValue.textContent = this.cdrConfig.reservedSpaceMb >= 1000
+            ? BYD.i18n.t('recording.unit_gb', {n: (this.cdrConfig.reservedSpaceMb / 1000)})
+            : BYD.i18n.t('recording.unit_mb', {n: this.cdrConfig.reservedSpaceMb});
+
         const protectedSlider = document.getElementById('cdrProtectedSlider');
         const protectedValue = document.getElementById('cdrProtectedValue');
         if (protectedSlider) protectedSlider.value = this.cdrConfig.protectedHours;
-        if (protectedValue) protectedValue.textContent = this.cdrConfig.protectedHours + 'h';
+        if (protectedValue) protectedValue.textContent = BYD.i18n.t('recording.unit_hours', {n: this.cdrConfig.protectedHours});
         
         const minKeepSlider = document.getElementById('cdrMinKeepSlider');
         const minKeepValue = document.getElementById('cdrMinKeepValue');
@@ -434,7 +435,7 @@ BYD.recording = {
         // Update info
         if (this.cdrInfo) {
             const pathEl = document.getElementById('cdrPath');
-            if (pathEl) pathEl.textContent = this.cdrInfo.cdrPath || 'Not found';
+            if (pathEl) pathEl.textContent = this.cdrInfo.cdrPath || BYD.i18n.t('recording.not_found');
 
             const usageEl = document.getElementById('cdrUsage');
             if (usageEl) usageEl.textContent = this.cdrInfo.cdrUsage || '--';
@@ -451,13 +452,13 @@ BYD.recording = {
             const monEl = document.getElementById('cdrMonitoring');
             if (monEl) {
                 if (!this.cdrConfig.enabled) {
-                    monEl.textContent = 'Disabled';
+                    monEl.textContent = BYD.i18n.t('common.disabled');
                     monEl.style.color = '';
                 } else if (this.cdrInfo.monitoringActive) {
-                    monEl.textContent = 'Running';
+                    monEl.textContent = BYD.i18n.t('common.running');
                     monEl.style.color = '#22c55e';
                 } else {
-                    monEl.textContent = 'Idle';
+                    monEl.textContent = BYD.i18n.t('common.idle');
                     monEl.style.color = '#94a3b8';
                 }
             }
@@ -477,13 +478,13 @@ BYD.recording = {
     },
 
     _formatRelativeTime(ts) {
-        if (!ts || ts <= 0) return 'Never';
+        if (!ts || ts <= 0) return BYD.i18n.t('recording.never');
         const diffSec = Math.floor((Date.now() - ts) / 1000);
-        if (diffSec < 0) return 'Just now';
-        if (diffSec < 60) return diffSec + 's ago';
-        if (diffSec < 3600) return Math.floor(diffSec / 60) + ' min ago';
-        if (diffSec < 86400) return Math.floor(diffSec / 3600) + 'h ago';
-        return Math.floor(diffSec / 86400) + 'd ago';
+        if (diffSec < 0) return BYD.i18n.t('recording.just_now');
+        if (diffSec < 60) return BYD.i18n.t('recording.seconds_ago', {n: diffSec});
+        if (diffSec < 3600) return BYD.i18n.t('recording.minutes_ago', {n: Math.floor(diffSec / 60)});
+        if (diffSec < 86400) return BYD.i18n.t('recording.hours_ago', {n: Math.floor(diffSec / 3600)});
+        return BYD.i18n.t('recording.days_ago', {n: Math.floor(diffSec / 86400)});
     },
     
     async toggleCdrCleanup() {
@@ -496,23 +497,24 @@ BYD.recording = {
             });
             this.cdrConfig.enabled = enabled;
             this.updateCdrUI();
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(enabled ? 'CDR cleanup enabled' : 'CDR cleanup disabled', 'success');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(enabled ? BYD.i18n.t('recording.cdr_enabled') : BYD.i18n.t('recording.cdr_disabled'), 'success');
         } catch (e) {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to toggle CDR cleanup', 'error');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.cdr_toggle_failed'), 'error');
         }
     },
     
     updateCdrReserved(value) {
         this.cdrConfig.reservedSpaceMb = parseInt(value);
         const el = document.getElementById('cdrReservedValue');
-        if (el) el.textContent = value >= 1000 ? (value / 1000) + ' GB' : value + ' MB';
+        const v = parseInt(value);
+        if (el) el.textContent = v >= 1000 ? BYD.i18n.t('recording.unit_gb', {n: (v / 1000)}) : BYD.i18n.t('recording.unit_mb', {n: v});
         this.saveCdrConfig();
     },
-    
+
     updateCdrProtected(value) {
         this.cdrConfig.protectedHours = parseInt(value);
         const el = document.getElementById('cdrProtectedValue');
-        if (el) el.textContent = value + 'h';
+        if (el) el.textContent = BYD.i18n.t('recording.unit_hours', {n: parseInt(value)});
         this.saveCdrConfig();
     },
     
@@ -541,35 +543,35 @@ BYD.recording = {
     
     async triggerCdrCleanup() {
         try {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Cleaning up dashcam files...', 'info');
-            
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.cdr_cleaning'), 'info');
+
             const resp = await fetch('/api/storage/external/cleanup', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({})
             });
             const data = await resp.json();
-            
+
             if (data.success) {
-                const msg = data.filesDeleted > 0 
-                    ? `Freed ${data.freedFormatted} (${data.filesDeleted} files)`
-                    : 'No files needed cleanup';
+                const msg = data.filesDeleted > 0
+                    ? BYD.i18n.t('recording.cdr_freed', {size: data.freedFormatted, files: data.filesDeleted})
+                    : BYD.i18n.t('recording.cdr_no_cleanup');
                 if (BYD.utils && BYD.utils.toast) BYD.utils.toast(msg, 'success');
-                
+
                 // Refresh CDR info
                 this.loadCdrConfig();
             } else {
-                if (BYD.utils && BYD.utils.toast) BYD.utils.toast(data.error || 'Cleanup failed', 'error');
+                if (BYD.utils && BYD.utils.toast) BYD.utils.toast(data.error || BYD.i18n.t('recording.cdr_cleanup_failed'), 'error');
             }
         } catch (e) {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to trigger cleanup', 'error');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.cdr_trigger_failed'), 'error');
         }
     },
     
     updateRecLimit(value) {
         this.config.recordingsLimitMb = parseInt(value);
         const v = parseInt(value);
-        document.getElementById('recLimitValue').textContent = v >= 1000 ? (v / 1000) + ' GB' : v + ' MB';
+        document.getElementById('recLimitValue').textContent = v >= 1000 ? BYD.i18n.t('recording.unit_gb', {n: (v / 1000)}) : BYD.i18n.t('recording.unit_mb', {n: v});
         this.markChanged();
     },
 
@@ -608,16 +610,16 @@ BYD.recording = {
         const preValue = document.getElementById('preRecordValue');
         if (preSlider && preValue) {
             preSlider.value = this.config.proximityGuard.preRecordSeconds || 5;
-            preValue.textContent = preSlider.value + 's';
-            document.getElementById('timelinePre').textContent = preSlider.value + 's';
+            preValue.textContent = BYD.i18n.t('recording.unit_seconds', {n: preSlider.value});
+            document.getElementById('timelinePre').textContent = BYD.i18n.t('recording.unit_seconds', {n: preSlider.value});
         }
-        
+
         const postSlider = document.getElementById('postRecordSlider');
         const postValue = document.getElementById('postRecordValue');
         if (postSlider && postValue) {
             postSlider.value = this.config.proximityGuard.postRecordSeconds || 10;
-            postValue.textContent = postSlider.value + 's';
-            document.getElementById('timelinePost').textContent = postSlider.value + 's';
+            postValue.textContent = BYD.i18n.t('recording.unit_seconds', {n: postSlider.value});
+            document.getElementById('timelinePost').textContent = BYD.i18n.t('recording.unit_seconds', {n: postSlider.value});
         }
         
         this.updateStorageLimitUI();
@@ -650,15 +652,15 @@ BYD.recording = {
     
     updatePreRecord(value) {
         this.config.proximityGuard.preRecordSeconds = parseInt(value);
-        document.getElementById('preRecordValue').textContent = value + 's';
-        document.getElementById('timelinePre').textContent = value + 's';
+        document.getElementById('preRecordValue').textContent = BYD.i18n.t('recording.unit_seconds', {n: value});
+        document.getElementById('timelinePre').textContent = BYD.i18n.t('recording.unit_seconds', {n: value});
         this.markChanged();
     },
-    
+
     updatePostRecord(value) {
         this.config.proximityGuard.postRecordSeconds = parseInt(value);
-        document.getElementById('postRecordValue').textContent = value + 's';
-        document.getElementById('timelinePost').textContent = value + 's';
+        document.getElementById('postRecordValue').textContent = BYD.i18n.t('recording.unit_seconds', {n: value});
+        document.getElementById('timelinePost').textContent = BYD.i18n.t('recording.unit_seconds', {n: value});
         this.markChanged();
     },
     
@@ -710,12 +712,14 @@ BYD.recording = {
 
     updateFileSizeEstimate() {
         const bitrateMap = { 'LOW': 2, 'MEDIUM': 3, 'HIGH': 6 };
-        const sizeMB = (bitrateMap[this.config.recordingBitrate] || 3) * 120 / 8 * 
+        const sizeMB = (bitrateMap[this.config.recordingBitrate] || 3) * 120 / 8 *
                        (this.config.recordingCodec === 'H265' ? 0.5 : 1.0);
         const estEl = document.getElementById('estFileSize');
         if (estEl) {
-            estEl.textContent = `~${Math.round(sizeMB * 0.85)}-${Math.round(sizeMB * 1.15)} MB` + 
-                               (this.config.recordingCodec === 'H265' ? ' (H.265)' : '');
+            const minMb = Math.round(sizeMB * 0.85);
+            const maxMb = Math.round(sizeMB * 1.15);
+            const key = this.config.recordingCodec === 'H265' ? 'recording.est_file_size_h265' : 'recording.est_file_size_range';
+            estEl.textContent = BYD.i18n.t(key, {min: minMb, max: maxMb});
         }
     },
 
@@ -792,20 +796,20 @@ BYD.recording = {
             // Refresh storage stats after save (cleanup may have run)
             setTimeout(() => this.loadStorageStats(), 1000);
             
-            let msg = 'Settings applied';
-            if (this.config.recordingCodec === 'H265') msg += ' - H.265 will apply on next recording';
+            let msg = BYD.i18n.t('recording.settings_applied');
+            if (this.config.recordingCodec === 'H265') msg += ' - ' + BYD.i18n.t('recording.h265_next_recording');
             if (this.config.cameraFps !== (this.savedConfig ? this.savedConfig.cameraFps : 15)) {
-                msg += ' - FPS change takes effect on next ACC ON';
+                msg += ' - ' + BYD.i18n.t('recording.fps_next_acc_on');
             }
-            
+
             // Show cleanup info if files will be deleted
             if (storageData.cleanup && storageData.cleanup.recordingsToDelete) {
-                msg = `Settings applied. Deleting ~${storageData.cleanup.recordingsFilesEstimate} old files (${storageData.cleanup.recordingsToDelete})`;
+                msg = BYD.i18n.t('recording.settings_applied_deleting', {files: storageData.cleanup.recordingsFilesEstimate, size: storageData.cleanup.recordingsToDelete});
             }
-            
+
             if (BYD.utils && BYD.utils.toast) BYD.utils.toast(msg, 'success');
         } catch (e) {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to save settings', 'error');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.save_settings_failed'), 'error');
         }
     },
 
@@ -838,15 +842,15 @@ BYD.recording = {
             if (data.success) {
                 toggle.checked = data.enabled;
                 if (BYD.utils && BYD.utils.toast) {
-                    BYD.utils.toast(data.enabled ? 'Telemetry overlay enabled' : 'Telemetry overlay disabled', 'success');
+                    BYD.utils.toast(data.enabled ? BYD.i18n.t('recording.telemetry_overlay_enabled') : BYD.i18n.t('recording.telemetry_overlay_disabled'), 'success');
                 }
             } else {
                 toggle.checked = !enabled;
-                if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to update overlay setting', 'error');
+                if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.overlay_update_failed'), 'error');
             }
         } catch (e) {
             toggle.checked = !enabled;
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to update overlay setting', 'error');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.overlay_update_failed'), 'error');
         }
     }
 };

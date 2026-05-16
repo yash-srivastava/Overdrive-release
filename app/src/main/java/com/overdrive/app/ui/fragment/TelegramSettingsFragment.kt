@@ -161,8 +161,8 @@ class TelegramSettingsFragment : Fragment() {
             etBotToken.setText(token)
             val botInfo = botTokenConfig.getCachedBotInfo()
             if (botInfo != null) {
-                tvBotStatus.text = "🟢 Connected"
-                tvBotInfo.text = "@${botInfo.username}"
+                tvBotStatus.text = getString(R.string.telegram_status_connected)
+                tvBotInfo.text = getString(R.string.telegram_bot_username_format, botInfo.username)
                 tvBotInfo.visibility = View.VISIBLE
             }
         }
@@ -196,8 +196,8 @@ class TelegramSettingsFragment : Fragment() {
                     // Valid token format (contains colon like "123456:ABC...")
                     activity?.runOnUiThread {
                         etBotToken.setText(token)
-                        tvBotStatus.text = "⚠️ Restored from config"
-                        tvBotInfo.text = "Click 'Connect & Test' to verify"
+                        tvBotStatus.text = getString(R.string.telegram_status_restored)
+                        tvBotInfo.text = getString(R.string.telegram_click_connect_to_verify)
                         tvBotInfo.visibility = View.VISIBLE
                         
                         // Also restore owner info if present
@@ -278,7 +278,7 @@ class TelegramSettingsFragment : Fragment() {
     private fun updateDaemonStatus() {
         adbLauncher?.isDaemonRunning("telegram_bot_daemon") { isRunning ->
             activity?.runOnUiThread {
-                tvDaemonStatus.text = if (isRunning) "🟢 Running" else "🔴 Stopped"
+                tvDaemonStatus.text = if (isRunning) getString(R.string.telegram_status_running) else getString(R.string.telegram_status_stopped)
             }
         }
     }
@@ -291,12 +291,12 @@ class TelegramSettingsFragment : Fragment() {
     private fun testBotToken() {
         val token = etBotToken.text?.toString()?.trim() ?: ""
         if (token.isEmpty()) {
-            Toast.makeText(context, "Enter bot token", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, getString(R.string.toast_enter_bot_token), Toast.LENGTH_SHORT).show()
             return
         }
-        
+
         btnConnectTest.isEnabled = false
-        tvBotStatus.text = "Testing..."
+        tvBotStatus.text = getString(R.string.telegram_status_testing)
         
         executor.execute {
             val result = botTokenConfig.validateToken(token)
@@ -312,16 +312,16 @@ class TelegramSettingsFragment : Fragment() {
                     // Write config to daemon file via ADB shell (app can't write to /data/local/tmp directly)
                     writeDaemonConfigViaShell(token)
                     
-                    tvBotStatus.text = "🟢 Connected"
-                    tvBotInfo.text = "@${botInfo.username}"
+                    tvBotStatus.text = getString(R.string.telegram_status_connected)
+                    tvBotInfo.text = getString(R.string.telegram_bot_username_format, botInfo.username)
                     tvBotInfo.visibility = View.VISIBLE
-                    
-                    Toast.makeText(context, "Bot connected! Starting daemon for pairing...", Toast.LENGTH_SHORT).show()
-                    
+
+                    Toast.makeText(context, getString(R.string.toast_bot_connected_starting), Toast.LENGTH_SHORT).show()
+
                     // Start daemon immediately so user can pair via /pair command
                     startTelegramDaemonForPairing()
                 } else {
-                    tvBotStatus.text = "🔴 Failed"
+                    tvBotStatus.text = getString(R.string.telegram_status_failed)
                     tvBotInfo.visibility = View.GONE
                     Toast.makeText(context, result.errorMessage, Toast.LENGTH_LONG).show()
                 }
@@ -335,24 +335,24 @@ class TelegramSettingsFragment : Fragment() {
      * or until manually stopped from daemon view.
      */
     private fun startTelegramDaemonForPairing() {
-        tvDaemonStatus.text = "⏳ Starting..."
-        
+        tvDaemonStatus.text = getString(R.string.telegram_status_starting)
+
         // Small delay to ensure config is written
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             adbLauncher?.launchTelegramDaemon(object : AdbDaemonLauncher.LaunchCallback {
                 override fun onLog(message: String) {}
-                
+
                 override fun onLaunched() {
                     activity?.runOnUiThread {
-                        tvDaemonStatus.text = "🟢 Running"
-                        Toast.makeText(context, "Daemon running. Send /pair <PIN> to your bot.", Toast.LENGTH_LONG).show()
+                        tvDaemonStatus.text = getString(R.string.telegram_status_running)
+                        Toast.makeText(context, getString(R.string.toast_daemon_running_send_pair), Toast.LENGTH_LONG).show()
                     }
                 }
-                
+
                 override fun onError(error: String) {
                     activity?.runOnUiThread {
-                        tvDaemonStatus.text = "🔴 Failed"
-                        Toast.makeText(context, "Failed to start daemon: $error", Toast.LENGTH_LONG).show()
+                        tvDaemonStatus.text = getString(R.string.telegram_status_failed)
+                        Toast.makeText(context, getString(R.string.toast_daemon_start_failed, error), Toast.LENGTH_LONG).show()
                     }
                 }
             })
@@ -397,16 +397,16 @@ class TelegramSettingsFragment : Fragment() {
                 android.util.Log.d("TelegramSettings", "Config write success for key: $key")
                 if (showToast) {
                     activity?.runOnUiThread {
-                        Toast.makeText(context, "Config saved for daemon", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, getString(R.string.toast_config_saved_for_daemon), Toast.LENGTH_SHORT).show()
                     }
                 }
             }
-            
+
             override fun onError(error: String) {
                 android.util.Log.e("TelegramSettings", "Config write error: $error")
                 if (showToast) {
                     activity?.runOnUiThread {
-                        Toast.makeText(context, "Warning: Could not save daemon config: $error", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, getString(R.string.toast_warning_daemon_config_failed, error), Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -441,23 +441,23 @@ class TelegramSettingsFragment : Fragment() {
                 val seconds = millisUntilFinished / 1000
                 val minutes = seconds / 60
                 val secs = seconds % 60
-                tvPinExpiry.text = String.format("(%d:%02d)", minutes, secs)
+                tvPinExpiry.text = getString(R.string.telegram_pin_expiry_format, minutes, secs)
             }
-            
+
             override fun onFinish() {
                 tvPin.visibility = View.GONE
                 tvPinExpiry.visibility = View.GONE
-                Toast.makeText(context, "PIN expired", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, getString(R.string.toast_pin_expired), Toast.LENGTH_SHORT).show()
             }
         }.start()
     }
-    
+
     private fun unpairOwner() {
         pairingManager.clearOwner()
         // Also clear owner from daemon config via shell
         clearOwnerFromDaemonConfigViaShell()
         updateOwnerUI()
-        Toast.makeText(context, "Owner unpaired", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, getString(R.string.toast_owner_unpaired), Toast.LENGTH_SHORT).show()
     }
     
     /**
@@ -489,7 +489,7 @@ class TelegramSettingsFragment : Fragment() {
         if (owner != null) {
             layoutNoOwner.visibility = View.GONE
             layoutOwnerPaired.visibility = View.VISIBLE
-            tvOwnerInfo.text = "✅ Paired with ${owner.firstName} (@${owner.username})"
+            tvOwnerInfo.text = getString(R.string.telegram_paired_with, owner.firstName, owner.username)
         } else {
             layoutNoOwner.visibility = View.VISIBLE
             layoutOwnerPaired.visibility = View.GONE

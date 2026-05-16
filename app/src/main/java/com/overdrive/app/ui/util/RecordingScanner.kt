@@ -143,15 +143,22 @@ object RecordingScanner {
             val animal  = stats?.optInt("animalCount", 0) ?: 0
             val heroName = root.optString("heroThumbnail").takeIf { it.isNotEmpty() }
             val heroFile = heroName?.let { File(rec.file.parentFile, it) }?.takeIf { it.exists() }
-            // Exclude static actors from the class list used for filter chips.
-            // Two parked cars at the recording moment shouldn't make a clip
-            // "match Vehicle filter" — only moving actors count.
+            // Class list for filter chips. Includes static actors so the chip
+            // matches "did this clip contain a vehicle?" rather than "was a
+            // vehicle moving in this clip?". The tracker's isStatic flag fires
+            // after just 2 frames (~200ms at 10fps) of bbox stability — a
+            // vehicle drifting laterally through a quadrant trips it even
+            // though it's clearly moving, so excluding statics here drops
+            // legitimate matches. Severity / proximity filters key off the
+            // peak* fields which EventTimelineCollector aggregates from
+            // non-static actors only — that "scenery doesn't escalate" rule
+            // still holds where it matters. Mirrors the server-side fix in
+            // RecordingsApiHandler.parseRecordingUncached.
             val classes = mutableListOf<String>()
             val actorsArr = root.optJSONArray("actors")
             if (actorsArr != null) {
                 for (i in 0 until actorsArr.length()) {
                     val a = actorsArr.optJSONObject(i) ?: continue
-                    if (a.optBoolean("isStatic", false)) continue
                     val c = a.optString("class").takeIf { it.isNotEmpty() } ?: continue
                     classes.add(c)
                 }

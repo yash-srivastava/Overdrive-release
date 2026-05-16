@@ -11,7 +11,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:fontFamily="monospace"
-        android:text="12:34:56"
+        android:text="@string/log_entry_default_timestamp"
         android:textColor="@color/text_muted"
         android:textSize="10sp" />
 
@@ -31,7 +31,7 @@
         android:fontFamily="monospace"
         android:maxWidth="80dp"
         android:singleLine="true"
-        android:text="[TAG]"
+        android:text="@string/log_entry_default_tag"
         android:textColor="@color/brand_secondary"
         android:textSize="10sp" />
 
@@ -43,7 +43,7 @@
         android:layout_marginStart="8dp"
         android:layout_weight="1"
         android:fontFamily="monospace"
-        android:text="Log message here"
+        android:text="@string/log_entry_default_message"
         android:textColor="@color/text_primary"
         android:textSize="10sp" />
 

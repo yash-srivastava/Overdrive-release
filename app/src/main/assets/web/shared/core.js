@@ -6,6 +6,308 @@
 window.BYD = window.BYD || {};
 
 /**
+ * i18n runtime — ES5-compatible (Chrome 58 / Android 7.1 head-unit).
+ *
+ * Usage:
+ *   BYD.i18n.t('nav.live_view')                 // → "Live View"
+ *   BYD.i18n.t('trip.tier_score', {score: 85})  // → "Score: 85"
+ *   BYD.i18n.plural('trip.stored', count)       // pluralized
+ *   <span data-i18n="nav.events">Events</span>  // hydrated by BYD.i18n.hydrate(root)
+ *   <input data-i18n-attr="placeholder:auth.code_placeholder">
+ *
+ * Why a custom runtime instead of i18next:
+ *   - APK perf budget; i18next + Intl.PluralRules polyfill ~80KB minified.
+ *   - Chrome 58 lacks Intl.PluralRules and modern template strings; we hand-roll
+ *     plural rules from CLDR for our 16 supported langs (~3KB total).
+ *   - One synchronous load before first paint avoids the flash-of-English.
+ */
+BYD.i18n = (function () {
+    var SUPPORTED = [
+        'en', 'zh-CN', 'zh-TW', 'pt-BR', 'es', 'de', 'fr', 'it',
+        'nb', 'nl', 'ja', 'ko', 'th', 'vi', 'hi', 'tr', 'ru'
+    ];
+    var DEFAULT_LANG = 'en';
+    var STORAGE_KEY = 'overdrive_locale';
+
+    // Native-script display labels (sidebar picker shows these — no flags by design).
+    var DISPLAY_NAMES = {
+        'en':    'English',
+        'zh-CN': '简体中文',
+        'zh-TW': '繁體中文',
+        'pt-BR': 'Português (Brasil)',
+        'es':    'Español',
+        'de':    'Deutsch',
+        'fr':    'Français',
+        'it':    'Italiano',
+        'nb':    'Norsk',
+        'nl':    'Nederlands',
+        'ja':    '日本語',
+        'ko':    '한국어',
+        'th':    'ไทย',
+        'vi':    'Tiếng Việt',
+        'hi':    'हिन्दी',
+        'tr':    'Türkçe',
+        'ru':    'Русский'
+    };
+
+    // CLDR plural rules condensed to two-form (one/other) and language-specific quirks.
+    // Returns 'one', 'few', 'many', or 'other' so translation files can carry a
+    // matching nested object for any plural-aware key.
+    function pluralRule(lang, n) {
+        n = Math.abs(n);
+        var i = Math.floor(n);
+        switch (lang) {
+            case 'zh-CN': case 'zh-TW': case 'ja': case 'ko': case 'th': case 'vi':
+                return 'other';                            // no plural distinction
+            case 'fr': case 'pt-BR':
+                return n < 2 ? 'one' : 'other';            // 0 and 1 are singular
+            case 'tr':
+                return 'other';                            // optional plural marker, treat all as other
+            case 'hi':
+                return n === 0 || n === 1 ? 'one' : 'other';
+            case 'ru':
+                // Russian / Slavic three-form plural per CLDR:
+                //   one  → ends in 1 but not 11           (1, 21, 31, ...; not 11)
+                //   few  → ends in 2-4 but not 12-14      (2-4, 22-24, ...; not 12-14)
+                //   many → ends in 0, 5-9, or 11-14       (0, 5-20, 25-30, ...)
+                var mod10 = i % 10;
+                var mod100 = i % 100;
+                if (mod10 === 1 && mod100 !== 11) return 'one';
+                if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'few';
+                return 'many';
+            default:
+                // en, es, de, it, nb, nl
+                return n === 1 ? 'one' : 'other';
+        }
+    }
+
+    var state = {
+        lang: DEFAULT_LANG,
+        catalog: {},          // flat key → string OR { one, other, ... }
+        loaded: false,
+        loadingPromise: null,
+        listeners: []
+    };
+
+    /** Normalise an arbitrary BCP-47 tag to our supported set, with sensible fallbacks. */
+    function resolveLang(raw) {
+        if (!raw) return DEFAULT_LANG;
+        // Exact match first
+        for (var i = 0; i < SUPPORTED.length; i++) {
+            if (SUPPORTED[i].toLowerCase() === raw.toLowerCase()) return SUPPORTED[i];
+        }
+        // Region fallback: zh-Hans → zh-CN, zh-Hant → zh-TW, pt → pt-BR, etc.
+        var lower = raw.toLowerCase();
+        if (lower.indexOf('zh-hans') === 0 || lower === 'zh-cn' || lower === 'zh') return 'zh-CN';
+        if (lower.indexOf('zh-hant') === 0 || lower === 'zh-tw' || lower === 'zh-hk') return 'zh-TW';
+        if (lower.indexOf('pt') === 0) return 'pt-BR';
+        if (lower.indexOf('no') === 0 || lower.indexOf('nn') === 0) return 'nb';
+        // Bare-language fallback
+        var bare = lower.split('-')[0];
+        for (var j = 0; j < SUPPORTED.length; j++) {
+            if (SUPPORTED[j].toLowerCase().split('-')[0] === bare) return SUPPORTED[j];
+        }
+        return DEFAULT_LANG;
+    }
+
+    function detectFromBrowser() {
+        if (navigator.languages && navigator.languages.length) {
+            for (var i = 0; i < navigator.languages.length; i++) {
+                var resolved = resolveLang(navigator.languages[i]);
+                if (resolved !== DEFAULT_LANG || navigator.languages[i].indexOf('en') === 0) {
+                    return resolved;
+                }
+            }
+        }
+        return resolveLang(navigator.language);
+    }
+
+    function getStored() {
+        try { return localStorage.getItem(STORAGE_KEY); } catch (e) { return null; }
+    }
+    function setStored(lang) {
+        try { localStorage.setItem(STORAGE_KEY, lang); } catch (e) { /* private mode */ }
+    }
+
+    /** Fetch the catalog JSON for `lang`. Falls back to en on failure. */
+    function fetchCatalog(lang) {
+        return fetch('/i18n/' + lang + '.json', { cache: 'no-cache' })
+            .then(function (r) {
+                if (!r.ok) throw new Error('catalog ' + lang + ' http ' + r.status);
+                return r.json();
+            })
+            .catch(function () {
+                if (lang === DEFAULT_LANG) return {};
+                return fetch('/i18n/' + DEFAULT_LANG + '.json').then(function (r) { return r.json(); });
+            });
+    }
+
+    /** Look up a dotted key inside a nested catalog. */
+    function lookup(catalog, key) {
+        if (catalog[key] != null) return catalog[key];   // flat hit
+        var parts = key.split('.');
+        var cur = catalog;
+        for (var i = 0; i < parts.length; i++) {
+            if (cur == null) return null;
+            cur = cur[parts[i]];
+        }
+        return cur == null ? null : cur;
+    }
+
+    /** {var} interpolation. Missing vars are left as-is so missing data is visible. */
+    function interpolate(str, vars) {
+        if (!vars || typeof str !== 'string') return str;
+        return str.replace(/\{(\w+)\}/g, function (match, name) {
+            return vars[name] != null ? vars[name] : match;
+        });
+    }
+
+    function t(key, vars) {
+        var val = lookup(state.catalog, key);
+        if (val == null) {
+            // No translation available. Two cases:
+            //   1. Catalog hasn't loaded yet — return null so hydrate keeps
+            //      the existing default text rather than writing the raw key.
+            //   2. Catalog IS loaded but the key is missing — return the key
+            //      as a dev-visible miss indicator.
+            return state.loaded ? key : null;
+        }
+        if (typeof val === 'object' && val.other) val = val.other;
+        return interpolate(val, vars);
+    }
+
+    function plural(key, count, vars) {
+        var val = lookup(state.catalog, key);
+        if (val == null) return key;
+        if (typeof val === 'string') return interpolate(val, vars);
+        var rule = pluralRule(state.lang, count);
+        var pick = val[rule] != null ? val[rule] : (val.other != null ? val.other : val.one);
+        if (pick == null) return key;
+        var merged = { count: count };
+        if (vars) for (var k in vars) if (vars.hasOwnProperty(k)) merged[k] = vars[k];
+        return interpolate(pick, merged);
+    }
+
+    /**
+     * Walk `root` and rewrite element text per [data-i18n] / attribute per
+     * [data-i18n-attr="attr1:key1;attr2:key2"]. Idempotent — safe to call
+     * many times. Stores the original key in dataset so subsequent language
+     * switches re-translate from the catalog rather than the previous render.
+     */
+    function hydrate(root) {
+        root = root || document;
+        var nodes = root.querySelectorAll('[data-i18n]');
+        for (var i = 0; i < nodes.length; i++) {
+            var n = nodes[i];
+            var key = n.getAttribute('data-i18n');
+            var translated = t(key);
+            // null = catalog not loaded yet → leave existing text alone, the
+            // listener fired on catalog-ready will re-hydrate. Don't write
+            // raw keys to DOM.
+            if (translated == null) continue;
+            // If the node has children other than the original text, only replace its
+            // first text node so we don't blow away nested icons/SVGs (e.g. nav links).
+            if (n.children.length > 0) {
+                var replaced = false;
+                for (var c = 0; c < n.childNodes.length; c++) {
+                    var child = n.childNodes[c];
+                    if (child.nodeType === 3 && child.nodeValue.replace(/\s/g, '').length > 0) {
+                        child.nodeValue = translated;
+                        replaced = true;
+                        break;
+                    }
+                }
+                if (!replaced) n.appendChild(document.createTextNode(translated));
+            } else {
+                n.textContent = translated;
+            }
+        }
+        var attrNodes = root.querySelectorAll('[data-i18n-attr]');
+        for (var j = 0; j < attrNodes.length; j++) {
+            var an = attrNodes[j];
+            var spec = an.getAttribute('data-i18n-attr').split(';');
+            for (var s = 0; s < spec.length; s++) {
+                var pair = spec[s].split(':');
+                if (pair.length === 2) {
+                    var translatedAttr = t(pair[1].trim());
+                    if (translatedAttr != null) {
+                        an.setAttribute(pair[0].trim(), translatedAttr);
+                    }
+                }
+            }
+        }
+        // Update <html lang="..."> so screen readers and CSS :lang() work.
+        if (document.documentElement) document.documentElement.setAttribute('lang', state.lang);
+    }
+
+    function onChange(fn) { state.listeners.push(fn); }
+    function notify() {
+        for (var i = 0; i < state.listeners.length; i++) {
+            try { state.listeners[i](state.lang); } catch (e) { console.error('[i18n]', e); }
+        }
+    }
+
+    /**
+     * Switch active language. Persists choice locally + posts to server so
+     * Java-side error JSON comes back in the matching locale on the next fetch.
+     * Resolves once the new catalog is loaded and the DOM has been rehydrated.
+     */
+    function setLang(lang) {
+        var resolved = resolveLang(lang);
+        if (resolved === state.lang && state.loaded) return Promise.resolve();
+        state.lang = resolved;
+        setStored(resolved);
+        // Server is best-effort — UI shouldn't block on it.
+        try { fetch('/api/i18n/lang', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lang: resolved })
+        }); } catch (e) {}
+        return fetchCatalog(resolved).then(function (cat) {
+            state.catalog = cat || {};
+            state.loaded = true;
+            hydrate(document);
+            notify();
+        });
+    }
+
+    /**
+     * Bootstrap: pick the active language from (in priority order)
+     *   1. Persisted localStorage choice
+     *   2. Server-supplied locale on /status (set via picker on another device)
+     *   3. navigator.language
+     *   4. 'en'
+     * Returns a promise; pages should `await BYD.i18n.init()` before showing UI.
+     */
+    function init() {
+        if (state.loadingPromise) return state.loadingPromise;
+        var picked = getStored() || detectFromBrowser();
+        state.lang = resolveLang(picked);
+        state.loadingPromise = fetchCatalog(state.lang).then(function (cat) {
+            state.catalog = cat || {};
+            state.loaded = true;
+            hydrate(document);
+            notify();
+        });
+        return state.loadingPromise;
+    }
+
+    return {
+        init: init,
+        t: t,
+        plural: plural,
+        hydrate: hydrate,
+        setLang: setLang,
+        onChange: onChange,
+        getLang: function () { return state.lang; },
+        getDisplayName: function (lang) { return DISPLAY_NAMES[lang] || lang; },
+        supported: function () { return SUPPORTED.slice(); },
+        // For tests / picker UI
+        _resolve: resolveLang
+    };
+})();
+
+/**
  * Unit formatting utility. All backend values are stored in km/km·h.
  * When the user's vehicle is set to miles, this module converts for display.
  * The mode is updated from the /status response on every poll cycle.
@@ -75,10 +377,10 @@ BYD.core = {
         const update = () => {
             const el = document.getElementById('currentTime');
             if (el) {
-                el.textContent = new Date().toLocaleTimeString('en-US', { 
-                    hour: '2-digit', 
-                    minute: '2-digit', 
-                    hour12: false 
+                el.textContent = new Date().toLocaleTimeString(BYD.i18n.getLang(), {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
                 });
             }
         };
@@ -108,6 +410,13 @@ BYD.core = {
                 BYD.units.mode = status.distanceUnit;
             }
 
+            // Locale sync: if Android settings changed the locale on another
+            // device (e.g. via the native settings drawer), fold that change
+            // into the WebView without a manual refresh.
+            if (status.locale && BYD.i18n && status.locale !== BYD.i18n.getLang()) {
+                BYD.i18n.setLang(status.locale);
+            }
+
             // Device ID
             if (status.deviceId) {
                 this.deviceId = status.deviceId;
@@ -130,7 +439,7 @@ BYD.core = {
             // ACC status
             const accEl = document.getElementById('accValue');
             if (accEl) {
-                accEl.textContent = status.acc ? 'ON' : 'OFF';
+                accEl.textContent = status.acc ? BYD.i18n.t('status.on') : BYD.i18n.t('status.off');
                 accEl.className = 'status-value ' + (status.acc ? 'on' : 'off');
             }
 
@@ -138,11 +447,11 @@ BYD.core = {
             const survEl = document.getElementById('survStatus');
             if (survEl) {
                 if (status.safeZoneSuppressed || status.inSafeZone) {
-                    survEl.textContent = '🏠 Safe';
+                    survEl.textContent = '🏠 ' + BYD.i18n.t('status.safe');
                     survEl.className = 'status-value safe';
                 } else {
                     const active = status.gpuSurveillance || false;
-                    survEl.textContent = active ? 'ON' : 'OFF';
+                    survEl.textContent = active ? BYD.i18n.t('status.on') : BYD.i18n.t('status.off');
                     survEl.className = 'status-value ' + (active ? 'on' : 'off');
                 }
             }
@@ -365,7 +674,7 @@ BYD.core = {
         }
 
         if (net.type === 'wifi') {
-            const ssid = net.ssid || 'WiFi';
+            const ssid = net.ssid || BYD.i18n.t('status.wifi');
             const ip = net.ip || '';
             // Show SSID on first line, IP smaller below
             netEl.innerHTML = '<span class="net-ssid">' + this._esc(ssid) + '</span>' +
@@ -374,12 +683,12 @@ BYD.core = {
             if (netIcon) netIcon.innerHTML = this._wifiSvg();
         } else if (net.type === 'cellular') {
             const ip = net.ip || '';
-            netEl.innerHTML = '<span class="net-ssid">Mobile Data</span>' +
+            netEl.innerHTML = '<span class="net-ssid">' + this._esc(BYD.i18n.t('status.mobile_data')) + '</span>' +
                 (ip ? '<span class="net-ip">' + this._esc(ip) + '</span>' : '');
             netEl.className = 'status-value on net-info';
             if (netIcon) netIcon.innerHTML = this._cellSvg();
         } else {
-            netEl.textContent = 'No Network';
+            netEl.textContent = BYD.i18n.t('status.no_network');
             netEl.className = 'status-value off';
             if (netIcon) netIcon.innerHTML = this._wifiOffSvg();
         }
@@ -459,3 +768,16 @@ BYD.core = {
 // Expose toast globally for convenience
 BYD.utils = BYD.utils || {};
 BYD.utils.toast = (msg, type) => BYD.core.toast(msg, type);
+
+// Auto-load the language picker on every page that includes core.js so we
+// don't have to touch every HTML file. Picker mounts itself once the DOM is
+// ready and a sidebar-footer is found (login page has no sidebar — picker
+// silently no-ops there).
+(function () {
+    if (document.querySelector('script[data-byd-lang-picker]')) return;
+    var s = document.createElement('script');
+    s.src = '/shared/lang-picker.js';
+    s.async = true;
+    s.setAttribute('data-byd-lang-picker', '1');
+    (document.head || document.documentElement).appendChild(s);
+})();

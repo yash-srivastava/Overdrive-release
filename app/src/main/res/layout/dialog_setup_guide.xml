@@ -33,7 +33,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Getting Started"
+        android:text="@string/setup_guide_title"
         android:textColor="@color/brand_primary"
         android:textSize="20sp"
         android:textStyle="bold" />
@@ -42,11 +42,11 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:text="Two quick steps to get the best experience:"
+        android:text="@string/setup_guide_subtitle"
         android:textColor="@color/text_secondary"
         android:textSize="13sp" />
 
-    <!-- Step 1: Auto-start -->
+    <!-- Step 1: Language -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -66,7 +66,7 @@
                 android:layout_height="28dp"
                 android:background="@drawable/overlay_pill_background"
                 android:gravity="center"
-                android:text="1"
+                android:text="@string/setup_step_one_label"
                 android:textColor="@color/brand_primary"
                 android:textSize="14sp"
                 android:textStyle="bold" />
@@ -81,7 +81,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Disable Auto-Start Restriction"
+                    android:text="@string/setup_language_title"
                     android:textColor="@color/text_primary"
                     android:textSize="14sp"
                     android:textStyle="bold" />
@@ -90,38 +90,38 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="Tap below to open BYD Auto-Start. Find OverDrive in the list and uncheck the box. BYD wipes this on every install — you'll redo it after updates."
+                    android:text="@string/setup_language_body"
                     android:textColor="@color/text_secondary"
                     android:textSize="11sp" />
 
             </LinearLayout>
 
             <ImageView
-                android:id="@+id/ivAutoStartCheck"
+                android:id="@+id/ivLanguageCheck"
                 android:layout_width="24dp"
                 android:layout_height="24dp"
-                android:src="@drawable/ic_overlay_rec_active"
-                android:visibility="invisible"
-                android:contentDescription="Step completed" />
+                android:src="@drawable/ic_check"
+                android:visibility="visible"
+                android:contentDescription="@string/cd_step_completed" />
 
         </LinearLayout>
 
         <TextView
-            android:id="@+id/btnOpenAutoStart"
+            android:id="@+id/btnOpenLanguage"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
             android:background="@drawable/overlay_action_button_bg"
             android:gravity="center"
             android:paddingVertical="8dp"
-            android:text="Open BYD Auto-Start"
+            android:text="@string/setup_language_button"
             android:textColor="@color/brand_primary"
             android:textSize="13sp"
             android:textStyle="bold" />
 
     </LinearLayout>
 
-    <!-- Step 2: Overlay Permission -->
+    <!-- Step 2: Auto-start -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -141,7 +141,7 @@
                 android:layout_height="28dp"
                 android:background="@drawable/overlay_pill_background"
                 android:gravity="center"
-                android:text="2"
+                android:text="@string/setup_step_two_label"
                 android:textColor="@color/brand_primary"
                 android:textSize="14sp"
                 android:textStyle="bold" />
@@ -156,7 +156,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Allow Display Over Other Apps"
+                    android:text="@string/setup_autostart_title"
                     android:textColor="@color/text_primary"
                     android:textSize="14sp"
                     android:textStyle="bold" />
@@ -165,7 +165,82 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="Enable this to show a floating status indicator for recording and trip tracking on top of other apps."
+                    android:text="@string/setup_autostart_body"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11sp" />
+
+            </LinearLayout>
+
+            <ImageView
+                android:id="@+id/ivAutoStartCheck"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:src="@drawable/ic_check"
+                android:visibility="invisible"
+                android:contentDescription="@string/cd_step_completed" />
+
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/btnOpenAutoStart"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/overlay_action_button_bg"
+            android:gravity="center"
+            android:paddingVertical="8dp"
+            android:text="@string/setup_autostart_button"
+            android:textColor="@color/brand_primary"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
+    <!-- Step 3: Overlay Permission -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:background="@drawable/overlay_expanded_background"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:background="@drawable/overlay_pill_background"
+                android:gravity="center"
+                android:text="@string/setup_step_three_label"
+                android:textColor="@color/brand_primary"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/setup_overlay_title"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/setup_overlay_body"
                     android:textColor="@color/text_secondary"
                     android:textSize="11sp" />
 
@@ -175,9 +250,9 @@
                 android:id="@+id/ivOverlayCheck"
                 android:layout_width="24dp"
                 android:layout_height="24dp"
-                android:src="@drawable/ic_overlay_rec_active"
+                android:src="@drawable/ic_check"
                 android:visibility="invisible"
-                android:contentDescription="Permission granted" />
+                android:contentDescription="@string/cd_permission_granted" />
 
         </LinearLayout>
 
@@ -189,7 +264,7 @@
             android:background="@drawable/overlay_action_button_bg"
             android:gravity="center"
             android:paddingVertical="8dp"
-            android:text="Open Overlay Settings"
+            android:text="@string/setup_overlay_button"
             android:textColor="@color/brand_primary"
             android:textSize="13sp"
             android:textStyle="bold" />
@@ -215,7 +290,7 @@
             android:singleLine="true"
             android:ellipsize="end"
             android:paddingHorizontal="20dp"
-            android:text="REMIND ME LATER"
+            android:text="@string/action_remind_me_later"
             android:textColor="#FFFFFF"
             android:textSize="14sp"
             android:textStyle="bold"
@@ -232,7 +307,7 @@
             android:includeFontPadding="false"
             android:paddingHorizontal="24dp"
             android:background="@color/brand_primary"
-            android:text="DONE"
+            android:text="@string/action_done"
             android:textColor="#000000"
             android:textSize="14sp"
             android:textStyle="bold" />

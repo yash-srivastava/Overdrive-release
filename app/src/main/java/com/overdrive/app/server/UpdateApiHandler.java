@@ -76,7 +76,7 @@ public class UpdateApiHandler {
     private static void handleCheck(OutputStream out) throws Exception {
         Context ctx = CameraDaemon.getAppContext();
         if (ctx == null) {
-            HttpResponse.sendJsonError(out, "App context not ready");
+            HttpResponse.sendJsonError(out, Messages.get("errors.update_app_context_not_ready"));
             return;
         }
 
@@ -127,7 +127,7 @@ public class UpdateApiHandler {
         }
 
         if (resultRef[0] == null) {
-            HttpResponse.sendJsonError(out, "Update check timed out");
+            HttpResponse.sendJsonError(out, Messages.get("errors.update_check_timed_out"));
             return;
         }
         HttpResponse.sendJson(out, resultRef[0].toString());
@@ -237,9 +237,7 @@ public class UpdateApiHandler {
         // is in PUBLIC mode. Anyone with a sharing link should not be able to
         // push an APK to the head unit.
         if (CameraDaemon.isPublicMode()) {
-            HttpResponse.sendJsonError(out,
-                    "Updates are disabled in PUBLIC sharing mode. " +
-                    "Switch to PRIVATE mode in the in-car app first.");
+            HttpResponse.sendJsonError(out, Messages.get("errors.update_disabled_in_public_mode"));
             return;
         }
 
@@ -247,18 +245,18 @@ public class UpdateApiHandler {
         // pushing an install. The webapp passes this only after the user clicks
         // "Install Anyway" in the confirmation modal.
         if (!path.contains("confirm=true")) {
-            HttpResponse.sendJsonError(out, "Missing confirm=true");
+            HttpResponse.sendJsonError(out, Messages.get("errors.update_missing_confirm"));
             return;
         }
 
         if (installInFlight) {
-            HttpResponse.sendJsonError(out, "An update is already in progress");
+            HttpResponse.sendJsonError(out, Messages.get("errors.update_already_in_progress"));
             return;
         }
 
         Context ctx = CameraDaemon.getAppContext();
         if (ctx == null) {
-            HttpResponse.sendJsonError(out, "App context not ready");
+            HttpResponse.sendJsonError(out, Messages.get("errors.update_app_context_not_ready"));
             return;
         }
 
@@ -290,11 +288,11 @@ public class UpdateApiHandler {
             if (!done[0]) lock.wait(20_000);
         }
         if (err[0] != null) {
-            HttpResponse.sendJsonError(out, "Pre-install check failed: " + err[0]);
+            HttpResponse.sendJsonError(out, Messages.get("errors.update_pre_install_failed_with_detail", err[0]));
             return;
         }
         if (!available[0]) {
-            HttpResponse.sendJsonError(out, "No update available");
+            HttpResponse.sendJsonError(out, Messages.get("errors.update_no_update_available"));
             return;
         }
 
@@ -302,7 +300,7 @@ public class UpdateApiHandler {
         // dying, the response would never make it back. From here on, the
         // webapp polls /api/update/progress.
         installInFlight = true;
-        writeProgress("queued", 0, "Update queued — starting download…", null);
+        writeProgress("queued", 0, Messages.get("messages.update_queued"), null);
 
         JSONObject r = new JSONObject();
         r.put("status", "scheduled");
@@ -332,22 +330,24 @@ public class UpdateApiHandler {
                     }
                     @Override public void onDownloadProgress(int percent) {
                         writeProgress("downloading", percent,
-                                percent < 0 ? "Downloading…" : "Downloading… " + percent + "%",
+                                percent < 0
+                                    ? Messages.get("messages.update_downloading_indeterminate")
+                                    : Messages.get("messages.update_downloading_with_percent", percent),
                                 null);
                     }
                     @Override public void onSuccess() {
                         writeProgress("installing", 100,
-                                "Installing — head unit will be back online shortly.", null);
+                                Messages.get("messages.update_installing_finishing"), null);
                         // Process should die before this matters, but defensive.
                         installInFlight = false;
                     }
                     @Override public void onError(String error) {
-                        writeProgress("error", -1, "Install failed", error);
+                        writeProgress("error", -1, Messages.get("messages.update_install_failed"), error);
                         installInFlight = false;
                     }
                 });
             } catch (Exception e) {
-                writeProgress("error", -1, "Install crashed", e.getMessage());
+                writeProgress("error", -1, Messages.get("messages.update_install_crashed"), e.getMessage());
                 installInFlight = false;
             }
         }, "UpdateApi-Install").start();
@@ -369,7 +369,7 @@ public class UpdateApiHandler {
         }
         String json = readTextFile(PROGRESS_FILE);
         if (json == null || json.isEmpty()) {
-            HttpResponse.sendJsonError(out, "Progress file unreadable");
+            HttpResponse.sendJsonError(out, Messages.get("errors.update_progress_unreadable"));
             return;
         }
         HttpResponse.sendJson(out, json);

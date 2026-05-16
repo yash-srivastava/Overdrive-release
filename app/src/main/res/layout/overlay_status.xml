@@ -25,14 +25,14 @@
             android:layout_width="18dp"
             android:layout_height="18dp"
             android:src="@drawable/ic_overlay_rec_inactive"
-            android:contentDescription="Recording status" />
+            android:contentDescription="@string/cd_recording_status" />
 
         <TextView
             android:id="@+id/tvRecLabel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="4dp"
-            android:text="REC ✗"
+            android:text="@string/overlay_rec_inactive_label"
             android:textColor="@color/status_danger"
             android:textSize="11sp"
             android:textStyle="bold"
@@ -63,14 +63,14 @@
             android:layout_width="18dp"
             android:layout_height="18dp"
             android:src="@drawable/ic_overlay_trip_inactive"
-            android:contentDescription="Trip tracking status" />
+            android:contentDescription="@string/cd_trip_tracking_status" />
 
         <TextView
             android:id="@+id/tvTripLabel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="4dp"
-            android:text="TRIP ✗"
+            android:text="@string/overlay_trip_inactive_label"
             android:textColor="@color/status_danger"
             android:textSize="11sp"
             android:textStyle="bold"

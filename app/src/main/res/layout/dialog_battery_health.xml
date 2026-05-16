@@ -24,7 +24,7 @@
             android:layout_width="40dp"
             android:layout_height="40dp"
             android:src="@drawable/ic_battery_health"
-            android:contentDescription="Battery"
+            android:contentDescription="@string/cd_battery"
             app:tint="@color/brand_primary" />
 
         <LinearLayout
@@ -37,7 +37,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Battery Health"
+                android:text="@string/battery_health_title"
                 android:textColor="@color/text_primary"
                 android:textSize="18sp"
                 android:fontFamily="sans-serif-medium" />
@@ -46,7 +46,7 @@
                 android:id="@+id/tvSohSubtitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="State of Health"
+                android:text="@string/battery_health_subtitle"
                 android:textColor="@color/text_muted"
                 android:textSize="12sp"
                 android:layout_marginTop="2dp" />
@@ -75,7 +75,7 @@
                 android:id="@+id/tvSohPercent"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="--"
+                android:text="@string/battery_health_dashes"
                 android:textColor="@color/brand_primary"
                 android:textSize="36sp"
                 android:fontFamily="sans-serif-medium" />
@@ -84,7 +84,7 @@
                 android:id="@+id/tvSohStatus"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Waiting for data..."
+                android:text="@string/battery_health_waiting"
                 android:textColor="@color/text_muted"
                 android:textSize="12sp"
                 android:layout_marginTop="4dp" />
@@ -114,7 +114,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Source"
+                    android:text="@string/battery_health_source"
                     android:textColor="@color/text_muted"
                     android:textSize="11sp"
                     android:textAllCaps="true"
@@ -124,7 +124,7 @@
                     android:id="@+id/tvSohSource"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="--"
+                    android:text="@string/battery_health_dashes"
                     android:textColor="@color/text_primary"
                     android:textSize="14sp"
                     android:layout_marginTop="2dp" />
@@ -139,7 +139,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Method"
+                    android:text="@string/battery_health_method"
                     android:textColor="@color/text_muted"
                     android:textSize="11sp"
                     android:textAllCaps="true"
@@ -149,7 +149,7 @@
                     android:id="@+id/tvSohMethod"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="--"
+                    android:text="@string/battery_health_dashes"
                     android:textColor="@color/text_primary"
                     android:textSize="14sp"
                     android:layout_marginTop="2dp" />
@@ -172,7 +172,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Capacity"
+                    android:text="@string/battery_health_capacity"
                     android:textColor="@color/text_muted"
                     android:textSize="11sp"
                     android:textAllCaps="true"
@@ -182,7 +182,7 @@
                     android:id="@+id/tvSohCapacity"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="--"
+                    android:text="@string/battery_health_dashes"
                     android:textColor="@color/text_primary"
                     android:textSize="14sp"
                     android:layout_marginTop="2dp" />
@@ -197,7 +197,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Samples"
+                    android:text="@string/battery_health_samples"
                     android:textColor="@color/text_muted"
                     android:textSize="11sp"
                     android:textAllCaps="true"
@@ -207,7 +207,7 @@
                     android:id="@+id/tvSohSamples"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="--"
+                    android:text="@string/battery_health_dashes"
                     android:textColor="@color/text_primary"
                     android:textSize="14sp"
                     android:layout_marginTop="2dp" />
@@ -223,7 +223,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Last Updated"
+                android:text="@string/battery_health_last_updated"
                 android:textColor="@color/text_muted"
                 android:textSize="11sp"
                 android:textAllCaps="true"
@@ -233,7 +233,7 @@
                 android:id="@+id/tvSohLastUpdated"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="--"
+                android:text="@string/battery_health_dashes"
                 android:textColor="@color/text_primary"
                 android:textSize="14sp"
                 android:layout_marginTop="2dp" />
@@ -252,7 +252,7 @@
         android:id="@+id/btnResetSoh"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="⚠️ Reset SOH Estimation"
+        android:text="@string/battery_health_reset"
         android:textColor="#EF4444"
         android:textSize="14sp"
         android:fontFamily="sans-serif-medium"
@@ -265,7 +265,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
-        android:text="Clears all data and re-estimates from scratch. Use if battery was replaced or reading seems incorrect."
+        android:text="@string/battery_health_reset_desc"
         android:textColor="@color/text_muted"
         android:textSize="11sp" />
 

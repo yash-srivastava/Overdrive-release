@@ -7,7 +7,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="../shared/app-icon.webp">
-    <title>Notifications - OverDrive</title>
+    <title data-i18n="app.notifications_title">Notifications - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon.webp">
     <link rel="stylesheet" href="../shared/styles.css">
     <link rel="manifest" href="/manifest.json">
@@ -188,8 +188,8 @@
                         <img src="../shared/app-icon.webp" alt="OverDrive">
                     </div>
                     <div class="brand-text">
-                        <span class="brand-name">OverDrive</span>
-                        <span class="brand-tagline">Sentry System</span>
+                        <span class="brand-name" data-i18n="app.name">OverDrive</span>
+                        <span class="brand-tagline" data-i18n="app.tagline">Sentry System</span>
                         <span class="brand-version" id="appVersion"></span>
                     </div>
                 </div>
@@ -203,70 +203,70 @@
             <nav class="sidebar-nav">
                 <a href="index.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/><path d="M2 12a9 9 0 0 0 8 8"/><circle cx="2" cy="12" r="2"/></svg>
-                    <span>Live View</span>
+                    <span data-i18n="nav.live_view">Live View</span>
                 </a>
                 <a href="events.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                    <span>Events</span>
+                    <span data-i18n="nav.events">Events</span>
                 </a>
                 <a href="surveillance.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                    <span>Surveillance</span>
+                    <span data-i18n="nav.surveillance">Surveillance</span>
                 </a>
                 <a href="recording.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg>
-                    <span>Recordings</span>
+                    <span data-i18n="nav.recordings">Recordings</span>
                 </a>
                 <a href="performance.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                    <span>Performance</span>
+                    <span data-i18n="nav.performance">Performance</span>
                 </a>
                 <a href="abrp.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/><circle cx="18" cy="12" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/></svg>
-                    <span>ABRP</span>
+                    <span data-i18n="nav.abrp">ABRP</span>
                 </a>
                 <a href="mqtt.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="2"/><path d="M8.46 15.54A5 5 0 0 1 7 12a5 5 0 0 1 1.46-3.54"/><path d="M15.54 8.46A5 5 0 0 1 17 12a5 5 0 0 1-1.46 3.54"/><path d="M5.64 18.36A9 9 0 0 1 3 12a9 9 0 0 1 2.64-6.36"/><path d="M18.36 5.64A9 9 0 0 1 21 12a9 9 0 0 1-2.64 6.36"/></svg>
-                    <span>MQTT</span>
+                    <span data-i18n="nav.mqtt">MQTT</span>
                 </a>
                 <a href="trips.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17h2v-7l4 4 4-4 4 4 4-4v7h2"/><path d="M4 5h16"/></svg>
-                    <span>Trips</span>
+                    <span data-i18n="nav.trips">Trips</span>
                 </a>
                 <a href="notifications.html" class="nav-link active">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-                    <span>Notifications</span>
+                    <span data-i18n="nav.notifications">Notifications</span>
                 </a>
                 <a href="vehicle-control.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="3" y="11" width="18" height="11" rx="2"/>
                         <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                     </svg>
-                    <span>Vehicle Control</span>
+                    <span data-i18n="nav.vehicle_control">Vehicle Control</span>
                 </a>
             </nav>
             <div class="sidebar-footer">
                 <div class="status-card">
                     <div class="status-row">
-                        <span class="status-label"><span class="status-dot" id="connDot"></span>Device</span>
+                        <span class="status-label" data-i18n="status.device"><span class="status-dot" id="connDot"></span>Device</span>
                         <span class="status-value" id="deviceId">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">ACC</span>
+                        <span class="status-label" data-i18n="status.acc">ACC</span>
                         <span class="status-value" id="accValue">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">
+                        <span class="status-label" data-i18n="status.battery_12v">
                             <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="7" width="12" height="10" rx="1"/><path d="M6 10H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h2"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/></svg>12V
                         </span>
                         <span class="status-value" id="batteryValue">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">Sentry</span>
-                        <span class="status-value" id="survStatus">OFF</span>
+                        <span class="status-label" data-i18n="status.sentry">Sentry</span>
+                        <span class="status-value" id="survStatus" data-i18n="status.off">OFF</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">
+                        <span class="status-label" data-i18n="status.network">
                             <span id="networkIcon"><svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg></span>Net
                         </span>
                         <span class="status-value" id="networkValue">--</span>
@@ -275,7 +275,7 @@
                 <!-- EV Battery & Charging Card -->
                 <div class="status-card ev-card" id="evCard">
                     <div class="ev-header-row">
-                        <span class="ev-title">Vehicle Status</span>
+                        <span class="ev-title" data-i18n="status.vehicle_status">Vehicle Status</span>
                         <span class="ev-percent-text" id="evPercentValue">--%</span>
                     </div>
                     <div class="ev-svg-container">
@@ -344,7 +344,7 @@
             </div>
 
             <header class="page-header">
-                <h1 class="page-title">Notifications</h1>
+                <h1 class="page-title" data-i18n="notif.page_title">Notifications</h1>
                 <div class="header-actions">
                     <div class="header-badge">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -357,64 +357,49 @@
                 <div class="notif-page-body">
                     <div id="status" class="notif-status" style="display:none;"></div>
 
-                    <div id="originBanner" class="notif-status warn" style="display:none;">
-                        <strong>Push notifications require Zrok.</strong>
-                        They install via the reserved Zrok URL only — Cloudflare quick tunnels
-                        change every restart and would invalidate every subscription.
-                        Tailscale serves over plain HTTP and can't be used for Web Push at all.
-                        Open the dashboard from your <code>&lt;name&gt;.share.zrok.io</code> URL
-                        on your phone, "Add to Home Screen", then return here to enable.
+                    <div id="originBanner" class="notif-status warn" style="display:none;" data-i18n="notif.origin_banner">
+                        Push notifications require Zrok. They install via the reserved Zrok URL only — Cloudflare quick tunnels change every restart and would invalidate every subscription. Tailscale serves over plain HTTP and can't be used for Web Push at all. Open the dashboard from your &lt;name&gt;.share.zrok.io URL on your phone, "Add to Home Screen", then return here to enable.
                     </div>
 
-                    <div id="backendBanner" class="notif-status warn" style="display:none;">
-                        <strong>Notifications backend not initialized.</strong>
-                        Reserve a Zrok URL via the daemons screen and restart the daemon
-                        to enable push delivery.
+                    <div id="backendBanner" class="notif-status warn" style="display:none;" data-i18n="notif.backend_banner">
+                        Notifications backend not initialized. Reserve a Zrok URL via the daemons screen and restart the daemon to enable push delivery.
                     </div>
 
                     <div class="notif-section" id="permissionSection">
-                        <h2>Push delivery</h2>
-                        <p class="notif-section-sub">
-                            Enables alerts on the device you are currently using. Each phone
-                            you install the dashboard onto needs to be enabled here once.
+                        <h2 data-i18n="notif.push_delivery">Push delivery</h2>
+                        <p class="notif-section-sub" data-i18n="notif.push_delivery_sub">
+                            Enables alerts on the device you are currently using. Each phone you install the dashboard onto needs to be enabled here once.
                         </p>
                         <div class="notif-card" style="padding: 16px 18px;">
                             <div id="permissionRow" class="notif-permission-row">
                                 <div id="permissionState" class="notif-permission-state"></div>
                                 <div class="notif-action-row">
-                                    <button class="notif-btn" id="enableBtn">Enable on this device</button>
-                                    <button class="notif-btn" id="testBtn">Send test</button>
-                                    <button class="notif-btn danger" id="disableBtn" style="display:none;">Disable on this device</button>
+                                    <button class="notif-btn" id="enableBtn" data-i18n="notif.enable_btn">Enable on this device</button>
+                                    <button class="notif-btn" id="testBtn" data-i18n="notif.test_btn">Send test</button>
+                                    <button class="notif-btn danger" id="disableBtn" style="display:none;" data-i18n="notif.disable_btn">Disable on this device</button>
                                 </div>
                             </div>
                         </div>
                     </div>
 
                     <div class="notif-section">
-                        <h2>Categories</h2>
-                        <p class="notif-section-sub">
-                            Toggle which kinds of alerts are pushed to this device. Each
-                            category fires when the head unit detects the matching event;
-                            what triggers it depends on the related daemon's settings.
-                            Hover any row to see what its severity level means.
+                        <h2 data-i18n="notif.categories">Categories</h2>
+                        <p class="notif-section-sub" data-i18n="notif.categories_sub">
+                            Toggle which kinds of alerts are pushed to this device. Each category fires when the head unit detects the matching event; what triggers it depends on the related daemon's settings. Hover any row to see what its severity level means.
                         </p>
 
                         <div id="categoriesContainer">
-                            <div class="notif-card"><div class="empty-state">Loading…</div></div>
+                            <div class="notif-card"><div class="empty-state" data-i18n="common.loading">Loading…</div></div>
                         </div>
                     </div>
 
                     <div class="notif-section">
-                        <h2>Registered devices</h2>
-                        <p class="notif-section-sub">
-                            Every phone that enabled push notifications appears here.
-                            Use <strong>Remove</strong> to deregister a device — useful if you
-                            lose the phone or want to stop alerts to it without touching it.
-                            <strong>Disable on this device</strong> above also unsubscribes the
-                            current browser locally, while Remove is server-side only.
+                        <h2 data-i18n="notif.registered_devices">Registered devices</h2>
+                        <p class="notif-section-sub" data-i18n="notif.devices_sub">
+                            Every phone that enabled push notifications appears here. Use Remove to deregister a device. Disable on this device above also unsubscribes the current browser locally, while Remove is server-side only.
                         </p>
                         <div class="notif-card" id="devicesCard">
-                            <div class="empty-state" id="devicesEmpty">No devices registered yet.</div>
+                            <div class="empty-state" id="devicesEmpty" data-i18n="notif.no_devices">No devices registered yet.</div>
                         </div>
                     </div>
                 </div>
@@ -458,7 +443,11 @@
         if (!SKIP_AUTH_REDIRECT && typeof BYDAuth !== 'undefined' && BYDAuth.requireAuth) {
             BYDAuth.requireAuth();
         }
-        if (typeof BYD !== 'undefined' && BYD.core) BYD.core.init();
+        if (typeof BYD !== 'undefined' && BYD.core) {
+            BYD.i18n.init().then(function () {
+                BYD.core.init();
+            });
+        }
 
         // ==================== ORIGIN GATE ====================
         // Dev escape hatch: ?devPwa=1 lets the page run its full flow against
@@ -505,13 +494,13 @@
 
         function permissionLabel() {
             if (!ORIGIN_OK) {
-                return 'Push delivery requires the Zrok URL — see banner above.';
+                return BYD.i18n.t('notif.perm_zrok_required');
             }
-            if (typeof Notification === 'undefined') return 'Notifications not supported in this browser';
+            if (typeof Notification === 'undefined') return BYD.i18n.t('notif.perm_unsupported');
             switch (Notification.permission) {
-                case 'granted': return 'Notifications are enabled on this device';
-                case 'denied':  return 'Notifications are blocked. Enable in browser settings.';
-                default:        return 'Notifications are not yet enabled.';
+                case 'granted': return BYD.i18n.t('notif.perm_granted');
+                case 'denied':  return BYD.i18n.t('notif.perm_denied');
+                default:        return BYD.i18n.t('notif.perm_default');
             }
         }
 
@@ -625,7 +614,7 @@
                     state.backendReady = false;
                     var bb = document.getElementById('backendBanner');
                     if (bb) bb.style.display = '';
-                    if (container) container.innerHTML = '<div class="notif-card"><div class="empty-state">Backend not ready.</div></div>';
+                    if (container) container.innerHTML = '<div class="notif-card"><div class="empty-state">' + escapeHtml(BYD.i18n.t('notif.backend_not_ready')) + '</div></div>';
                     return;
                 }
                 if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -634,8 +623,8 @@
                 state.backendReady = true;
                 renderCategories();
             } catch (e) {
-                if (container) container.innerHTML = '<div class="notif-card"><div class="empty-state">Could not load categories.</div></div>';
-                showStatus('error', 'Failed to load categories: ' + (e && e.message ? e.message : e));
+                if (container) container.innerHTML = '<div class="notif-card"><div class="empty-state">' + escapeHtml(BYD.i18n.t('notif.categories_load_failed')) + '</div></div>';
+                showStatus('error', BYD.i18n.t('notif.categories_load_error', {error: (e && e.message ? e.message : e)}));
             }
         }
 
@@ -648,14 +637,10 @@
 
         function severityTooltip(sev) {
             switch (sev) {
-                case 'critical':
-                    return 'Critical: drop-everything alert — sticky banner, longer vibrate, ignores quiet hours.';
-                case 'warn':
-                    return 'Warn: short vibrate, standard banner — something to look at soon.';
-                case 'auto':
-                    return 'Auto: severity is decided per-event from the data (slow leak → warn, fast leak → critical).';
-                default:
-                    return 'Info: silent banner, no vibrate — reserved for confirmations.';
+                case 'critical': return BYD.i18n.t('notif.sev_critical');
+                case 'warn':     return BYD.i18n.t('notif.sev_warn');
+                case 'auto':     return BYD.i18n.t('notif.sev_auto');
+                default:         return BYD.i18n.t('notif.sev_info');
             }
         }
 
@@ -690,7 +675,7 @@
             container.innerHTML = '';
 
             if (state.categories.length === 0) {
-                container.innerHTML = '<div class="notif-card"><div class="empty-state">No categories registered.</div></div>';
+                container.innerHTML = '<div class="notif-card"><div class="empty-state">' + escapeHtml(BYD.i18n.t('notif.no_categories')) + '</div></div>';
                 return;
             }
 
@@ -748,7 +733,7 @@
 
         async function onToggle(catId, el) {
             if (!state.currentSubscriptionId) {
-                showStatus('warn', 'Enable notifications on this device first.');
+                showStatus('warn', BYD.i18n.t('notif.enable_first'));
                 return;
             }
             if (state.muted.has(catId)) state.muted.delete(catId);
@@ -765,7 +750,7 @@
                         mutedCategories: muted
                     })
                 });
-            } catch (e) { showStatus('error', 'Failed to save preference'); }
+            } catch (e) { showStatus('error', BYD.i18n.t('notif.save_pref_failed')); }
         }
 
         // SHA-256 first 12 bytes of endpoint, base64url no-padding — matches
@@ -810,7 +795,7 @@
             var card = document.getElementById('devicesCard');
             if (!card) return;
             if (!subs.length) {
-                card.innerHTML = '<div class="empty-state">No devices registered yet.</div>';
+                card.innerHTML = '<div class="empty-state">' + escapeHtml(BYD.i18n.t('notif.no_devices')) + '</div>';
                 return;
             }
             card.innerHTML = '';
@@ -819,14 +804,14 @@
                 row.className = 'device-row';
                 var lastSeen = s.lastSeenAt
                     ? new Date(s.lastSeenAt).toLocaleString()
-                    : 'never';
+                    : BYD.i18n.t('notif.device_never');
                 row.innerHTML =
                     '<div class="device-row-top">' +
                         '<div>' +
-                            '<div class="device-row-label">' + escapeHtml(s.label || 'Unnamed device') + '</div>' +
-                            '<div class="device-row-meta">Last seen ' + escapeHtml(lastSeen) + '</div>' +
+                            '<div class="device-row-label">' + escapeHtml(s.label || BYD.i18n.t('notif.unnamed_device')) + '</div>' +
+                            '<div class="device-row-meta">' + escapeHtml(BYD.i18n.t('notif.device_last_seen', {time: lastSeen})) + '</div>' +
                         '</div>' +
-                        '<button class="notif-btn danger" data-id="' + escapeAttr(s.id) + '">Remove</button>' +
+                        '<button class="notif-btn danger" data-id="' + escapeAttr(s.id) + '">' + escapeHtml(BYD.i18n.t('notif.device_remove')) + '</button>' +
                     '</div>';
                 card.appendChild(row);
             });
@@ -838,7 +823,7 @@
         }
 
         async function removeDevice(id) {
-            if (!confirm('Remove this device from notifications?')) return;
+            if (!confirm(BYD.i18n.t('notif.remove_device_confirm'))) return;
             try {
                 await BYDAuth.fetch('/api/push/unsubscribe', {
                     method: 'POST',
@@ -846,7 +831,7 @@
                     body: JSON.stringify({ id: id })
                 });
                 await loadSubscriptions();
-            } catch (e) { showStatus('error', 'Failed to remove device'); }
+            } catch (e) { showStatus('error', BYD.i18n.t('notif.remove_device_failed')); }
         }
 
         var enableBtnEl = document.getElementById('enableBtn');
@@ -854,21 +839,21 @@
             hideStatus();
             if (!ORIGIN_OK) return;
             if (!window.OverdrivePush) {
-                showStatus('error', 'PWA bootstrap not loaded — install to home screen first.');
+                showStatus('error', BYD.i18n.t('notif.pwa_not_loaded'));
                 return;
             }
             try {
                 var result = await window.OverdrivePush.requestAndSubscribe();
                 if (!result.ok) {
-                    showStatus('error', 'Could not enable: ' + result.reason);
+                    showStatus('error', BYD.i18n.t('notif.enable_could_not', {reason: result.reason}));
                     return;
                 }
                 state.currentSubscriptionId = result.id;
                 refreshPermissionUI();
                 await loadSubscriptions();
-                showStatus('ok', 'Push notifications enabled on this device.');
+                showStatus('ok', BYD.i18n.t('notif.enable_success'));
             } catch (e) {
-                showStatus('error', 'Enable failed: ' + (e && e.message ? e.message : e));
+                showStatus('error', BYD.i18n.t('notif.enable_failed', {error: (e && e.message ? e.message : e)}));
             }
         });
 

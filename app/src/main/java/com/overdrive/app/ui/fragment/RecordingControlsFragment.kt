@@ -309,7 +309,7 @@ class RecordingControlsFragment : Fragment() {
                 
                 // Check if SD card is available when selecting SD card
                 if (newType == "SD_CARD" && !sdCardAvailable) {
-                    Toast.makeText(context, "SD Card not available", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, getString(R.string.toast_sd_card_not_available), Toast.LENGTH_SHORT).show()
                     // Revert to internal
                     toggleRecordingsStorage.check(R.id.btnStorageInternal)
                     return@addOnButtonCheckedListener
@@ -442,30 +442,30 @@ class RecordingControlsFragment : Fragment() {
     
     private fun triggerCdrCleanup() {
         btnCdrCleanupNow?.isEnabled = false
-        btnCdrCleanupNow?.text = "Cleaning..."
-        
+        btnCdrCleanupNow?.text = getString(R.string.cdr_cleaning_in_progress)
+
         executor.submit {
             try {
                 val cleaner = com.overdrive.app.storage.ExternalStorageCleaner.getInstance()
                 val result = cleaner.forceCleanup(500 * 1024 * 1024) // Free 500MB
-                
+
                 activity?.runOnUiThread {
                     btnCdrCleanupNow?.isEnabled = true
-                    btnCdrCleanupNow?.text = "🗑️ Clean Up Now"
-                    
+                    btnCdrCleanupNow?.text = getString(R.string.action_clean_up_now)
+
                     if (result.isSuccess) {
-                        val msg = "Deleted ${result.filesDeleted} files (${com.overdrive.app.storage.ExternalStorageCleaner.formatSize(result.bytesFreed)})"
+                        val msg = getString(R.string.toast_cleanup_deleted, result.filesDeleted, com.overdrive.app.storage.ExternalStorageCleaner.formatSize(result.bytesFreed))
                         Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                         loadCdrConfig() // Refresh stats
                     } else {
-                        Toast.makeText(context, "Cleanup failed: ${result.error}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, getString(R.string.toast_cleanup_failed, result.error ?: ""), Toast.LENGTH_SHORT).show()
                     }
                 }
             } catch (e: Exception) {
                 activity?.runOnUiThread {
                     btnCdrCleanupNow?.isEnabled = true
-                    btnCdrCleanupNow?.text = "🗑️ Clean Up Now"
-                    Toast.makeText(context, "Cleanup error: ${e.message}", Toast.LENGTH_SHORT).show()
+                    btnCdrCleanupNow?.text = getString(R.string.action_clean_up_now)
+                    Toast.makeText(context, getString(R.string.toast_cleanup_error, e.message ?: ""), Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -692,17 +692,17 @@ class RecordingControlsFragment : Fragment() {
                     btnApplyQuality.isEnabled = false
                     
                     val msg = if (cleanupMessage != null) {
-                        "Settings applied. $cleanupMessage"
+                        getString(R.string.toast_settings_applied_format, cleanupMessage)
                     } else {
-                        "Settings applied"
+                        getString(R.string.toast_settings_applied_short)
                     }
                     Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                 }
-                
+
             } catch (e: Exception) {
                 android.util.Log.e("RecordingControls", "Failed to save settings: ${e.message}")
                 activity?.runOnUiThread {
-                    Toast.makeText(context, "Failed to save settings", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, getString(R.string.toast_failed_save_settings), Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -968,10 +968,10 @@ class RecordingControlsFragment : Fragment() {
         
         if (sdCardAvailable) {
             sdCardStatusDot?.setBackgroundResource(R.drawable.status_dot_online)
-            tvSdCardStatus?.text = "SD Card: Available"
+            tvSdCardStatus?.text = getString(R.string.sd_card_available)
         } else {
             sdCardStatusDot?.setBackgroundResource(R.drawable.status_dot_offline)
-            tvSdCardStatus?.text = "SD Card: Not detected"
+            tvSdCardStatus?.text = getString(R.string.storage_sd_not_detected)
         }
         
         // Update storage path display
@@ -979,9 +979,9 @@ class RecordingControlsFragment : Fragment() {
             val storageManager = com.overdrive.app.storage.StorageManager.getInstance()
             val path = storageManager.recordingsPath
             val shortPath = path.replace("/storage/emulated/0/", "")
-            tvStoragePathInfo?.text = "Recordings saved to $shortPath"
+            tvStoragePathInfo?.text = getString(R.string.recordings_saved_to_path, shortPath)
         } catch (e: Exception) {
-            tvStoragePathInfo?.text = "Recordings saved to Overdrive/recordings"
+            tvStoragePathInfo?.text = getString(R.string.recordings_saved_default)
         }
         
         // Update slider max based on storage type

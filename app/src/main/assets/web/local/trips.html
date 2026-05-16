@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Trips - OverDrive</title>
+    <title data-i18n="app.trips_title">Trips - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon.webp">
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="../shared/app-icon.webp">
@@ -1215,8 +1215,8 @@
                         <img src="../shared/app-icon.webp" alt="OverDrive">
                     </div>
                     <div class="brand-text">
-                        <span class="brand-name">OverDrive</span>
-                        <span class="brand-tagline">Sentry System</span>
+                        <span class="brand-name" data-i18n="app.name">OverDrive</span>
+                        <span class="brand-tagline" data-i18n="app.tagline">Sentry System</span>
                         <span class="brand-version" id="appVersion"></span>
                     </div>
                 </div>
@@ -1230,73 +1230,73 @@
             <nav class="sidebar-nav">
                 <a href="index.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/><path d="M2 12a9 9 0 0 0 8 8"/><circle cx="2" cy="12" r="2"/></svg>
-                    <span>Live View</span>
+                    <span data-i18n="nav.live_view">Live View</span>
                 </a>
                 <a href="events.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                    <span>Events</span>
+                    <span data-i18n="nav.events">Events</span>
                 </a>
                 <a href="surveillance.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                    <span>Surveillance</span>
+                    <span data-i18n="nav.surveillance">Surveillance</span>
                 </a>
                 <a href="recording.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg>
-                    <span>Recordings</span>
+                    <span data-i18n="nav.recordings">Recordings</span>
                 </a>
                 <a href="performance.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                    <span>Performance</span>
+                    <span data-i18n="nav.performance">Performance</span>
                 </a>
                 <a href="abrp.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/><circle cx="18" cy="12" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/></svg>
-                    <span>ABRP</span>
+                    <span data-i18n="nav.abrp">ABRP</span>
                 </a>
                 <a href="mqtt.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="2"/><path d="M8.46 15.54A5 5 0 0 1 7 12a5 5 0 0 1 1.46-3.54"/><path d="M15.54 8.46A5 5 0 0 1 17 12a5 5 0 0 1-1.46 3.54"/><path d="M5.64 18.36A9 9 0 0 1 3 12a9 9 0 0 1 2.64-6.36"/><path d="M18.36 5.64A9 9 0 0 1 21 12a9 9 0 0 1-2.64 6.36"/></svg>
-                    <span>MQTT</span>
+                    <span data-i18n="nav.mqtt">MQTT</span>
                 </a>
                 <a href="trips.html" class="nav-link active">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17h2v-7l4 4 4-4 4 4 4-4v7h2"/><path d="M4 5h16"/></svg>
-                    <span>Trips</span>
+                    <span data-i18n="nav.trips">Trips</span>
                 </a>
                 <a href="notifications.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
                         <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
                     </svg>
-                    <span>Notifications</span>
+                    <span data-i18n="nav.notifications">Notifications</span>
                 </a>
                 <a href="vehicle-control.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="3" y="11" width="18" height="11" rx="2"/>
                         <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                     </svg>
-                    <span>Vehicle Control</span>
+                    <span data-i18n="nav.vehicle_control">Vehicle Control</span>
                 </a>
             </nav>
             <div class="sidebar-footer">
                 <div class="status-card">
                     <div class="status-row">
-                        <span class="status-label"><span class="status-dot" id="connDot"></span>Device</span>
+                        <span class="status-label" data-i18n="status.device"><span class="status-dot" id="connDot"></span>Device</span>
                         <span class="status-value" id="deviceId">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">ACC</span>
+                        <span class="status-label" data-i18n="status.acc">ACC</span>
                         <span class="status-value" id="accValue">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">
+                        <span class="status-label" data-i18n="status.battery_12v">
                             <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="7" width="12" height="10" rx="1"/><path d="M6 10H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h2"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/></svg>12V
                         </span>
                         <span class="status-value" id="batteryValue">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">Sentry</span>
-                        <span class="status-value" id="survStatus">OFF</span>
+                        <span class="status-label" data-i18n="status.sentry">Sentry</span>
+                        <span class="status-value" id="survStatus" data-i18n="status.off">OFF</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">
+                        <span class="status-label" data-i18n="status.network">
                             <span id="networkIcon"><svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg></span>Net
                         </span>
                         <span class="status-value" id="networkValue">--</span>
@@ -1305,7 +1305,7 @@
                 <!-- EV Battery & Charging Card -->
                 <div class="status-card ev-card" id="evCard">
                     <div class="ev-header-row">
-                        <span class="ev-title">Vehicle Status</span>
+                        <span class="ev-title" data-i18n="status.vehicle_status">Vehicle Status</span>
                         <span class="ev-percent-text" id="evPercentValue">--%</span>
                     </div>
                     <div class="ev-svg-container">
@@ -1369,12 +1369,12 @@
                 <button class="menu-toggle" onclick="toggleSidebar()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
                 </button>
-                <span style="font-weight:600;">Trips</span>
+                <span style="font-weight:600;" data-i18n="trip.page_title_short">Trips</span>
                 <div style="width:40px;"></div>
             </div>
 
             <header class="page-header">
-                <h1 class="page-title">Trip Analytics</h1>
+                <h1 class="page-title" data-i18n="trip.settings.title">Trip Analytics</h1>
                 <div class="header-actions">
                     <div class="header-badge">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -1392,7 +1392,7 @@
                         <div class="score-hero-card" id="scoreHeroCard">
                             <div class="card-title" style="margin-bottom:16px;align-self:flex-start;">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;color:var(--brand-primary)"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                                Driver Score
+                                <span data-i18n="trip.card.driver_score">Driver Score</span>
                             </div>
                             <div class="score-circle">
                                 <canvas id="scoreCircleCanvas" width="320" height="320"></canvas>
@@ -1404,22 +1404,22 @@
                             </div>
                             <div class="score-hero-label" id="scoreHeroLabel">--</div>
                             <div class="score-hero-tooltip" id="scoreHeroTooltip">
-                                <div class="score-hero-tooltip-title" id="scoreTooltipTitle">Driver Score</div>
+                                <div class="score-hero-tooltip-title" id="scoreTooltipTitle" data-i18n="trip.card.driver_score">Driver Score</div>
                                 <div class="score-hero-tooltip-tier" id="scoreTooltipTiers">
-                                    <span class="score-tier-pill t-poor">0–39 Poor</span>
-                                    <span class="score-tier-pill t-average">40–59 Average</span>
-                                    <span class="score-tier-pill t-good">60–79 Good</span>
-                                    <span class="score-tier-pill t-excellent">80–100 Excellent</span>
+                                    <span class="score-tier-pill t-poor" data-i18n="trip.score_descriptors.excellent_zone">0–39 Poor</span>
+                                    <span class="score-tier-pill t-average" data-i18n="trip.score_descriptors.average_zone">40–59 Average</span>
+                                    <span class="score-tier-pill t-good" data-i18n="trip.score_descriptors.good_zone">60–79 Good</span>
+                                    <span class="score-tier-pill t-excellent" data-i18n="trip.score_descriptors.high_zone">80–100 Excellent</span>
                                 </div>
-                                <div class="score-hero-tooltip-desc" id="scoreTooltipDesc">Your overall driving efficiency score based on 5 criteria: anticipation, smoothness, speed discipline, efficiency, and consistency.</div>
-                                <div class="score-hero-tooltip-tip" id="scoreTooltipTip">💡 Focus on your weakest category to see the biggest improvement.</div>
+                                <div class="score-hero-tooltip-desc" id="scoreTooltipDesc" data-i18n="trip.card.score_tooltip">Your overall driving efficiency score based on 5 criteria: anticipation, smoothness, speed discipline, efficiency, and consistency.</div>
+                                <div class="score-hero-tooltip-tip" id="scoreTooltipTip" data-i18n="trip.card.score_tip">💡 Focus on your weakest category to see the biggest improvement.</div>
                             </div>
                         </div>
 
                         <div class="range-hero-card" id="rangeHeroCard">
                             <div class="range-hero-title">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                                Personalized Range
+                                <span data-i18n="trip.card.personalized_range">Personalized Range</span>
                             </div>
                             <div style="position:relative;width:140px;height:140px;margin-bottom:12px;">
                                 <canvas id="rangeCircleCanvas" width="280" height="280" style="width:100%;height:100%;"></canvas>
@@ -1433,7 +1433,7 @@
                             <div id="rangeHeroContent">
                                 <div class="range-hero-no-data">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                                    <div>Drive more trips to unlock personalized range estimates</div>
+                                    <div data-i18n="trip.unlock_range">Drive more trips to unlock personalized range estimates</div>
                                 </div>
                             </div>
                             <div class="range-hero-tooltip" id="rangeHeroTooltip" style="display:none;"></div>
@@ -1443,7 +1443,7 @@
                         <div id="costHeroCard" style="background:linear-gradient(135deg, rgba(245,158,11,0.08) 0%, rgba(245,158,11,0.03) 100%);border:1px solid rgba(245,158,11,0.15);border-radius:20px;padding:20px 18px;display:flex;flex-direction:column;align-items:center;text-align:center;position:relative;overflow:visible;">
                             <div style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:var(--text-secondary);margin-bottom:16px;align-self:flex-start;">
                                 <span style="font-size:18px;">💰</span>
-                                Cost per <span id="costPerDistLabel">km</span>
+                                <span data-i18n="trip.card.cost_per">Cost per</span> <span id="costPerDistLabel">km</span>
                             </div>
                             <div id="costNoRate" style="position:relative;">
                                 <div style="position:relative;width:140px;height:140px;margin:0 auto 8px;">
@@ -1454,8 +1454,8 @@
                                         <span style="font-size:12px;color:var(--text-muted);margin-top:2px;">/km</span>
                                     </div>
                                 </div>
-                                <div style="position:absolute;left:-4px;right:-4px;bottom:-8px;background:rgba(10,10,15,0.96);border:1px solid var(--warning);border-radius:8px;padding:10px 12px;opacity:0;transition:opacity 0.2s;pointer-events:none;font-size:11px;color:var(--text-muted);text-align:center;z-index:10;" class="cost-hint">
-                                    💡 Set your electricity rate in<br>Trip Storage → Electricity Rate
+                                <div style="position:absolute;left:-4px;right:-4px;bottom:-8px;background:rgba(10,10,15,0.96);border:1px solid var(--warning);border-radius:8px;padding:10px 12px;opacity:0;transition:opacity 0.2s;pointer-events:none;font-size:11px;color:var(--text-muted);text-align:center;z-index:10;" class="cost-hint" data-i18n="trip.cost_hint">
+                                    💡 Set your electricity rate in Trip Storage → Electricity Rate
                                 </div>
                             </div>
                             <div id="costHeroData" style="display:none;">
@@ -1478,7 +1478,7 @@
                         <div class="radar-card">
                             <div class="card-title">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;color:var(--brand-primary)"><polygon points="12 2 22 8.5 19 20 5 20 2 8.5"/></svg>
-                                Driving DNA
+                                <span data-i18n="trip.dna.title">Driving DNA</span>
                             </div>
                             <div class="radar-canvas-wrap">
                                 <canvas id="radarChart"></canvas>
@@ -1496,12 +1496,12 @@
                     <div class="trips-top-bar" id="tripFilters">
                         <button class="calendar-toggle" id="calendarToggle" onclick="TRIPS.toggleCalendar()">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                            <span id="calendarBtnText">Select Date</span>
+                            <span id="calendarBtnText" data-i18n="trip.filter.select_date">Select Date</span>
                         </button>
                         <div class="filter-tabs">
-                            <button class="filter-tab active" data-days="7" onclick="TRIPS.quickFilter(7, this)">7 Days</button>
-                            <button class="filter-tab" data-days="14" onclick="TRIPS.quickFilter(14, this)">14 Days</button>
-                            <button class="filter-tab" data-days="30" onclick="TRIPS.quickFilter(30, this)">30 Days</button>
+                            <button class="filter-tab active" data-days="7" onclick="TRIPS.quickFilter(7, this)" data-i18n="trip.filter.days_7">7 Days</button>
+                            <button class="filter-tab" data-days="14" onclick="TRIPS.quickFilter(14, this)" data-i18n="trip.filter.days_14">14 Days</button>
+                            <button class="filter-tab" data-days="30" onclick="TRIPS.quickFilter(30, this)" data-i18n="trip.filter.days_30">30 Days</button>
                         </div>
                     </div>
 
@@ -1517,26 +1517,26 @@
                     <!-- Empty State -->
                     <div class="empty-state" id="tripEmptyState" style="display:none;">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 17h2v-7l4 4 4-4 4 4 4-4v7h2"/><path d="M4 5h16"/></svg>
-                        <div class="empty-title">No trips recorded yet</div>
-                        <div class="empty-text">Enable trip analytics and start driving to see your trips here</div>
+                        <div class="empty-title" data-i18n="trip.no_trips_yet">No trips recorded yet</div>
+                        <div class="empty-text" data-i18n="trip.no_trips_hint">Enable trip analytics and start driving to see your trips here</div>
                     </div>
 
-                    <button class="load-more-btn" id="loadMoreBtn" style="display:none;" onclick="TRIPS.loadMore()">Load More Trips</button>
+                    <button class="load-more-btn" id="loadMoreBtn" style="display:none;" onclick="TRIPS.loadMore()" data-i18n="trip.load_more">Load More Trips</button>
 
                     <!-- Weekly Summary (below trips) -->
                     <div class="summary-card" style="margin-top:20px;">
                         <div class="card-title" style="font-size:14px;">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;color:var(--brand-primary)"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                            Period Summary
+                            <span data-i18n="trip.period_summary">Period Summary</span>
                         </div>
                         <div class="summary-grid" id="weeklySummary">
-                            <div class="summary-stat"><div class="summary-stat-value" id="summaryTrips">--</div><div class="summary-stat-label">Trips</div></div>
+                            <div class="summary-stat"><div class="summary-stat-value" id="summaryTrips">--</div><div class="summary-stat-label" data-i18n="trip.summary.trips">Trips</div></div>
                             <div class="summary-stat"><div class="summary-stat-value" id="summaryDistance">--</div><div class="summary-stat-label">km</div></div>
-                            <div class="summary-stat"><div class="summary-stat-value" id="summaryTime">--</div><div class="summary-stat-label">Hours</div></div>
-                            <div class="summary-stat"><div class="summary-stat-value" id="summaryEfficiency">--</div><div class="summary-stat-label">Avg Score</div></div>
-                            <div class="summary-stat"><div class="summary-stat-value" id="summaryEnergy">--</div><div class="summary-stat-label">kWh</div></div>
+                            <div class="summary-stat"><div class="summary-stat-value" id="summaryTime">--</div><div class="summary-stat-label" data-i18n="trip.summary.hours">Hours</div></div>
+                            <div class="summary-stat"><div class="summary-stat-value" id="summaryEfficiency">--</div><div class="summary-stat-label" data-i18n="trip.summary.avg_score">Avg Score</div></div>
+                            <div class="summary-stat"><div class="summary-stat-value" id="summaryEnergy">--</div><div class="summary-stat-label" data-i18n="trip.summary.kwh">kWh</div></div>
                             <div class="summary-stat"><div class="summary-stat-value" id="summaryConsumption" style="color:var(--brand-primary);">--</div><div class="summary-stat-label">kWh/100km</div></div>
-                            <div class="summary-stat"><div class="summary-stat-value" id="summaryCost">--</div><div class="summary-stat-label">Cost</div></div>
+                            <div class="summary-stat"><div class="summary-stat-value" id="summaryCost">--</div><div class="summary-stat-label" data-i18n="trip.summary.cost">Cost</div></div>
                         </div>
                     </div>
 
@@ -1549,14 +1549,14 @@
                                     <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
                                     <line x1="6" x2="6.01" y1="16" y2="16"/><line x1="10" x2="10.01" y1="16" y2="16"/>
                                 </svg>
-                                Trip Storage
+                                <span data-i18n="trip.settings.trip_storage_title">Trip Storage</span>
                             </div>
                         </div>
                         <div class="card-body">
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name">Trip Analytics</div>
-                                    <div class="setting-desc">Automatically record trips and compute driving scores</div>
+                                    <div class="setting-name" data-i18n="trip.settings.title">Trip Analytics</div>
+                                    <div class="setting-desc" data-i18n="trip.settings.auto_record">Automatically record trips and compute driving scores</div>
                                 </div>
                                 <div class="setting-control">
                                     <label class="toggle-switch">
@@ -1568,8 +1568,8 @@
                             <!-- Electricity Rate -->
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name">Electricity Rate</div>
-                                    <div class="setting-desc">Cost per kWh for trip cost calculation</div>
+                                    <div class="setting-name" data-i18n="trip.settings.elec_rate_label">Electricity Rate</div>
+                                    <div class="setting-desc" data-i18n="trip.settings.rate_help">Cost per kWh for trip cost calculation</div>
                                 </div>
                                 <div class="setting-control" style="display:flex;gap:8px;align-items:center;">
                                     <select id="currencySelect" onchange="TRIPS.showApplyNeeded()" style="padding:8px 10px;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;">
@@ -1585,26 +1585,26 @@
                             <!-- Distance Unit -->
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name">Distance Unit</div>
-                                    <div class="setting-desc">Display distances and speeds in km or miles</div>
+                                    <div class="setting-name" data-i18n="trip.settings.distance_unit">Distance Unit</div>
+                                    <div class="setting-desc" data-i18n="trip.settings.distance_unit_desc">Display distances and speeds in km or miles</div>
                                 </div>
                                 <div class="setting-control">
                                     <div class="btn-group">
-                                        <button class="btn-toggle active" id="unitKm" onclick="TRIPS.setDistanceUnit('km')">🌍 km</button>
-                                        <button class="btn-toggle" id="unitMi" onclick="TRIPS.setDistanceUnit('mi')">🇬🇧 miles</button>
+                                        <button class="btn-toggle active" id="unitKm" onclick="TRIPS.setDistanceUnit('km')" data-i18n="trip.settings.unit_km">🌍 km</button>
+                                        <button class="btn-toggle" id="unitMi" onclick="TRIPS.setDistanceUnit('mi')" data-i18n="trip.settings.unit_miles">🇬🇧 miles</button>
                                     </div>
                                 </div>
                             </div>
                             <!-- Storage Location Selection -->
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name">Storage Location</div>
-                                    <div class="setting-desc">Choose where to save trip telemetry</div>
+                                    <div class="setting-name" data-i18n="trip.settings.storage_location">Storage Location</div>
+                                    <div class="setting-desc" data-i18n="trip.settings.storage_location_desc">Choose where to save trip telemetry</div>
                                 </div>
                                 <div class="setting-control">
                                     <div class="btn-group">
-                                        <button class="btn-toggle active" id="storageInternal" onclick="TRIPS.setStorageType('INTERNAL')">📱 Internal</button>
-                                        <button class="btn-toggle" id="storageSdCard" onclick="TRIPS.setStorageType('SD_CARD')">💾 SD Card</button>
+                                        <button class="btn-toggle active" id="storageInternal" onclick="TRIPS.setStorageType('INTERNAL')" data-i18n="trip.settings.storage_internal">📱 Internal</button>
+                                        <button class="btn-toggle" id="storageSdCard" onclick="TRIPS.setStorageType('SD_CARD')" data-i18n="trip.settings.storage_sd">💾 SD Card</button>
                                     </div>
                                 </div>
                             </div>
@@ -1612,7 +1612,7 @@
                             <div class="sd-card-status" id="tripSdCardStatus" style="display:none;">
                                 <div class="sd-status-row">
                                     <span class="sd-status-dot" id="tripSdStatusDot"></span>
-                                    <span class="sd-status-text" id="tripSdStatusText">SD Card: Checking...</span>
+                                    <span class="sd-status-text" id="tripSdStatusText" data-i18n="trip.settings.sd_checking">SD Card: Checking...</span>
                                 </div>
                                 <div class="sd-space-info" id="tripSdSpaceInfo" style="display:none;">
                                     <span id="tripSdFree">-- free</span> / <span id="tripSdTotal">-- total</span>
@@ -1620,8 +1620,8 @@
                             </div>
                             <div class="setting-row" style="border-bottom:none;padding-bottom:8px;">
                                 <div class="setting-info">
-                                    <div class="setting-name">Storage Usage</div>
-                                    <div class="setting-desc" id="tripStoragePath">Telemetry saved to Overdrive/trips</div>
+                                    <div class="setting-name" data-i18n="trip.settings.storage_usage">Storage Usage</div>
+                                    <div class="setting-desc" id="tripStoragePath" data-i18n="trip.settings.storage_path_default">Telemetry saved to Overdrive/trips</div>
                                 </div>
                             </div>
                             <div class="storage-bar">
@@ -1633,8 +1633,8 @@
                             </div>
                             <div class="setting-row" style="margin-top:16px;">
                                 <div class="setting-info">
-                                    <div class="setting-name">Storage Limit</div>
-                                    <div class="setting-desc">Auto-delete oldest when limit reached</div>
+                                    <div class="setting-name" data-i18n="trip.settings.storage_limit">Storage Limit</div>
+                                    <div class="setting-desc" data-i18n="trip.settings.storage_limit_desc">Auto-delete oldest when limit reached</div>
                                 </div>
                                 <div class="setting-control">
                                     <div class="slider-control">
@@ -1648,7 +1648,7 @@
                                 <span>100 GB</span>
                             </div>
                             <div style="margin-top:12px;display:flex;gap:8px;">
-                                <button class="btn btn-primary" id="storageApplyBtn" onclick="TRIPS.applyStorageSettings()" style="flex:1;" disabled>Apply Changes</button>
+                                <button class="btn btn-primary" id="storageApplyBtn" onclick="TRIPS.applyStorageSettings()" style="flex:1;" disabled data-i18n="common.apply_changes">Apply Changes</button>
                             </div>
                         </div>
                     </div>
@@ -1661,15 +1661,15 @@
                                     <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
                                     <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
                                 </svg>
-                                BYD Dashcam Auto-Cleanup
-                                <span class="status-badge" id="tripCdrBadge">OFF</span>
+                                <span data-i18n="trip.cdr.title">BYD Dashcam Auto-Cleanup</span>
+                                <span class="status-badge" id="tripCdrBadge" data-i18n="status.off">OFF</span>
                             </div>
                         </div>
                         <div class="card-body">
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name">Auto-Delete Old Dashcam Files</div>
-                                    <div class="setting-desc">Free up SD card space by removing oldest BYD dashcam recordings</div>
+                                    <div class="setting-name" data-i18n="trip.cdr.auto_delete">Auto-Delete Old Dashcam Files</div>
+                                    <div class="setting-desc" data-i18n="trip.cdr.auto_delete_desc">Free up SD card space by removing oldest BYD dashcam recordings</div>
                                 </div>
                                 <div class="setting-control">
                                     <label class="toggle-switch">
@@ -1681,23 +1681,23 @@
                             <!-- Recommend banner (shown only when API says recommendAutoCleanup) -->
                             <div class="info-box" id="tripCdrRecommendBanner" style="display:none;background:rgba(255,193,7,0.08);border:1px solid rgba(255,193,7,0.3);">
                                 <div class="info-row" style="color:#ffc107;">
-                                    <span class="label">⚠️ Recommended</span>
-                                    <span class="value">Overdrive uses SD — enable cleanup to keep space free</span>
+                                    <span class="label" data-i18n="trip.cdr.recommend_label">⚠️ Recommended</span>
+                                    <span class="value" data-i18n="trip.cdr.recommend_text">Overdrive uses SD — enable cleanup to keep space free</span>
                                 </div>
                             </div>
                             <div class="info-box" id="tripCdrInfoBox">
-                                <div class="info-row"><span class="label">Dashcam Path</span><span class="value" id="tripCdrPath">--</span></div>
-                                <div class="info-row"><span class="label">Dashcam Usage</span><span class="value" id="tripCdrUsage">--</span></div>
-                                <div class="info-row"><span class="label">Files</span><span class="value" id="tripCdrFileCount">--</span></div>
-                                <div class="info-row"><span class="label">Protected</span><span class="value" id="tripCdrProtected">--</span></div>
-                                <div class="info-row"><span class="label">Deletable</span><span class="value" id="tripCdrDeletable">--</span></div>
-                                <div class="info-row"><span class="label">Background monitor</span><span class="value" id="tripCdrMonitoring">--</span></div>
-                                <div class="info-row"><span class="label">Last cleanup</span><span class="value" id="tripCdrLastCleanup">--</span></div>
+                                <div class="info-row"><span class="label" data-i18n="trip.cdr.path">Dashcam Path</span><span class="value" id="tripCdrPath">--</span></div>
+                                <div class="info-row"><span class="label" data-i18n="trip.cdr.usage">Dashcam Usage</span><span class="value" id="tripCdrUsage">--</span></div>
+                                <div class="info-row"><span class="label" data-i18n="trip.cdr.files">Files</span><span class="value" id="tripCdrFileCount">--</span></div>
+                                <div class="info-row"><span class="label" data-i18n="trip.cdr.protected">Protected</span><span class="value" id="tripCdrProtected">--</span></div>
+                                <div class="info-row"><span class="label" data-i18n="trip.cdr.deletable">Deletable</span><span class="value" id="tripCdrDeletable">--</span></div>
+                                <div class="info-row"><span class="label" data-i18n="trip.cdr.bg_monitor">Background monitor</span><span class="value" id="tripCdrMonitoring">--</span></div>
+                                <div class="info-row"><span class="label" data-i18n="trip.cdr.last_cleanup">Last cleanup</span><span class="value" id="tripCdrLastCleanup">--</span></div>
                             </div>
                             <div class="setting-row" style="margin-top:12px;">
                                 <div class="setting-info">
-                                    <div class="setting-name">Reserved Space for Overdrive</div>
-                                    <div class="setting-desc">Keep this much free on SD card</div>
+                                    <div class="setting-name" data-i18n="trip.cdr.reserved">Reserved Space for Overdrive</div>
+                                    <div class="setting-desc" data-i18n="trip.cdr.reserved_desc">Keep this much free on SD card</div>
                                 </div>
                                 <div class="setting-control">
                                     <div class="slider-control">
@@ -1708,8 +1708,8 @@
                             </div>
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name">Protect Recent Files</div>
-                                    <div class="setting-desc">Don't delete dashcam files newer than this</div>
+                                    <div class="setting-name" data-i18n="trip.cdr.protect_recent">Protect Recent Files</div>
+                                    <div class="setting-desc" data-i18n="trip.cdr.protect_recent_desc">Don't delete dashcam files newer than this</div>
                                 </div>
                                 <div class="setting-control">
                                     <div class="slider-control">
@@ -1720,8 +1720,8 @@
                             </div>
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name">Keep Minimum Files</div>
-                                    <div class="setting-desc">Always keep at least this many newest files</div>
+                                    <div class="setting-name" data-i18n="trip.cdr.min_keep">Keep Minimum Files</div>
+                                    <div class="setting-desc" data-i18n="trip.cdr.min_keep_desc">Always keep at least this many newest files</div>
                                 </div>
                                 <div class="setting-control">
                                     <div class="slider-control">
@@ -1730,12 +1730,12 @@
                                     </div>
                                 </div>
                             </div>
-                            <button class="btn btn-danger" style="width:100%;margin-top:12px;" onclick="TRIPS.triggerCdrCleanup()">
+                            <button class="btn btn-danger" style="width:100%;margin-top:12px;" onclick="TRIPS.triggerCdrCleanup()" data-i18n="trip.cdr.cleanup_now">
                                 🗑️ Clean Up Now
                             </button>
                             <div class="info-box" style="margin-top:12px;">
-                                <div class="info-row"><span class="label">Total Freed</span><span class="value" id="tripCdrTotalFreed">--</span></div>
-                                <div class="info-row"><span class="label">Files Deleted</span><span class="value" id="tripCdrTotalDeleted">--</span></div>
+                                <div class="info-row"><span class="label" data-i18n="trip.cdr.total_freed">Total Freed</span><span class="value" id="tripCdrTotalFreed">--</span></div>
+                                <div class="info-row"><span class="label" data-i18n="trip.cdr.files_deleted_label">Files Deleted</span><span class="value" id="tripCdrTotalDeleted">--</span></div>
                             </div>
                         </div>
                     </div>
@@ -1746,7 +1746,7 @@
                     <div class="detail-header">
                         <button class="detail-back-btn" onclick="TRIPS.hideDetail()">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
-                            Back to Trips
+                            <span data-i18n="trip.detail.back">Back to Trips</span>
                         </button>
                     </div>
 
@@ -1756,17 +1756,17 @@
                         <div style="font-size:13px;color:var(--text-muted);margin-top:4px;" id="detailSubtitle">--</div>
                         <div class="detail-summary-grid">
                             <div class="detail-stat"><div class="detail-stat-value" id="detailDistance">--</div><div class="detail-stat-label">km</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailDuration">--</div><div class="detail-stat-label">Duration</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailSocDelta">--</div><div class="detail-stat-label">SoC Used</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailEfficiency">--</div><div class="detail-stat-label">Energy</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailDuration">--</div><div class="detail-stat-label" data-i18n="trip.detail.duration">Duration</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailSocDelta">--</div><div class="detail-stat-label" data-i18n="trip.detail.soc_used">SoC Used</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailEfficiency">--</div><div class="detail-stat-label" data-i18n="trip.detail.energy">Energy</div></div>
                             <div class="detail-stat"><div class="detail-stat-value" id="detailConsumption" style="color:var(--brand-primary);">--</div><div class="detail-stat-label">kWh/100km</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailAvgSpeed">--</div><div class="detail-stat-label">Avg km/h</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailMaxSpeed">--</div><div class="detail-stat-label">Max km/h</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailSocStart">--</div><div class="detail-stat-label">Start SoC</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailTemp">--</div><div class="detail-stat-label">Temp °C</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailCost" style="color:var(--warning);">--</div><div class="detail-stat-label">Cost</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailElevGain" style="color:#22C55E;">--</div><div class="detail-stat-label">Elev ↑</div></div>
-                            <div class="detail-stat"><div class="detail-stat-value" id="detailElevLoss" style="color:#EF4444;">--</div><div class="detail-stat-label">Elev ↓</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailAvgSpeed">--</div><div class="detail-stat-label" data-i18n="trip.detail.avg_kmh">Avg km/h</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailMaxSpeed">--</div><div class="detail-stat-label" data-i18n="trip.detail.max_kmh">Max km/h</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailSocStart">--</div><div class="detail-stat-label" data-i18n="trip.detail.start_soc">Start SoC</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailTemp">--</div><div class="detail-stat-label" data-i18n="trip.detail.temp_c">Temp °C</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailCost" style="color:var(--warning);">--</div><div class="detail-stat-label" data-i18n="trip.detail.cost">Cost</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailElevGain" style="color:#22C55E;">--</div><div class="detail-stat-label" data-i18n="trip.detail.elev_up">Elev ↑</div></div>
+                            <div class="detail-stat"><div class="detail-stat-value" id="detailElevLoss" style="color:#EF4444;">--</div><div class="detail-stat-label" data-i18n="trip.detail.elev_down">Elev ↓</div></div>
                         </div>
                         <div style="margin-top:8px;text-align:center;"><span id="detailGradientPill" style="display:none;"></span></div>
                     </div>
@@ -1776,13 +1776,13 @@
                         <div class="timeline-slider-header">
                             <div class="card-title">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;color:var(--brand-primary)"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                                Trip Timeline
+                                <span data-i18n="trip.timeline.title">Trip Timeline</span>
                             </div>
                             <div class="timeline-slider-info" id="sliderInfo">
-                                <span class="timeline-slider-stat">Speed: <span class="tval" id="sliderSpeed">--</span> km/h</span>
-                                <span class="timeline-slider-stat">Accel: <span class="tval" id="sliderAccel">--</span>%</span>
-                                <span class="timeline-slider-stat">Brake: <span class="tval" id="sliderBrake">--</span>%</span>
-                                <span class="timeline-slider-stat" style="color:rgba(245,158,11,0.7);">SoC: <span class="tval" id="sliderSoc" style="color:rgba(245,158,11,0.9);">--</span>%</span>
+                                <span class="timeline-slider-stat"><span data-i18n="trip.timeline.speed">Speed</span>: <span class="tval" id="sliderSpeed">--</span> km/h</span>
+                                <span class="timeline-slider-stat"><span data-i18n="trip.timeline.accel">Accel</span>: <span class="tval" id="sliderAccel">--</span>%</span>
+                                <span class="timeline-slider-stat"><span data-i18n="trip.timeline.brake">Brake</span>: <span class="tval" id="sliderBrake">--</span>%</span>
+                                <span class="timeline-slider-stat" style="color:rgba(245,158,11,0.7);"><span data-i18n="trip.timeline.soc">SoC</span>: <span class="tval" id="sliderSoc" style="color:rgba(245,158,11,0.9);">--</span>%</span>
                             </div>
                         </div>
                         <div class="timeline-slider-wrap">
@@ -1799,13 +1799,13 @@
                     <div class="map-card">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;color:var(--brand-primary)"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
-                            Route
+                            <span data-i18n="trip.route.title">Route</span>
                         </div>
                         <div id="tripMap"></div>
                         <div class="map-speed-legend">
-                            <span><span class="legend-dot" style="background:#22C55E"></span> &lt;40 km/h</span>
-                            <span><span class="legend-dot" style="background:#F59E0B"></span> 40–80 km/h</span>
-                            <span><span class="legend-dot" style="background:#EF4444"></span> &gt;80 km/h</span>
+                            <span><span class="legend-dot" style="background:#22C55E"></span> <span data-i18n="trip.route.speed_low">&lt;40 km/h</span></span>
+                            <span><span class="legend-dot" style="background:#F59E0B"></span> <span data-i18n="trip.route.speed_mid">40–80 km/h</span></span>
+                            <span><span class="legend-dot" style="background:#EF4444"></span> <span data-i18n="trip.route.speed_high">&gt;80 km/h</span></span>
                         </div>
                     </div>
 
@@ -1814,21 +1814,21 @@
                     <div class="chart-card">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;color:var(--brand-primary)"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                            Speed &amp; Pedal Timeline
+                            <span data-i18n="trip.timeline.speed_pedal_title">Speed &amp; Pedal Timeline</span>
                         </div>
                         <div style="display:flex;gap:12px;margin-bottom:8px;font-size:11px;color:var(--text-muted);">
-                            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:3px;background:#00D4AA;border-radius:2px;display:inline-block;"></span> Speed</span>
-                            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:8px;background:rgba(14,165,233,0.3);border-radius:2px;display:inline-block;"></span> Accel</span>
-                            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:8px;background:rgba(239,68,68,0.3);border-radius:2px;display:inline-block;"></span> Brake</span>
-                            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:0;border-top:2px dashed rgba(245,158,11,0.5);display:inline-block;"></span> SoC%</span>
+                            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:3px;background:#00D4AA;border-radius:2px;display:inline-block;"></span> <span data-i18n="trip.timeline.legend_speed">Speed</span></span>
+                            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:8px;background:rgba(14,165,233,0.3);border-radius:2px;display:inline-block;"></span> <span data-i18n="trip.timeline.legend_accel">Accel</span></span>
+                            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:8px;background:rgba(239,68,68,0.3);border-radius:2px;display:inline-block;"></span> <span data-i18n="trip.timeline.legend_brake">Brake</span></span>
+                            <span style="display:flex;align-items:center;gap:4px;"><span style="width:12px;height:0;border-top:2px dashed rgba(245,158,11,0.5);display:inline-block;"></span> <span data-i18n="trip.timeline.legend_soc">SoC%</span></span>
                         </div>
                         <div class="chart-canvas-wrap">
                             <canvas id="timelineChart"></canvas>
                         </div>
                         <div style="display:flex;justify-content:space-around;padding-top:10px;border-top:1px solid var(--border-subtle);margin-top:10px;">
-                            <div style="text-align:center;"><span style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--text-primary);" id="tlAccelPct">--%</span><div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Accelerating</div></div>
-                            <div style="text-align:center;"><span style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--accent);" id="tlCoastPct">--%</span><div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Coasting</div></div>
-                            <div style="text-align:center;"><span style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--danger);" id="tlBrakePct">--%</span><div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Braking</div></div>
+                            <div style="text-align:center;"><span style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--text-primary);" id="tlAccelPct">--%</span><div style="font-size:10px;color:var(--text-muted);margin-top:2px;" data-i18n="trip.timeline.accelerating">Accelerating</div></div>
+                            <div style="text-align:center;"><span style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--accent);" id="tlCoastPct">--%</span><div style="font-size:10px;color:var(--text-muted);margin-top:2px;" data-i18n="trip.timeline.coasting">Coasting</div></div>
+                            <div style="text-align:center;"><span style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--danger);" id="tlBrakePct">--%</span><div style="font-size:10px;color:var(--text-muted);margin-top:2px;" data-i18n="trip.timeline.braking">Braking</div></div>
                         </div>
                     </div>
 
@@ -1836,15 +1836,15 @@
                     <div class="chart-card">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;color:var(--brand-primary)"><rect x="3" y="12" width="4" height="8" rx="1"/><rect x="10" y="8" width="4" height="12" rx="1"/><rect x="17" y="4" width="4" height="16" rx="1"/></svg>
-                            Speed Distribution
+                            <span data-i18n="trip.speed_dist.title">Speed Distribution</span>
                         </div>
                         <div class="chart-canvas-wrap">
                             <canvas id="speedHistogram"></canvas>
                         </div>
                         <div class="speed-hist-legend">
-                            <span><span class="legend-dot" style="background:#F59E0B;width:8px;height:8px;border-radius:50%;display:inline-block"></span> Low (&lt;40)</span>
-                            <span><span class="legend-dot" style="background:#22C55E;width:8px;height:8px;border-radius:50%;display:inline-block"></span> Normal (40–80)</span>
-                            <span><span class="legend-dot" style="background:#EF4444;width:8px;height:8px;border-radius:50%;display:inline-block"></span> High (&gt;80)</span>
+                            <span><span class="legend-dot" style="background:#F59E0B;width:8px;height:8px;border-radius:50%;display:inline-block"></span> <span data-i18n="trip.speed_dist.low">Low (&lt;40)</span></span>
+                            <span><span class="legend-dot" style="background:#22C55E;width:8px;height:8px;border-radius:50%;display:inline-block"></span> <span data-i18n="trip.speed_dist.normal">Normal (40–80)</span></span>
+                            <span><span class="legend-dot" style="background:#EF4444;width:8px;height:8px;border-radius:50%;display:inline-block"></span> <span data-i18n="trip.speed_dist.high">High (&gt;80)</span></span>
                         </div>
                         <div class="speed-hist-summary" id="speedHistSummary"></div>
                     </div>
@@ -1853,7 +1853,7 @@
                     <div class="micro-moments-card" id="microMomentsCard">
                         <div class="card-title" style="margin-bottom:8px;">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;color:var(--brand-primary)"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-                            Micro-Moments
+                            <span data-i18n="trip.micro.title">Micro-Moments</span>
                         </div>
                         <div id="microMomentsList"></div>
                     </div>
@@ -1862,7 +1862,7 @@
                     <div class="route-comparison-card" id="routeComparisonCard" style="display:none;">
                         <div class="card-title" style="margin-bottom:12px;">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;color:var(--brand-primary)"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
-                            Route Comparison
+                            <span data-i18n="trip.route_compare.title">Route Comparison</span>
                         </div>
                         <div id="routeComparisonContent"></div>
                         <div id="routeMapOverlay" style="display:none;margin-top:12px;">
@@ -1876,69 +1876,69 @@
                         <div class="card-title" style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
                             <div style="display:flex; align-items:center; gap:8px;">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;color:var(--brand-primary)"><polygon points="12 2 22 8.5 19 20 5 20 2 8.5"/></svg>
-                                Driving DNA Breakdown
+                                <span data-i18n="trip.scores.breakdown_title">Driving DNA Breakdown</span>
                             </div>
-                            <span style="font-size:11px; color:var(--brand-primary); cursor:pointer;">Tap rows for coaching 💡</span>
+                            <span style="font-size:11px; color:var(--brand-primary); cursor:pointer;" data-i18n="trip.scores.tap_for_coaching">Tap rows for coaching 💡</span>
                         </div>
                         <div id="scoreBreakdown">
                             <div class="score-row" onclick="TRIPS.toggleScoreDetail(this)">
                                 <div class="score-row-top">
                                     <span class="score-icon">🔮</span>
-                                    <span class="score-label">Anticipation</span>
+                                    <span class="score-label" data-i18n="trip.scores.anticipation">Anticipation</span>
                                     <div class="score-bar-track"><div class="score-bar-fill" id="scoreAnticipation" style="width:0%"></div></div>
                                     <span class="score-number" id="scoreAnticipationVal">--</span>
                                 </div>
                                 <div class="score-detail">
-                                    <div class="score-detail-text">Measures how well you read traffic ahead and lift off the accelerator early before braking. Higher scores mean less energy wasted on sudden stops.</div>
-                                    <div class="score-detail-tip">💡 Tip: Coast more before red lights and slow traffic. Lift off the pedal 3–5 seconds earlier than usual.</div>
+                                    <div class="score-detail-text" data-i18n="trip.scores.anticipation_text">Measures how well you read traffic ahead and lift off the accelerator early before braking. Higher scores mean less energy wasted on sudden stops.</div>
+                                    <div class="score-detail-tip" data-i18n="trip.scores.anticipation_tip">💡 Tip: Coast more before red lights and slow traffic. Lift off the pedal 3–5 seconds earlier than usual.</div>
                                 </div>
                             </div>
                             <div class="score-row" onclick="TRIPS.toggleScoreDetail(this)">
                                 <div class="score-row-top">
                                     <span class="score-icon">🌊</span>
-                                    <span class="score-label">Smoothness</span>
+                                    <span class="score-label" data-i18n="trip.scores.smoothness">Smoothness</span>
                                     <div class="score-bar-track"><div class="score-bar-fill" id="scoreSmoothness" style="width:0%"></div></div>
                                     <span class="score-number" id="scoreSmoothnessVal">--</span>
                                 </div>
                                 <div class="score-detail">
-                                    <div class="score-detail-text">Tracks how gradually you apply and release the accelerator and brake pedals. Jerky inputs waste energy and reduce comfort.</div>
-                                    <div class="score-detail-tip">💡 Tip: Pretend there's a glass of water on the dashboard. Smooth pedal transitions keep it from spilling.</div>
+                                    <div class="score-detail-text" data-i18n="trip.scores.smoothness_text">Tracks how gradually you apply and release the accelerator and brake pedals. Jerky inputs waste energy and reduce comfort.</div>
+                                    <div class="score-detail-tip" data-i18n="trip.scores.smoothness_tip">💡 Tip: Pretend there's a glass of water on the dashboard. Smooth pedal transitions keep it from spilling.</div>
                                 </div>
                             </div>
                             <div class="score-row" onclick="TRIPS.toggleScoreDetail(this)">
                                 <div class="score-row-top">
                                     <span class="score-icon">🎯</span>
-                                    <span class="score-label">Speed Discipline</span>
+                                    <span class="score-label" data-i18n="trip.scores.speed_discipline">Speed Discipline</span>
                                     <div class="score-bar-track"><div class="score-bar-fill" id="scoreSpeedDisc" style="width:0%"></div></div>
                                     <span class="score-number" id="scoreSpeedDiscVal">--</span>
                                 </div>
                                 <div class="score-detail">
-                                    <div class="score-detail-text">Evaluates how consistently you maintain appropriate speeds. Frequent speeding and large speed variations reduce this score.</div>
-                                    <div class="score-detail-tip">💡 Tip: Use cruise control on highways. Keeping within 5 km/h of the limit saves significant energy.</div>
+                                    <div class="score-detail-text" data-i18n="trip.scores.speed_disc_text">Evaluates how consistently you maintain appropriate speeds. Frequent speeding and large speed variations reduce this score.</div>
+                                    <div class="score-detail-tip" data-i18n="trip.scores.speed_disc_tip">💡 Tip: Use cruise control on highways. Keeping within 5 km/h of the limit saves significant energy.</div>
                                 </div>
                             </div>
                             <div class="score-row" onclick="TRIPS.toggleScoreDetail(this)">
                                 <div class="score-row-top">
                                     <span class="score-icon">⚡</span>
-                                    <span class="score-label">Efficiency</span>
+                                    <span class="score-label" data-i18n="trip.scores.efficiency">Efficiency</span>
                                     <div class="score-bar-track"><div class="score-bar-fill" id="scoreEfficiency" style="width:0%"></div></div>
                                     <span class="score-number" id="scoreEfficiencyVal">--</span>
                                 </div>
                                 <div class="score-detail">
-                                    <div class="score-detail-text">Compares your energy consumption per km against the optimal baseline for your vehicle, route, and conditions.</div>
-                                    <div class="score-detail-tip">💡 Tip: Pre-condition the cabin while plugged in. Avoid full-throttle launches from stops.</div>
+                                    <div class="score-detail-text" data-i18n="trip.scores.efficiency_text">Compares your energy consumption per km against the optimal baseline for your vehicle, route, and conditions.</div>
+                                    <div class="score-detail-tip" data-i18n="trip.scores.efficiency_tip">💡 Tip: Pre-condition the cabin while plugged in. Avoid full-throttle launches from stops.</div>
                                 </div>
                             </div>
                             <div class="score-row" onclick="TRIPS.toggleScoreDetail(this)">
                                 <div class="score-row-top">
                                     <span class="score-icon">📐</span>
-                                    <span class="score-label">Consistency</span>
+                                    <span class="score-label" data-i18n="trip.scores.consistency">Consistency</span>
                                     <div class="score-bar-track"><div class="score-bar-fill" id="scoreConsistency" style="width:0%"></div></div>
                                     <span class="score-number" id="scoreConsistencyVal">--</span>
                                 </div>
                                 <div class="score-detail">
-                                    <div class="score-detail-text">Measures how uniform your driving style is throughout the trip. Erratic behavior (alternating aggressive and calm) lowers this score.</div>
-                                    <div class="score-detail-tip">💡 Tip: Pick a driving style and stick with it. Consistent habits build muscle memory for efficiency.</div>
+                                    <div class="score-detail-text" data-i18n="trip.scores.consistency_text">Measures how uniform your driving style is throughout the trip. Erratic behavior (alternating aggressive and calm) lowers this score.</div>
+                                    <div class="score-detail-tip" data-i18n="trip.scores.consistency_tip">💡 Tip: Pick a driving style and stick with it. Consistent habits build muscle memory for efficiency.</div>
                                 </div>
                             </div>
                         </div>
@@ -1947,7 +1947,7 @@
                     <!-- Delete Trip -->
                     <button class="detail-delete-btn" id="detailDeleteBtn" onclick="TRIPS.deleteCurrentTrip()">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                        Delete Trip
+                        <span data-i18n="trip.detail.delete_trip">Delete Trip</span>
                     </button>
                 </div>
 
@@ -1973,7 +1973,7 @@
                 </div>
             </div>
             <div class="calendar-grid" id="calendarGrid"></div>
-            <button class="calendar-close" onclick="TRIPS.closeCalendar()">Close</button>
+            <button class="calendar-close" onclick="TRIPS.closeCalendar()" data-i18n="common.close">Close</button>
         </div>
     </div>
 
@@ -1988,8 +1988,10 @@
             document.getElementById('sidebar').classList.toggle('open');
             document.getElementById('sidebarOverlay').classList.toggle('show');
         }
-        if (typeof BYD !== 'undefined' && BYD.core) BYD.core.init();
-        TRIPS.init();
+        BYD.i18n.init().then(function () {
+            if (typeof BYD !== 'undefined' && BYD.core) BYD.core.init();
+            TRIPS.init();
+        });
     </script>
 </body>
 </html>

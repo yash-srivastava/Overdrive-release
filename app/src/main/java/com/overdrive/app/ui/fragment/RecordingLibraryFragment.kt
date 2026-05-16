@@ -394,7 +394,7 @@ class RecordingLibraryFragment : Fragment() {
     }
     
     private fun onSelectionChanged(count: Int) {
-        tvSelectedCount?.text = "$count selected"
+        tvSelectedCount?.text = getString(R.string.recording_lib_selected_count, count)
         if (recordingAdapter.selectMode && selectToolbar?.visibility != View.VISIBLE) {
             selectToolbar?.visibility = View.VISIBLE
         }
@@ -716,43 +716,43 @@ class RecordingLibraryFragment : Fragment() {
                     setDataAndType(uri, "video/mp4")
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
-                startActivity(Intent.createChooser(intent, "Play with"))
+                startActivity(Intent.createChooser(intent, getString(R.string.play_with_chooser)))
             } catch (e2: Exception) {
-                Toast.makeText(context, "Cannot play video: ${e2.message}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, getString(R.string.toast_cannot_play_video, e2.message ?: ""), Toast.LENGTH_SHORT).show()
             }
         }
     }
     
     private fun confirmDelete(recording: RecordingFile) {
         MaterialAlertDialogBuilder(requireContext())
-            .setTitle("Delete Recording")
-            .setMessage("Delete ${recording.name}?\nThis cannot be undone.")
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Delete") { _, _ ->
+            .setTitle(getString(R.string.dialog_delete_recording_title))
+            .setMessage(getString(R.string.dialog_delete_recording_message, recording.name))
+            .setNegativeButton(getString(R.string.action_cancel), null)
+            .setPositiveButton(getString(R.string.dialog_delete)) { _, _ ->
                 deleteRecording(recording)
             }
             .show()
     }
-    
+
     private fun deleteRecording(recording: RecordingFile) {
         if (RecordingScanner.deleteRecording(recording)) {
-            Toast.makeText(context, "Recording deleted", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, getString(R.string.toast_recording_deleted), Toast.LENGTH_SHORT).show()
             loadRecordingsForSelectedDate()
             updateCalendar() // Refresh indicators
         } else {
-            Toast.makeText(context, "Failed to delete recording", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, getString(R.string.toast_recording_delete_failed), Toast.LENGTH_SHORT).show()
         }
     }
-    
+
     private fun confirmBatchDelete() {
         val selected = recordingAdapter.getSelectedRecordings()
         if (selected.isEmpty()) return
-        
+
         MaterialAlertDialogBuilder(requireContext())
-            .setTitle("Delete ${selected.size} Recording${if (selected.size > 1) "s" else ""}")
-            .setMessage("This will permanently delete ${selected.size} recording${if (selected.size > 1) "s" else ""}. This cannot be undone.")
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Delete") { _, _ ->
+            .setTitle(resources.getQuantityString(R.plurals.delete_recordings_title, selected.size, selected.size))
+            .setMessage(resources.getQuantityString(R.plurals.delete_recordings_message, selected.size, selected.size))
+            .setNegativeButton(getString(R.string.action_cancel), null)
+            .setPositiveButton(getString(R.string.dialog_delete)) { _, _ ->
                 batchDeleteRecordings(selected)
             }
             .show()
@@ -776,9 +776,9 @@ class RecordingLibraryFragment : Fragment() {
             activity?.runOnUiThread {
                 if (isAdded) {
                     val msg = if (failed > 0) {
-                        "$deleted deleted, $failed failed"
+                        getString(R.string.toast_batch_delete_partial, deleted, failed)
                     } else {
-                        "$deleted recording${if (deleted > 1) "s" else ""} deleted"
+                        resources.getQuantityString(R.plurals.recordings_deleted_count, deleted, deleted)
                     }
                     Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                     exitSelectMode()

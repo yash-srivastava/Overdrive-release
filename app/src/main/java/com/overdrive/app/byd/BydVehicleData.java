@@ -101,7 +101,10 @@ public class BydVehicleData {
     public final boolean rearFog;
     public final boolean frontFog;
     public final boolean hazard;
-    public final int dayTimeLight;
+    public final boolean dayTimeLight;
+
+    // ==================== ADAS ====================
+    public final boolean speedLimitWarning;
 
     // ==================== SEATBELTS ====================
     public final int[] seatbeltStatus;    // [1-5]
@@ -251,6 +254,7 @@ public class BydVehicleData {
         this.frontFog = b.frontFog;
         this.hazard = b.hazard;
         this.dayTimeLight = b.dayTimeLight;
+        this.speedLimitWarning = b.speedLimitWarning;
         this.seatbeltStatus = b.seatbeltStatus;
         this.acStartState = b.acStartState;
         this.acCycleMode = b.acCycleMode;
@@ -633,6 +637,7 @@ public class BydVehicleData {
         b.rightTurnState = rightTurnState; b.lowBeam = lowBeam; b.highBeam = highBeam;
         b.rearFog = rearFog; b.frontFog = frontFog; b.hazard = hazard;
         b.dayTimeLight = dayTimeLight; b.seatbeltStatus = seatbeltStatus;
+        b.speedLimitWarning = speedLimitWarning;
         b.acStartState = acStartState; b.acCycleMode = acCycleMode; b.acWindMode = acWindMode; b.acFanLevel = acFanLevel;
         b.tempUnit = tempUnit; b.slopeDegrees = slopeDegrees; b.powerLevel = powerLevel;
         b.mcuStatus = mcuStatus; b.emergencyAlarmState = emergencyAlarmState;
@@ -691,7 +696,8 @@ public class BydVehicleData {
         int[] tyrePressureState, tyreAirLeakState, tyreSignalState, tyreTemperature;
         int tyreSystemState = UNAVAILABLE, tyreTemperatureState = UNAVAILABLE;
         int leftTurnState = UNAVAILABLE, rightTurnState = UNAVAILABLE;
-        boolean lowBeam, highBeam, rearFog, frontFog, hazard; int dayTimeLight = UNAVAILABLE;
+        boolean lowBeam, highBeam, rearFog, frontFog, hazard, dayTimeLight;
+        boolean speedLimitWarning;
         int acStartState = UNAVAILABLE, acCycleMode = UNAVAILABLE, acWindMode = UNAVAILABLE, acFanLevel = UNAVAILABLE, tempUnit = UNAVAILABLE;
         double slopeDegrees = NaN;
         int powerLevel = UNAVAILABLE, mcuStatus = UNAVAILABLE, emergencyAlarmState = UNAVAILABLE;
@@ -796,7 +802,8 @@ public class BydVehicleData {
         public Builder rearFog(boolean v) { rearFog = v; return this; }
         public Builder frontFog(boolean v) { frontFog = v; return this; }
         public Builder hazard(boolean v) { hazard = v; return this; }
-        public Builder dayTimeLight(int v) { dayTimeLight = v; return this; }
+        public Builder dayTimeLight(boolean v) { dayTimeLight = v; return this; }
+        public Builder speedLimitWarning(boolean v) { speedLimitWarning = v; return this; }
         public Builder seatbeltStatus(int[] v) { seatbeltStatus = v; return this; }
         public Builder acStartState(int v) { acStartState = v; return this; }
         public Builder acCycleMode(int v) { acCycleMode = v; return this; }

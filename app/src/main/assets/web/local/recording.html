@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Recordings - OverDrive</title>
+    <title data-i18n="app.recordings_title">Recordings - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon.webp">
     <link rel="stylesheet" href="../shared/styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -24,8 +24,8 @@
                         <img src="../shared/app-icon.webp" alt="OverDrive">
                     </div>
                     <div class="brand-text">
-                        <span class="brand-name">OverDrive</span>
-                        <span class="brand-tagline">Sentry System</span>
+                        <span class="brand-name" data-i18n="app.name">OverDrive</span>
+                        <span class="brand-tagline" data-i18n="app.tagline">Sentry System</span>
                         <span class="brand-version" id="appVersion"></span>
                     </div>
                 </div>
@@ -41,7 +41,7 @@
                         <path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/>
                         <path d="M2 12a9 9 0 0 0 8 8"/><circle cx="2" cy="12" r="2"/>
                     </svg>
-                    <span>Live View</span>
+                    <span data-i18n="nav.live_view">Live View</span>
                 </a>
                 <a href="events.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -50,26 +50,26 @@
                         <line x1="8" y1="2" x2="8" y2="6"/>
                         <line x1="3" y1="10" x2="21" y2="10"/>
                     </svg>
-                    <span>Events</span>
+                    <span data-i18n="nav.events">Events</span>
                 </a>
                 <a href="surveillance.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                     </svg>
-                    <span>Surveillance</span>
+                    <span data-i18n="nav.surveillance">Surveillance</span>
                 </a>
                 <a href="recording.html" class="nav-link active">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="m22 8-6 4 6 4V8Z"/>
                         <rect width="14" height="12" x="2" y="6" rx="2"/>
                     </svg>
-                    <span>Recordings</span>
+                    <span data-i18n="nav.recordings">Recordings</span>
                 </a>
                 <a href="performance.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
                     </svg>
-                    <span>Performance</span>
+                    <span data-i18n="nav.performance">Performance</span>
                 </a>
                 <a href="abrp.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -78,7 +78,7 @@
                         <circle cx="6" cy="6" r="3"/>
                         <circle cx="6" cy="18" r="3"/>
                     </svg>
-                    <span>ABRP</span>
+                    <span data-i18n="nav.abrp">ABRP</span>
                 </a>
                 <a href="mqtt.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -88,45 +88,45 @@
                         <path d="M5.64 18.36A9 9 0 0 1 3 12a9 9 0 0 1 2.64-6.36"/>
                         <path d="M18.36 5.64A9 9 0 0 1 21 12a9 9 0 0 1-2.64 6.36"/>
                     </svg>
-                    <span>MQTT</span>
+                    <span data-i18n="nav.mqtt">MQTT</span>
                 </a>
                 <a href="trips.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 17h2v-7l4 4 4-4 4 4 4-4v7h2"/>
                         <path d="M4 5h16"/>
                     </svg>
-                    <span>Trips</span>
+                    <span data-i18n="nav.trips">Trips</span>
                 </a>
                 <a href="notifications.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
                         <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
                     </svg>
-                    <span>Notifications</span>
+                    <span data-i18n="nav.notifications">Notifications</span>
                 </a>
                 <a href="vehicle-control.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="3" y="11" width="18" height="11" rx="2"/>
                         <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                     </svg>
-                    <span>Vehicle Control</span>
+                    <span data-i18n="nav.vehicle_control">Vehicle Control</span>
                 </a>
             </nav>
             <div class="sidebar-footer">
                 <div class="status-card">
                     <div class="status-row">
-                        <span class="status-label">
+                        <span class="status-label" data-i18n="status.device">
                             <span class="status-dot" id="connDot"></span>
                             Device
                         </span>
                         <span class="status-value" id="deviceId">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">ACC</span>
+                        <span class="status-label" data-i18n="status.acc">ACC</span>
                         <span class="status-value" id="accValue">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">
+                        <span class="status-label" data-i18n="status.battery_12v">
                             <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="6" y="7" width="12" height="10" rx="1"/><path d="M6 10H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h2"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/>
                             </svg>
@@ -135,11 +135,11 @@
                         <span class="status-value" id="batteryValue">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">Sentry</span>
-                        <span class="status-value" id="survStatus">OFF</span>
+                        <span class="status-label" data-i18n="status.sentry">Sentry</span>
+                        <span class="status-value" id="survStatus" data-i18n="status.off">OFF</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">
+                        <span class="status-label" data-i18n="status.network">
                             <span id="networkIcon"><svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg></span>Net
                         </span>
                         <span class="status-value" id="networkValue">--</span>
@@ -148,7 +148,7 @@
                 <!-- EV Battery & Charging Card -->
                 <div class="status-card ev-card" id="evCard">
                     <div class="ev-header-row">
-                        <span class="ev-title">Vehicle Status</span>
+                        <span class="ev-title" data-i18n="status.vehicle_status">Vehicle Status</span>
                         <span class="ev-percent-text" id="evPercentValue">--%</span>
                     </div>
                     <div class="ev-svg-container">
@@ -229,11 +229,11 @@
                         </div>
                     </div>
                     <div class="ev-soh-row" id="evSohRow" style="display:none;">
-                        <span class="ev-soh-label">SOH</span>
+                        <span class="ev-soh-label" data-i18n="vehicle.soh_label">SOH</span>
                         <span class="ev-soh-val" id="evSohValue">--%</span>
                     </div>
                     <div class="ev-personalized-range" id="evPersonalizedRow" style="display:none;">
-                        <span class="ev-personalized-label">⚡ Personalized</span>
+                        <span class="ev-personalized-label" data-i18n="vehicle.personalized_label">⚡ Personalized</span>
                         <span class="ev-personalized-val" id="evPersonalizedRange">-- km</span>
                     </div>
                 </div>
@@ -247,7 +247,7 @@
                             <path d="M13 10h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V9.83a2 2 0 0 0-.59-1.42L18 6"/>
                             <path d="M6 14v-3"/>
                         </svg>
-                        <span class="fuel-title">Fuel</span>
+                        <span class="fuel-title" data-i18n="vehicle.fuel">Fuel</span>
                         <span class="fuel-percent" id="fuelPercentValue">--%</span>
                     </div>
                     <div class="fuel-bar-track">
@@ -265,12 +265,12 @@
                         <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
                     </svg>
                 </button>
-                <span style="font-weight:600;">Recordings</span>
+                <span style="font-weight:600;" data-i18n="nav.recordings">Recordings</span>
                 <div style="width:40px;"></div>
             </div>
 
             <header class="page-header">
-                <h1 class="page-title">Recording Settings</h1>
+                <h1 class="page-title" data-i18n="recording.page_title">Recording Settings</h1>
             </header>
 
             <div class="page-body">
@@ -279,15 +279,15 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4" fill="currentColor"/></svg>
-                            Recording Status
+                            <span data-i18n="recording.status_title">Recording Status</span>
                         </div>
-                        <span class="status-badge inactive" id="recStatusBadge">IDLE</span>
+                        <span class="status-badge inactive" id="recStatusBadge" data-i18n="recording.status_idle">IDLE</span>
                     </div>
                     <div class="card-body">
                         <div class="info-box" style="margin-top:0;">
-                            <div class="info-row"><span class="label">Current State</span><span class="value" id="recState">Idle</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.current_state">Current State</span><span class="value" id="recState" data-i18n="common.idle">Idle</span></div>
                             <div class="info-row">
-                                <span class="label">Recordings Today</span>
+                                <span class="label" data-i18n="recording.recordings_today">Recordings Today</span>
                                 <a href="events.html" class="value link-value" id="recToday">0 →</a>
                             </div>
                         </div>
@@ -301,14 +301,14 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/>
                             </svg>
-                            Recording Mode (ACC ON)
+                            <span data-i18n="recording.mode_title">Recording Mode (ACC ON)</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row" style="border-bottom:none;padding-bottom:12px;">
                             <div class="setting-info">
-                                <div class="setting-name">Select Mode</div>
-                                <div class="setting-desc">Choose when to record while driving</div>
+                                <div class="setting-name" data-i18n="recording.select_mode">Select Mode</div>
+                                <div class="setting-desc" data-i18n="recording.select_mode_desc">Choose when to record while driving</div>
                             </div>
                         </div>
                         <div class="mode-selector">
@@ -317,9 +317,9 @@
                                 <div class="mode-card">
                                     <div class="mode-header">
                                         <span class="mode-icon">🚫</span>
-                                        <span class="mode-name">None (Default)</span>
+                                        <span class="mode-name" data-i18n="recording.mode_none_name">None (Default)</span>
                                     </div>
-                                    <div class="mode-desc">No recording - saves battery and resources</div>
+                                    <div class="mode-desc" data-i18n="recording.mode_none_desc">No recording - saves battery and resources</div>
                                 </div>
                             </label>
                             <label class="mode-option">
@@ -327,9 +327,9 @@
                                 <div class="mode-card">
                                     <div class="mode-header">
                                         <span class="mode-icon">📹</span>
-                                        <span class="mode-name">Continuous</span>
+                                        <span class="mode-name" data-i18n="recording.mode_continuous_name">Continuous</span>
                                     </div>
-                                    <div class="mode-desc">Record all the time when cameras are active</div>
+                                    <div class="mode-desc" data-i18n="recording.mode_continuous_desc">Record all the time when cameras are active</div>
                                 </div>
                             </label>
                             <label class="mode-option">
@@ -337,9 +337,9 @@
                                 <div class="mode-card">
                                     <div class="mode-header">
                                         <span class="mode-icon">🚗</span>
-                                        <span class="mode-name">Drive Mode</span>
+                                        <span class="mode-name" data-i18n="recording.mode_drive_name">Drive Mode</span>
                                     </div>
-                                    <div class="mode-desc">Record only when driving (D/R/S/M gear)</div>
+                                    <div class="mode-desc" data-i18n="recording.mode_drive_desc">Record only when driving (D/R/S/M gear)</div>
                                 </div>
                             </label>
                             <label class="mode-option">
@@ -347,9 +347,9 @@
                                 <div class="mode-card">
                                     <div class="mode-header">
                                         <span class="mode-icon">🛡️</span>
-                                        <span class="mode-name">Proximity Guard</span>
+                                        <span class="mode-name" data-i18n="recording.mode_proximity_name">Proximity Guard</span>
                                     </div>
-                                    <div class="mode-desc">Record when objects approach the vehicle</div>
+                                    <div class="mode-desc" data-i18n="recording.mode_proximity_desc">Record when objects approach the vehicle</div>
                                 </div>
                             </label>
                         </div>
@@ -363,26 +363,26 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                             </svg>
-                            Proximity Guard Settings
+                            <span data-i18n="recording.proximity_settings_title">Proximity Guard Settings</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Trigger Sensitivity</div>
-                                <div class="setting-desc">When to start recording</div>
+                                <div class="setting-name" data-i18n="recording.trigger_sensitivity">Trigger Sensitivity</div>
+                                <div class="setting-desc" data-i18n="recording.trigger_sensitivity_desc">When to start recording</div>
                             </div>
                             <div class="setting-control">
                                 <select class="select-input" id="triggerLevel" onchange="RecSettings.markDirty()">
-                                    <option value="RED">🔴 Close Only (0-0.5m)</option>
-                                    <option value="YELLOW_RED">🟡 Medium + Close (0-0.8m)</option>
+                                    <option value="RED" data-i18n="recording.trigger_red">🔴 Close Only (0-0.5m)</option>
+                                    <option value="YELLOW_RED" data-i18n="recording.trigger_yellow_red">🟡 Medium + Close (0-0.8m)</option>
                                 </select>
                             </div>
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Pre-event Buffer</div>
-                                <div class="setting-desc">Seconds captured before event</div>
+                                <div class="setting-name" data-i18n="recording.pre_event_buffer">Pre-event Buffer</div>
+                                <div class="setting-desc" data-i18n="recording.pre_event_buffer_desc">Seconds captured before event</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -393,8 +393,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Post-event Buffer</div>
-                                <div class="setting-desc">Seconds captured after radar clears</div>
+                                <div class="setting-name" data-i18n="recording.post_event_buffer">Post-event Buffer</div>
+                                <div class="setting-desc" data-i18n="recording.post_event_buffer_desc">Seconds captured after radar clears</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -405,17 +405,17 @@
                         </div>
                         <div class="timeline-visual">
                             <div class="timeline-segment pre">
-                                <span class="timeline-label">PRE <span id="timelinePre">5s</span></span>
+                                <span class="timeline-label"><span data-i18n="recording.timeline_pre">PRE</span> <span id="timelinePre">5s</span></span>
                             </div>
                             <div class="timeline-segment event">
-                                <span class="timeline-label">⚠️ EVENT</span>
+                                <span class="timeline-label" data-i18n="recording.timeline_event">⚠️ EVENT</span>
                             </div>
                             <div class="timeline-segment post">
-                                <span class="timeline-label">POST <span id="timelinePost">10s</span></span>
+                                <span class="timeline-label"><span data-i18n="recording.timeline_post">POST</span> <span id="timelinePost">10s</span></span>
                             </div>
                         </div>
                         <div class="info-box">
-                            <div class="info-note">
+                            <div class="info-note" data-i18n="recording.timeline_note">
                                 ℹ️ Recording continues if radar triggers again within post-buffer time
                             </div>
                         </div>
@@ -427,40 +427,40 @@
                     <div class="card-header">
                         <div class="card-title">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg>
-                            Video Quality
+                            <span data-i18n="recording.video_quality_title">Video Quality</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Recording Quality</div>
-                                <div class="setting-desc">Higher quality uses more storage</div>
+                                <div class="setting-name" data-i18n="recording.recording_quality">Recording Quality</div>
+                                <div class="setting-desc" data-i18n="recording.recording_quality_desc">Higher quality uses more storage</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="recQualityBtns">
-                                    <button class="btn-toggle" data-value="LOW" onclick="RecSettings.setRecQuality('LOW')">Low</button>
-                                    <button class="btn-toggle" data-value="REDUCED" onclick="RecSettings.setRecQuality('REDUCED')">Med</button>
-                                    <button class="btn-toggle active" data-value="NORMAL" onclick="RecSettings.setRecQuality('NORMAL')">High</button>
+                                    <button class="btn-toggle" data-value="LOW" onclick="RecSettings.setRecQuality('LOW')" data-i18n="recording.qual_low">Low</button>
+                                    <button class="btn-toggle" data-value="REDUCED" onclick="RecSettings.setRecQuality('REDUCED')" data-i18n="recording.qual_med">Med</button>
+                                    <button class="btn-toggle active" data-value="NORMAL" onclick="RecSettings.setRecQuality('NORMAL')" data-i18n="recording.qual_high">High</button>
                                 </div>
                             </div>
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Recording Bitrate</div>
-                                <div class="setting-desc">Lower = smaller files, Higher = better quality</div>
+                                <div class="setting-name" data-i18n="recording.bitrate">Recording Bitrate</div>
+                                <div class="setting-desc" data-i18n="recording.bitrate_desc">Lower = smaller files, Higher = better quality</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="bitrateBtns">
-                                    <button class="btn-toggle" data-value="LOW" onclick="RecSettings.setBitrate('LOW')">Low</button>
-                                    <button class="btn-toggle active" data-value="MEDIUM" onclick="RecSettings.setBitrate('MEDIUM')">Med</button>
-                                    <button class="btn-toggle" data-value="HIGH" onclick="RecSettings.setBitrate('HIGH')">High</button>
+                                    <button class="btn-toggle" data-value="LOW" onclick="RecSettings.setBitrate('LOW')" data-i18n="recording.qual_low">Low</button>
+                                    <button class="btn-toggle active" data-value="MEDIUM" onclick="RecSettings.setBitrate('MEDIUM')" data-i18n="recording.qual_med">Med</button>
+                                    <button class="btn-toggle" data-value="HIGH" onclick="RecSettings.setBitrate('HIGH')" data-i18n="recording.qual_high">High</button>
                                 </div>
                             </div>
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Video Codec</div>
-                                <div class="setting-desc">H.265 produces 50% smaller files</div>
+                                <div class="setting-name" data-i18n="recording.codec">Video Codec</div>
+                                <div class="setting-desc" data-i18n="recording.codec_desc">H.265 produces 50% smaller files</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="codecBtns">
@@ -471,8 +471,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Camera FPS</div>
-                                <div class="setting-desc">Frame rate for recording &amp; surveillance. Takes effect on next ACC ON.</div>
+                                <div class="setting-name" data-i18n="recording.camera_fps">Camera FPS</div>
+                                <div class="setting-desc" data-i18n="recording.camera_fps_desc">Frame rate for recording &amp; surveillance. Takes effect on next ACC ON.</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="fpsBtns">
@@ -483,17 +483,17 @@
                             </div>
                         </div>
                         <div class="info-box">
-                            <div class="info-row"><span class="label">Est. file size (2 min)</span><span class="value" id="estFileSize">~22-30 MB</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.est_file_size">Est. file size (2 min)</span><span class="value" id="estFileSize">~22-30 MB</span></div>
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Streaming Quality</div>
-                                <div class="setting-desc">Quality for live view (lower = less bandwidth)</div>
+                                <div class="setting-name" data-i18n="recording.streaming_quality">Streaming Quality</div>
+                                <div class="setting-desc" data-i18n="recording.streaming_quality_desc">Quality for live view (lower = less bandwidth)</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="streamQualityBtns">
-                                    <button class="btn-toggle active" data-value="LQ" onclick="RecSettings.setStreamQuality('LQ')">Low</button>
-                                    <button class="btn-toggle" data-value="HQ" onclick="RecSettings.setStreamQuality('HQ')">High</button>
+                                    <button class="btn-toggle active" data-value="LQ" onclick="RecSettings.setStreamQuality('LQ')" data-i18n="recording.qual_low">Low</button>
+                                    <button class="btn-toggle" data-value="HQ" onclick="RecSettings.setStreamQuality('HQ')" data-i18n="recording.qual_high">High</button>
                                 </div>
                             </div>
                         </div>
@@ -507,14 +507,14 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
                             </svg>
-                            Telemetry Overlay
+                            <span data-i18n="recording.telemetry_overlay_title">Telemetry Overlay</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row" style="border-bottom:none;">
                             <div class="setting-info">
-                                <div class="setting-name">Show on Recorded Video</div>
-                                <div class="setting-desc">Overlay speed, gear, pedals and timestamp on recorded video</div>
+                                <div class="setting-name" data-i18n="recording.telemetry_show_label">Show on Recorded Video</div>
+                                <div class="setting-desc" data-i18n="recording.telemetry_show_desc">Overlay speed, gear, pedals and timestamp on recorded video</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -535,20 +535,20 @@
                                 <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
                                 <line x1="6" x2="6.01" y1="16" y2="16"/><line x1="10" x2="10.01" y1="16" y2="16"/>
                             </svg>
-                            Recording Storage
+                            <span data-i18n="recording.storage_title">Recording Storage</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <!-- Storage Location Selection -->
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Storage Location</div>
-                                <div class="setting-desc">Choose where to save recordings</div>
+                                <div class="setting-name" data-i18n="trip.settings.storage_location">Storage Location</div>
+                                <div class="setting-desc" data-i18n="recording.storage_location_desc">Choose where to save recordings</div>
                             </div>
                             <div class="setting-control">
                                 <div class="btn-group" id="recStorageTypeBtns">
-                                    <button class="btn-toggle active" data-value="INTERNAL" onclick="RecSettings.setStorageType('INTERNAL')">📱 Internal</button>
-                                    <button class="btn-toggle" data-value="SD_CARD" onclick="RecSettings.setStorageType('SD_CARD')" id="btnRecSdCard">💾 SD Card</button>
+                                    <button class="btn-toggle active" data-value="INTERNAL" onclick="RecSettings.setStorageType('INTERNAL')" data-i18n="trip.settings.storage_internal">📱 Internal</button>
+                                    <button class="btn-toggle" data-value="SD_CARD" onclick="RecSettings.setStorageType('SD_CARD')" id="btnRecSdCard" data-i18n="trip.settings.storage_sd">💾 SD Card</button>
                                 </div>
                             </div>
                         </div>
@@ -556,7 +556,7 @@
                         <div class="sd-card-status" id="recSdCardStatus" style="display:none;">
                             <div class="sd-status-row">
                                 <span class="sd-status-dot" id="recSdStatusDot"></span>
-                                <span class="sd-status-text" id="recSdStatusText">SD Card: Checking...</span>
+                                <span class="sd-status-text" id="recSdStatusText" data-i18n="recording.sd_checking">SD Card: Checking...</span>
                             </div>
                             <div class="sd-space-info" id="recSdSpaceInfo" style="display:none;">
                                 <span id="recSdFree">-- free</span> / <span id="recSdTotal">-- total</span>
@@ -564,8 +564,8 @@
                         </div>
                         <div class="setting-row" style="border-bottom:none;padding-bottom:8px;">
                             <div class="setting-info">
-                                <div class="setting-name">Storage Usage</div>
-                                <div class="setting-desc" id="recStoragePath">Recordings saved to Overdrive/recordings</div>
+                                <div class="setting-name" data-i18n="trip.settings.storage_usage">Storage Usage</div>
+                                <div class="setting-desc" id="recStoragePath" data-i18n="recording.storage_path_default">Recordings saved to Overdrive/recordings</div>
                             </div>
                         </div>
                         <div class="storage-bar">
@@ -577,8 +577,8 @@
                         </div>
                         <div class="setting-row" style="margin-top:16px;">
                             <div class="setting-info">
-                                <div class="setting-name">Storage Limit</div>
-                                <div class="setting-desc">Auto-delete oldest when limit reached</div>
+                                <div class="setting-name" data-i18n="recording.storage_limit">Storage Limit</div>
+                                <div class="setting-desc" data-i18n="recording.storage_limit_desc">Auto-delete oldest when limit reached</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -602,15 +602,15 @@
                                 <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
                                 <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
                             </svg>
-                            BYD Dashcam Auto-Cleanup
-                            <span class="status-badge" id="cdrCleanupBadge">OFF</span>
+                            <span data-i18n="recording.cdr_title">BYD Dashcam Auto-Cleanup</span>
+                            <span class="status-badge" id="cdrCleanupBadge" data-i18n="status.off">OFF</span>
                         </div>
                     </div>
                     <div class="card-body">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Auto-Delete Old Dashcam Files</div>
-                                <div class="setting-desc">Free up SD card space by removing oldest BYD dashcam recordings</div>
+                                <div class="setting-name" data-i18n="recording.cdr_auto_delete">Auto-Delete Old Dashcam Files</div>
+                                <div class="setting-desc" data-i18n="recording.cdr_auto_delete_desc">Free up SD card space by removing oldest BYD dashcam recordings</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -622,24 +622,24 @@
                         <!-- Recommend banner (shown only when API says recommendAutoCleanup) -->
                         <div class="info-box" id="cdrRecommendBanner" style="display:none;background:rgba(255,193,7,0.08);border:1px solid rgba(255,193,7,0.3);">
                             <div class="info-row" style="color:#ffc107;">
-                                <span class="label">⚠️ Recommended</span>
-                                <span class="value">Overdrive uses SD — enable cleanup to keep space free</span>
+                                <span class="label" data-i18n="recording.cdr_recommend_label">⚠️ Recommended</span>
+                                <span class="value" data-i18n="recording.cdr_recommend_text">Overdrive uses SD — enable cleanup to keep space free</span>
                             </div>
                         </div>
                         <!-- CDR Status -->
                         <div class="info-box" id="cdrInfoBox">
-                            <div class="info-row"><span class="label">Dashcam Path</span><span class="value" id="cdrPath">--</span></div>
-                            <div class="info-row"><span class="label">Dashcam Usage</span><span class="value" id="cdrUsage">--</span></div>
-                            <div class="info-row"><span class="label">Files</span><span class="value" id="cdrFileCount">--</span></div>
-                            <div class="info-row"><span class="label">Protected</span><span class="value" id="cdrProtected">--</span></div>
-                            <div class="info-row"><span class="label">Deletable</span><span class="value" id="cdrDeletable">--</span></div>
-                            <div class="info-row"><span class="label">Background monitor</span><span class="value" id="cdrMonitoring">--</span></div>
-                            <div class="info-row"><span class="label">Last cleanup</span><span class="value" id="cdrLastCleanup">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_path">Dashcam Path</span><span class="value" id="cdrPath">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_usage">Dashcam Usage</span><span class="value" id="cdrUsage">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_files">Files</span><span class="value" id="cdrFileCount">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_protected">Protected</span><span class="value" id="cdrProtected">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_deletable">Deletable</span><span class="value" id="cdrDeletable">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_bg_monitor">Background monitor</span><span class="value" id="cdrMonitoring">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_last_cleanup">Last cleanup</span><span class="value" id="cdrLastCleanup">--</span></div>
                         </div>
                         <div class="setting-row" style="margin-top:12px;">
                             <div class="setting-info">
-                                <div class="setting-name">Reserved Space for Overdrive</div>
-                                <div class="setting-desc">Keep this much free on SD card</div>
+                                <div class="setting-name" data-i18n="recording.cdr_reserved">Reserved Space for Overdrive</div>
+                                <div class="setting-desc" data-i18n="recording.cdr_reserved_desc">Keep this much free on SD card</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -650,8 +650,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Protect Recent Files</div>
-                                <div class="setting-desc">Don't delete dashcam files newer than this</div>
+                                <div class="setting-name" data-i18n="recording.cdr_protect_recent">Protect Recent Files</div>
+                                <div class="setting-desc" data-i18n="recording.cdr_protect_recent_desc">Don't delete dashcam files newer than this</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -662,8 +662,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Keep Minimum Files</div>
-                                <div class="setting-desc">Always keep at least this many newest files</div>
+                                <div class="setting-name" data-i18n="recording.cdr_min_keep">Keep Minimum Files</div>
+                                <div class="setting-desc" data-i18n="recording.cdr_min_keep_desc">Always keep at least this many newest files</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -673,13 +673,13 @@
                             </div>
                         </div>
                         <!-- Manual Cleanup Button -->
-                        <button class="btn btn-secondary" style="width:100%;margin-top:12px;" onclick="RecSettings.triggerCdrCleanup()">
+                        <button class="btn btn-secondary" style="width:100%;margin-top:12px;" onclick="RecSettings.triggerCdrCleanup()" data-i18n="recording.cdr_cleanup_now">
                             🗑️ Clean Up Now
                         </button>
                         <!-- Stats -->
                         <div class="info-box" style="margin-top:12px;">
-                            <div class="info-row"><span class="label">Total Freed</span><span class="value" id="cdrTotalFreed">--</span></div>
-                            <div class="info-row"><span class="label">Files Deleted</span><span class="value" id="cdrTotalDeleted">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_total_freed">Total Freed</span><span class="value" id="cdrTotalFreed">--</span></div>
+                            <div class="info-row"><span class="label" data-i18n="recording.cdr_files_deleted">Files Deleted</span><span class="value" id="cdrTotalDeleted">--</span></div>
                         </div>
                     </div>
                 </div>
@@ -690,7 +690,7 @@
 
         <!-- Fixed Footer Bar -->
         <div class="footer-bar" id="footerBar">
-            <button class="btn btn-primary" id="btnApply" disabled onclick="RecSettings.saveSettings()">
+            <button class="btn btn-primary" id="btnApply" disabled onclick="RecSettings.saveSettings()" data-i18n="common.apply_changes">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;">
                     <polyline points="20 6 9 17 4 12"/>
                 </svg>
@@ -712,9 +712,11 @@
             document.getElementById('sidebar').classList.toggle('open');
             document.getElementById('sidebarOverlay').classList.toggle('show');
         }
-        BYD.core.init();
-        BYD.pip.init();
-        RecSettings.init();
+        BYD.i18n.init().then(function () {
+            BYD.core.init();
+            BYD.pip.init();
+            RecSettings.init();
+        });
     </script>
 </body>
 </html>

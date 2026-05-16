@@ -32,14 +32,14 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="🔑 ABRP Token Configuration"
+                    android:text="@string/abrp_token_config_title"
                     android:textAppearance="@style/TextAppearance.Overdrive.Subtitle"
                     android:layout_marginBottom="16dp" />
 
                 <com.google.android.material.textfield.TextInputLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:hint="ABRP User Token"
+                    android:hint="@string/abrp_token_hint"
                     app:endIconMode="password_toggle"
                     app:boxBackgroundColor="@color/bg_elevated"
                     app:boxStrokeColor="@color/card_border"
@@ -67,7 +67,7 @@
                         android:id="@+id/btnSaveTest"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Save &amp; Test"
+                        android:text="@string/abrp_save_test"
                         app:backgroundTint="@color/brand_primary"
                         android:textColor="@color/bg_base"
                         app:cornerRadius="12dp" />
@@ -81,7 +81,7 @@
                         android:id="@+id/tvTokenStatus"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Not configured"
+                        android:text="@string/abrp_not_configured"
                         android:textColor="@color/text_muted" />
 
                 </LinearLayout>
@@ -109,7 +109,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="⚙️ Service Control"
+                    android:text="@string/abrp_service_control_title"
                     android:textAppearance="@style/TextAppearance.Overdrive.Subtitle"
                     android:layout_marginBottom="16dp" />
 
@@ -117,7 +117,7 @@
                     android:id="@+id/switchAbrpEnabled"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Enable ABRP Telemetry"
+                    android:text="@string/abrp_enable_telemetry"
                     android:textColor="@color/text_primary"
                     android:paddingVertical="8dp" />
 
@@ -138,14 +138,14 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="Connection Status"
+                        android:text="@string/abrp_connection_status_label"
                         android:textColor="@color/text_secondary" />
 
                     <TextView
                         android:id="@+id/tvConnectionStatus"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="🔴 Disconnected"
+                        android:text="@string/abrp_disconnected"
                         android:textColor="@color/text_muted" />
 
                 </LinearLayout>
@@ -161,14 +161,14 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="Last Upload"
+                        android:text="@string/abrp_last_upload_label"
                         android:textColor="@color/text_secondary" />
 
                     <TextView
                         android:id="@+id/tvLastUpload"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Never"
+                        android:text="@string/abrp_last_upload_never"
                         android:textColor="@color/text_muted" />
 
                 </LinearLayout>
@@ -196,7 +196,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="📊 Telemetry Preview"
+                    android:text="@string/abrp_telemetry_preview_title"
                     android:textAppearance="@style/TextAppearance.Overdrive.Subtitle"
                     android:layout_marginBottom="16dp" />
 
@@ -204,7 +204,7 @@
                     android:id="@+id/tvTelemetryPreview"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="No telemetry data available"
+                    android:text="@string/abrp_no_telemetry"
                     android:textColor="@color/text_muted"
                     android:fontFamily="monospace"
                     android:textSize="12sp"
@@ -233,7 +233,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="🗑️ Token Management"
+                    android:text="@string/abrp_token_management_title"
                     android:textAppearance="@style/TextAppearance.Overdrive.Subtitle"
                     android:layout_marginBottom="16dp" />
 
@@ -241,7 +241,7 @@
                     android:id="@+id/btnDeleteToken"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Delete Token"
+                    android:text="@string/abrp_delete_token"
                     style="@style/Widget.Overdrive.Button.Outlined"
                     app:strokeColor="@color/status_danger"
                     android:textColor="@color/status_danger" />

@@ -8,7 +8,7 @@
     <com.google.android.material.textfield.TextInputLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Enable Token"
+        android:hint="@string/zrok_enable_token_hint"
         style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
 
         <com.google.android.material.textfield.TextInputEditText
@@ -27,7 +27,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
-        android:text="Token is stored securely and shared between app and daemon processes."
+        android:text="@string/zrok_token_storage_note"
         android:textColor="@color/text_muted"
         android:textSize="12sp" />
 
@@ -42,7 +42,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
-        android:text="⚠️ Reset Zrok Environment"
+        android:text="@string/zrok_reset_environment"
         android:textColor="#EF4444"
         android:textSize="14sp"
         android:fontFamily="sans-serif-medium"
@@ -55,7 +55,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
-        android:text="Removes environment and token. You will need to re-enable with your token (uses a device slot)."
+        android:text="@string/zrok_reset_environment_desc"
         android:textColor="@color/text_muted"
         android:textSize="11sp" />
 

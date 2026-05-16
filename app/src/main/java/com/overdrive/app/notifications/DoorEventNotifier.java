@@ -3,6 +3,7 @@ package com.overdrive.app.notifications;
 import com.overdrive.app.byd.BydDataCollector;
 import com.overdrive.app.byd.BydVehicleData;
 import com.overdrive.app.byd.bodywork.BodyworkConstants;
+import com.overdrive.app.server.Messages;
 
 import org.json.JSONObject;
 
@@ -68,12 +69,12 @@ public final class DoorEventNotifier {
         // instead of an anonymous "While parked". When the car is outside any
         // configured zone, the "at <zone>" suffix is omitted entirely; we
         // never make up a location.
-        String body = "While parked";
+        String body = Messages.get("notifications.while_parked");
         try {
             String zone = com.overdrive.app.surveillance.SafeLocationManager
                     .getInstance().getCurrentZoneName();
             if (zone != null && !zone.isEmpty()) {
-                body = "While parked at " + zone;
+                body = Messages.get("notifications.while_parked_at", zone);
             }
         } catch (Throwable ignored) { /* fall back to plain body */ }
 
@@ -88,7 +89,9 @@ public final class DoorEventNotifier {
             NotificationBus.get().publish(new NotificationEvent(
                     category,
                     NotificationEvent.Severity.WARN,
-                    opened ? areaLabel + " door opened" : areaLabel + " door closed",
+                    opened
+                            ? Messages.get("notifications.door_opened", areaLabel)
+                            : Messages.get("notifications.door_closed", areaLabel),
                     body,
                     "door-" + area + "-" + (opened ? "open" : "close"),
                     null,
@@ -98,14 +101,14 @@ public final class DoorEventNotifier {
 
     private static String areaLabel(int area) {
         switch (area) {
-            case AREA_LF: return "Front-left";
-            case AREA_RF: return "Front-right";
-            case AREA_LR: return "Rear-left";
-            case AREA_RR: return "Rear-right";
-            case AREA_HOOD: return "Hood";
-            case AREA_TRUNK: return "Trunk";
-            case AREA_FUEL_CAP: return "Fuel cap";
-            default: return "Door " + area;
+            case AREA_LF: return Messages.get("notifications.area_front_left");
+            case AREA_RF: return Messages.get("notifications.area_front_right");
+            case AREA_LR: return Messages.get("notifications.area_rear_left");
+            case AREA_RR: return Messages.get("notifications.area_rear_right");
+            case AREA_HOOD: return Messages.get("notifications.area_hood");
+            case AREA_TRUNK: return Messages.get("notifications.area_trunk");
+            case AREA_FUEL_CAP: return Messages.get("notifications.area_fuel_cap");
+            default: return Messages.get("notifications.area_door_n", area);
         }
     }
 }

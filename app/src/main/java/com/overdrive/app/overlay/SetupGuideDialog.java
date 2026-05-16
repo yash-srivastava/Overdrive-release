@@ -68,25 +68,40 @@ public class SetupGuideDialog {
         TextView tvVersionBanner = view.findViewById(R.id.tvVersionBanner);
         if (tvVersionBanner != null) {
             if (isUpdate) {
-                tvVersionBanner.setText("🔄 Updated to v" + BuildConfig.VERSION_NAME +
-                        " — re-confirm autostart, BYD wipes it on every install");
+                tvVersionBanner.setText(context.getString(R.string.setup_version_banner, BuildConfig.VERSION_NAME));
                 tvVersionBanner.setVisibility(View.VISIBLE);
             } else {
                 tvVersionBanner.setVisibility(View.GONE);
             }
         }
 
-        // Step 1: Auto-start restriction
+        // Step 1: Language. Always shown as "complete" because Auto is a valid
+        // selection out of the box; the row exists so users can opt in to a
+        // specific language before they hit Done.
+        TextView btnLanguage = view.findViewById(R.id.btnOpenLanguage);
+        if (btnLanguage != null) {
+            btnLanguage.setOnClickListener(v ->
+                com.overdrive.app.ui.dialog.LanguagePickerDialog.show(context, picked -> {
+                    // After a pick, recreate the host activity so AppCompat
+                    // re-applies the locale and the setup dialog re-inflates
+                    // in the new language. Cheaper than juggling two dialogs.
+                    if (context instanceof android.app.Activity) {
+                        ((android.app.Activity) context).recreate();
+                    }
+                }));
+        }
+
+        // Step 2: Auto-start restriction
         TextView btnAutoStart = view.findViewById(R.id.btnOpenAutoStart);
         btnAutoStart.setOnClickListener(v -> openAutoStartSettings(context));
 
-        // Step 2: Overlay permission
+        // Step 3: Overlay permission
         TextView btnOverlay = view.findViewById(R.id.btnOpenOverlay);
         View stepOverlayCheck = view.findViewById(R.id.ivOverlayCheck);
 
         if (Settings.canDrawOverlays(context)) {
             stepOverlayCheck.setVisibility(View.VISIBLE);
-            btnOverlay.setText("✓ Already Granted");
+            btnOverlay.setText(context.getString(R.string.setup_overlay_already_granted));
             btnOverlay.setEnabled(false);
         }
 

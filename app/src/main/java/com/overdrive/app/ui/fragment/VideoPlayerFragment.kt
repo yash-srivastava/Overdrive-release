@@ -134,7 +134,7 @@ class VideoPlayerFragment : Fragment() {
 
         videoView.setOnErrorListener { _, what, extra ->
             android.util.Log.e("VideoPlayer", "Error: what=$what extra=$extra")
-            tvEventInfo.text = "Playback error"
+            tvEventInfo.text = getString(R.string.video_player_playback_error)
             true
         }
     }
@@ -223,7 +223,7 @@ class VideoPlayerFragment : Fragment() {
                 val jsonPath = videoPath.replace(".mp4", ".json")
                 val jsonFile = File(jsonPath)
                 if (!jsonFile.exists()) {
-                    activity?.runOnUiThread { tvEventInfo.text = "No events" }
+                    activity?.runOnUiThread { tvEventInfo.text = getString(R.string.video_player_no_events) }
                     return@Thread
                 }
 

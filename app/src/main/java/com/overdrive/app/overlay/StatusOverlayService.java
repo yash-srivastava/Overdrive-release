@@ -706,8 +706,8 @@ public class StatusOverlayService extends Service {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
         return new Notification.Builder(this, CHANNEL_ID)
-                .setContentTitle("OverDrive Status")
-                .setContentText("Status overlay active")
+                .setContentTitle(getString(R.string.status_overlay_notif_title))
+                .setContentText(getString(R.string.status_overlay_notif_text))
                 .setSmallIcon(R.drawable.ic_recording)
                 .setContentIntent(pi)
                 .setOngoing(true)

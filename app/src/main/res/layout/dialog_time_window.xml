@@ -17,7 +17,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="⏰ Schedule Configuration"
+            android:text="@string/time_window_dialog_title"
             android:textColor="@color/text_primary"
             android:textSize="18sp"
             android:textStyle="bold" />
@@ -26,7 +26,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="Configure when surveillance should be active"
+            android:text="@string/time_window_dialog_subtitle"
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
 
@@ -59,7 +59,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
-                android:text="+ Add Window (1/3)"
+                android:text="@string/time_window_add_button"
                 app:icon="@android:drawable/ic_input_add"
                 app:iconGravity="textStart" />
 
@@ -78,7 +78,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:padding="12dp"
-                    android:text="💡 Tip: Overnight windows (e.g., 22:00 - 06:00) are supported. Surveillance will only activate during these windows when ACC is OFF."
+                    android:text="@string/time_window_tip"
                     android:textColor="@color/text_secondary"
                     android:textSize="12sp" />
 
@@ -103,14 +103,14 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginEnd="8dp"
-            android:text="Cancel" />
+            android:text="@string/action_cancel" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnSave"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="💾 Save"
+            android:text="@string/action_save"
             app:backgroundTint="@color/brand_primary"
             android:textColor="@color/bg_base"
             app:cornerRadius="12dp" />

@@ -28,7 +28,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="Loading..."
+            android:text="@string/webview_loading"
             android:textColor="@color/text_muted"
             android:textSize="14sp" />
 
@@ -48,14 +48,14 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="📡"
+            android:text="@string/webview_unreachable_emoji"
             android:textSize="48sp" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="Camera Daemon Not Running"
+            android:text="@string/webview_camera_daemon_not_running"
             android:textColor="@color/text_primary"
             android:textSize="18sp"
             android:fontFamily="sans-serif-medium"
@@ -65,7 +65,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Start the Camera Daemon from the Daemons screen to access this page."
+            android:text="@string/webview_start_camera_daemon"
             android:textColor="@color/text_muted"
             android:textSize="14sp"
             android:gravity="center" />
@@ -75,7 +75,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
-            android:text="Retry"
+            android:text="@string/action_retry"
             app:cornerRadius="12dp"
             app:backgroundTint="@color/brand_primary"
             android:textColor="@color/bg_base" />

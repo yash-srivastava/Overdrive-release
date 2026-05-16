@@ -27,7 +27,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Time Window 1"
+                android:text="@string/time_window_default_title"
                 android:textColor="@color/text_primary"
                 android:textSize="16sp"
                 android:textStyle="bold" />
@@ -38,7 +38,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:minWidth="0dp"
-                android:text="🗑"
+                android:text="@string/time_window_remove_icon"
                 android:textSize="18sp"
                 app:rippleColor="@color/status_danger" />
 
@@ -61,7 +61,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Start"
+                    android:text="@string/time_window_start"
                     android:textColor="@color/text_muted"
                     android:textSize="12sp" />
 
@@ -72,7 +72,7 @@
                     android:layout_marginTop="6dp"
                     android:background="@drawable/time_picker_background"
                     android:padding="14dp"
-                    android:text="22:00"
+                    android:text="@string/time_window_default_start"
                     android:textColor="@color/brand_primary"
                     android:textSize="24sp"
                     android:textStyle="bold"
@@ -84,7 +84,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginHorizontal="16dp"
-                android:text="→"
+                android:text="@string/time_window_arrow"
                 android:textColor="@color/text_muted"
                 android:textSize="24sp" />
 
@@ -98,7 +98,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="End"
+                    android:text="@string/time_window_end"
                     android:textColor="@color/text_muted"
                     android:textSize="12sp" />
 
@@ -109,7 +109,7 @@
                     android:layout_marginTop="6dp"
                     android:background="@drawable/time_picker_background"
                     android:padding="14dp"
-                    android:text="06:00"
+                    android:text="@string/time_window_default_end"
                     android:textColor="@color/brand_primary"
                     android:textSize="24sp"
                     android:textStyle="bold"
@@ -124,7 +124,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            android:text="ACTIVE DAYS"
+            android:text="@string/time_window_active_days"
             android:textColor="@color/text_muted"
             android:textSize="11sp"
             android:letterSpacing="0.1" />
@@ -141,7 +141,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:checked="true"
-                android:text="M"
+                android:text="@string/day_initial_monday"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
@@ -151,7 +151,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:checked="true"
-                android:text="T"
+                android:text="@string/day_initial_tuesday"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
@@ -161,7 +161,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:checked="true"
-                android:text="W"
+                android:text="@string/day_initial_wednesday"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
@@ -171,7 +171,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:checked="true"
-                android:text="T"
+                android:text="@string/day_initial_thursday"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
@@ -181,7 +181,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:checked="true"
-                android:text="F"
+                android:text="@string/day_initial_friday"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
@@ -191,7 +191,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:checked="true"
-                android:text="S"
+                android:text="@string/day_initial_saturday"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
@@ -201,7 +201,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:checked="true"
-                android:text="S"
+                android:text="@string/day_initial_sunday"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 

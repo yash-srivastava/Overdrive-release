@@ -28,7 +28,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="$"
+                android:text="@string/adb_prompt"
                 android:textColor="@color/brand_primary"
                 android:textSize="16sp"
                 android:textStyle="bold"
@@ -42,7 +42,7 @@
                 android:layout_weight="1"
                 android:background="@android:color/transparent"
                 android:fontFamily="monospace"
-                android:hint="Enter command..."
+                android:hint="@string/adb_command_hint"
                 android:imeOptions="actionSend"
                 android:inputType="text"
                 android:singleLine="true"
@@ -55,7 +55,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="40dp"
                 android:layout_marginStart="8dp"
-                android:text="Run"
+                android:text="@string/action_run"
                 app:backgroundTint="@color/brand_primary"
                 android:textColor="@color/bg_base"
                 app:cornerRadius="8dp" />
@@ -69,7 +69,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginBottom="8dp"
-        android:text="PRESET COMMANDS"
+        android:text="@string/adb_preset_commands_header"
         android:textColor="@color/text_muted"
         android:textSize="11sp"
         android:letterSpacing="0.1" />
@@ -86,7 +86,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginBottom="8dp"
-        android:text="OUTPUT"
+        android:text="@string/adb_output_header"
         android:textColor="@color/text_muted"
         android:textSize="11sp"
         android:letterSpacing="0.1" />
@@ -112,7 +112,7 @@
                 android:layout_height="wrap_content"
                 android:fontFamily="monospace"
                 android:padding="16dp"
-                android:text="$ Ready for commands..."
+                android:text="@string/adb_output_ready"
                 android:textColor="@color/brand_primary"
                 android:textIsSelectable="true"
                 android:textSize="12sp" />
@@ -129,6 +129,6 @@
         android:layout_height="wrap_content"
         android:layout_gravity="end"
         android:layout_marginTop="8dp"
-        android:text="Clear Output" />
+        android:text="@string/action_clear_output" />
 
 </LinearLayout>

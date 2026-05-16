@@ -36,10 +36,10 @@ BYD.pip = {
             <div class="pip-header" id="pipHeader">
                 <div class="pip-title">
                     <span class="status-dot" id="pipDot"></span>
-                    <span id="pipStatus">Select Camera</span>
+                    <span id="pipStatus">${BYD.i18n.t('pip.select_camera')}</span>
                 </div>
                 <div class="pip-controls">
-                    <button class="pip-btn" onclick="BYD.pip.toggleSize()" title="Resize">
+                    <button class="pip-btn" onclick="BYD.pip.toggleSize()" title="${BYD.i18n.t('pip.title_resize')}">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M8 3H5a2 2 0 0 0-2 2v3"/>
                             <path d="M21 8V5a2 2 0 0 0-2-2h-3"/>
@@ -47,12 +47,12 @@ BYD.pip = {
                             <path d="M16 21h3a2 2 0 0 0 2-2v-3"/>
                         </svg>
                     </button>
-                    <button class="pip-btn" onclick="BYD.pip.minimize()" title="Minimize">
+                    <button class="pip-btn" onclick="BYD.pip.minimize()" title="${BYD.i18n.t('pip.title_minimize')}">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M5 12h14"/>
                         </svg>
                     </button>
-                    <button class="pip-btn" onclick="BYD.pip.close()" title="Close">
+                    <button class="pip-btn" onclick="BYD.pip.close()" title="${BYD.i18n.t('pip.title_close')}">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
                         </svg>
@@ -68,16 +68,16 @@ BYD.pip = {
                         <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
                         <circle cx="12" cy="13" r="3"/>
                     </svg>
-                    <span>Select a camera</span>
+                    <span>${BYD.i18n.t('pip.select_a_camera')}</span>
                 </div>
                 <div class="decoder-badge" id="pipDecoderBadge"></div>
             </div>
             <div class="pip-footer">
-                <button class="pip-cam-btn" id="pip_vm4" onclick="BYD.pip.setView(4)" title="Left Camera">L</button>
-                <button class="pip-cam-btn" id="pip_vm1" onclick="BYD.pip.setView(1)" title="Front Camera">F</button>
-                <button class="pip-cam-btn" id="pip_vm0" onclick="BYD.pip.setView(0)" title="All Cameras">ALL</button>
-                <button class="pip-cam-btn" id="pip_vm3" onclick="BYD.pip.setView(3)" title="Rear Camera">R</button>
-                <button class="pip-cam-btn" id="pip_vm2" onclick="BYD.pip.setView(2)" title="Right Camera">RT</button>
+                <button class="pip-cam-btn" id="pip_vm4" onclick="BYD.pip.setView(4)" title="${BYD.i18n.t('pip.title_left_camera')}">L</button>
+                <button class="pip-cam-btn" id="pip_vm1" onclick="BYD.pip.setView(1)" title="${BYD.i18n.t('pip.title_front_camera')}">F</button>
+                <button class="pip-cam-btn" id="pip_vm0" onclick="BYD.pip.setView(0)" title="${BYD.i18n.t('pip.title_all_cameras')}">ALL</button>
+                <button class="pip-cam-btn" id="pip_vm3" onclick="BYD.pip.setView(3)" title="${BYD.i18n.t('pip.title_rear_camera')}">R</button>
+                <button class="pip-cam-btn" id="pip_vm2" onclick="BYD.pip.setView(2)" title="${BYD.i18n.t('pip.title_right_camera')}">RT</button>
             </div>
         </div>`;
         
@@ -160,11 +160,11 @@ BYD.pip = {
         this.currentViewMode = -1;
         this.streamStarted = false;
         document.querySelectorAll('.pip-cam-btn').forEach(b => b.classList.remove('active'));
-        document.getElementById('pipStatus').textContent = 'Select Camera';
+        document.getElementById('pipStatus').textContent = BYD.i18n.t('pip.select_camera');
         document.getElementById('pipDot').classList.remove('live');
-        this.showPlaceholder('Select a camera');
+        this.showPlaceholder(BYD.i18n.t('pip.select_a_camera'));
     },
-    
+
     /**
      * Hide PiP
      */
@@ -189,7 +189,7 @@ BYD.pip = {
      * Set camera view with toggle behavior
      */
     async setView(mode) {
-        const viewNames = ['All', 'Front', 'Right', 'Rear', 'Left'];
+        const viewNames = [BYD.i18n.t('pip.view_all'), BYD.i18n.t('pip.view_front'), BYD.i18n.t('pip.view_right'), BYD.i18n.t('pip.view_rear'), BYD.i18n.t('pip.view_left')];
         const btn = document.getElementById('pip_vm' + mode);
         
         // Toggle behavior: if same camera tapped again, stop the stream
@@ -201,9 +201,9 @@ BYD.pip = {
             
             // Remove active state from buttons
             document.querySelectorAll('.pip-cam-btn').forEach(b => b.classList.remove('active'));
-            document.getElementById('pipStatus').textContent = 'Select Camera';
+            document.getElementById('pipStatus').textContent = BYD.i18n.t('pip.select_camera');
             document.getElementById('pipDot').classList.remove('live');
-            this.showPlaceholder('Select a camera');
+            this.showPlaceholder(BYD.i18n.t('pip.select_a_camera'));
             return;
         }
         
@@ -221,28 +221,28 @@ BYD.pip = {
                     btn.classList.remove('loading');
                     btn.classList.add('active');
                 }
-                document.getElementById('pipStatus').textContent = viewNames[mode] || 'Camera';
+                document.getElementById('pipStatus').textContent = viewNames[mode] || BYD.i18n.t('pip.default_camera');
             } catch (e) {
                 if (btn) btn.classList.remove('loading');
             }
             return;
         }
-        
+
         // Start streaming
         await this.startStream(mode);
-        
+
         if (btn) {
             btn.classList.remove('loading');
             btn.classList.add('active');
         }
-        document.getElementById('pipStatus').textContent = viewNames[mode] || 'Camera';
+        document.getElementById('pipStatus').textContent = viewNames[mode] || BYD.i18n.t('pip.default_camera');
     },
     
     /**
      * Start streaming with selected view mode
      */
     async startStream(viewMode) {
-        this.showPlaceholder('Connecting...');
+        this.showPlaceholder(BYD.i18n.t('pip.connecting'));
         
         try {
             // 1. Set view mode first
@@ -257,7 +257,7 @@ BYD.pip = {
             this.streamStarted = true;
         } catch (e) {
             console.error('[PiP] Failed to start stream:', e);
-            this.showPlaceholder('Connection failed');
+            this.showPlaceholder(BYD.i18n.t('pip.connection_failed'));
         }
     },
     
@@ -384,7 +384,7 @@ BYD.pip = {
         this.decoderMode = 'broadway';
         
         if (typeof Player === 'undefined') {
-            this.showPlaceholder('Decoder not loaded');
+            this.showPlaceholder(BYD.i18n.t('pip.decoder_not_loaded'));
             return false;
         }
         
@@ -443,7 +443,7 @@ BYD.pip = {
             return true;
         } catch (e) {
             console.error('[PiP] Broadway init failed:', e);
-            this.showPlaceholder('Decoder failed');
+            this.showPlaceholder(BYD.i18n.t('pip.decoder_failed'));
             return false;
         }
     },
@@ -490,10 +490,10 @@ BYD.pip = {
                 }
             };
         } catch (e) {
-            this.showPlaceholder('Connection failed');
+            this.showPlaceholder(BYD.i18n.t('pip.connection_failed'));
         }
     },
-    
+
     /**
      * Stop streaming
      */
@@ -584,7 +584,7 @@ BYD.pip = {
         const btn = document.createElement('button');
         btn.id = 'pipToggleBtn';
         btn.className = 'pip-toggle-btn';
-        btn.title = 'Toggle Camera View';
+        btn.title = BYD.i18n.t('pip.title_toggle');
         btn.innerHTML = `
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>

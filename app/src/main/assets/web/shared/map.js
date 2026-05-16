@@ -65,7 +65,7 @@ BYD.map = {
             rotationAngle: 0
         }).addTo(this.map);
         
-        this.carMarker.bindPopup('<b>Your Vehicle</b><br>BYD Champ Sentry');
+        this.carMarker.bindPopup('<b>' + BYD.i18n.t('map.your_vehicle') + '</b><br>' + BYD.i18n.t('map.your_vehicle_sub'));
         
         this.isInitialized = true;
         
@@ -248,7 +248,7 @@ BYD.map = {
                     this.userMarker = L.marker([latitude, longitude], {
                         icon: this.createUserIcon()
                     }).addTo(this.map);
-                    this.userMarker.bindPopup('<b>You are here</b>');
+                    this.userMarker.bindPopup('<b>' + BYD.i18n.t('map.you_are_here') + '</b>');
                 } else {
                     this.userMarker.setLatLng([latitude, longitude]);
                 }

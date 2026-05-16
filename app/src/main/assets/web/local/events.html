@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Events - OverDrive</title>
+    <title data-i18n="app.events_title">Events - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon.webp">
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="../shared/app-icon.webp">
@@ -1191,8 +1191,8 @@
                         <img src="../shared/app-icon.webp" alt="OverDrive">
                     </div>
                     <div class="brand-text">
-                        <span class="brand-name">OverDrive</span>
-                        <span class="brand-tagline">Sentry System</span>
+                        <span class="brand-name" data-i18n="app.name">OverDrive</span>
+                        <span class="brand-tagline" data-i18n="app.tagline">Sentry System</span>
                         <span class="brand-version" id="appVersion"></span>
                     </div>
                 </div>
@@ -1208,7 +1208,7 @@
                         <path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/>
                         <path d="M2 12a9 9 0 0 0 8 8"/><circle cx="2" cy="12" r="2"/>
                     </svg>
-                    <span>Live View</span>
+                    <span data-i18n="nav.live_view">Live View</span>
                 </a>
                 <a href="events.html" class="nav-link active">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1217,26 +1217,26 @@
                         <line x1="8" y1="2" x2="8" y2="6"/>
                         <line x1="3" y1="10" x2="21" y2="10"/>
                     </svg>
-                    <span>Events</span>
+                    <span data-i18n="nav.events">Events</span>
                 </a>
                 <a href="surveillance.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                     </svg>
-                    <span>Surveillance</span>
+                    <span data-i18n="nav.surveillance">Surveillance</span>
                 </a>
                 <a href="recording.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="m22 8-6 4 6 4V8Z"/>
                         <rect width="14" height="12" x="2" y="6" rx="2"/>
                     </svg>
-                    <span>Recordings</span>
+                    <span data-i18n="nav.recordings">Recordings</span>
                 </a>
                 <a href="performance.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
                     </svg>
-                    <span>Performance</span>
+                    <span data-i18n="nav.performance">Performance</span>
                 </a>
                 <a href="abrp.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1245,7 +1245,7 @@
                         <circle cx="6" cy="6" r="3"/>
                         <circle cx="6" cy="18" r="3"/>
                     </svg>
-                    <span>ABRP</span>
+                    <span data-i18n="nav.abrp">ABRP</span>
                 </a>
                 <a href="mqtt.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -1255,45 +1255,45 @@
                         <path d="M5.64 18.36A9 9 0 0 1 3 12a9 9 0 0 1 2.64-6.36"/>
                         <path d="M18.36 5.64A9 9 0 0 1 21 12a9 9 0 0 1-2.64 6.36"/>
                     </svg>
-                    <span>MQTT</span>
+                    <span data-i18n="nav.mqtt">MQTT</span>
                 </a>
                 <a href="trips.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 17h2v-7l4 4 4-4 4 4 4-4v7h2"/>
                         <path d="M4 5h16"/>
                     </svg>
-                    <span>Trips</span>
+                    <span data-i18n="nav.trips">Trips</span>
                 </a>
                 <a href="notifications.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
                         <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
                     </svg>
-                    <span>Notifications</span>
+                    <span data-i18n="nav.notifications">Notifications</span>
                 </a>
                 <a href="vehicle-control.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="3" y="11" width="18" height="11" rx="2"/>
                         <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                     </svg>
-                    <span>Vehicle Control</span>
+                    <span data-i18n="nav.vehicle_control">Vehicle Control</span>
                 </a>
             </nav>
             <div class="sidebar-footer">
                 <div class="status-card">
                     <div class="status-row">
-                        <span class="status-label">
+                        <span class="status-label" data-i18n="status.device">
                             <span class="status-dot" id="connDot"></span>
                             Device
                         </span>
                         <span class="status-value" id="deviceId">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">ACC</span>
+                        <span class="status-label" data-i18n="status.acc">ACC</span>
                         <span class="status-value" id="accValue">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">
+                        <span class="status-label" data-i18n="status.battery_12v">
                             <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="6" y="7" width="12" height="10" rx="1"/><path d="M6 10H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h2"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/>
                             </svg>
@@ -1302,11 +1302,11 @@
                         <span class="status-value" id="batteryValue">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">Sentry</span>
-                        <span class="status-value" id="survStatus">OFF</span>
+                        <span class="status-label" data-i18n="status.sentry">Sentry</span>
+                        <span class="status-value" id="survStatus" data-i18n="status.off">OFF</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">
+                        <span class="status-label" data-i18n="status.network">
                             <span id="networkIcon"><svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg></span>Net
                         </span>
                         <span class="status-value" id="networkValue">--</span>
@@ -1315,7 +1315,7 @@
                 <!-- EV Battery & Charging Card -->
                 <div class="status-card ev-card" id="evCard">
                     <div class="ev-header-row">
-                        <span class="ev-title">Vehicle Status</span>
+                        <span class="ev-title" data-i18n="status.vehicle_status">Vehicle Status</span>
                         <span class="ev-percent-text" id="evPercentValue">--%</span>
                     </div>
                     <div class="ev-svg-container">
@@ -1396,11 +1396,11 @@
                         </div>
                     </div>
                     <div class="ev-soh-row" id="evSohRow" style="display:none;">
-                        <span class="ev-soh-label">SOH</span>
+                        <span class="ev-soh-label" data-i18n="vehicle.soh_label">SOH</span>
                         <span class="ev-soh-val" id="evSohValue">--%</span>
                     </div>
                     <div class="ev-personalized-range" id="evPersonalizedRow" style="display:none;">
-                        <span class="ev-personalized-label">⚡ Personalized</span>
+                        <span class="ev-personalized-label" data-i18n="vehicle.personalized_label">⚡ Personalized</span>
                         <span class="ev-personalized-val" id="evPersonalizedRange">-- km</span>
                     </div>
                 </div>
@@ -1414,7 +1414,7 @@
                             <path d="M13 10h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V9.83a2 2 0 0 0-.59-1.42L18 6"/>
                             <path d="M6 14v-3"/>
                         </svg>
-                        <span class="fuel-title">Fuel</span>
+                        <span class="fuel-title" data-i18n="vehicle.fuel">Fuel</span>
                         <span class="fuel-percent" id="fuelPercentValue">--%</span>
                     </div>
                     <div class="fuel-bar-track">
@@ -1432,7 +1432,7 @@
                         <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
                     </svg>
                 </button>
-                <span style="font-weight:600;">Events</span>
+                <span style="font-weight:600;" data-i18n="nav.events">Events</span>
                 <div style="width:40px;"></div>
             </div>
             <div class="events-container">
@@ -1445,14 +1445,14 @@
                             <line x1="8" y1="2" x2="8" y2="6"/>
                             <line x1="3" y1="10" x2="21" y2="10"/>
                         </svg>
-                        <span id="calendarBtnText">Select Date</span>
+                        <span id="calendarBtnText" data-i18n="events.select_date">Select Date</span>
                     </button>
-                    
+
                     <div class="filter-tabs">
-                        <button class="filter-tab active" data-filter="all" onclick="BYD.events.setFilter('all')">All</button>
-                        <button class="filter-tab" data-filter="sentry" onclick="BYD.events.setFilter('sentry')">Sentry</button>
-                        <button class="filter-tab" data-filter="normal" onclick="BYD.events.setFilter('normal')">Normal</button>
-                        <button class="filter-tab" data-filter="proximity" onclick="BYD.events.setFilter('proximity')">Proximity</button>
+                        <button class="filter-tab active" data-filter="all" onclick="BYD.events.setFilter('all')" data-i18n="events.all">All</button>
+                        <button class="filter-tab" data-filter="sentry" onclick="BYD.events.setFilter('sentry')" data-i18n="events.badge_sentry">Sentry</button>
+                        <button class="filter-tab" data-filter="normal" onclick="BYD.events.setFilter('normal')" data-i18n="events.badge_normal">Normal</button>
+                        <button class="filter-tab" data-filter="proximity" onclick="BYD.events.setFilter('proximity')" data-i18n="events.badge_proximity">Proximity</button>
                     </div>
 
                     <div class="storage-stats" id="storageStats">
@@ -1487,37 +1487,37 @@
                 -->
                 <div class="actor-filter-rows">
                     <div class="filter-tabs filter-tabs-row2" data-filter-row="class">
-                        <span class="filter-row-label">What:</span>
-                        <button class="filter-chip active" data-class="" onclick="BYD.events.setActorFilter('class','')">Any</button>
-                        <button class="filter-chip" data-class="person"  onclick="BYD.events.setActorFilter('class','person')">Person</button>
-                        <button class="filter-chip" data-class="vehicle" onclick="BYD.events.setActorFilter('class','vehicle')">Vehicle</button>
-                        <button class="filter-chip" data-class="bike"    onclick="BYD.events.setActorFilter('class','bike')">Bike</button>
-                        <button class="filter-chip" data-class="animal"  onclick="BYD.events.setActorFilter('class','animal')">Animal</button>
+                        <span class="filter-row-label" data-i18n="events.filter_what">What:</span>
+                        <button class="filter-chip active" data-class="" onclick="BYD.events.setActorFilter('class','')" data-i18n="events.actor_any">Any</button>
+                        <button class="filter-chip" data-class="person"  onclick="BYD.events.setActorFilter('class','person')" data-i18n="events.actor_person">Person</button>
+                        <button class="filter-chip" data-class="vehicle" onclick="BYD.events.setActorFilter('class','vehicle')" data-i18n="events.actor_vehicle">Vehicle</button>
+                        <button class="filter-chip" data-class="bike"    onclick="BYD.events.setActorFilter('class','bike')" data-i18n="events.actor_bike">Bike</button>
+                        <button class="filter-chip" data-class="animal"  onclick="BYD.events.setActorFilter('class','animal')" data-i18n="events.actor_animal">Animal</button>
                     </div>
                     <div class="filter-tabs filter-tabs-row2" data-filter-row="severity">
-                        <span class="filter-row-label">Severity:</span>
-                        <button class="filter-chip active" data-severity="" onclick="BYD.events.setActorFilter('severity','')">Any</button>
-                        <button class="filter-chip sev-notice"   data-severity="NOTICE"   onclick="BYD.events.setActorFilter('severity','NOTICE')">Notice</button>
-                        <button class="filter-chip sev-alert"    data-severity="ALERT"    onclick="BYD.events.setActorFilter('severity','ALERT')">Alert</button>
-                        <button class="filter-chip sev-critical" data-severity="CRITICAL" onclick="BYD.events.setActorFilter('severity','CRITICAL')">Critical</button>
+                        <span class="filter-row-label" data-i18n="events.filter_severity">Severity:</span>
+                        <button class="filter-chip active" data-severity="" onclick="BYD.events.setActorFilter('severity','')" data-i18n="events.actor_any">Any</button>
+                        <button class="filter-chip sev-notice"   data-severity="NOTICE"   onclick="BYD.events.setActorFilter('severity','NOTICE')" data-i18n="events.severity_notice">Notice</button>
+                        <button class="filter-chip sev-alert"    data-severity="ALERT"    onclick="BYD.events.setActorFilter('severity','ALERT')" data-i18n="events.severity_alert">Alert</button>
+                        <button class="filter-chip sev-critical" data-severity="CRITICAL" onclick="BYD.events.setActorFilter('severity','CRITICAL')" data-i18n="events.severity_critical">Critical</button>
                     </div>
                     <div class="filter-tabs filter-tabs-row2" data-filter-row="proximity">
-                        <span class="filter-row-label">Distance:</span>
-                        <button class="filter-chip active" data-proximity="" onclick="BYD.events.setActorFilter('proximity','')">Any</button>
-                        <button class="filter-chip" data-proximity="VERY_CLOSE" onclick="BYD.events.setActorFilter('proximity','VERY_CLOSE')">Very close</button>
-                        <button class="filter-chip" data-proximity="CLOSE"      onclick="BYD.events.setActorFilter('proximity','CLOSE')">Close</button>
-                        <button class="filter-chip" data-proximity="MID"        onclick="BYD.events.setActorFilter('proximity','MID')">Mid</button>
-                        <button class="filter-chip" data-proximity="FAR"        onclick="BYD.events.setActorFilter('proximity','FAR')">Far</button>
+                        <span class="filter-row-label" data-i18n="events.filter_distance">Distance:</span>
+                        <button class="filter-chip active" data-proximity="" onclick="BYD.events.setActorFilter('proximity','')" data-i18n="events.actor_any">Any</button>
+                        <button class="filter-chip" data-proximity="VERY_CLOSE" onclick="BYD.events.setActorFilter('proximity','VERY_CLOSE')" data-i18n="events.proximity_very_close">Very close</button>
+                        <button class="filter-chip" data-proximity="CLOSE"      onclick="BYD.events.setActorFilter('proximity','CLOSE')" data-i18n="events.proximity_close">Close</button>
+                        <button class="filter-chip" data-proximity="MID"        onclick="BYD.events.setActorFilter('proximity','MID')" data-i18n="events.proximity_mid">Mid</button>
+                        <button class="filter-chip" data-proximity="FAR"        onclick="BYD.events.setActorFilter('proximity','FAR')" data-i18n="events.proximity_far">Far</button>
                     </div>
                 </div>
                 
                 <!-- Recordings List -->
                 <div class="recordings-panel">
                     <div class="recordings-header">
-                        <span class="recordings-title" id="recordingsTitle">All Recordings</span>
+                        <span class="recordings-title" id="recordingsTitle" data-i18n="events.all_recordings">All Recordings</span>
                         <div style="display:flex;align-items:center;gap:8px;">
-                            <span class="recordings-count" id="recordingsCount">0 videos</span>
-                            <button class="select-mode-btn" id="selectModeBtn" onclick="BYD.events.toggleSelectMode()" title="Select multiple">
+                            <span class="recordings-count" id="recordingsCount" data-i18n="events.videos_count_initial">0 videos</span>
+                            <button class="select-mode-btn" id="selectModeBtn" onclick="BYD.events.toggleSelectMode()" title="Select multiple" data-i18n-attr="title:events.select_multiple">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <polyline points="9 11 12 14 22 4"/>
                                     <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
@@ -1527,18 +1527,18 @@
                     </div>
                     <!-- Multi-select toolbar -->
                     <div class="select-toolbar" id="selectToolbar" style="display:none;">
-                        <span class="selected-count" id="selectedCount">0 selected</span>
+                        <span class="selected-count" id="selectedCount" data-i18n="events.selected_count_initial">0 selected</span>
                         <div class="select-actions">
-                            <button class="select-action-btn" onclick="BYD.events.selectAll()">Select All</button>
-                            <button class="select-action-btn" onclick="BYD.events.deselectAll()">Deselect</button>
-                            <button class="select-action-btn danger" onclick="BYD.events.batchDelete()">
+                            <button class="select-action-btn" onclick="BYD.events.selectAll()" data-i18n="common.select_all">Select All</button>
+                            <button class="select-action-btn" onclick="BYD.events.deselectAll()" data-i18n="events.deselect">Deselect</button>
+                            <button class="select-action-btn danger" onclick="BYD.events.batchDelete()" data-i18n="common.delete">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <polyline points="3 6 5 6 21 6"/>
                                     <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                                 </svg>
                                 Delete
                             </button>
-                            <button class="select-action-btn cancel" onclick="BYD.events.exitSelectMode()">Cancel</button>
+                            <button class="select-action-btn cancel" onclick="BYD.events.exitSelectMode()" data-i18n="common.cancel">Cancel</button>
                         </div>
                     </div>
                     <div class="recordings-list" id="recordingsList">
@@ -1547,14 +1547,14 @@
                         </div>
                     </div>
                     <div class="pagination" id="pagination" style="display: none;">
-                        <button class="pagination-btn" id="prevPageBtn" onclick="BYD.events.prevPage()" disabled>
+                        <button class="pagination-btn" id="prevPageBtn" onclick="BYD.events.prevPage()" disabled data-i18n="events.prev">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M15 18l-6-6 6-6"/>
                             </svg>
                             Prev
                         </button>
-                        <span class="pagination-info" id="paginationInfo">Page 1 of 1</span>
-                        <button class="pagination-btn" id="nextPageBtn" onclick="BYD.events.nextPage()" disabled>
+                        <span class="pagination-info" id="paginationInfo" data-i18n="events.page_initial">Page 1 of 1</span>
+                        <button class="pagination-btn" id="nextPageBtn" onclick="BYD.events.nextPage()" disabled data-i18n="events.next">
                             Next
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M9 18l6-6-6-6"/>
@@ -1570,8 +1570,8 @@
     <div class="video-modal" id="videoModal">
         <div class="video-container">
             <div class="video-header">
-                <span class="video-title" id="videoTitle">Recording</span>
-                <button class="video-close" onclick="BYD.events.closeVideo()">
+                <span class="video-title" id="videoTitle" data-i18n="events.video_title">Recording</span>
+                <button class="video-close" onclick="BYD.events.closeVideo()" data-i18n-attr="title:common.close" title="Close">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"/>
                         <line x1="6" y1="6" x2="18" y2="18"/>
@@ -1586,10 +1586,10 @@
                     <div class="timeline-playhead" id="timelinePlayhead"></div>
                 </div>
                 <div class="timeline-legend" id="timelineLegend" style="display:none;">
-                    <span class="legend-item"><span class="legend-dot legend-motion"></span>Motion</span>
-                    <span class="legend-item"><span class="legend-dot legend-person"></span>Person</span>
-                    <span class="legend-item"><span class="legend-dot legend-car"></span>Vehicle</span>
-                    <span class="legend-item"><span class="legend-dot legend-bike"></span>Bike</span>
+                    <span class="legend-item"><span class="legend-dot legend-motion"></span><span data-i18n="events.legend_motion">Motion</span></span>
+                    <span class="legend-item"><span class="legend-dot legend-person"></span><span data-i18n="events.actor_person">Person</span></span>
+                    <span class="legend-item"><span class="legend-dot legend-car"></span><span data-i18n="events.actor_vehicle">Vehicle</span></span>
+                    <span class="legend-item"><span class="legend-dot legend-bike"></span><span data-i18n="events.actor_bike">Bike</span></span>
                 </div>
             </div>
             <div class="video-details">
@@ -1625,7 +1625,7 @@
                         <polyline points="7 10 12 15 17 10"/>
                         <line x1="12" y1="15" x2="12" y2="3"/>
                     </svg>
-                    Download
+                    <span data-i18n="common.download">Download</span>
                 </a>
             </div>
         </div>
@@ -1635,7 +1635,7 @@
     <div class="calendar-popup" id="calendarPopup">
         <div class="calendar-panel">
             <div class="calendar-header">
-                <span class="calendar-title" id="calendarTitle">January 2026</span>
+                <span class="calendar-title" id="calendarTitle" data-i18n="events.calendar_title_initial">Calendar</span>
                 <div class="calendar-nav">
                     <button onclick="BYD.events.prevMonth()">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1652,7 +1652,7 @@
             <div class="calendar-grid" id="calendarGrid">
                 <!-- Calendar days will be rendered here -->
             </div>
-            <button class="calendar-close" onclick="BYD.events.closeCalendar()">Close</button>
+            <button class="calendar-close" onclick="BYD.events.closeCalendar()" data-i18n="common.close">Close</button>
         </div>
     </div>
 
@@ -1672,9 +1672,11 @@
         }
         
         document.addEventListener('DOMContentLoaded', () => {
-            BYD.core.init();
-            BYD.pip.init();
-            BYD.events.init();
+            BYD.i18n.init().then(function () {
+                BYD.core.init();
+                BYD.pip.init();
+                BYD.events.init();
+            });
         });
     </script>
 </body>

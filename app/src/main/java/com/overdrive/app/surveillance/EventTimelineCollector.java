@@ -262,7 +262,109 @@ public class EventTimelineCollector {
         writeExecutor.execute(() -> {
             writeJsonSidecar(mp4File, starts, ends, types, confs, counts, cams, count,
                     durationMs, actorsCopy, heroThumb);
+            // SRT subtitle sidecar — localized prose so VLC / video.js / ExoPlayer
+            // can show "Person detected close range" / "Charging started · 4.3 kW"
+            // without re-encoding the burned-in English overlay. Wrapped so an
+            // SRT failure can never poison the JSON write above (which the
+            // recordings UI depends on).
+            try {
+                writeSrtSidecar(mp4File, starts, ends, types, count, actorsCopy);
+            } catch (Throwable t) {
+                logger.warn("SRT sidecar write failed for "
+                        + mp4File.getName() + ": " + t.getMessage());
+            }
         });
+    }
+
+    /**
+     * Convert the snapshotted spans + actor list into a localized SRT
+     * sidecar next to {@code mp4File}. Runs on the same low-priority
+     * writer thread that emits the JSON sidecar, so it never blocks the
+     * encoder drainer.
+     *
+     * <p>Mapping rules (kept conservative — better to under-emit than to
+     * spam every motion blip into a subtitle line):
+     * <ul>
+     *   <li>Each non-static actor produces ONE entry at its first-seen
+     *       offset, keyed by class group (PERSON / VEHICLE) and tightened
+     *       to {@code srt.person_close} when peakProximity is VERY_CLOSE
+     *       or CLOSE.</li>
+     *   <li>Spans of type {@code motion} that don't overlap any actor
+     *       produce a single {@code srt.motion_started} entry at the
+     *       span's start. Avoids duplicating actor-driven entries.</li>
+     *   <li>Proximity-tier alerts are emitted from the actor's
+     *       peakSeverityRelMs when severity is CRITICAL/ALERT.</li>
+     *   <li>"Recording started" is always emitted at offset 0.</li>
+     * </ul>
+     */
+    private void writeSrtSidecar(File mp4File,
+                                 long[] starts, long[] ends, byte[] types,
+                                 int spanCount,
+                                 java.util.List<Actor> actors) {
+        SrtWriter srt = new SrtWriter();
+        srt.addEvent(0L, SrtWriter.K_RECORDING_STARTED);
+
+        // Actor-driven entries (preferred — they carry class + proximity)
+        if (actors != null) {
+            for (Actor a : actors) {
+                if (a.isStatic) continue;
+                long offset = a.firstSeenRelMs >= 0 ? a.firstSeenRelMs : 0L;
+                String key = null;
+                switch (a.classGroup) {
+                    case PERSON:
+                        key = (a.peakProximity == Actor.Proximity.VERY_CLOSE
+                                || a.peakProximity == Actor.Proximity.CLOSE)
+                                ? SrtWriter.K_PERSON_CLOSE
+                                : SrtWriter.K_PERSON_DETECTED;
+                        break;
+                    case VEHICLE:
+                        key = SrtWriter.K_VEHICLE_DETECTED;
+                        break;
+                    default:
+                        // BIKE / ANIMAL / UNKNOWN: no key in the catalog yet;
+                        // fall through to motion if applicable.
+                        break;
+                }
+                if (key != null) {
+                    srt.addEvent(offset, key);
+                }
+
+                // Severity → proximity-band alert. peakSeverityRelMs may be -1
+                // when the peak fell outside this segment's window (renormalized
+                // upstream by SurveillanceEngineGpu#flushSegmentMetadata).
+                if (a.peakSeverityRelMs >= 0) {
+                    if (a.peakSeverity == Actor.Severity.CRITICAL) {
+                        srt.addEvent(a.peakSeverityRelMs, SrtWriter.K_PROXIMITY_RED);
+                    } else if (a.peakSeverity == Actor.Severity.ALERT) {
+                        srt.addEvent(a.peakSeverityRelMs, SrtWriter.K_PROXIMITY_YELLOW);
+                    }
+                }
+            }
+        }
+
+        // Plain-motion spans (TYPE_MOTION) that have no actor to anchor on.
+        // Without a class signal we fall back to the generic motion key.
+        for (int i = 0; i < spanCount; i++) {
+            if (types[i] != TYPE_MOTION) continue;
+            // Skip motion spans that overlap a known actor — the actor entry
+            // already covers them and we don't want double-up subtitles.
+            if (overlapsAnyActor(starts[i], ends[i], actors)) continue;
+            srt.addEvent(starts[i], SrtWriter.K_MOTION_STARTED);
+        }
+
+        srt.write(mp4File);
+    }
+
+    private static boolean overlapsAnyActor(long spanStart, long spanEnd,
+                                            java.util.List<Actor> actors) {
+        if (actors == null || actors.isEmpty()) return false;
+        for (Actor a : actors) {
+            if (a.firstSeenRelMs < 0 || a.lastSeenRelMs < 0) continue;
+            if (spanStart <= a.lastSeenRelMs && spanEnd >= a.firstSeenRelMs) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ========================================================================

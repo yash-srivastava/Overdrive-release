@@ -44,8 +44,8 @@ class RecordingFragment : Fragment() {
         
         TabLayoutMediator(tabLayout, viewPager) { tab, position ->
             tab.text = when (position) {
-                0 -> "Controls"
-                1 -> "Library"
+                0 -> getString(R.string.recording_tab_controls)
+                1 -> getString(R.string.recording_tab_library)
                 else -> ""
             }
         }.attach()

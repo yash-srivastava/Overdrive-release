@@ -58,7 +58,7 @@
                     android:id="@+id/tvDaemonName"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Daemon Name"
+                    android:text="@string/daemon_card_default_name"
                     android:textColor="@color/text_primary"
                     android:textSize="15sp"
                     android:textStyle="bold" />
@@ -68,7 +68,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Status message"
+                    android:text="@string/daemon_card_default_status"
                     android:textColor="@color/text_secondary"
                     android:textSize="12sp"
                     android:maxLines="1"
@@ -85,7 +85,7 @@
                 android:src="@drawable/ic_expand"
                 android:visibility="gone"
                 app:tint="@color/text_muted"
-                android:contentDescription="Expand" />
+                android:contentDescription="@string/cd_expand" />
 
             <!-- Configure button (only visible for configurable daemons like Zrok) -->
             <ImageView
@@ -98,7 +98,7 @@
                 android:visibility="gone"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 app:tint="@color/text_muted"
-                android:contentDescription="Configure" />
+                android:contentDescription="@string/cd_configure" />
 
             <!-- Download log button (only visible in debug builds) -->
             <ImageView
@@ -111,7 +111,7 @@
                 android:visibility="gone"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 app:tint="@color/text_muted"
-                android:contentDescription="Download log" />
+                android:contentDescription="@string/cd_download_log" />
 
             <!-- Toggle Switch -->
             <com.google.android.material.switchmaterial.SwitchMaterial
@@ -141,7 +141,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="SUBPROCESSES"
+                android:text="@string/daemon_card_subprocesses"
                 android:textColor="@color/text_muted"
                 android:textSize="10sp"
                 android:textAllCaps="true"

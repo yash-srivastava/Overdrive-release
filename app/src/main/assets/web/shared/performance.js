@@ -458,19 +458,19 @@ BYD.performance = {
         switch (chartType) {
             case 'cpu':
                 this.renderChart(this.charts.cpu, [
-                    { data: this.history.cpuSystem, color: this.colors.system, label: 'System' },
-                    { data: this.history.cpuApp, color: this.colors.app, label: 'App' }
+                    { data: this.history.cpuSystem, color: this.colors.system, label: BYD.i18n.t('performance.legend_system') },
+                    { data: this.history.cpuApp, color: this.colors.app, label: BYD.i18n.t('performance.legend_app') }
                 ]);
                 break;
             case 'mem':
                 this.renderChart(this.charts.mem, [
-                    { data: this.history.memSystem, color: this.colors.system, label: 'System' },
-                    { data: this.history.memApp, color: this.colors.app, label: 'App' }
+                    { data: this.history.memSystem, color: this.colors.system, label: BYD.i18n.t('performance.legend_system') },
+                    { data: this.history.memApp, color: this.colors.app, label: BYD.i18n.t('performance.legend_app') }
                 ]);
                 break;
             case 'gpu':
                 this.renderChart(this.charts.gpu, [
-                    { data: this.history.gpu, color: this.colors.gpu, label: 'GPU' }
+                    { data: this.history.gpu, color: this.colors.gpu, label: BYD.i18n.t('performance.card_gpu') }
                 ]);
                 break;
             case 'soc':
@@ -663,7 +663,7 @@ BYD.performance = {
         const dot = document.getElementById('monitoringDot');
         const text = document.getElementById('monitoringText');
         if (dot) dot.classList.toggle('inactive', !active);
-        if (text) text.textContent = active ? 'Monitoring' : 'Offline';
+        if (text) text.textContent = active ? BYD.i18n.t('performance.monitoring_active') : BYD.i18n.t('performance.monitoring_offline');
     },
     
     /**
@@ -727,56 +727,56 @@ BYD.performance = {
         if (isLockedHigh) {
             // CRITICAL: GPU stuck at high usage - actual problem
             status = 'critical';
-            badgeText = 'Overloaded';
+            badgeText = BYD.i18n.t('performance.gpu_overloaded');
             card.classList.add('danger');
-            subtitle.textContent = 'GPU locked at high load';
-            hintMessage = `⚠️ GPU stuck at ${usage.toFixed(0)}% — Not oscillating. System may be overloaded or thermal throttling.`;
+            subtitle.textContent = BYD.i18n.t('performance.gpu_sub_locked_high');
+            hintMessage = BYD.i18n.t('performance.gpu_hint_overloaded', {pct: usage.toFixed(0)});
             showHint = true;
         } else if (isOscillating && usage >= HIGH_USAGE) {
             // Oscillating with high peaks - this is HEALTHY
             status = 'efficient';
-            badgeText = 'Healthy';
-            subtitle.textContent = 'Dynamic frequency scaling';
-            hintMessage = `✓ Oscillation is normal! GPU boosts to ${usage.toFixed(0)}% for frames, then idles. This "race to idle" pattern saves battery.`;
+            badgeText = BYD.i18n.t('performance.gpu_healthy');
+            subtitle.textContent = BYD.i18n.t('performance.gpu_sub_dynamic_scaling');
+            hintMessage = BYD.i18n.t('performance.gpu_hint_healthy', {pct: usage.toFixed(0)});
             showHint = true;
         } else if (usage < 20 && freqMhz < LOW_FREQ) {
             // Idle - GPU barely working
             status = 'optimal';
-            badgeText = 'Idle';
-            subtitle.textContent = 'GPU idle, minimal power draw';
+            badgeText = BYD.i18n.t('performance.gpu_idle');
+            subtitle.textContent = BYD.i18n.t('performance.gpu_sub_idle');
             showHint = false;
         } else if (usage >= HIGH_USAGE && freqMhz < LOW_FREQ) {
             // High usage at low frequency = EFFICIENT
             status = 'efficient';
-            badgeText = 'Efficient';
-            subtitle.textContent = 'Power-efficient operation';
-            hintMessage = `${usage.toFixed(0)}% at ${freqMhz.toFixed(0)} MHz — Governor optimizing power.`;
+            badgeText = BYD.i18n.t('performance.gpu_efficient');
+            subtitle.textContent = BYD.i18n.t('performance.gpu_sub_efficient');
+            hintMessage = BYD.i18n.t('performance.gpu_hint_efficient', {pct: usage.toFixed(0), freq: freqMhz.toFixed(0)});
             showHint = true;
         } else if (usage >= CRITICAL_USAGE && freqMhz >= HIGH_FREQ && !isOscillating) {
             // Critical only if NOT oscillating
             status = 'critical';
-            badgeText = 'Heavy';
+            badgeText = BYD.i18n.t('performance.gpu_heavy');
             card.classList.add('danger');
-            subtitle.textContent = 'Sustained high load';
-            hintMessage = `${usage.toFixed(0)}% at ${freqMhz.toFixed(0)} MHz — Monitor for heat and battery drain.`;
+            subtitle.textContent = BYD.i18n.t('performance.gpu_sub_sustained');
+            hintMessage = BYD.i18n.t('performance.gpu_hint_heavy', {pct: usage.toFixed(0), freq: freqMhz.toFixed(0)});
             showHint = true;
         } else if (usage >= HIGH_USAGE && freqMhz >= HIGH_FREQ) {
             // High usage at high freq but oscillating = normal burst
             status = 'optimal';
-            badgeText = 'Active';
-            subtitle.textContent = 'Processing burst';
+            badgeText = BYD.i18n.t('performance.gpu_active');
+            subtitle.textContent = BYD.i18n.t('performance.gpu_sub_burst');
             showHint = false;
         } else if (freqMhz >= HIGH_FREQ) {
             // High freq but moderate usage - ramping up
             status = 'optimal';
-            badgeText = 'Active';
-            subtitle.textContent = 'GPU active';
+            badgeText = BYD.i18n.t('performance.gpu_active');
+            subtitle.textContent = BYD.i18n.t('performance.gpu_sub_active');
             showHint = false;
         } else {
             // Normal operation
             status = 'optimal';
             badgeText = '';
-            subtitle.textContent = 'Graphics Processing';
+            subtitle.textContent = BYD.i18n.t('performance.gpu_sub_processing');
             showHint = false;
         }
         
@@ -843,26 +843,26 @@ BYD.performance = {
         // This prevents tooltip from being cleared during data updates
         if (this.tooltip.chartId !== 'cpu') {
             this.renderChart(this.charts.cpu, [
-                { data: this.history.cpuSystem, color: this.colors.system, label: 'System' },
-                { data: this.history.cpuApp, color: this.colors.app, label: 'App' }
+                { data: this.history.cpuSystem, color: this.colors.system, label: BYD.i18n.t('performance.legend_system') },
+                { data: this.history.cpuApp, color: this.colors.app, label: BYD.i18n.t('performance.legend_app') }
             ]);
         } else {
             // Re-render with tooltip
             this.renderChartByType('cpu');
         }
-        
+
         if (this.tooltip.chartId !== 'mem') {
             this.renderChart(this.charts.mem, [
-                { data: this.history.memSystem, color: this.colors.system, label: 'System' },
-                { data: this.history.memApp, color: this.colors.app, label: 'App' }
+                { data: this.history.memSystem, color: this.colors.system, label: BYD.i18n.t('performance.legend_system') },
+                { data: this.history.memApp, color: this.colors.app, label: BYD.i18n.t('performance.legend_app') }
             ]);
         } else {
             this.renderChartByType('mem');
         }
-        
+
         if (this.tooltip.chartId !== 'gpu') {
             this.renderChart(this.charts.gpu, [
-                { data: this.history.gpu, color: this.colors.gpu, label: 'GPU' }
+                { data: this.history.gpu, color: this.colors.gpu, label: BYD.i18n.t('performance.card_gpu') }
             ]);
         } else {
             this.renderChartByType('gpu');
@@ -902,9 +902,9 @@ BYD.performance = {
         
         // X-axis labels (time)
         ctx.textAlign = 'center';
-        ctx.fillText('60s', padding.left, height - 5);
-        ctx.fillText('30s', padding.left + chartWidth / 2, height - 5);
-        ctx.fillText('now', width - padding.right, height - 5);
+        ctx.fillText(BYD.i18n.t('performance.axis_60s'), padding.left, height - 5);
+        ctx.fillText(BYD.i18n.t('performance.axis_30s'), padding.left + chartWidth / 2, height - 5);
+        ctx.fillText(BYD.i18n.t('performance.time_now'), width - padding.right, height - 5);
         
         // Draw each series
         series.forEach(s => {
@@ -964,7 +964,7 @@ BYD.performance = {
         
         // Calculate time ago
         const secondsAgo = (series[0].data.length - 1 - dataIndex);
-        const timeLabel = secondsAgo === 0 ? 'now' : secondsAgo + 's ago';
+        const timeLabel = secondsAgo === 0 ? BYD.i18n.t('performance.time_now') : BYD.i18n.t('performance.time_seconds_ago', {n: secondsAgo});
         
         // Draw tooltip box
         this.drawTooltipBox(ctx, x, padding.top + 20, tooltipData, timeLabel, width, padding);
@@ -1201,7 +1201,7 @@ BYD.performance = {
         this.updateElement('evSocValue', current != null ? current.toFixed(0) : '--');
         this.updateElement('evKwhValue', currentKwh != null ? currentKwh.toFixed(1) : '--');
         this.updateElement('evRangeValue', currentRange != null ? currentRange.toFixed(0) + ' km' : '-- km');
-        this.updateElement('evChargingStatus', isCharging ? '⚡ Charging' : 'Idle');
+        this.updateElement('evChargingStatus', isCharging ? BYD.i18n.t('performance.status_charging') : BYD.i18n.t('performance.status_idle'));
         
         // Update EV SOC bar
         const evSocBar = document.getElementById('evSocBar');
@@ -1233,7 +1233,7 @@ BYD.performance = {
                 const badge = document.getElementById('sohBadge');
                 if (badge && badge.style.display === 'none') {
                     badge.style.display = '';
-                    badge.textContent = 'SOH ' + latest.soh.toFixed(0) + '%';
+                    badge.textContent = BYD.i18n.t('performance.soh_badge', {pct: latest.soh.toFixed(0)});
                     if (latest.soh >= 90) badge.className = 'gpu-status-badge efficient';
                     else if (latest.soh >= 80) badge.className = 'gpu-status-badge optimal';
                     else if (latest.soh >= 70) badge.className = 'gpu-status-badge heavy';
@@ -1270,12 +1270,12 @@ BYD.performance = {
             ctx.fillStyle = this.colors.text;
             ctx.font = '14px Inter, sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText('No SOC data available', width / 2, height / 2 - 10);
+            ctx.fillText(BYD.i18n.t('performance.soc_no_data'), width / 2, height / 2 - 10);
             ctx.font = '12px Inter, sans-serif';
-            ctx.fillText('SOC history will appear once data is collected', width / 2, height / 2 + 15);
+            ctx.fillText(BYD.i18n.t('performance.soc_will_appear'), width / 2, height / 2 + 15);
             return;
         }
-        
+
         // If only one point, show current value prominently
         if (history.length === 1) {
             const soc = history[0].soc;
@@ -1285,8 +1285,8 @@ BYD.performance = {
             ctx.fillText(soc.toFixed(0) + '%', width / 2, height / 2);
             ctx.fillStyle = this.colors.text;
             ctx.font = '12px Inter, sans-serif';
-            ctx.fillText('Current Battery Level', width / 2, height / 2 + 30);
-            ctx.fillText('History will build over time', width / 2, height / 2 + 50);
+            ctx.fillText(BYD.i18n.t('performance.soc_current_label'), width / 2, height / 2 + 30);
+            ctx.fillText(BYD.i18n.t('performance.soc_history_will_build'), width / 2, height / 2 + 50);
             return;
         }
         
@@ -1600,13 +1600,13 @@ BYD.performance = {
         // Charging status
         ctx.fillStyle = point.charging ? this.colors.charging : this.colors.text;
         ctx.font = '11px Inter, sans-serif';
-        ctx.fillText(point.charging ? '⚡ Charging' : '○ Not charging', tooltipX + boxPadding, tooltipY + boxPadding + yOffset);
+        ctx.fillText(point.charging ? BYD.i18n.t('performance.status_charging') : BYD.i18n.t('performance.status_not_charging'), tooltipX + boxPadding, tooltipY + boxPadding + yOffset);
         yOffset += 16;
-        
+
         // Range if available
         if (point.range && point.range > 0) {
             ctx.fillStyle = '#fff';
-            ctx.fillText('Range: ' + point.range.toFixed(0) + ' km', tooltipX + boxPadding, tooltipY + boxPadding + yOffset);
+            ctx.fillText(BYD.i18n.t('performance.tooltip_range_km', {km: point.range.toFixed(0)}), tooltipX + boxPadding, tooltipY + boxPadding + yOffset);
         }
     },
     
@@ -1714,7 +1714,7 @@ BYD.performance = {
         const badge = document.getElementById('sohBadge');
         if (badge && soh != null) {
             badge.style.display = '';
-            badge.textContent = 'SOH ' + soh.toFixed(0) + '%';
+            badge.textContent = BYD.i18n.t('performance.soh_badge', {pct: soh.toFixed(0)});
             if (soh >= 90) { badge.className = 'gpu-status-badge efficient'; }
             else if (soh >= 80) { badge.className = 'gpu-status-badge optimal'; }
             else if (soh >= 70) { badge.className = 'gpu-status-badge heavy'; }
@@ -1991,12 +1991,12 @@ BYD.performance = {
         if (point.charging) {
             ctx.fillStyle = this.colors.charging || '#0ea5e9';
             ctx.font = '11px Inter, sans-serif';
-            ctx.fillText('⚡ Charging', tooltipX + boxPadding, tooltipY + boxPadding + yOff);
+            ctx.fillText(BYD.i18n.t('performance.status_charging'), tooltipX + boxPadding, tooltipY + boxPadding + yOff);
             yOff += 16;
         }
         ctx.fillStyle = point.voltage < 11.5 ? '#ef4444' : '#22c55e';
         ctx.font = '11px Inter, sans-serif';
-        ctx.fillText(point.voltage < 11.5 ? '⚠ Low voltage' : '● Normal', tooltipX + boxPadding, tooltipY + boxPadding + yOff);
+        ctx.fillText(point.voltage < 11.5 ? BYD.i18n.t('performance.status_low_voltage') : BYD.i18n.t('performance.status_normal'), tooltipX + boxPadding, tooltipY + boxPadding + yOff);
     },
 
     /**
@@ -2072,25 +2072,25 @@ BYD.performance = {
         if (point.high != null) {
             ctx.fillStyle = '#ef4444';
             ctx.font = '12px JetBrains Mono, monospace';
-            ctx.fillText('Hi: ' + point.high.toFixed(1) + '°C', tooltipX + boxPadding, tooltipY + boxPadding + yOff);
+            ctx.fillText(BYD.i18n.t('performance.tooltip_temp_hi', {value: point.high.toFixed(1)}), tooltipX + boxPadding, tooltipY + boxPadding + yOff);
             yOff += lineHeight;
         }
         if (point.low != null) {
             ctx.fillStyle = '#22c55e';
             ctx.font = '12px JetBrains Mono, monospace';
-            ctx.fillText('Lo: ' + point.low.toFixed(1) + '°C', tooltipX + boxPadding, tooltipY + boxPadding + yOff);
+            ctx.fillText(BYD.i18n.t('performance.tooltip_temp_lo', {value: point.low.toFixed(1)}), tooltipX + boxPadding, tooltipY + boxPadding + yOff);
             yOff += lineHeight;
         }
         if (point.avg != null) {
             ctx.fillStyle = '#3b82f6';
             ctx.font = '12px JetBrains Mono, monospace';
-            ctx.fillText('Avg: ' + point.avg.toFixed(1) + '°C', tooltipX + boxPadding, tooltipY + boxPadding + yOff);
+            ctx.fillText(BYD.i18n.t('performance.tooltip_temp_avg', {value: point.avg.toFixed(1)}), tooltipX + boxPadding, tooltipY + boxPadding + yOff);
             yOff += lineHeight;
         }
         if (point.charging) {
             ctx.fillStyle = this.colors.charging || '#0ea5e9';
             ctx.font = '11px Inter, sans-serif';
-            ctx.fillText('⚡ Charging', tooltipX + boxPadding, tooltipY + boxPadding + yOff);
+            ctx.fillText(BYD.i18n.t('performance.status_charging'), tooltipX + boxPadding, tooltipY + boxPadding + yOff);
         }
     },
 
@@ -2158,12 +2158,12 @@ BYD.performance = {
         if (data.hasEstimate && data.soh > 0) {
             setEl('sohDetailPercent', data.soh.toFixed(1) + '%');
         } else {
-            setEl('sohDetailPercent', 'N/A');
+            setEl('sohDetailPercent', BYD.i18n.t('performance.soh_na'));
         }
 
         // EMA value (always show for reference)
         if (data.emaSoh > 0) {
-            setEl('sohEmaValue', 'EMA: ' + data.emaSoh.toFixed(1) + '%');
+            setEl('sohEmaValue', BYD.i18n.t('performance.soh_ema_label', {pct: data.emaSoh.toFixed(1)}));
         }
 
         // Source selector — highlight active button
@@ -2201,10 +2201,10 @@ BYD.performance = {
         if (hint) {
             if (!data.hasEstimate) {
                 hint.style.display = 'block';
-                hint.textContent = '⚠ No SOH estimate yet — waiting for data from any source.';
+                hint.textContent = BYD.i18n.t('performance.soh_no_estimate');
             } else if (data.preferredSource !== 'auto') {
                 hint.style.display = 'block';
-                hint.textContent = '📌 Pinned to ' + data.preferredSource + ' source. Switch to Auto for EMA-blended value.';
+                hint.textContent = BYD.i18n.t('performance.soh_pinned_to', {source: data.preferredSource});
             } else {
                 hint.style.display = 'none';
             }
@@ -2228,7 +2228,7 @@ BYD.performance = {
     },
 
     async resetSoh() {
-        if (!confirm('Reset SOH estimation?\n\nThis clears all SOH data and forces re-estimation from scratch.\n\nUse if battery was replaced or reading seems incorrect.')) {
+        if (!confirm(BYD.i18n.t('performance.confirm_reset_soh'))) {
             return;
         }
 
@@ -2237,17 +2237,17 @@ BYD.performance = {
             const data = await resp.json();
             if (data.success) {
                 if (BYD.utils && BYD.utils.toast) {
-                    BYD.utils.toast('SOH estimation reset — will recalculate from next data', 'success');
+                    BYD.utils.toast(BYD.i18n.t('performance.soh_reset_toast'), 'success');
                 } else {
-                    alert('SOH estimation reset successfully.');
+                    alert(BYD.i18n.t('performance.soh_reset_alert'));
                 }
                 // Refresh the card
                 this.fetchSohStatus();
             } else {
-                alert('Reset failed: ' + (data.error || 'Unknown error'));
+                alert(BYD.i18n.t('performance.reset_failed', {error: data.error || BYD.i18n.t('errors.generic')}));
             }
         } catch (e) {
-            alert('Reset failed: ' + e.message);
+            alert(BYD.i18n.t('performance.reset_failed', {error: e.message}));
         }
     },
 
@@ -2260,23 +2260,23 @@ BYD.performance = {
         const boxes = document.querySelectorAll('#resetCategoriesList input[type=checkbox]:checked');
         const categories = Array.from(boxes).map(b => b.dataset.cat);
         if (categories.length === 0) {
-            alert('Select at least one category to reset.');
+            alert(BYD.i18n.t('performance.select_one_category'));
             return;
         }
 
         const labelLookup = {
-            trips: 'Trips',
-            socHistory: 'SoC + 12V history',
-            soh: 'SoH calibration',
-            abrpToken: 'ABRP token',
-            bydCloud: 'BYD Cloud credentials',
-            mediaRecordings: 'Recordings',
-            mediaSurveillance: 'Sentry events',
-            mediaProximity: 'Proximity recordings',
-            mediaTrips: 'Trip telemetry files'
+            trips: BYD.i18n.t('performance.cat_trips'),
+            socHistory: BYD.i18n.t('performance.cat_soc_history'),
+            soh: BYD.i18n.t('performance.cat_soh'),
+            abrpToken: BYD.i18n.t('performance.cat_abrp_token'),
+            bydCloud: BYD.i18n.t('performance.cat_byd_cloud'),
+            mediaRecordings: BYD.i18n.t('performance.cat_recordings'),
+            mediaSurveillance: BYD.i18n.t('performance.cat_sentry_events'),
+            mediaProximity: BYD.i18n.t('performance.cat_proximity'),
+            mediaTrips: BYD.i18n.t('performance.cat_trip_telemetry')
         };
         const list = categories.map(c => '• ' + (labelLookup[c] || c)).join('\n');
-        const confirmMsg = 'Reset the following? This cannot be undone.\n\n' + list;
+        const confirmMsg = BYD.i18n.t('performance.confirm_reset_categories', {list: list});
         if (!confirm(confirmMsg)) return;
 
         try {
@@ -2287,7 +2287,7 @@ BYD.performance = {
             });
             const data = await resp.json();
             if (!data.success) {
-                alert('Reset failed: ' + (data.error || 'Unknown error'));
+                alert(BYD.i18n.t('performance.reset_failed', {error: data.error || BYD.i18n.t('errors.generic')}));
                 return;
             }
 
@@ -2298,16 +2298,16 @@ BYD.performance = {
                 const label = labelLookup[cat] || cat;
                 if (r.success) {
                     let detail = '';
-                    if (r.rowsDeleted !== undefined) detail = ' (' + r.rowsDeleted + ' rows)';
-                    else if (r.filesDeleted !== undefined) detail = ' (' + r.filesDeleted + ' files)';
+                    if (r.rowsDeleted !== undefined) detail = ' ' + BYD.i18n.t('performance.rows_paren', {n: r.rowsDeleted});
+                    else if (r.filesDeleted !== undefined) detail = ' ' + BYD.i18n.t('performance.files_paren', {n: r.filesDeleted});
                     lines.push('✓ ' + label + detail);
                 } else {
-                    lines.push('✗ ' + label + ': ' + (r.error || 'failed'));
+                    lines.push('✗ ' + label + ': ' + (r.error || BYD.i18n.t('performance.failed')));
                 }
             }
 
             if (BYD.utils && BYD.utils.toast) {
-                BYD.utils.toast('Reset complete', 'success');
+                BYD.utils.toast(BYD.i18n.t('performance.reset_complete'), 'success');
             }
             alert(lines.join('\n'));
 
@@ -2315,7 +2315,7 @@ BYD.performance = {
             this.toggleAllResetCategories(false);
             try { this.fetchSohStatus(); } catch (_) {}
         } catch (e) {
-            alert('Reset failed: ' + e.message);
+            alert(BYD.i18n.t('performance.reset_failed', {error: e.message}));
         }
     }
 };

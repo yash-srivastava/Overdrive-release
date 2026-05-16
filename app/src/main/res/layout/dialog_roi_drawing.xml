@@ -19,7 +19,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="📐 Configure Detection Zone"
+            android:text="@string/roi_title"
             android:textColor="@color/text_primary"
             android:textSize="18sp"
             android:textStyle="bold" />
@@ -40,7 +40,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:padding="12dp"
-        android:text="Tap to add points. Drag points to adjust. Draw a polygon around the area you want to monitor."
+        android:text="@string/roi_instructions"
         android:textColor="@color/text_secondary"
         android:textSize="12sp"
         android:background="@color/bg_elevated" />
@@ -58,7 +58,7 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:scaleType="fitCenter"
-            android:contentDescription="Camera preview" />
+            android:contentDescription="@string/cd_camera_preview" />
 
         <!-- ROI Drawing Overlay -->
         <com.overdrive.app.ui.view.RoiDrawingView
@@ -83,7 +83,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginEnd="8dp"
-            android:text="↩ Undo" />
+            android:text="@string/action_undo" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnClear"
@@ -92,7 +92,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginEnd="8dp"
-            android:text="🗑 Clear" />
+            android:text="@string/action_clear" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnCancel"
@@ -101,14 +101,14 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginEnd="8dp"
-            android:text="Cancel" />
+            android:text="@string/action_cancel" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnSave"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="💾 Save"
+            android:text="@string/action_save"
             app:backgroundTint="@color/brand_primary"
             android:textColor="@color/bg_base"
             app:cornerRadius="12dp" />

@@ -137,7 +137,7 @@ class DashboardFragment : Fragment() {
         daemonsViewModel.daemonStates.observe(viewLifecycleOwner) { states ->
             val running = states.values.count { it.status == DaemonStatus.RUNNING }
             val total = states.size
-            tvDaemonsStatus.text = "$running/$total Running"
+            tvDaemonsStatus.text = getString(R.string.dashboard_daemons_running, running, total)
             rebuildTunnelChips()
         }
 
@@ -149,7 +149,7 @@ class DashboardFragment : Fragment() {
 
         // Observe recording state
         recordingViewModel.isRecording.observe(viewLifecycleOwner) { isRecording ->
-            tvRecordingStatus.text = if (isRecording) "🔴 Recording" else "Idle"
+            tvRecordingStatus.text = if (isRecording) getString(R.string.dashboard_recording_active) else getString(R.string.dashboard_recording_idle_label)
             tvRecordingStatus.setTextColor(
                 resources.getColor(
                     if (isRecording) R.color.status_error else R.color.status_stopped,
@@ -240,9 +240,9 @@ class DashboardFragment : Fragment() {
     }
 
     private fun labelFor(type: DaemonType): String = when (type) {
-        DaemonType.CLOUDFLARED_TUNNEL -> "Cloudflared"
-        DaemonType.ZROK_TUNNEL -> "Zrok"
-        DaemonType.TAILSCALE_TUNNEL -> "Tailscale"
+        DaemonType.CLOUDFLARED_TUNNEL -> getString(R.string.tunnel_label_cloudflared)
+        DaemonType.ZROK_TUNNEL -> getString(R.string.tunnel_label_zrok)
+        DaemonType.TAILSCALE_TUNNEL -> getString(R.string.tunnel_label_tailscale)
         else -> type.displayName
     }
 
@@ -279,19 +279,19 @@ class DashboardFragment : Fragment() {
      * Get appropriate placeholder text based on tunnel daemon state.
      */
     private fun getTunnelPlaceholderText(): String {
-        val states = daemonsViewModel.daemonStates.value ?: return "No tunnel running"
+        val states = daemonsViewModel.daemonStates.value ?: return getString(R.string.dashboard_no_tunnel)
         val cfState = states[DaemonType.CLOUDFLARED_TUNNEL]
         val zrokState = states[DaemonType.ZROK_TUNNEL]
         val tailscaleState = states[DaemonType.TAILSCALE_TUNNEL]
-        
+
         return when {
-            zrokState?.status == DaemonStatus.STARTING -> "Starting Zrok tunnel..."
-            cfState?.status == DaemonStatus.STARTING -> "Starting Cloudflared tunnel..."
-            tailscaleState?.status == DaemonStatus.STARTING -> "Starting Tailscale tunnel..."
-            zrokState?.status == DaemonStatus.RUNNING -> "Waiting for tunnel URL..."
-            cfState?.status == DaemonStatus.RUNNING -> "Waiting for tunnel URL..."
-            tailscaleState?.status == DaemonStatus.RUNNING -> "Waiting for tunnel URL..."
-            else -> "No tunnel running"
+            zrokState?.status == DaemonStatus.STARTING -> getString(R.string.dashboard_starting_zrok)
+            cfState?.status == DaemonStatus.STARTING -> getString(R.string.dashboard_starting_cloudflared)
+            tailscaleState?.status == DaemonStatus.STARTING -> getString(R.string.dashboard_starting_tailscale)
+            zrokState?.status == DaemonStatus.RUNNING -> getString(R.string.dashboard_waiting_url)
+            cfState?.status == DaemonStatus.RUNNING -> getString(R.string.dashboard_waiting_url)
+            tailscaleState?.status == DaemonStatus.RUNNING -> getString(R.string.dashboard_waiting_url)
+            else -> getString(R.string.dashboard_no_tunnel)
         }
     }
     
@@ -337,22 +337,22 @@ class DashboardFragment : Fragment() {
     
     private fun copyTokenToClipboard() {
         val state = AuthManager.getState() ?: return
-        
+
         val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = ClipData.newPlainText("Access Code", state.secret)
+        val clip = ClipData.newPlainText(getString(R.string.clip_label_access_code), state.secret)
         clipboard.setPrimaryClip(clip)
-        
-        Toast.makeText(requireContext(), "Access code copied", Toast.LENGTH_SHORT).show()
+
+        Toast.makeText(requireContext(), getString(R.string.toast_access_code_copied), Toast.LENGTH_SHORT).show()
     }
-    
+
     private fun showRegenerateConfirmation() {
         AlertDialog.Builder(requireContext())
-            .setTitle("Regenerate Token")
-            .setMessage("This will invalidate the current token. All active sessions will be logged out. Continue?")
-            .setPositiveButton("Regenerate") { _, _ ->
+            .setTitle(getString(R.string.dialog_regenerate_token_title))
+            .setMessage(getString(R.string.dialog_regenerate_token_message))
+            .setPositiveButton(getString(R.string.dialog_regenerate)) { _, _ ->
                 regenerateToken()
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(getString(R.string.action_cancel), null)
             .show()
     }
     
@@ -371,19 +371,19 @@ class DashboardFragment : Fragment() {
                     
                     activity?.runOnUiThread {
                         if (success) {
-                            Toast.makeText(requireContext(), "New token generated. All sessions logged out.", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(requireContext(), getString(R.string.toast_token_regenerated_logged_out), Toast.LENGTH_SHORT).show()
                         } else {
-                            Toast.makeText(requireContext(), "Token regenerated. Daemon may need restart to apply.", Toast.LENGTH_LONG).show()
+                            Toast.makeText(requireContext(), getString(R.string.toast_token_regenerated_restart), Toast.LENGTH_LONG).show()
                         }
                     }
                 } else {
                     activity?.runOnUiThread {
-                        Toast.makeText(requireContext(), "Token regenerated. Could not notify daemon.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(requireContext(), getString(R.string.toast_token_regenerated_no_notify), Toast.LENGTH_LONG).show()
                     }
                 }
             } catch (e: Exception) {
                 activity?.runOnUiThread {
-                    Toast.makeText(requireContext(), "Token regenerated", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), getString(R.string.toast_token_regenerated), Toast.LENGTH_SHORT).show()
                 }
             }
         }.start()

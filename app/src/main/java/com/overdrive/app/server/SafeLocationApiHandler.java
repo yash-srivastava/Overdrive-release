@@ -54,13 +54,13 @@ public class SafeLocationApiHandler {
                 int radiusM = req.optInt("radiusM", 150);
 
                 if (lat == 0 && lng == 0) {
-                    HttpResponse.sendJsonError(out, "Invalid coordinates");
+                    HttpResponse.sendJsonError(out, Messages.get("errors.safelocation_invalid_coordinates"));
                     return true;
                 }
 
                 SafeLocation zone = mgr.addZone(name, lat, lng, radiusM);
                 if (zone == null) {
-                    HttpResponse.sendJsonError(out, "Max zones reached (10)");
+                    HttpResponse.sendJsonError(out, Messages.get("errors.safelocation_max_zones"));
                     return true;
                 }
 
@@ -78,14 +78,14 @@ public class SafeLocationApiHandler {
                 if (id == null) id = req.optString("id", null);
 
                 if (id == null) {
-                    HttpResponse.sendJsonError(out, "Missing zone id");
+                    HttpResponse.sendJsonError(out, Messages.get("errors.safelocation_missing_zone_id"));
                     return true;
                 }
 
                 boolean updated = mgr.updateZone(id, req);
                 JSONObject resp = new JSONObject();
                 resp.put("success", updated);
-                if (!updated) resp.put("error", "Zone not found");
+                if (!updated) resp.put("error", Messages.get("errors.safelocation_zone_not_found"));
                 HttpResponse.sendJson(out, resp.toString());
                 return true;
             }
@@ -96,14 +96,14 @@ public class SafeLocationApiHandler {
                 if (id == null) id = req.optString("id", null);
 
                 if (id == null) {
-                    HttpResponse.sendJsonError(out, "Missing zone id");
+                    HttpResponse.sendJsonError(out, Messages.get("errors.safelocation_missing_zone_id"));
                     return true;
                 }
 
                 boolean removed = mgr.removeZone(id);
                 JSONObject resp = new JSONObject();
                 resp.put("success", removed);
-                if (!removed) resp.put("error", "Zone not found");
+                if (!removed) resp.put("error", Messages.get("errors.safelocation_zone_not_found"));
                 HttpResponse.sendJson(out, resp.toString());
                 return true;
             }

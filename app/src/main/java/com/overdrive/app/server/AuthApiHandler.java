@@ -88,7 +88,7 @@ public class AuthApiHandler {
         synchronized (bucket) {
             if (bucket.lockedUntil > now) {
                 long secs = (bucket.lockedUntil - now) / 1000 + 1;
-                return "Too many attempts — locked for " + secs + "s";
+                return Messages.get("errors.rate_limited_locked_for_seconds", secs);
             }
             // Drop attempts outside the window
             long windowStart = now - RATE_LIMIT_WINDOW_MS;
@@ -100,7 +100,7 @@ public class AuthApiHandler {
                 bucket.attempts.clear();
                 log("Rate limit exceeded for " + identity + " — locked for "
                     + (RATE_LIMIT_LOCKOUT_MS / 1000) + "s");
-                return "Too many attempts — locked for " + (RATE_LIMIT_LOCKOUT_MS / 1000) + "s";
+                return Messages.get("errors.rate_limited_locked_for_seconds", (RATE_LIMIT_LOCKOUT_MS / 1000));
             }
             bucket.attempts.addLast(now);
         }
@@ -162,13 +162,13 @@ public class AuthApiHandler {
                 log("Token validated for device: " + state.deviceId);
             } else {
                 response.put("success", false);
-                response.put("error", "Invalid device token");
+                response.put("error", Messages.get("errors.invalid_device_token"));
                 log("Invalid token attempt from " + rateLimitIdentity);
             }
 
         } catch (Exception e) {
             response.put("success", false);
-            response.put("error", "Invalid request: " + e.getMessage());
+            response.put("error", Messages.get("errors.invalid_request_with_detail", e.getMessage()));
         }
 
         HttpResponse.sendJson(out, response.toString());
@@ -182,7 +182,7 @@ public class AuthApiHandler {
     private static boolean handleLogout(OutputStream out) throws Exception {
         JSONObject response = new JSONObject();
         response.put("success", true);
-        response.put("message", "Logged out");
+        response.put("message", Messages.get("messages.logged_out"));
         
         HttpResponse.sendJson(out, response.toString());
         return true;

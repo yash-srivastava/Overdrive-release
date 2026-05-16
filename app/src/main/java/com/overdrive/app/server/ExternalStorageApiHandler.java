@@ -176,7 +176,7 @@ public class ExternalStorageApiHandler {
             
             JSONObject response = new JSONObject();
             response.put("success", true);
-            response.put("message", "Configuration updated");
+            response.put("message", Messages.get("messages.external_storage_config_updated"));
             response.put("cleanupEnabled", cleaner.isEnabled());
             response.put("reservedSpaceMb", cleaner.getReservedSpaceMb());
             response.put("protectedHours", cleaner.getProtectedHours());
@@ -187,7 +187,7 @@ public class ExternalStorageApiHandler {
         } catch (Exception e) {
             JSONObject error = new JSONObject();
             error.put("success", false);
-            error.put("error", "Invalid configuration: " + e.getMessage());
+            error.put("error", Messages.get("errors.external_storage_invalid_config_with_detail", e.getMessage()));
             sendJson(out, 400, error);
         }
     }
@@ -207,7 +207,7 @@ public class ExternalStorageApiHandler {
         if (!cleaner.isEnabled()) {
             JSONObject err = new JSONObject();
             err.put("success", false);
-            err.put("error", "External storage cleanup is disabled in config");
+            err.put("error", Messages.get("errors.external_storage_cleanup_disabled"));
             err.put("hint", "Enable cleanup first via POST /api/storage/external/config");
             sendJson(out, 403, err);
             return;

@@ -140,7 +140,7 @@ public class ModelsApiHandler {
     private static void handleGetManifest(OutputStream out) throws Exception {
         JSONObject manifest = readManifest();
         if (manifest == null) {
-            HttpResponse.sendJsonError(out, "No manifest available");
+            HttpResponse.sendJsonError(out, Messages.get("errors.models_no_manifest"));
             return;
         }
         HttpResponse.sendJson(out, manifest.toString());
@@ -275,14 +275,14 @@ public class ModelsApiHandler {
 
     private static void handleSetSelected(OutputStream out, String body) throws Exception {
         if (body == null || body.isEmpty()) {
-            HttpResponse.sendJsonError(out, "Empty body");
+            HttpResponse.sendJsonError(out, Messages.get("errors.models_empty_body"));
             return;
         }
         JSONObject incoming;
         try {
             incoming = (JSONObject) new JSONTokener(body).nextValue();
         } catch (Exception e) {
-            HttpResponse.sendJsonError(out, "Invalid JSON");
+            HttpResponse.sendJsonError(out, Messages.get("errors.models_invalid_json"));
             return;
         }
         JSONObject patch = new JSONObject();
@@ -291,7 +291,7 @@ public class ModelsApiHandler {
             // Validate against manifest so a typo or stale client can't poison the config.
             JSONObject manifest = readManifest();
             if (manifest != null && findModel(manifest, id) == null) {
-                HttpResponse.sendJsonError(out, "Unknown model id: " + id);
+                HttpResponse.sendJsonError(out, Messages.get("errors.models_unknown_id_with_id", id));
                 return;
             }
             patch.put("modelId", id);
@@ -301,18 +301,18 @@ public class ModelsApiHandler {
             // Sanity-check: must be a 7-char hex color (#RRGGBB). Anything else gets rejected
             // so the value going to localStorage callers is always renderable.
             if (!color.matches("^#[0-9A-Fa-f]{6}$")) {
-                HttpResponse.sendJsonError(out, "Invalid color (expected #RRGGBB)");
+                HttpResponse.sendJsonError(out, Messages.get("errors.models_invalid_color"));
                 return;
             }
             patch.put("color", color);
         }
         if (patch.length() == 0) {
-            HttpResponse.sendJsonError(out, "Nothing to update");
+            HttpResponse.sendJsonError(out, Messages.get("errors.models_nothing_to_update"));
             return;
         }
         boolean ok = UnifiedConfigManager.setVehicle(patch);
         if (!ok) {
-            HttpResponse.sendJsonError(out, "Failed to persist");
+            HttpResponse.sendJsonError(out, Messages.get("errors.models_persist_failed"));
             return;
         }
         HttpResponse.sendJson(out, "{\"ok\":true}");
@@ -328,7 +328,7 @@ public class ModelsApiHandler {
     private static void handleList(OutputStream out) throws Exception {
         JSONObject manifest = readManifest();
         if (manifest == null) {
-            HttpResponse.sendJsonError(out, "Manifest not available");
+            HttpResponse.sendJsonError(out, Messages.get("errors.models_manifest_unavailable"));
             return;
         }
         JSONArray models = manifest.optJSONArray("models");
@@ -364,7 +364,7 @@ public class ModelsApiHandler {
 
     private static void handleStatus(OutputStream out, String id) throws Exception {
         if (id == null || id.isEmpty()) {
-            HttpResponse.sendJsonError(out, "id is required");
+            HttpResponse.sendJsonError(out, Messages.get("errors.models_id_required"));
             return;
         }
         DownloadState ds = downloads.get(id);
@@ -390,17 +390,17 @@ public class ModelsApiHandler {
 
     private static void handleDownload(OutputStream out, String id) throws Exception {
         if (id == null || id.isEmpty()) {
-            HttpResponse.sendJsonError(out, "id is required");
+            HttpResponse.sendJsonError(out, Messages.get("errors.models_id_required"));
             return;
         }
         JSONObject manifest = readManifest();
         if (manifest == null) {
-            HttpResponse.sendJsonError(out, "Manifest not available");
+            HttpResponse.sendJsonError(out, Messages.get("errors.models_manifest_unavailable"));
             return;
         }
         JSONObject entry = findModel(manifest, id);
         if (entry == null) {
-            HttpResponse.sendJsonError(out, "Unknown model id: " + id);
+            HttpResponse.sendJsonError(out, Messages.get("errors.models_unknown_id_with_id", id));
             return;
         }
 

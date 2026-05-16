@@ -238,7 +238,7 @@ public class RecordingsApiHandler {
     private static void serveThumbnail(OutputStream out, String filename) throws Exception {
         // Security: prevent path traversal
         if (filename.contains("..") || filename.contains("/")) {
-            HttpResponse.sendError(out, 400, "Invalid filename");
+            HttpResponse.sendError(out, 400, Messages.get("errors.recordings_invalid_filename"));
             return;
         }
 
@@ -252,7 +252,7 @@ public class RecordingsApiHandler {
                 HttpResponse.sendImage(out, jpegFile, "image/jpeg");
                 return;
             }
-            HttpResponse.sendError(out, 404, "Thumbnail not found: " + filename);
+            HttpResponse.sendError(out, 404, Messages.get("errors.recordings_thumbnail_not_found_with_filename", filename));
             return;
         }
 
@@ -287,7 +287,7 @@ public class RecordingsApiHandler {
         // before the muxer finalises the moov atom on close.
         File videoFile = findVideoFile(filename, true);
         if (videoFile == null) {
-            HttpResponse.sendError(out, 404, "Video not found: " + filename);
+            HttpResponse.sendError(out, 404, Messages.get("errors.recordings_video_not_found_with_filename", filename));
             return;
         }
 
@@ -395,7 +395,7 @@ public class RecordingsApiHandler {
         // Security: prevent path traversal
         if (filename == null || filename.isEmpty()
                 || filename.contains("..") || filename.contains("/")) {
-            HttpResponse.sendError(out, 400, "Invalid filename");
+            HttpResponse.sendError(out, 400, Messages.get("errors.recordings_invalid_filename"));
             return;
         }
         File tmp = findInflightTmp(filename);
@@ -551,6 +551,7 @@ public class RecordingsApiHandler {
         return out;
     }
 
+
     private static Map<String, String> parseQuery(String query) {
         Map<String, String> params = new HashMap<>();
         if (query == null || query.isEmpty()) return params;
@@ -627,8 +628,9 @@ public class RecordingsApiHandler {
         });
 
         // v3 filters (item 6): each filter is comma-separated; recording must
-        // match at least one value in each non-empty filter. Recordings without
-        // sidecar data (legacy clips) only pass when the filter is unset.
+        // match at least one value in each non-empty filter. Static actors
+        // (parked cars, idle people) are intentionally excluded — chips
+        // surface threats, not scenery.
         Set<String> classSet = splitCsvLower(classFilter);
         Set<String> sevSet   = splitCsvUpper(severityFilter);
         Set<String> proxSet  = splitCsvUpper(proximityFilter);
@@ -850,22 +852,32 @@ public class RecordingsApiHandler {
                             }
                         }
                     }
-                    // Compact actors[] for filter chips. Strip the heavy fields.
-                    // EXCLUDE static actors so a clip with two parked cars + a
-                    // person walking in only matches "Person" / "Alert" filters,
-                    // not "Vehicle". Forensic-detail callers that want the
-                    // complete list can read the full sidecar via /api/events/.
+                    // Compact actors[] for filter chips. Strip the heavy fields,
+                    // but KEEP static actors with their isStatic flag intact.
+                    //
+                    // The Class chip ("does this clip contain a vehicle?") only
+                    // makes sense if it counts every vehicle that physically
+                    // appeared. The tracker's isStatic flag is a frame-by-frame
+                    // bbox-stability heuristic (STATIC_FRAMES_NEEDED_VEHICLE=2,
+                    // ~200ms) that flips true on a vehicle passing laterally
+                    // through a quadrant — which is exactly the kind of clip a
+                    // user filtering on Vehicle wants to see.
+                    //
+                    // Severity / Proximity filters key off rec.peakSeverity and
+                    // rec.peakProximity (which EventTimelineCollector aggregates
+                    // from non-static actors only) so the "scenery doesn't
+                    // escalate" rule still holds for those chips.
                     org.json.JSONArray actors = side.optJSONArray("actors");
                     if (actors != null && actors.length() > 0) {
                         org.json.JSONArray slim = new org.json.JSONArray();
                         for (int i = 0; i < actors.length(); i++) {
                             JSONObject a = actors.optJSONObject(i);
                             if (a == null) continue;
-                            if (a.optBoolean("isStatic", false)) continue;
                             JSONObject s = new JSONObject();
                             s.put("class", a.optString("class", "object"));
                             s.put("peakSeverity", a.optString("peakSeverity", "NOTICE"));
                             s.put("peakProximity", a.optString("peakProximity", "UNKNOWN"));
+                            s.put("isStatic", a.optBoolean("isStatic", false));
                             slim.put(s);
                         }
                         rec.put("actors", slim);
@@ -1148,7 +1160,7 @@ public class RecordingsApiHandler {
     private static void streamVideo(OutputStream out, String filename, String rangeHeader) throws Exception {
         // Security: prevent path traversal
         if (filename.contains("..") || filename.contains("/")) {
-            HttpResponse.sendError(out, 400, "Invalid filename");
+            HttpResponse.sendError(out, 400, Messages.get("errors.recordings_invalid_filename"));
             return;
         }
         
@@ -1156,7 +1168,7 @@ public class RecordingsApiHandler {
         File file = findVideoFile(filename);
         
         if (file == null) {
-            HttpResponse.sendError(out, 404, "Recording not found: " + filename);
+            HttpResponse.sendError(out, 404, Messages.get("errors.recordings_not_found_with_filename", filename));
             return;
         }
         
@@ -1171,7 +1183,7 @@ public class RecordingsApiHandler {
                 // Validate range
                 long fileLength = file.length();
                 if (start < 0 || start >= fileLength) {
-                    HttpResponse.sendError(out, 416, "Range Not Satisfiable");
+                    HttpResponse.sendError(out, 416, Messages.get("errors.recordings_range_not_satisfiable"));
                     return;
                 }
                 
@@ -1180,10 +1192,10 @@ public class RecordingsApiHandler {
                 HttpResponse.sendVideo(out, file);
             }
         } catch (NumberFormatException e) {
-            HttpResponse.sendError(out, 400, "Invalid Range header");
+            HttpResponse.sendError(out, 400, Messages.get("errors.recordings_invalid_range_header"));
         } catch (java.io.FileNotFoundException e) {
             // File disappeared between check and read (SD card unmount)
-            HttpResponse.sendError(out, 410, "File no longer accessible");
+            HttpResponse.sendError(out, 410, Messages.get("errors.recordings_file_no_longer_accessible"));
         }
     }
     
@@ -1193,7 +1205,7 @@ public class RecordingsApiHandler {
     private static void deleteRecording(OutputStream out, String filename) throws Exception {
         // Security: prevent path traversal
         if (filename.contains("..") || filename.contains("/")) {
-            HttpResponse.sendJsonError(out, "Invalid filename");
+            HttpResponse.sendJsonError(out, Messages.get("errors.recordings_invalid_filename"));
             return;
         }
         
@@ -1201,7 +1213,7 @@ public class RecordingsApiHandler {
         File file = findVideoFile(filename);
         
         if (file == null) {
-            HttpResponse.sendJsonError(out, "Recording not found");
+            HttpResponse.sendJsonError(out, Messages.get("errors.recordings_not_found"));
             return;
         }
         
@@ -1213,7 +1225,7 @@ public class RecordingsApiHandler {
         JSONObject response = new JSONObject();
         response.put("success", deleted);
         if (!deleted) {
-            response.put("error", "Failed to delete file");
+            response.put("error", Messages.get("errors.recordings_delete_failed"));
         }
 
         HttpResponse.sendJson(out, response.toString());
@@ -1276,7 +1288,7 @@ public class RecordingsApiHandler {
         
         if (body == null || body.isEmpty()) {
             response.put("success", false);
-            response.put("error", "Request body is required");
+            response.put("error", Messages.get("errors.recordings_body_required"));
             HttpResponse.sendJson(out, response.toString());
             return;
         }
@@ -1287,7 +1299,7 @@ public class RecordingsApiHandler {
             
             if (filenames == null || filenames.length() == 0) {
                 response.put("success", false);
-                response.put("error", "No filenames provided");
+                response.put("error", Messages.get("errors.recordings_no_filenames"));
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
@@ -1296,7 +1308,7 @@ public class RecordingsApiHandler {
             int maxBatch = 100;
             if (filenames.length() > maxBatch) {
                 response.put("success", false);
-                response.put("error", "Maximum batch size is " + maxBatch);
+                response.put("error", Messages.get("errors.recordings_max_batch_with_count", maxBatch));
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
@@ -1341,7 +1353,7 @@ public class RecordingsApiHandler {
             
         } catch (Exception e) {
             response.put("success", false);
-            response.put("error", "Invalid request: " + e.getMessage());
+            response.put("error", Messages.get("errors.invalid_request_with_detail", e.getMessage()));
         }
         
         HttpResponse.sendJson(out, response.toString());
@@ -1354,7 +1366,7 @@ public class RecordingsApiHandler {
     private static void serveEventTimeline(OutputStream out, String filename) throws Exception {
         // Security: prevent path traversal
         if (filename.contains("..") || filename.contains("/")) {
-            HttpResponse.sendError(out, 400, "Invalid filename");
+            HttpResponse.sendError(out, 400, Messages.get("errors.recordings_invalid_filename"));
             return;
         }
         

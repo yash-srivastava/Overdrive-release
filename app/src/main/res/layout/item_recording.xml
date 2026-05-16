@@ -37,7 +37,7 @@
                 android:layout_height="match_parent"
                 android:adjustViewBounds="true"
                 android:background="@color/surface_variant"
-                android:contentDescription="Video thumbnail"
+                android:contentDescription="@string/cd_video_thumbnail"
                 android:scaleType="centerCrop" />
 
             <!-- Severity stripe — solid bar across the top edge, set programmatically. -->
@@ -128,7 +128,7 @@
                 android:layout_gravity="center"
                 android:src="@drawable/ic_play_circle"
                 android:alpha="0.85"
-                android:contentDescription="Play" />
+                android:contentDescription="@string/cd_play" />
 
         </FrameLayout>
 
@@ -187,7 +187,7 @@
                     android:layout_width="32dp"
                     android:layout_height="32dp"
                     android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="Delete"
+                    android:contentDescription="@string/cd_delete"
                     android:src="@drawable/ic_delete"
                     app:tint="@color/text_muted" />
 

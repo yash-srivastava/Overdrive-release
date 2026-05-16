@@ -131,7 +131,7 @@ public class PerformanceApiHandler {
                 // No data yet - return empty with status
                 JSONObject response = new JSONObject();
                 response.put("status", "no_data");
-                response.put("message", "Performance monitoring not started or no data collected yet");
+                response.put("message", Messages.get("errors.performance_no_data"));
                 response.put("monitoring", monitor.isRunning());
                 HttpResponse.sendJson(out, response.toString());
             } else {
@@ -287,7 +287,7 @@ public class PerformanceApiHandler {
             
             JSONObject response = new JSONObject();
             response.put("status", "ok");
-            response.put("message", "Performance monitoring started");
+            response.put("message", Messages.get("messages.performance_monitoring_started"));
             response.put("monitoring", true);
             HttpResponse.sendJson(out, response.toString());
             return true;
@@ -305,7 +305,7 @@ public class PerformanceApiHandler {
             
             JSONObject response = new JSONObject();
             response.put("status", "ok");
-            response.put("message", "Performance monitoring stopped");
+            response.put("message", Messages.get("messages.performance_monitoring_stopped"));
             response.put("monitoring", false);
             HttpResponse.sendJson(out, response.toString());
             return true;
@@ -463,7 +463,7 @@ public class PerformanceApiHandler {
             } else {
                 JSONObject response = new JSONObject();
                 response.put("success", false);
-                response.put("error", "SohEstimator not initialized");
+                response.put("error", Messages.get("errors.soh_not_initialized"));
                 HttpResponse.sendJson(out, response.toString());
             }
             return true;
@@ -494,7 +494,7 @@ public class PerformanceApiHandler {
 
                 JSONObject response = new JSONObject();
                 response.put("success", true);
-                response.put("message", "SOH estimation reset and re-seeded.");
+                response.put("message", Messages.get("messages.soh_reset_complete"));
                 if (sohEst.hasEstimate()) {
                     response.put("newSoh", sohEst.getCurrentSoh());
                     response.put("nominalCapacityKwh", sohEst.getNominalCapacityKwh());
@@ -503,7 +503,7 @@ public class PerformanceApiHandler {
             } else {
                 JSONObject response = new JSONObject();
                 response.put("success", false);
-                response.put("error", "SohEstimator not initialized");
+                response.put("error", Messages.get("errors.soh_not_initialized"));
                 HttpResponse.sendJson(out, response.toString());
             }
             return true;
@@ -535,7 +535,7 @@ public class PerformanceApiHandler {
             org.json.JSONArray cats = req.optJSONArray("categories");
             if (cats == null || cats.length() == 0) {
                 response.put("success", false);
-                response.put("error", "No categories specified");
+                response.put("error", Messages.get("errors.reset_no_categories"));
                 HttpResponse.sendJson(out, response.toString());
                 return true;
             }
@@ -555,7 +555,7 @@ public class PerformanceApiHandler {
                             // turn the car off and try again.
                             if (mgr != null && mgr.isTripActive()) {
                                 r.put("success", false);
-                                r.put("error", "Trip in progress — turn ACC off first");
+                                r.put("error", Messages.get("errors.reset_trip_in_progress"));
                                 break;
                             }
                             com.overdrive.app.trips.TripDatabase db =
@@ -581,7 +581,7 @@ public class PerformanceApiHandler {
                                 r.put("success", true);
                             } else {
                                 r.put("success", false);
-                                r.put("error", "SohEstimator not initialized");
+                                r.put("error", Messages.get("errors.soh_not_initialized"));
                             }
                             break;
                         }
@@ -593,7 +593,7 @@ public class PerformanceApiHandler {
                             // token until the daemon restarted.
                             boolean ok = SurveillanceIpcServer.resetAbrpForBulkWipe();
                             r.put("success", ok);
-                            if (!ok) r.put("error", "ABRP not initialized");
+                            if (!ok) r.put("error", Messages.get("errors.reset_abrp_not_initialized"));
                             break;
                         }
                         case "bydCloud": {
@@ -609,7 +609,7 @@ public class PerformanceApiHandler {
                             // descriptor; at worst, corrupt the active MP4.
                             if (sm.isRecordingActive()) {
                                 r.put("success", false);
-                                r.put("error", "Recording in progress — stop recording first");
+                                r.put("error", Messages.get("errors.reset_recording_in_progress"));
                                 break;
                             }
                             long n = sm.wipeMediaCategory("recordings");
@@ -622,7 +622,7 @@ public class PerformanceApiHandler {
                                 com.overdrive.app.storage.StorageManager.getInstance();
                             if (sm.isSurveillanceActive()) {
                                 r.put("success", false);
-                                r.put("error", "Surveillance recording in progress — wait for it to stop");
+                                r.put("error", Messages.get("errors.reset_surveillance_in_progress"));
                                 break;
                             }
                             long n = sm.wipeMediaCategory("surveillance");
@@ -646,7 +646,7 @@ public class PerformanceApiHandler {
                         }
                         default:
                             r.put("success", false);
-                            r.put("error", "Unknown category");
+                            r.put("error", Messages.get("errors.reset_unknown_category"));
                     }
                 } catch (Exception inner) {
                     r.put("success", false);
@@ -678,7 +678,10 @@ public class PerformanceApiHandler {
             com.overdrive.app.abrp.SohEstimator sohEst = socDb != null ? socDb.getSohEstimator() : null;
 
             if (sohEst == null) {
-                HttpResponse.sendJson(out, "{\"success\":false,\"error\":\"SohEstimator not initialized\"}");
+                JSONObject err = new JSONObject();
+                err.put("success", false);
+                err.put("error", Messages.get("errors.soh_not_initialized"));
+                HttpResponse.sendJson(out, err.toString());
                 return true;
             }
 

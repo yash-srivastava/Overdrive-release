@@ -45,6 +45,7 @@ public class BydDataCollector {
     private Object safetyBeltDevice;
     private Object acDevice;
     private Object lightDevice;
+    private Object adasDevice;
     private Object radarDevice;
     private Object powerDevice;
     private Object settingDevice;
@@ -190,6 +191,7 @@ public class BydDataCollector {
         gearboxDevice = initDevice("android.hardware.bydauto.gearbox.BYDAutoGearboxDevice", "Gearbox");
         acDevice = initDevice("android.hardware.bydauto.ac.BYDAutoAcDevice", "AC");
         lightDevice = initDevice("android.hardware.bydauto.light.BYDAutoLightDevice", "Light");
+        adasDevice = initDevice("android.hardware.bydauto.adas.BYDAutoADASDevice", "ADAS");
         powerDevice = initDevice("android.hardware.bydauto.power.BYDAutoPowerDevice", "Power");
         safetyBeltDevice = initDevice("android.hardware.bydauto.safetybelt.BYDAutoSafetyBeltDevice", "SafetyBelt");
         tyreDevice = initDevice("android.hardware.bydauto.tyre.BYDAutoTyreDevice", "Tyre");
@@ -607,6 +609,7 @@ public class BydDataCollector {
         // Display-only devices (normally listener-driven, polled here on-demand)
         collectAc(b);
         collectLight(b);
+        collectAdas(b);
         collectPower(b);
         collectSafetyBelt(b);
         collectTyre(b);
@@ -1492,7 +1495,7 @@ public class BydDataCollector {
             b.frontFog(getLightStatus(7) == 1);
             b.hazard(getLightStatus(8) == 1);
             Object dayTime = BydDeviceHelper.callGetter(lightDevice, "getDayTimeLightState");
-            if (dayTime instanceof Number) b.dayTimeLight(((Number) dayTime).intValue());
+            if (dayTime instanceof Number) b.dayTimeLight(((Number) dayTime).intValue() == 1);
         } catch (Exception e) {
             logger.debug("collectLight error: " + e.getMessage());
         }
@@ -1501,6 +1504,18 @@ public class BydDataCollector {
     private int getLightStatus(int position) {
         Object val = BydDeviceHelper.callGetter(lightDevice, "getLightStatus", position);
         return (val instanceof Number) ? ((Number) val).intValue() : 0;
+    }
+
+    private void collectAdas(BydVehicleData.Builder b) {
+        if (adasDevice == null) return;
+        try {
+            int speedLimitWarning = BydDeviceHelper.callGetSingle(adasDevice, BydFeatureIds.ADAS_SLW_FUNC_SWITCH_STATE);
+            if (speedLimitWarning >= 0) {
+                b.speedLimitWarning(speedLimitWarning == 2);
+            }
+        } catch (Exception e) {
+            logger.debug("collectAdas error: " + e.getMessage());
+        }
     }
 
     private void collectPower(BydVehicleData.Builder b) {
@@ -2786,8 +2801,12 @@ public class BydDataCollector {
             logger.info("  Statistic listener registered");
             count++;
         }
-        if (BydDeviceHelper.registerListener(lightDevice, this::onGenericCallback)) {
+        if (BydDeviceHelper.registerListener(lightDevice, this::onLightsCallback)) {
             logger.info("  Light listener registered");
+            count++;
+        }
+        if (BydDeviceHelper.registerListener(adasDevice, this::onAdasCallback)) {
+            logger.info("  Adas listener registered");
             count++;
         }
         if (BydDeviceHelper.registerListener(radarDevice, this::onGenericCallback)) {
@@ -3143,6 +3162,40 @@ public class BydDataCollector {
         }
         // Listener-driven: the specific event value was already captured above.
         // Skip full device re-collection — the 5s polling timer handles periodic refresh.
+    }
+
+    private void onLightsCallback(String method, Object[] args) {
+        if ("onDataEventChanged".equals(method) && args != null && args.length >= 2) {
+            try {
+                int eventId = ((Number) args[0]).intValue();
+                Object eventValue = args[1];
+                int iVal = BydDeviceHelper.getIntValue(eventValue);
+
+                if (eventId == BydFeatureIds.LIGHT_DAY_RUNNING_LIGHT_AUTO_STATE && iVal > 0 && iVal < 3) {
+                    BydVehicleData current = snapshot.get();
+                    if (current != null) {
+                        snapshot.set(current.toBuilder().dayTimeLight(iVal == 1).build());
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private void onAdasCallback(String method, Object[] args) {
+        if ("onDataEventChanged".equals(method) && args != null && args.length >= 2) {
+            try {
+                int eventId = ((Number) args[0]).intValue();
+                Object eventValue = args[1];
+                int iVal = BydDeviceHelper.getIntValue(eventValue);
+
+                if (eventId == BydFeatureIds.ADAS_SLW_FUNC_SWITCH_STATE && iVal > 0 && iVal < 3) {
+                    BydVehicleData current = snapshot.get();
+                    if (current != null) {
+                        snapshot.set(current.toBuilder().speedLimitWarning(iVal == 2).build());
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
     }
 
     // ==================== EXTENDED LISTENER HANDLERS ====================
@@ -4052,6 +4105,21 @@ public class BydDataCollector {
         }
     }
 
+    /**
+     * Recall a stored driver-side seat memory position (1 or 2).
+     * SDK feature lives on settingDevice — Adas.* IDs do not accept this set.
+     */
+    public boolean setSeatMemoryPosition(int position) {
+        try {
+            if (position < 1 || position > 2) return false;
+            int result = BydDeviceHelper.callSetSingle(settingDevice, BydFeatureIds.SETTING_LF_MEMORY_LOCATION_WAKE_SET, position);
+            return result == 0;
+        } catch (Exception e) {
+            logger.debug("setSeatMemoryPosition failed: " + e.getMessage());
+        }
+        return false;
+    }
+
     /** Cached BYDAutoSettingDevice.hasFeature("SEAT_VENTILATING") result; probed once. */
     private volatile boolean seatVentFeatureProbed = false;
     private volatile boolean seatVentFeatureSupported = false;
@@ -4075,7 +4143,29 @@ public class BydDataCollector {
         }
     }
 
+    // --- Lights ---
+
+    public boolean setDayTimeLight(boolean enable) {
+        try {
+            Object result = BydDeviceHelper.callMethod(lightDevice, "setDayTimeLightState", enable ? 1 : 2);
+            return result instanceof Integer && ((Integer) result).intValue() == 0;
+        } catch (Exception e) {
+            logger.debug("setDayTimeLight failed: " + e.getMessage());
+        }
+        return false;
+    }
+
     // --- ADAS ---
+
+    public boolean setSpeedLimitWarning(boolean enable) {
+        try {
+            int result = BydDeviceHelper.callSetSingle(adasDevice, BydFeatureIds.ADAS_SLW_FUNC_SWITCH_STATE_SET, enable ? 2 : 1);
+            return result == 0;
+        } catch (Exception e) {
+            logger.debug("setSpeedLimitWarning failed: " + e.getMessage());
+        }
+        return false;
+    }
 
     public boolean setFcwLevel(int level) {
         try {

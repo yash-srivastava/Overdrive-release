@@ -46,13 +46,13 @@
                         android:layout_height="20dp"
                         android:src="@drawable/ic_dashboard"
                         app:tint="@color/brand_primary"
-                        android:contentDescription="QR" />
+                        android:contentDescription="@string/cd_qr" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="10dp"
-                        android:text="Scan to Connect"
+                        android:text="@string/dashboard_scan_to_connect"
                         android:textColor="@color/text_primary"
                         android:textSize="16sp"
                         android:fontFamily="sans-serif-medium" />
@@ -82,7 +82,7 @@
                         android:layout_width="180dp"
                         android:layout_height="180dp"
                         android:background="@color/white"
-                        android:contentDescription="QR Code"
+                        android:contentDescription="@string/cd_qr_code"
                         android:padding="8dp"
                         android:scaleType="fitCenter" />
 
@@ -93,7 +93,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="16dp"
-                    android:text="Waiting for tunnel..."
+                    android:text="@string/dashboard_qr_waiting"
                     android:textColor="@color/text_muted"
                     android:textSize="13sp"
                     android:gravity="center"
@@ -153,13 +153,13 @@
                             android:layout_height="18dp"
                             android:src="@drawable/ic_daemons"
                             app:tint="@color/text_muted"
-                            android:contentDescription="Daemons" />
+                            android:contentDescription="@string/cd_daemons" />
 
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginStart="8dp"
-                            android:text="Daemons"
+                            android:text="@string/menu_daemons"
                             android:textColor="@color/text_muted"
                             android:textSize="13sp" />
 
@@ -170,7 +170,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
-                        android:text="0/5 Running"
+                        android:text="@string/dashboard_daemons_running_default"
                         android:textColor="@color/brand_primary"
                         android:textSize="18sp"
                         android:fontFamily="sans-serif-medium" />
@@ -208,13 +208,13 @@
                             android:layout_height="18dp"
                             android:src="@drawable/ic_recording"
                             app:tint="@color/text_muted"
-                            android:contentDescription="Recording" />
+                            android:contentDescription="@string/cd_recording" />
 
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginStart="8dp"
-                            android:text="Recording"
+                            android:text="@string/menu_recording"
                             android:textColor="@color/text_muted"
                             android:textSize="13sp" />
 
@@ -225,7 +225,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
-                        android:text="Idle"
+                        android:text="@string/dashboard_recording_idle"
                         android:textColor="@color/text_muted"
                         android:textSize="18sp"
                         android:fontFamily="sans-serif-medium" />
@@ -265,13 +265,13 @@
                         android:layout_height="20dp"
                         android:src="@drawable/ic_dashboard"
                         app:tint="@color/brand_primary"
-                        android:contentDescription="Info" />
+                        android:contentDescription="@string/cd_info" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="10dp"
-                        android:text="Device Info"
+                        android:text="@string/dashboard_device_info"
                         android:textColor="@color/text_primary"
                         android:textSize="16sp"
                         android:fontFamily="sans-serif-medium" />
@@ -302,7 +302,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Device ID"
+                            android:text="@string/dashboard_device_id_label"
                             android:textColor="@color/text_muted"
                             android:textSize="13sp" />
 
@@ -313,7 +313,7 @@
                             android:layout_marginStart="8dp"
                             android:layout_weight="1"
                             android:fontFamily="monospace"
-                            android:text="..."
+                            android:text="@string/dashboard_device_id_loading"
                             android:textColor="@color/text_primary"
                             android:textSize="13sp"
                             android:textIsSelectable="true"
@@ -331,7 +331,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Access Mode"
+                            android:text="@string/dashboard_access_mode_label"
                             android:textColor="@color/text_muted"
                             android:textSize="13sp" />
 
@@ -341,7 +341,7 @@
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
                             android:gravity="end"
-                            android:text="PRIVATE"
+                            android:text="@string/access_mode_private"
                             android:textColor="@color/brand_primary"
                             android:textSize="13sp"
                             android:fontFamily="sans-serif-medium" />
@@ -383,13 +383,13 @@
                         android:layout_height="20dp"
                         android:src="@drawable/ic_sentry"
                         app:tint="@color/brand_primary"
-                        android:contentDescription="Auth" />
+                        android:contentDescription="@string/cd_auth" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="10dp"
-                        android:text="Remote Access"
+                        android:text="@string/dashboard_remote_access"
                         android:textColor="@color/text_primary"
                         android:textSize="16sp"
                         android:fontFamily="sans-serif-medium" />
@@ -411,7 +411,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Access Code"
+                        android:text="@string/dashboard_access_code"
                         android:textColor="@color/text_muted"
                         android:textSize="13sp"
                         android:layout_marginBottom="8dp" />
@@ -431,7 +431,7 @@
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
                             android:fontFamily="monospace"
-                            android:text="••••••••"
+                            android:text="@string/dashboard_token_masked"
                             android:textColor="@color/text_primary"
                             android:textSize="16sp"
                             android:letterSpacing="0.15"
@@ -444,7 +444,7 @@
                             android:layout_marginStart="8dp"
                             android:padding="4dp"
                             android:src="@android:drawable/ic_menu_view"
-                            android:contentDescription="Show/Hide Token"
+                            android:contentDescription="@string/cd_show_hide_token"
                             android:background="?attr/selectableItemBackgroundBorderless"
                             app:tint="@color/text_muted" />
 
@@ -455,7 +455,7 @@
                             android:layout_marginStart="4dp"
                             android:padding="4dp"
                             android:src="@drawable/ic_copy"
-                            android:contentDescription="Copy Token"
+                            android:contentDescription="@string/cd_copy_token"
                             android:background="?attr/selectableItemBackgroundBorderless"
                             app:tint="@color/text_muted" />
 
@@ -469,7 +469,7 @@
                         android:layout_height="40dp"
                         android:layout_marginTop="12dp"
                         android:layout_gravity="end"
-                        android:text="Regenerate Token"
+                        android:text="@string/dashboard_regenerate_token"
                         android:textColor="@color/brand_primary"
                         android:textSize="13sp" />
 

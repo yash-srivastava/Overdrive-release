@@ -128,10 +128,10 @@ BYD.events = {
         
         if (this.selectedDate) {
             const date = new Date(this.selectedDate + 'T00:00:00');
-            text.textContent = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            text.textContent = date.toLocaleDateString(BYD.i18n.getLang(), { month: 'short', day: 'numeric' });
             btn.classList.add('has-date');
         } else {
-            text.textContent = 'Select Date';
+            text.textContent = BYD.i18n.t('events.select_date');
             btn.classList.remove('has-date');
         }
     },
@@ -142,17 +142,30 @@ BYD.events = {
         const year = this.currentDate.getFullYear();
         const month = this.currentDate.getMonth();
         
-        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-                          'July', 'August', 'September', 'October', 'November', 'December'];
-        title.textContent = monthNames[month] + ' ' + year;
+        // i18n: Use Intl.DateTimeFormat for localized month/weekday names instead of hardcoded English arrays.
+        var monthDate = new Date(year, month, 1);
+        var monthName;
+        try {
+            monthName = new Intl.DateTimeFormat(BYD.i18n.getLang(), { month: 'long' }).format(monthDate);
+        } catch (e) {
+            monthName = monthDate.toLocaleDateString(BYD.i18n.getLang(), { month: 'long' });
+        }
+        title.textContent = monthName + ' ' + year;
         grid.innerHTML = '';
-        
-        ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(day => {
+
+        var weekdayFmt;
+        try {
+            weekdayFmt = new Intl.DateTimeFormat(BYD.i18n.getLang(), { weekday: 'short' });
+        } catch (e) { weekdayFmt = null; }
+        // Use Sunday 2024-01-07 .. Saturday 2024-01-13 as a known week for label rendering
+        for (var w = 0; w < 7; w++) {
+            const dateForDay = new Date(2024, 0, 7 + w); // Sun..Sat
+            const label = weekdayFmt ? weekdayFmt.format(dateForDay) : dateForDay.toLocaleDateString(BYD.i18n.getLang(), { weekday: 'short' });
             const el = document.createElement('div');
             el.className = 'calendar-weekday';
-            el.textContent = day;
+            el.textContent = label;
             grid.appendChild(el);
-        });
+        }
         
         const firstDay = new Date(year, month, 1).getDay();
         const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -260,12 +273,15 @@ BYD.events = {
     
     updateRecordingsTitle() {
         const title = document.getElementById('recordingsTitle');
-        let text = this.selectedDate 
-            ? new Date(this.selectedDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-            : 'All';
-        
-        const suffixes = { sentry: ' Sentry Events', normal: ' Recordings', proximity: ' Proximity Events' };
-        title.textContent = text + (suffixes[this.currentFilter] || ' Recordings');
+        let prefix = this.selectedDate
+            ? new Date(this.selectedDate + 'T00:00:00').toLocaleDateString(BYD.i18n.getLang(), { month: 'short', day: 'numeric', year: 'numeric' })
+            : BYD.i18n.t('events.all');
+
+        var suffixKey;
+        if (this.currentFilter === 'sentry') suffixKey = 'events.title_sentry';
+        else if (this.currentFilter === 'proximity') suffixKey = 'events.title_proximity';
+        else suffixKey = 'events.title_recordings';
+        title.textContent = BYD.i18n.t(suffixKey, {prefix: prefix});
     },
     
     updatePagination() {
@@ -282,7 +298,7 @@ BYD.events = {
         pagination.style.display = 'flex';
         prevBtn.disabled = this.currentPage <= 1;
         nextBtn.disabled = this.currentPage >= this.totalPages;
-        info.textContent = 'Page ' + this.currentPage + ' of ' + this.totalPages;
+        info.textContent = BYD.i18n.t('events.page_of', {page: this.currentPage, total: this.totalPages});
     },
     
     prevPage() {
@@ -423,11 +439,11 @@ BYD.events = {
             '<div class="recording-card recording-card-inflight" data-filename="' + filename + '">' +
                 '<div class="recording-thumbnail" id="' + thumbId + '" data-thumb="' + thumbUrl + '">' +
                     '<div class="thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg></div>' +
-                    '<span class="inflight-badge"><span class="inflight-dot"></span>Recording</span>' +
+                    '<span class="inflight-badge"><span class="inflight-dot"></span>' + BYD.i18n.t('events.recording_badge') + '</span>' +
                 '</div>' +
                 '<div class="recording-info">' +
-                    '<div class="recording-name"><span class="recording-badge live">Live</span>' + fname + '</div>' +
-                    '<div class="recording-meta"><span>Available in a few seconds…</span></div>' +
+                    '<div class="recording-name"><span class="recording-badge live">' + BYD.i18n.t('events.live_badge') + '</span>' + fname + '</div>' +
+                    '<div class="recording-meta"><span>' + BYD.i18n.t('events.available_in_seconds') + '</span></div>' +
                 '</div>' +
             '</div>';
     },
@@ -458,12 +474,12 @@ BYD.events = {
                 this.totalCount = data.totalCount || this.recordings.length;
                 this.renderRecordings();
                 this.updatePagination();
-                document.getElementById('recordingsCount').textContent = 
-                    this.totalCount + ' video' + (this.totalCount !== 1 ? 's' : '');
+                document.getElementById('recordingsCount').textContent =
+                    BYD.i18n.plural('events.video_count', this.totalCount);
             }
         } catch (e) {
             console.error('Failed to load recordings:', e);
-            list.innerHTML = '<div class="empty-state"><svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><div class="empty-title">Failed to load recordings</div><div class="empty-text">Check your connection and try again</div></div>';
+            list.innerHTML = '<div class="empty-state"><svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><div class="empty-title">' + BYD.i18n.t('events.empty_failed_title') + '</div><div class="empty-text">' + BYD.i18n.t('events.empty_failed_text') + '</div></div>';
         }
     },
     
@@ -481,14 +497,14 @@ BYD.events = {
             if (inflightHtml) {
                 list.innerHTML = inflightHtml;
             } else {
-                list.innerHTML = '<div class="empty-state"><svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><div class="empty-title">No recordings found</div><div class="empty-text">Recordings will appear here when available</div></div>';
+                list.innerHTML = '<div class="empty-state"><svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><div class="empty-title">' + BYD.i18n.t('events.empty_none_title') + '</div><div class="empty-text">' + BYD.i18n.t('events.empty_none_text') + '</div></div>';
             }
             return;
         }
 
         list.innerHTML = inflightHtml + this.recordings.map(rec => {
             const thumbId = this._thumbDomId(rec.filename);
-            const badge = rec.type === 'sentry' ? 'Sentry' : rec.type === 'proximity' ? 'Proximity' : 'Normal';
+            const badge = rec.type === 'sentry' ? BYD.i18n.t('events.badge_sentry') : rec.type === 'proximity' ? BYD.i18n.t('events.badge_proximity') : BYD.i18n.t('events.badge_normal');
             const fname = rec.filename.length > 28 ? rec.filename.substring(0, 25) + '...' : rec.filename;
             const isSelected = this.selectedFiles.has(rec.filename);
             
@@ -505,7 +521,11 @@ BYD.events = {
             // v3 enrichment (item 6): use hero JPEG when present, sev badge, actor summary
             const sev = (rec.peakSeverity || '').toUpperCase();
             const sevClass = sev === 'CRITICAL' ? 'sev-critical' : sev === 'ALERT' ? 'sev-alert' : '';
-            const sevBadge = sev ? '<span class="recording-badge sev-' + sev.toLowerCase() + '">' + sev + '</span>' : '';
+            const sevLabel = sev === 'CRITICAL' ? BYD.i18n.t('events.severity_critical')
+                : sev === 'ALERT' ? BYD.i18n.t('events.severity_alert')
+                : sev === 'NOTICE' ? BYD.i18n.t('events.severity_notice')
+                : sev;
+            const sevBadge = sev ? '<span class="recording-badge sev-' + sev.toLowerCase() + '">' + sevLabel + '</span>' : '';
             const thumbUrl = rec.heroThumbnailUrl || rec.thumbnailUrl || '';
             const personCount  = rec.personCount  || rec.personSpans  || 0;
             const vehicleCount = rec.vehicleCount || rec.vehicleSpans || 0;
@@ -513,10 +533,10 @@ BYD.events = {
             const animalCount  = rec.animalCount  || 0;
             const proxLabel = (function(p) {
                 switch ((p||'').toUpperCase()) {
-                    case 'VERY_CLOSE': return 'very close';
-                    case 'CLOSE': return 'close';
-                    case 'MID': return 'mid';
-                    case 'FAR': return 'far';
+                    case 'VERY_CLOSE': return BYD.i18n.t('events.prox_very_close');
+                    case 'CLOSE': return BYD.i18n.t('events.prox_close');
+                    case 'MID': return BYD.i18n.t('events.prox_mid');
+                    case 'FAR': return BYD.i18n.t('events.prox_far');
                     default: return '';
                 }
             })(rec.peakProximity);
@@ -542,8 +562,8 @@ BYD.events = {
                 '</div>' +
                 (this.selectMode ? '' : 
                 '<div class="recording-actions">' +
-                '<button class="action-btn" onclick="event.stopPropagation(); BYD.events.downloadVideo(\'' + rec.filename + '\')" title="Download"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>' +
-                '<button class="action-btn delete" onclick="event.stopPropagation(); BYD.events.deleteRecording(\'' + rec.filename + '\')" title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>' +
+                '<button class="action-btn" onclick="event.stopPropagation(); BYD.events.downloadVideo(\'' + rec.filename + '\')" title="' + BYD.i18n.t('common.download') + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>' +
+                '<button class="action-btn delete" onclick="event.stopPropagation(); BYD.events.deleteRecording(\'' + rec.filename + '\')" title="' + BYD.i18n.t('common.delete') + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>' +
                 '</div>') +
                 '</div>';
         }).join('');
@@ -568,7 +588,7 @@ BYD.events = {
             // After max retries, show "no preview" state
             const placeholder = container.querySelector('.thumb-placeholder');
             if (placeholder) {
-                placeholder.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>No preview</span>';
+                placeholder.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>' + BYD.i18n.t('events.no_preview') + '</span>';
             }
             return;
         }
@@ -590,11 +610,11 @@ BYD.events = {
                 if (placeholder) {
                     const img = document.createElement('img');
                     img.src = imgUrl;
-                    img.alt = 'Thumbnail';
+                    img.alt = BYD.i18n.t('events.thumbnail_alt');
                     img.onload = () => placeholder.remove();
                     img.onerror = () => {
                         URL.revokeObjectURL(imgUrl);
-                        placeholder.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>No preview</span>';
+                        placeholder.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>' + BYD.i18n.t('events.no_preview') + '</span>';
                     };
                     container.insertBefore(img, container.firstChild);
                 }
@@ -603,14 +623,14 @@ BYD.events = {
             // Network error - show fallback
             const placeholder = container.querySelector('.thumb-placeholder');
             if (placeholder) {
-                placeholder.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>No preview</span>';
+                placeholder.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>' + BYD.i18n.t('events.no_preview') + '</span>';
             }
         });
     },
     
     onThumbError(el) {
         const container = el.parentElement;
-        container.innerHTML = '<div class="thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>No preview</span></div><div class="play-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>';
+        container.innerHTML = '<div class="thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>' + BYD.i18n.t('events.no_preview') + '</span></div><div class="play-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>';
     },
     
     playVideo(filename) {
@@ -660,7 +680,7 @@ BYD.events = {
     },
     
     async deleteRecording(filename) {
-        if (!confirm('Delete ' + filename + '?')) return;
+        if (!confirm(BYD.i18n.t('events.confirm_delete_one', {filename: filename}))) return;
 
         // If the modal player is currently showing this recording, pause it
         // and detach the source BEFORE the DELETE goes through. Otherwise
@@ -682,14 +702,14 @@ BYD.events = {
                 await this.loadStorageStats();
                 await this.loadRecordings();
                 if (BYD.core && BYD.core.showToast) {
-                    BYD.core.showToast('Recording deleted', 'success');
+                    BYD.core.showToast(BYD.i18n.t('events.toast_deleted'), 'success');
                 }
             } else {
-                alert('Failed to delete: ' + (data.error || 'Unknown error'));
+                alert(BYD.i18n.t('events.alert_delete_failed', {error: data.error || BYD.i18n.t('errors.generic')}));
             }
         } catch (e) {
             console.error('Delete failed:', e);
-            alert('Failed to delete recording');
+            alert(BYD.i18n.t('events.alert_delete_failed_generic'));
         }
     },
     
@@ -752,7 +772,7 @@ BYD.events = {
         if (this.selectMode) {
             if (toolbar) toolbar.style.display = 'flex';
             if (selectBtn) selectBtn.classList.add('active');
-            if (count) count.textContent = this.selectedFiles.size + ' selected';
+            if (count) count.textContent = BYD.i18n.t('events.n_selected', {n: this.selectedFiles.size});
         } else {
             if (toolbar) toolbar.style.display = 'none';
             if (selectBtn) selectBtn.classList.remove('active');
@@ -763,7 +783,7 @@ BYD.events = {
         const count = this.selectedFiles.size;
         if (count === 0) return;
         
-        if (!confirm('Delete ' + count + ' recording' + (count > 1 ? 's' : '') + '? This cannot be undone.')) return;
+        if (!confirm(BYD.i18n.plural('events.confirm_delete_n', count))) return;
         
         const filenames = Array.from(this.selectedFiles);
         
@@ -776,7 +796,9 @@ BYD.events = {
             const data = await res.json();
             
             if (data.success) {
-                const msg = data.deleted + ' deleted' + (data.failed > 0 ? ', ' + data.failed + ' failed' : '');
+                const msg = data.failed > 0
+                    ? BYD.i18n.t('events.batch_deleted_with_failures', {deleted: data.deleted, failed: data.failed})
+                    : BYD.i18n.t('events.batch_deleted', {deleted: data.deleted});
                 if (BYD.core && BYD.core.showToast) {
                     BYD.core.showToast(msg, data.failed > 0 ? 'warning' : 'success');
                 }
@@ -785,11 +807,11 @@ BYD.events = {
                 await this.loadStorageStats();
                 await this.loadRecordings();
             } else {
-                alert('Batch delete failed: ' + (data.error || 'Unknown error'));
+                alert(BYD.i18n.t('events.batch_delete_failed', {error: data.error || BYD.i18n.t('errors.generic')}));
             }
         } catch (e) {
             console.error('Batch delete failed:', e);
-            alert('Failed to delete recordings');
+            alert(BYD.i18n.t('events.batch_delete_failed_generic'));
         }
     },
     

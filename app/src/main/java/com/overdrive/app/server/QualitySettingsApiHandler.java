@@ -241,11 +241,11 @@ public class QualitySettingsApiHandler {
                     cleanup.put("surveillanceFilesEstimate", surveillanceFilesToDelete);
                 }
                 response.put("cleanup", cleanup);
-                response.put("message", "Storage settings updated. Oldest files will be deleted to meet new limit.");
+                response.put("message", Messages.get("messages.quality_storage_settings_updated_cleanup"));
             } else if (storageTypeChanged) {
-                response.put("message", "Storage location changed successfully.");
+                response.put("message", Messages.get("messages.quality_storage_location_changed"));
             } else {
-                response.put("message", "Storage settings updated.");
+                response.put("message", Messages.get("messages.quality_storage_settings_updated"));
             }
             
             HttpResponse.sendJson(out, response.toString());
@@ -328,7 +328,7 @@ public class QualitySettingsApiHandler {
             JSONObject data = request.optJSONObject("data");
             
             if (section.isEmpty() || data == null) {
-                HttpResponse.sendJsonError(out, "Missing 'section' or 'data' in request");
+                HttpResponse.sendJsonError(out, Messages.get("errors.quality_missing_section_or_data"));
                 return;
             }
             
@@ -377,7 +377,7 @@ public class QualitySettingsApiHandler {
             JSONObject response = new JSONObject();
             response.put("success", true);
             response.put("section", section);
-            response.put("message", "Config section updated");
+            response.put("message", Messages.get("messages.quality_config_section_updated"));
             
             HttpResponse.sendJson(out, response.toString());
             
@@ -555,8 +555,8 @@ public class QualitySettingsApiHandler {
             response.put("success", true);
             response.put("recordingBitrate", recordingBitrate);
             response.put("recordingCodec", recordingCodec);
-            response.put("note", recordingCodec.equals("H265") ? 
-                "H.265 provides ~50% smaller files. Restart recording to apply codec change." : null);
+            response.put("note", recordingCodec.equals("H265") ?
+                Messages.get("messages.quality_h265_note") : null);
             
             persistSettings();
             

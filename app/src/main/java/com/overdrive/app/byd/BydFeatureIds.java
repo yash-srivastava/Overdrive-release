@@ -119,6 +119,7 @@ public final class BydFeatureIds {
     public static final int LIGHT_ATMOSPHERE_CUSTOM_BRIGHTNESS_SET = resolveOrFallback("Light.ATMOSPHERE_CUSTOM_BRIGHTNESS_SET", 1276194858);
     public static final int LIGHT_ATMOSPHERE_CUSTOM_COLOR = resolveOrFallback("Light.ATMOSPHERE_CUSTOM_COLOR", 657457168);
     public static final int LIGHT_ATMOSPHERE_CUSTOM_COLOR_SET = resolveOrFallback("Light.ATMOSPHERE_CUSTOM_COLOR_SET", 1276194864);
+    public static final int LIGHT_DAY_RUNNING_LIGHT_AUTO_STATE = resolveOrFallback("Light.LIGHT_DAY_RUNNING_LIGHT_AUTO_STATE", 985661476);
 
     // ==================== INSTRUMENT ====================
     public static final int INSTRUMENT_DD_MAIN_SAFETYBELT_STATE = resolveOrFallback("Instrument.INSTRUMENT_DD_MAIN_SAFETYBELT_STATE", 692060184);
@@ -147,6 +148,25 @@ public final class BydFeatureIds {
             INSTRUMENT_RB_TYRE_TEMPERATURE
     };
 
+    // Instrument tyre temperature feature IDs — used for two-arg listener
+    // registration and polled get() calls. May return null on some firmwares
+    // but are the correct channel for TPMS temperature on others.
+    public static final int INSTRUMENT_LF_TYRE_TEMPERATURE = resolveOrFallback(
+        "Instrument.LF_TYRE_TEMPERATURE", 1246797848);
+    public static final int INSTRUMENT_RF_TYRE_TEMPERATURE = resolveOrFallback(
+        "Instrument.RF_TYRE_TEMPERATURE", 1246797860);
+    public static final int INSTRUMENT_LB_TYRE_TEMPERATURE = resolveOrFallback(
+        "Instrument.LB_TYRE_TEMPERATURE", 1246797872);
+    public static final int INSTRUMENT_RB_TYRE_TEMPERATURE = resolveOrFallback(
+        "Instrument.RB_TYRE_TEMPERATURE", 1246797884);
+
+    /** All instrument tyre temperature feature IDs for listener subscription */
+    public static final int[] INSTRUMENT_TYRE_TEMP_IDS = {
+        INSTRUMENT_LF_TYRE_TEMPERATURE,
+        INSTRUMENT_RF_TYRE_TEMPERATURE,
+        INSTRUMENT_LB_TYRE_TEMPERATURE,
+        INSTRUMENT_RB_TYRE_TEMPERATURE
+    };
     public static final int INSTRUMENT_CHARGING_CHARGE_PERCENT_DD = resolveOrFallback("Instrument.CHARGING_CHARGE_PERCENT_DD", 842006544);
     public static final int INSTRUMENT_CHARGING_CHARGE_POWER_DD = resolveOrFallback("Instrument.CHARGING_CHARGE_POWER_DD", 842006552);
     public static final int INSTRUMENT_CHARGING_CHARGE_REST_HOUR_DD = resolveOrFallback("Instrument.CHARGING_CHARGE_REST_HOUR_DD", 842006568);
@@ -243,6 +263,8 @@ public final class BydFeatureIds {
     public static final int ADAS_RCW_STATE_SET = resolveOrFallback("Adas.ADAS_RCW_STATE_SET", 944766992);
     public static final int ADAS_ESP_STATE = resolveOrFallback("Adas.ADAS_ESP_STATE", 305135676);
     public static final int ADAS_ESP_STATE_SET = resolveOrFallback("Adas.ADAS_ESP_STATE_SET", 944766984);
+    public static final int ADAS_SLW_FUNC_SWITCH_STATE = resolveOrFallback("Adas.ADAS_SLW_FUNC_SWITCH_STATE", 535834664);
+    public static final int ADAS_SLW_FUNC_SWITCH_STATE_SET = resolveOrFallback("Adas.ADAS_SLW_FUNC_SWITCH_STATE_SET", 850452531);
 
     // ==================== SENSOR ====================
     public static final int SENSOR_AUTO_SLOPE = resolveOrFallback("Sensor.SENSOR_AUTO_SLOPE", 573571116);

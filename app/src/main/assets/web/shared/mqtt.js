@@ -83,7 +83,7 @@ const MQTT = {
         if (addBtn) {
             addBtn.disabled = this.connections.length >= this.maxConnections;
             if (this.connections.length >= this.maxConnections) {
-                addBtn.title = 'Maximum ' + this.maxConnections + ' connections reached';
+                addBtn.title = BYD.i18n.t('mqtt.max_reached', {n: this.maxConnections});
             }
         }
 
@@ -97,22 +97,22 @@ const MQTT = {
         const isExpanded = this.expandedId === conn.id;
 
         let dotClass = 'stopped';
-        let statusText = 'Stopped';
+        let statusText = BYD.i18n.t('mqtt.status_stopped');
         if (conn.enabled && isConnected) {
             dotClass = 'connected';
-            statusText = 'Connected';
+            statusText = BYD.i18n.t('mqtt.status_connected');
         } else if (conn.enabled && isRunning && !isConnected) {
             dotClass = 'reconnecting';
-            statusText = 'Reconnecting';
+            statusText = BYD.i18n.t('mqtt.status_reconnecting');
         } else if (conn.enabled && !isRunning) {
             dotClass = 'disconnected';
-            statusText = 'Disconnected';
+            statusText = BYD.i18n.t('mqtt.status_disconnected');
         }
 
         const totalPub = s.totalPublishes || 0;
         const failedPub = s.failedPublishes || 0;
         const lastPub = s.lastPublishTime && s.lastPublishTime > 0
-            ? new Date(s.lastPublishTime).toLocaleTimeString() : 'Never';
+            ? new Date(s.lastPublishTime).toLocaleTimeString(BYD.i18n.getLang()) : BYD.i18n.t('mqtt.never');
         const lastErr = s.lastError || '';
 
         return `
@@ -120,16 +120,16 @@ const MQTT = {
             <div class="conn-header" onclick="MQTT.toggleExpand('${conn.id}')">
                 <span class="conn-dot ${dotClass}"></span>
                 <div style="flex:1;min-width:0;">
-                    <div class="conn-name">${this.esc(conn.name || 'Unnamed')}</div>
+                    <div class="conn-name">${this.esc(conn.name || BYD.i18n.t('mqtt.unnamed'))}</div>
                     <div class="conn-broker">${this.esc(conn.brokerUrl || '')}:${conn.port} → ${this.esc(conn.topic || '')}</div>
                 </div>
                 <div class="conn-actions" onclick="event.stopPropagation()">
-                    <button class="icon-btn" onclick="MQTT.editConnection('${conn.id}')" title="Edit">✏️</button>
-                    <button class="icon-btn danger" onclick="MQTT.deleteConnection('${conn.id}')" title="Delete">🗑️</button>
+                    <button class="icon-btn" onclick="MQTT.editConnection('${conn.id}')" title="${BYD.i18n.t('common.edit')}">✏️</button>
+                    <button class="icon-btn danger" onclick="MQTT.deleteConnection('${conn.id}')" title="${BYD.i18n.t('common.delete')}">🗑️</button>
                 </div>
             </div>
             <div style="display:flex;align-items:center;justify-content:space-between;padding:0 16px 12px;" onclick="event.stopPropagation()">
-                <div style="font-size:13px;color:var(--text-secondary);">${conn.enabled ? '🟢 Enabled' : '🔴 Disabled'}</div>
+                <div style="font-size:13px;color:var(--text-secondary);">${conn.enabled ? '🟢 ' + BYD.i18n.t('common.enabled') : '🔴 ' + BYD.i18n.t('common.disabled')}</div>
                 <label class="toggle-switch">
                     <input type="checkbox" ${conn.enabled ? 'checked' : ''} onchange="MQTT.toggleEnabled('${conn.id}', this.checked)">
                     <span class="toggle-slider"></span>
@@ -137,17 +137,17 @@ const MQTT = {
             </div>
             <div class="conn-detail ${isExpanded ? 'open' : ''}" id="detail-${conn.id}">
                 <div class="conn-stats">
-                    <div class="conn-stat"><div class="label">Status</div><div class="value">${statusText}</div></div>
-                    <div class="conn-stat"><div class="label">Last Publish</div><div class="value">${lastPub}</div></div>
-                    <div class="conn-stat"><div class="label">Published</div><div class="value">${totalPub}</div></div>
-                    <div class="conn-stat"><div class="label">Failed</div><div class="value" style="${failedPub > 0 ? 'color:var(--danger)' : ''}">${failedPub}</div></div>
+                    <div class="conn-stat"><div class="label">${BYD.i18n.t('mqtt.label_status')}</div><div class="value">${statusText}</div></div>
+                    <div class="conn-stat"><div class="label">${BYD.i18n.t('mqtt.label_last_publish')}</div><div class="value">${lastPub}</div></div>
+                    <div class="conn-stat"><div class="label">${BYD.i18n.t('mqtt.label_published')}</div><div class="value">${totalPub}</div></div>
+                    <div class="conn-stat"><div class="label">${BYD.i18n.t('mqtt.label_failed')}</div><div class="value" style="${failedPub > 0 ? 'color:var(--danger)' : ''}">${failedPub}</div></div>
                 </div>
                 ${lastErr ? `<div style="font-size:12px;color:var(--danger);padding:8px 0;">⚠️ ${this.esc(lastErr)}</div>` : ''}
                 <div style="font-size:12px;color:var(--text-muted);display:flex;gap:16px;flex-wrap:wrap;">
-                    <span>QoS: ${conn.qos}</span>
-                    <span>Interval: ${conn.publishIntervalSeconds}s${conn.adaptiveInterval ? ' (adaptive)' : ''}</span>
-                    <span>Retain: ${conn.retainMessages ? 'Yes' : 'No'}</span>
-                    <span>Proxy: ${s.proxyActive ? '✅' : '❌'}</span>
+                    <span>${BYD.i18n.t('mqtt.label_qos')}: ${conn.qos}</span>
+                    <span>${BYD.i18n.t('mqtt.label_interval')}: ${conn.publishIntervalSeconds}s${conn.adaptiveInterval ? ' (' + BYD.i18n.t('mqtt.adaptive') + ')' : ''}</span>
+                    <span>${BYD.i18n.t('mqtt.label_retain')}: ${conn.retainMessages ? BYD.i18n.t('common.yes') : BYD.i18n.t('common.no')}</span>
+                    <span>${BYD.i18n.t('mqtt.label_proxy')}: ${s.proxyActive ? '✅' : '❌'}</span>
                 </div>
             </div>
         </div>`;
@@ -162,11 +162,11 @@ const MQTT = {
 
     showAddForm() {
         if (this.connections.length >= this.maxConnections) {
-            this.toast('Maximum ' + this.maxConnections + ' connections reached', 'error');
+            this.toast(BYD.i18n.t('mqtt.max_reached', {n: this.maxConnections}), 'error');
             return;
         }
         this.editingId = null;
-        document.getElementById('formTitle').textContent = 'Add Connection';
+        document.getElementById('formTitle').textContent = BYD.i18n.t('mqtt.add_connection');
         document.getElementById('formId').value = '';
         document.getElementById('formName').value = '';
         document.getElementById('formBrokerUrl').value = '';
@@ -189,7 +189,7 @@ const MQTT = {
         if (!conn) return;
 
         this.editingId = id;
-        document.getElementById('formTitle').textContent = 'Edit Connection';
+        document.getElementById('formTitle').textContent = BYD.i18n.t('mqtt.edit_connection');
         document.getElementById('formId').value = conn.id;
         document.getElementById('formName').value = conn.name || '';
         document.getElementById('formBrokerUrl').value = conn.brokerUrl || '';
@@ -228,9 +228,9 @@ const MQTT = {
             enabled: document.getElementById('formEnabled').checked
         };
 
-        if (!data.name) { this.toast('Connection name is required', 'error'); return; }
-        if (!data.brokerUrl) { this.toast('Broker URL is required', 'error'); return; }
-        if (!data.topic) { this.toast('Topic is required', 'error'); return; }
+        if (!data.name) { this.toast(BYD.i18n.t('mqtt.err_name_required'), 'error'); return; }
+        if (!data.brokerUrl) { this.toast(BYD.i18n.t('mqtt.err_broker_required'), 'error'); return; }
+        if (!data.topic) { this.toast(BYD.i18n.t('mqtt.err_topic_required'), 'error'); return; }
 
         try {
             let resp;
@@ -250,14 +250,14 @@ const MQTT = {
 
             const result = await resp.json();
             if (result.success) {
-                this.toast(this.editingId ? 'Connection updated' : 'Connection added', 'success');
+                this.toast(this.editingId ? BYD.i18n.t('mqtt.toast_updated') : BYD.i18n.t('mqtt.toast_added'), 'success');
                 this.hideForm();
                 this.loadConnections();
             } else {
-                this.toast(result.error || 'Failed to save', 'error');
+                this.toast(result.error || BYD.i18n.t('errors.save_failed'), 'error');
             }
         } catch (e) {
-            this.toast('Network error: ' + e.message, 'error');
+            this.toast(BYD.i18n.t('mqtt.network_error', {message: e.message}), 'error');
         }
     },
 
@@ -273,26 +273,26 @@ const MQTT = {
             // Refresh after a short delay to show updated status
             setTimeout(() => this.loadStatus(), 1000);
         } catch (e) {
-            this.toast('Failed to toggle connection', 'error');
+            this.toast(BYD.i18n.t('mqtt.toggle_failed'), 'error');
         }
     },
 
     async deleteConnection(id) {
         const conn = this.connections.find(c => c.id === id);
         const name = conn ? conn.name : id;
-        if (!confirm('Delete connection "' + name + '"?')) return;
+        if (!confirm(BYD.i18n.t('mqtt.confirm_delete', {name: name}))) return;
 
         try {
             const resp = await fetch('/api/mqtt/connections/' + id, { method: 'DELETE' });
             const result = await resp.json();
             if (result.success) {
-                this.toast('Connection deleted', 'success');
+                this.toast(BYD.i18n.t('mqtt.toast_deleted'), 'success');
                 this.loadConnections();
             } else {
-                this.toast(result.error || 'Failed to delete', 'error');
+                this.toast(result.error || BYD.i18n.t('errors.delete_failed'), 'error');
             }
         } catch (e) {
-            this.toast('Network error: ' + e.message, 'error');
+            this.toast(BYD.i18n.t('mqtt.network_error', {message: e.message}), 'error');
         }
     },
 
@@ -300,14 +300,14 @@ const MQTT = {
 
     updateTelemetryTable(t) {
         const fields = {
-            tlm_utc:         t.utc != null ? new Date(t.utc * 1000).toLocaleTimeString() : '--',
+            tlm_utc:         t.utc != null ? new Date(t.utc * 1000).toLocaleTimeString(BYD.i18n.getLang()) : '--',
             tlm_soc:         t.soc != null ? t.soc.toFixed(1) + '%' : '--%',
             tlm_power:       t.power != null ? t.power.toFixed(1) + ' kW' : '-- kW',
             tlm_speed:       t.speed != null ? BYD.units.speed(t.speed) : '-- ' + BYD.units.speedLabel(),
             tlm_lat:         t.lat != null ? t.lat.toFixed(6) : '--',
             tlm_lon:         t.lon != null ? t.lon.toFixed(6) : '--',
-            tlm_is_charging: t.is_charging != null ? (t.is_charging ? 'Yes' : 'No') : '--',
-            tlm_is_parked:   t.is_parked != null ? (t.is_parked ? 'Yes' : 'No') : '--',
+            tlm_is_charging: t.is_charging != null ? (t.is_charging ? BYD.i18n.t('common.yes') : BYD.i18n.t('common.no')) : '--',
+            tlm_is_parked:   t.is_parked != null ? (t.is_parked ? BYD.i18n.t('common.yes') : BYD.i18n.t('common.no')) : '--',
             tlm_elevation:   t.elevation != null ? t.elevation.toFixed(1) + ' m' : '-- m',
             tlm_gear:        t.gear || '--',
             tlm_ext_temp:    t.ext_temp != null ? t.ext_temp.toFixed(1) + ' °C' : '-- °C',

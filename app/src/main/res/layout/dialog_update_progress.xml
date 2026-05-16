@@ -9,7 +9,7 @@
         android:id="@+id/updateStatusText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Preparing update..."
+        android:text="@string/update_preparing"
         android:textSize="15sp"
         android:textColor="?android:textColorPrimary" />
 
@@ -27,7 +27,7 @@
         android:id="@+id/updatePercentText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="0%"
+        android:text="@string/update_percent_zero"
         android:textSize="12sp"
         android:textAlignment="viewEnd"
         android:textColor="?android:textColorSecondary" />

@@ -8,19 +8,19 @@
     <fragment
         android:id="@+id/dashboardFragment"
         android:name="com.overdrive.app.ui.fragment.DashboardFragment"
-        android:label="Dashboard"
+        android:label="@string/nav_page_dashboard"
         tools:layout="@layout/fragment_dashboard" />
 
     <fragment
         android:id="@+id/daemonsFragment"
         android:name="com.overdrive.app.ui.fragment.DaemonsFragment"
-        android:label="Daemons"
+        android:label="@string/nav_page_daemons"
         tools:layout="@layout/fragment_daemons" />
 
     <fragment
         android:id="@+id/recordingFragment"
         android:name="com.overdrive.app.ui.fragment.WebViewFragment"
-        android:label="Recording"
+        android:label="@string/nav_page_recording"
         tools:layout="@layout/fragment_webview">
         <argument
             android:name="page_path"
@@ -31,13 +31,13 @@
     <fragment
         android:id="@+id/adbConsoleFragment"
         android:name="com.overdrive.app.ui.fragment.AdbConsoleFragment"
-        android:label="ADB Console"
+        android:label="@string/nav_page_adb_console"
         tools:layout="@layout/fragment_adb_console" />
 
     <fragment
         android:id="@+id/sentryConfigFragment"
         android:name="com.overdrive.app.ui.fragment.WebViewFragment"
-        android:label="Surveillance"
+        android:label="@string/nav_page_surveillance"
         tools:layout="@layout/fragment_webview">
         <argument
             android:name="page_path"
@@ -48,13 +48,13 @@
     <fragment
         android:id="@+id/eventsFragment"
         android:name="com.overdrive.app.ui.fragment.RecordingLibraryFragment"
-        android:label="Events"
+        android:label="@string/nav_page_events"
         tools:layout="@layout/fragment_recording_library" />
 
     <fragment
         android:id="@+id/videoPlayerFragment"
         android:name="com.overdrive.app.ui.fragment.VideoPlayerFragment"
-        android:label="Video Player"
+        android:label="@string/nav_page_video_player"
         tools:layout="@layout/fragment_video_player">
         <argument
             android:name="video_path"
@@ -73,13 +73,13 @@
     <fragment
         android:id="@+id/telegramSettingsFragment"
         android:name="com.overdrive.app.ui.fragment.TelegramSettingsFragment"
-        android:label="Telegram"
+        android:label="@string/nav_page_telegram"
         tools:layout="@layout/fragment_telegram_settings" />
 
     <fragment
         android:id="@+id/abrpSettingsFragment"
         android:name="com.overdrive.app.ui.fragment.WebViewFragment"
-        android:label="ABRP"
+        android:label="@string/nav_page_abrp"
         tools:layout="@layout/fragment_webview">
         <argument
             android:name="page_path"
@@ -90,7 +90,7 @@
     <fragment
         android:id="@+id/mqttFragment"
         android:name="com.overdrive.app.ui.fragment.WebViewFragment"
-        android:label="MQTT"
+        android:label="@string/nav_page_mqtt"
         tools:layout="@layout/fragment_webview">
         <argument
             android:name="page_path"
@@ -101,7 +101,7 @@
     <fragment
         android:id="@+id/tripsFragment"
         android:name="com.overdrive.app.ui.fragment.WebViewFragment"
-        android:label="Trips"
+        android:label="@string/nav_page_trips"
         tools:layout="@layout/fragment_webview">
         <argument
             android:name="page_path"
@@ -112,7 +112,7 @@
     <fragment
         android:id="@+id/vehicleControlFragment"
         android:name="com.overdrive.app.ui.fragment.WebViewFragment"
-        android:label="Vehicle Control"
+        android:label="@string/nav_page_vehicle_control"
         tools:layout="@layout/fragment_webview">
         <argument
             android:name="page_path"

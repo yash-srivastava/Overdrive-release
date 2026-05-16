@@ -25,7 +25,9 @@ var VC = {
         locked: null,
         trunkOpen: false,
         doors: { lf: 1, rf: 1, lr: 1, rr: 1, trunk: -1, hood: -1 },
-        windows: { lf: 0, rf: 0, lr: 0, rr: 0 },
+        windows: { lf: 0, rf: 0, lr: 0, rr: 0, sunroof: 0, sunshade: 0 },
+        lights: { dayTimeLight: false },
+        adas: { speedLimitWarning: false },
         soc: 0,
         rangeKm: 0,
         cloudConfigured: false,
@@ -305,7 +307,7 @@ var VC = {
         var retryBtn = document.getElementById('vcLoadingRetry');
         if (retryBtn) retryBtn.style.display = 'none';
         var textEl = document.querySelector('.vc-loading-text');
-        if (textEl) textEl.textContent = 'Loading model...';
+        if (textEl) textEl.textContent = BYD.i18n.t('vehicle.loading_model');
 
         // If 3D surround view is active, exit it cleanly before swapping. The bowl
         // shader, video stream, contact shadow, and orbit constraints are all tied
@@ -475,7 +477,7 @@ var VC = {
                 if (progress.total > 0) {
                     var pct = Math.round((progress.loaded / progress.total) * 100);
                     var textEl = document.querySelector('.vc-loading-text');
-                    if (textEl) textEl.textContent = 'Loading model... ' + pct + '%';
+                    if (textEl) textEl.textContent = BYD.i18n.t('vehicle.loading_model_pct', {pct: pct});
                 }
             },
             function(error) {
@@ -483,7 +485,7 @@ var VC = {
                 console.error('Model load error:', error);
                 self._modelLoadComplete = true;  // Don't fire timeout error after this.
                 if (self._modelLoadTimeout) { clearTimeout(self._modelLoadTimeout); self._modelLoadTimeout = null; }
-                self._showModelError('Model not found. Tap Retry to try again.');
+                self._showModelError(BYD.i18n.t('vehicle.model_load_failed'));
             }
         );
     },
@@ -497,7 +499,7 @@ var VC = {
         if (loadingEl) loadingEl.classList.remove('hidden');
         var textEl = document.querySelector('.vc-loading-text');
         if (textEl) {
-            textEl.textContent = msg || 'Model load failed.';
+            textEl.textContent = msg || BYD.i18n.t('vehicle.model_load_failed_short');
             textEl.style.textAlign = 'center';
             textEl.style.lineHeight = '1.6';
         }
@@ -511,7 +513,7 @@ var VC = {
             retryBtn.onclick = function() {
                 retryBtn.style.display = 'none';
                 if (spinner) spinner.style.display = '';
-                if (textEl) textEl.textContent = 'Loading model...';
+                if (textEl) textEl.textContent = BYD.i18n.t('vehicle.loading_model');
                 self.loadModel();
             };
         }
@@ -693,7 +695,9 @@ var VC = {
             lf: { x: 1.0, y: 0.9, z: 0.5 },
             rf: { x: -1.0, y: 0.9, z: 0.5 },
             lr: { x: 1.0, y: 0.9, z: -0.5 },
-            rr: { x: -1.0, y: 0.9, z: -0.5 }
+            rr: { x: -1.0, y: 0.9, z: -0.5 },
+            sunroof: { x: 0, y: 1.4, z: -0.5 },
+            sunshade: { x: 0, y: 1.4, z: -0.5 }
         };
         var pos = positions[area];
         if (!pos) return;
@@ -805,7 +809,7 @@ var VC = {
         // (input type="color" doesn't work on Android 7.1 WebView / Chrome 58)
         var custom = document.createElement('div');
         custom.className = 'vc-swatch-custom';
-        custom.title = 'Custom color';
+        custom.title = BYD.i18n.t('vehicle.color_custom');
         custom.style.position = 'relative';
         
         // Try native color picker first, fall back gracefully
@@ -1032,7 +1036,7 @@ var VC = {
 
         _download: function(id, entry, url, onDone, onProgress) {
             var self = this;
-            if (onProgress) onProgress('Downloading ' + entry.name + '... 0%');
+            if (onProgress) onProgress(BYD.i18n.t('vehicle.downloading_model', {name: entry.name, pct: 0}));
 
             var xhr = new XMLHttpRequest();
             xhr.open('POST', '/api/models/download?id=' + encodeURIComponent(id), true);
@@ -1040,10 +1044,10 @@ var VC = {
                 if (xhr.status >= 200 && xhr.status < 300) {
                     self._poll(id, entry, url, onDone, onProgress);
                 } else {
-                    onDone(null, 'Download request failed (' + xhr.status + ')');
+                    onDone(null, BYD.i18n.t('vehicle.download_request_failed', {status: xhr.status}));
                 }
             };
-            xhr.onerror = function() { onDone(null, 'Network error starting download'); };
+            xhr.onerror = function() { onDone(null, BYD.i18n.t('vehicle.network_starting_download')); };
             xhr.send();
         },
 
@@ -1056,7 +1060,7 @@ var VC = {
             function tick() {
                 attempts++;
                 if (attempts > maxAttempts) {
-                    onDone(null, 'Download timed out');
+                    onDone(null, BYD.i18n.t('vehicle.download_timed_out'));
                     return;
                 }
                 var xhr = new XMLHttpRequest();
@@ -1076,12 +1080,12 @@ var VC = {
                         return;
                     }
                     if (s.state === 'error') {
-                        onDone(null, s.error || 'Download failed');
+                        onDone(null, s.error || BYD.i18n.t('vehicle.download_failed'));
                         return;
                     }
                     if (onProgress) {
                         var pct = typeof s.percent === 'number' ? s.percent : 0;
-                        onProgress('Downloading ' + entry.name + '... ' + pct + '%');
+                        onProgress(BYD.i18n.t('vehicle.downloading_model', {name: entry.name, pct: pct}));
                     }
                     setTimeout(tick, 250);
                 };
@@ -1209,9 +1213,9 @@ var VC = {
             self.apiPost('/api/vehicle/lock').then(function(result) {
                 self.setPending('btnLock', false);
                 if (result.success && result.commandSuccess) {
-                    self.toast('Car locked', 'success');
+                    self.toast(BYD.i18n.t('vehicle.car_locked'), 'success');
                 } else {
-                    self.toast(result.error || 'Lock failed', 'error');
+                    self.toast(result.error || BYD.i18n.t('vehicle.lock_failed'), 'error');
                 }
             });
         });
@@ -1224,9 +1228,9 @@ var VC = {
             self.apiPost('/api/vehicle/unlock').then(function(result) {
                 self.setPending('btnUnlock', false);
                 if (result.success && result.commandSuccess) {
-                    self.toast('Car unlocked', 'success');
+                    self.toast(BYD.i18n.t('vehicle.car_unlocked'), 'success');
                 } else {
-                    self.toast(result.error || 'Unlock failed', 'error');
+                    self.toast(result.error || BYD.i18n.t('vehicle.unlock_failed'), 'error');
                 }
             });
         });
@@ -1235,15 +1239,15 @@ var VC = {
         this.bindBtn('btnTrunkOpen', function() {
             if (!self.requireCloud()) return;
             self.setPending('btnTrunkOpen', true);
-            self.toast('Unlocking car...', 'info');
+            self.toast(BYD.i18n.t('vehicle.unlocking_car'), 'info');
             self.triggerUnlockVFX();
             self.apiPost('/api/vehicle/trunk', { action: 'open' }).then(function(result) {
                 self.setPending('btnTrunkOpen', false);
                 if (result.success) {
                     self.triggerTrunkVFX(true);
-                    self.toast('Trunk opening', 'success');
+                    self.toast(BYD.i18n.t('vehicle.trunk_opening'), 'success');
                 } else {
-                    self.toast(result.error || 'Trunk failed', 'error');
+                    self.toast(result.error || BYD.i18n.t('vehicle.trunk_failed'), 'error');
                 }
             });
         });
@@ -1251,15 +1255,15 @@ var VC = {
         // Trunk close — closes trunk via local HAL + locks car
         this.bindBtn('btnTrunkClose', function() {
             self.setPending('btnTrunkClose', true);
-            self.toast('Closing trunk...', 'info');
+            self.toast(BYD.i18n.t('vehicle.closing_trunk'), 'info');
             self.triggerLockVFX();
             self.apiPost('/api/vehicle/trunk', { action: 'close' }).then(function(result) {
                 self.setPending('btnTrunkClose', false);
                 if (result.success) {
                     self.triggerTrunkVFX(false);
-                    self.toast('Trunk closing', 'success');
+                    self.toast(BYD.i18n.t('vehicle.trunk_closing'), 'success');
                 } else {
-                    self.toast(result.error || 'Trunk close failed', 'error');
+                    self.toast(result.error || BYD.i18n.t('vehicle.trunk_close_failed'), 'error');
                 }
             });
         });
@@ -1271,8 +1275,8 @@ var VC = {
             self.triggerFlashVFX();
             self.apiPost('/api/vehicle/flash').then(function(result) {
                 self.setPending('btnFlash', false);
-                if (result.success) self.toast('Lights flashed', 'info');
-                else self.toast(result.error || 'Flash failed', 'error');
+                if (result.success) self.toast(BYD.i18n.t('vehicle.lights_flashed'), 'info');
+                else self.toast(result.error || BYD.i18n.t('vehicle.flash_failed'), 'error');
             });
         });
 
@@ -1311,15 +1315,45 @@ var VC = {
 
         // All windows — only fully-open / fully-closed makes sense for "all"
         // (per-window % requires per-window polling, no SDK batch primitive).
+        // Loop over the 4 side windows only — `area:0` does not control sunroof/sunshade.
         this.bindBtn('btnWinAllOpen', function() {
-            for (var j = 0; j < areas.length; j++) self.triggerWindowVFX(areas[j], true);
+            for (var j = 0; j < 4; j++) self.triggerWindowVFX(areas[j], true);
             self.apiPost('/api/vehicle/window', { area: 0, command: 1 });
-            self.toast('All windows opening', 'info');
+            self.toast(BYD.i18n.t('vehicle.windows_all_opening'), 'info');
         });
         this.bindBtn('btnWinAllClose', function() {
-            for (var j = 0; j < areas.length; j++) self.triggerWindowVFX(areas[j], false);
+            for (var j = 0; j < 4; j++) self.triggerWindowVFX(areas[j], false);
             self.apiPost('/api/vehicle/window', { area: 0, command: 2 });
-            self.toast('All windows closing', 'info');
+            self.toast(BYD.i18n.t('vehicle.windows_all_closing'), 'info');
+        });
+
+        // === LIGHTS CONTROLS ===
+        this.bindBtn('btnDRL', function() {
+            var enable = !(self.vehicleState.lights && self.vehicleState.lights.dayTimeLight);
+            self.triggerSonarVFX(0, 0.6, 2, new THREE.Color(enable ? 0xFF6B35 : 0x1A1A1E));
+            self.apiPost('/api/vehicle/lights', { target: 'dayTimeLight', enable: enable }).then(function(result) {
+                if (result.success && result.commandSuccess) {
+                    self.vehicleState.lights.dayTimeLight = result.enable;
+                    self.updateLightsUI();
+                    self.toast(BYD.i18n.t(result.enable ? 'vehicle.drl_enabled' : 'vehicle.drl_disabled'), 'info');
+                } else {
+                    self.toast(result.error || BYD.i18n.t('vehicle.drl_failed'), 'error');
+                }
+            });
+        });
+
+        // === ADAS CONTROLS ===
+        this.bindBtn('btnSLW', function() {
+            var enable = !(self.vehicleState.adas && self.vehicleState.adas.speedLimitWarning);
+            self.apiPost('/api/vehicle/adas', { target: 'speedLimitWarning', enable: enable }).then(function(result) {
+                if (result.success && result.commandSuccess) {
+                    self.vehicleState.adas.speedLimitWarning = result.enable;
+                    self.updateAdasUI();
+                    self.toast(BYD.i18n.t(result.enable ? 'vehicle.slw_enabled' : 'vehicle.slw_disabled'), 'info');
+                } else {
+                    self.toast(result.error || BYD.i18n.t('vehicle.slw_failed'), 'error');
+                }
+            });
         });
 
         // === CLIMATE CONTROLS ===
@@ -1329,15 +1363,15 @@ var VC = {
             self.triggerSonarVFX(0, 0.6, -0.2, new THREE.Color(0x38BDF8));
             self.flashBodyColor(new THREE.Color(0x38BDF8), 0.1, 2, null);
             self.apiPost('/api/vehicle/climate', { action: 'power_on' }).then(function(r) {
-                if (r.success && r.commandSuccess !== false) { self.vehicleState.acOn = true; self.updateClimateUI(); self.toast('AC On', 'success'); }
-                else { self.toast(r.error || 'AC command failed', 'error'); }
+                if (r.success && r.commandSuccess !== false) { self.vehicleState.acOn = true; self.updateClimateUI(); self.toast(BYD.i18n.t('vehicle.ac_on'), 'success'); }
+                else { self.toast(r.error || BYD.i18n.t('vehicle.ac_command_failed'), 'error'); }
             });
         });
         this.bindBtn('btnAcOff', function() {
             self.flashBodyColor(new THREE.Color(0x71717A), 0.15, 1, null);
             self.apiPost('/api/vehicle/climate', { action: 'power_off' }).then(function(r) {
-                if (r.success && r.commandSuccess !== false) { self.vehicleState.acOn = false; self.updateClimateUI(); self.toast('AC Off', 'info'); }
-                else { self.toast(r.error || 'AC command failed', 'error'); }
+                if (r.success && r.commandSuccess !== false) { self.vehicleState.acOn = false; self.updateClimateUI(); self.toast(BYD.i18n.t('vehicle.ac_off'), 'info'); }
+                else { self.toast(r.error || BYD.i18n.t('vehicle.ac_command_failed'), 'error'); }
             });
         });
         this.bindBtn('btnTempUp', function() {
@@ -1398,9 +1432,9 @@ var VC = {
                         if (next === 2) {
                             setTimeout(function() { self.triggerSonarVFX(sp.x, sp.y + 0.2, sp.z, new THREE.Color(0xFF4500)); }, 120);
                         }
-                        self.toast('Seat heat: ' + (next === 1 ? 'Low' : 'High'), 'success');
+                        self.toast(BYD.i18n.t('vehicle.seat_heat_level', {level: next === 1 ? BYD.i18n.t('vehicle.level_low') : BYD.i18n.t('vehicle.level_high')}), 'success');
                     } else {
-                        self.toast('Seat heat: Off', 'info');
+                        self.toast(BYD.i18n.t('vehicle.seat_heat_off'), 'info');
                     }
                     self.apiPost('/api/vehicle/seat', { action: 'heating', position: pos, level: next });
                 });
@@ -1419,13 +1453,26 @@ var VC = {
                         if (next === 2) {
                             setTimeout(function() { self.triggerSonarVFX(sp.x, sp.y + 0.2, sp.z, new THREE.Color(0x00BFFF)); }, 120);
                         }
-                        self.toast('Seat cool: ' + (next === 1 ? 'Low' : 'High'), 'success');
+                        self.toast(BYD.i18n.t('vehicle.seat_cool_level', {level: next === 1 ? BYD.i18n.t('vehicle.level_low') : BYD.i18n.t('vehicle.level_high')}), 'success');
                     } else {
-                        self.toast('Seat cool: Off', 'info');
+                        self.toast(BYD.i18n.t('vehicle.seat_cool_off'), 'info');
                     }
                     self.apiPost('/api/vehicle/seat', { action: 'ventilation', position: pos, level: next });
                 });
             })(si);
+        }
+
+        // Seat memory positions — driver-side recall (BYD SDK supports up to 2 stored positions).
+        for (var smi = 1; smi <= 2; smi++) {
+            (function(pos) {
+                self.bindBtn('btnSeatMemory' + pos, function() {
+                    // Blue sonar at driver seat — recall is driver-only.
+                    var sp = seatPositions[1];
+                    self.triggerSonarVFX(sp.x, sp.y, sp.z, new THREE.Color(0x00BFFF));
+                    self.toast(BYD.i18n.t('vehicle.seat_memory_position', {pos: pos}), 'success');
+                    self.apiPost('/api/vehicle/seat', { action: 'position', position: pos });
+                });
+            })(smi);
         }
     },
 
@@ -1535,6 +1582,9 @@ var VC = {
             // 'muted' / NO DATA).
             if (data.tyres) self.updateTyreCallouts(data.tyres);
 
+            if (data.lights) self.vehicleState.lights = data.lights;
+            if (data.adas) self.vehicleState.adas = data.adas;
+
             // Update UI
             self.updateHUD();
             self.updateWindowBars();
@@ -1544,6 +1594,8 @@ var VC = {
             self.updateClimateUI();
             self.updateSeatGlows();
             self.updateTabIndicators();
+            self.updateLightsUI();
+            self.updateAdasUI();
 
         }).catch(function(e) {
             console.warn('[VC] State fetch error:', e);
@@ -1693,7 +1745,7 @@ var VC = {
         if (lockBtn) { if (locked === true) lockBtn.classList.add('on'); else lockBtn.classList.remove('on'); }
         if (unlockBtn) { if (locked === false) unlockBtn.classList.add('on'); else unlockBtn.classList.remove('on'); }
         if (lockStatus) {
-            lockStatus.textContent = locked === true ? 'Locked' : (locked === false ? 'Unlocked' : 'Unknown');
+            lockStatus.textContent = locked === true ? BYD.i18n.t('vehicle.locked') : (locked === false ? BYD.i18n.t('vehicle.unlocked') : BYD.i18n.t('common.unknown'));
             var dot = lockStatus.previousElementSibling;
             if (dot) {
                 dot.className = 'dot ' + (locked === true ? 'green' : (locked === false ? 'amber' : 'grey'));
@@ -1757,15 +1809,15 @@ var VC = {
             var val = this.vehicleState.doors[area];
             if (val === 1) {
                 el.textContent = '\uD83D\uDD12'; // locked
-                el.title = 'Locked';
+                el.title = BYD.i18n.t('vehicle.locked');
                 this.removeStateGlow('door_' + area);
             } else if (val === 2) {
                 el.textContent = '\uD83D\uDD13'; // unlocked
-                el.title = 'Unlocked';
+                el.title = BYD.i18n.t('vehicle.unlocked');
                 this.setStateGlow('door_' + area, this.getDoorPosition(area), 0xF59E0B); // amber
             } else {
                 el.textContent = '\u2014';
-                el.title = 'Unknown';
+                el.title = BYD.i18n.t('common.unknown');
                 this.removeStateGlow('door_' + area);
             }
         }
@@ -1870,10 +1922,10 @@ var VC = {
         var dot = pillEl.querySelector('.dot');
         if (this.vehicleState.cloudConfigured) {
             if (dot) dot.className = 'dot green';
-            if (textEl) textEl.textContent = 'Cloud Connected';
+            if (textEl) textEl.textContent = BYD.i18n.t('vehicle.cloud_connected');
         } else {
             if (dot) dot.className = 'dot red';
-            if (textEl) textEl.textContent = 'Cloud Not Configured';
+            if (textEl) textEl.textContent = BYD.i18n.t('vehicle.cloud_not_configured');
         }
     },
 
@@ -1909,6 +1961,18 @@ var VC = {
 
         if (heatBtn) { if (heatLvl > 0) heatBtn.classList.add('on'); else heatBtn.classList.remove('on'); }
         if (coolBtn) { if (coolLvl > 0) coolBtn.classList.add('on'); else coolBtn.classList.remove('on'); }
+    },
+
+    updateLightsUI: function() {
+        var btnDRL = document.getElementById('btnDRL');
+        var on = !!(this.vehicleState.lights && this.vehicleState.lights.dayTimeLight);
+        if (btnDRL) { if (on) btnDRL.classList.add('on'); else btnDRL.classList.remove('on'); }
+    },
+
+    updateAdasUI: function() {
+        var btnSLW = document.getElementById('btnSLW');
+        var on = !!(this.vehicleState.adas && this.vehicleState.adas.speedLimitWarning);
+        if (btnSLW) { if (on) btnSLW.classList.add('on'); else btnSLW.classList.remove('on'); }
     },
 
     updateSeatGlows: function() {
@@ -2054,7 +2118,7 @@ var VC = {
         // Timeout: if no stream data arrives within 8 seconds, show error and stop
         this._3dTimeout = setTimeout(function() {
             if (self._3dViewActive && !self._3dStreamConnected) {
-                self.toast('No camera stream available', 'error');
+                self.toast(BYD.i18n.t('vehicle.no_camera_stream'), 'error');
                 self.stop3dView();
             }
         }, 8000);
@@ -2102,7 +2166,7 @@ var VC = {
                     console.log('[VC] 3D WebCodecs stream connected');
                     self._3dStreamConnected = true;
                     if (self._3dTimeout) { clearTimeout(self._3dTimeout); self._3dTimeout = null; }
-                    self.toast('3D stream connected', 'success');
+                    self.toast(BYD.i18n.t('vehicle.stream_3d_connected'), 'success');
                 };
                 this._sotaPlayer.onFrame = function() {
                     // Mark texture as needing update on each decoded frame
@@ -2154,7 +2218,7 @@ var VC = {
 
             } else {
                 console.error('[VC] No H.264 decoder available (need SotaPlayer + WebCodecs)');
-                this.toast('3D view requires WebCodecs support', 'error');
+                this.toast(BYD.i18n.t('vehicle.requires_webcodecs'), 'error');
                 this._3dViewActive = false;
                 var btn = document.getElementById('btn3dView');
                 if (btn) btn.classList.remove('on');
@@ -2162,10 +2226,10 @@ var VC = {
             }
         } catch(e) {
             console.error('[VC] 3D view start error:', e);
-            this.toast('3D view failed: ' + e.message, 'error');
+            this.toast(BYD.i18n.t('vehicle.view_3d_failed', {message: e.message}), 'error');
         }
 
-        this.toast('3D Surround View active', 'info');
+        this.toast(BYD.i18n.t('vehicle.surround_view_active'), 'info');
     },
 
     /** DevTools-only: dumps the mean luminance of each mosaic quadrant so you
@@ -2398,7 +2462,7 @@ var VC = {
         // Restore stream quality to LOW (default for remote viewing)
         fetch('/api/stream/quality/LOW', { method: 'POST' }).catch(function() {});
 
-        this.toast('3D View off', 'info');
+        this.toast(BYD.i18n.t('vehicle.view_3d_off'), 'info');
     },
 
     /**
@@ -3097,13 +3161,13 @@ var VC = {
     },
 
     _tyreStateLabel: function(corner) {
-        if (!corner || corner.available === false) return 'NO DATA';
-        if (corner.signalState === 1) return 'NO SIGNAL';
-        if (corner.airLeakState === 2) return 'FAST LEAK';
-        if (corner.airLeakState === 1) return 'SLOW LEAK';
-        if (corner.pressureState === 1) return 'LOW';
-        if (corner.pressureState === 2) return 'HIGH';
-        return 'OK';
+        if (!corner || corner.available === false) return BYD.i18n.t('vehicle.tyre_no_data');
+        if (corner.signalState === 1) return BYD.i18n.t('vehicle.tyre_no_signal');
+        if (corner.airLeakState === 2) return BYD.i18n.t('vehicle.tyre_fast_leak');
+        if (corner.airLeakState === 1) return BYD.i18n.t('vehicle.tyre_slow_leak');
+        if (corner.pressureState === 1) return BYD.i18n.t('vehicle.tyre_low');
+        if (corner.pressureState === 2) return BYD.i18n.t('vehicle.tyre_high');
+        return BYD.i18n.t('vehicle.tyre_ok');
     },
 
     updateTyreCallouts: function(tyres) {
@@ -3156,7 +3220,7 @@ var VC = {
         }).then(function(resp) {
             return resp.json();
         }).catch(function(e) {
-            return { success: false, error: 'Network error: ' + e.message };
+            return { success: false, error: BYD.i18n.t('vehicle.network_error_msg', {message: e.message}) };
         });
     },
 

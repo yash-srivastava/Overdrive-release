@@ -47,13 +47,13 @@ window.SafeLocations = {
         const el = document.getElementById('safeLocStatus');
         if (!el) return;
         if (data.inSafeZone) {
-            el.textContent = '🟢 In Safe Zone (' + data.currentZone + ', ' + data.nearestDistanceM + 'm)';
+            el.textContent = BYD.i18n.t('safe_loc.in_safe_zone', {zone: data.currentZone, meters: data.nearestDistanceM});
             el.style.color = 'var(--brand-secondary)';
         } else if (data.hasGps && this.zones.length > 0) {
-            el.textContent = '🔴 Outside (' + data.nearestDistanceM + 'm to nearest)';
+            el.textContent = BYD.i18n.t('safe_loc.outside_zone', {meters: data.nearestDistanceM});
             el.style.color = 'var(--danger)';
         } else {
-            el.textContent = this.zones.length === 0 ? 'No zones yet' : 'Waiting for GPS...';
+            el.textContent = this.zones.length === 0 ? BYD.i18n.t('safe_loc.no_zones_yet') : BYD.i18n.t('safe_loc.waiting_gps');
             el.style.color = 'var(--text-muted)';
         }
         const gpsEl = document.getElementById('safeLocGps');
@@ -68,7 +68,7 @@ window.SafeLocations = {
 
         const badge = document.getElementById('safeLocBadge');
         if (badge) {
-            badge.textContent = this.featureEnabled ? '● ON' : '○ OFF';
+            badge.textContent = this.featureEnabled ? BYD.i18n.t('safe_loc.badge_on') : BYD.i18n.t('safe_loc.badge_off');
             badge.className = 'status-badge ' + (this.featureEnabled ? 'active' : 'inactive');
         }
 
@@ -112,7 +112,7 @@ window.SafeLocations = {
             this.gpsMarker = L.circleMarker([this.currentGps.lat, this.currentGps.lng], {
                 radius: 7, fillColor: '#3b82f6', fillOpacity: 1,
                 color: '#fff', weight: 2
-            }).addTo(this.map).bindPopup('📍 You are here');
+            }).addTo(this.map).bindPopup(BYD.i18n.t('safe_loc.you_are_here'));
         }
 
         // Add saved zones
@@ -174,7 +174,7 @@ window.SafeLocations = {
 
         const marker = L.marker([zone.lat, zone.lng], { title: zone.name })
             .addTo(this.map)
-            .bindPopup('<b>' + zone.name + '</b><br>' + zone.radiusM + 'm radius');
+            .bindPopup(BYD.i18n.t('safe_loc.popup_radius', {name: zone.name, meters: zone.radiusM}));
 
         this.zoneCircles[zone.id] = circle;
         this.zoneMarkers[zone.id] = marker;
@@ -207,7 +207,7 @@ window.SafeLocations = {
                             <input type="checkbox" ${z.enabled ? 'checked' : ''} onchange="SafeLocations.toggleZone('${z.id}', this.checked)">
                             <span class="toggle-slider"></span>
                         </label>
-                        <button onclick="SafeLocations.deleteZone('${z.id}')" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px;" title="Delete">🗑️</button>
+                        <button onclick="SafeLocations.deleteZone('${z.id}')" style="background:none;border:none;cursor:pointer;font-size:14px;padding:2px;" title="${BYD.i18n.t('common.delete')}">🗑️</button>
                     </div>
                 </div>
             </div>
@@ -226,19 +226,19 @@ window.SafeLocations = {
             });
             this.featureEnabled = enabled;
             this.updateUI();
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(enabled ? 'Safe locations enabled' : 'Safe locations disabled', 'success');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(enabled ? BYD.i18n.t('safe_loc.enabled') : BYD.i18n.t('safe_loc.disabled'), 'success');
         } catch (e) {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to toggle', 'error');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('safe_loc.toggle_failed'), 'error');
         }
     },
 
     async addCurrentZone() {
         if (!this.currentGps) {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('No GPS signal', 'error');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('safe_loc.no_gps'), 'error');
             return;
         }
 
-        const name = prompt('Name this safe zone:', 'Home');
+        const name = prompt(BYD.i18n.t('safe_loc.name_prompt'), BYD.i18n.t('safe_loc.default_name'));
         if (!name) return;
 
         try {
@@ -257,12 +257,12 @@ window.SafeLocations = {
                 this.zones.push(data.zone);
                 this.addSavedZoneToMap(data.zone);
                 this.renderZoneList();
-                if (BYD.utils && BYD.utils.toast) BYD.utils.toast('"' + name + '" added (' + this.editRadius + 'm)', 'success');
+                if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('safe_loc.zone_added', {name: name, radius: this.editRadius}), 'success');
             } else {
-                if (BYD.utils && BYD.utils.toast) BYD.utils.toast(data.error || 'Failed', 'error');
+                if (BYD.utils && BYD.utils.toast) BYD.utils.toast(data.error || BYD.i18n.t('common.error'), 'error');
             }
         } catch (e) {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to add zone', 'error');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('safe_loc.add_zone_failed'), 'error');
         }
     },
 
@@ -288,7 +288,7 @@ window.SafeLocations = {
     },
 
     async deleteZone(id) {
-        if (!confirm('Delete this safe zone?')) return;
+        if (!confirm(BYD.i18n.t('safe_loc.confirm_delete_zone'))) return;
         try {
             await fetch('/api/surveillance/safe-locations', {
                 method: 'DELETE',
@@ -298,9 +298,9 @@ window.SafeLocations = {
             this.zones = this.zones.filter(z => z.id !== id);
             this.removeSavedZoneFromMap(id);
             this.renderZoneList();
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Zone deleted', 'success');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('safe_loc.zone_deleted'), 'success');
         } catch (e) {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to delete', 'error');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('errors.delete_failed'), 'error');
         }
     },
 

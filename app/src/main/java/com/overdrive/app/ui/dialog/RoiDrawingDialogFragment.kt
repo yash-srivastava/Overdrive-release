@@ -121,10 +121,10 @@ class RoiDrawingDialogFragment : DialogFragment() {
     
     private fun setupCameraSelector() {
         val cameraNames = arrayOf(
-            "Camera 1 - Front",
-            "Camera 2 - Right", 
-            "Camera 3 - Rear",
-            "Camera 4 - Left"
+            getString(R.string.roi_camera_front),
+            getString(R.string.roi_camera_right),
+            getString(R.string.roi_camera_rear),
+            getString(R.string.roi_camera_left)
         )
         
         val adapter = ArrayAdapter(
@@ -185,12 +185,12 @@ class RoiDrawingDialogFragment : DialogFragment() {
                 val points = roiDrawingView.getRoiAsFloatArray()
                 onRoiSavedListener?.invoke(currentCameraId, points)
                 
-                Toast.makeText(context, "ROI saved for Camera $currentCameraId", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, getString(R.string.toast_roi_saved_for_camera, currentCameraId), Toast.LENGTH_SHORT).show()
                 dismiss()
             } else {
                 Toast.makeText(
-                    context, 
-                    "Please add at least ${roiDrawingView.minPoints} points",
+                    context,
+                    getString(R.string.toast_roi_min_points, roiDrawingView.minPoints),
                     Toast.LENGTH_SHORT
                 ).show()
             }

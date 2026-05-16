@@ -60,7 +60,7 @@ public class SurveillanceApiHandler {
                 int quadrant = Integer.parseInt(cleanPath.substring("/api/surveillance/snapshot/".length()));
                 sendQuadrantSnapshot(out, quadrant);
             } catch (NumberFormatException e) {
-                HttpResponse.sendJsonError(out, "Invalid quadrant ID");
+                HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_invalid_quadrant_id"));
             }
             return true;
         }
@@ -989,7 +989,7 @@ public class SurveillanceApiHandler {
      */
     private static void sendQuadrantSnapshot(OutputStream out, int quadrant) throws Exception {
         if (quadrant < 0 || quadrant > 3) {
-            HttpResponse.sendJsonError(out, "Invalid quadrant: " + quadrant);
+            HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_invalid_quadrant_with_id", quadrant));
             return;
         }
         
@@ -1038,12 +1038,12 @@ public class SurveillanceApiHandler {
                 out.flush();
             } catch (Exception e) {
                 frameBitmap.recycle();
-                HttpResponse.sendJsonError(out, "Failed to process event frame: " + e.getMessage());
+                HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_event_frame_failed_with_detail", e.getMessage()));
             }
             return;
         }
         
-        HttpResponse.sendJsonError(out, "No frame available — start surveillance or record an event first");
+        HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_no_frame_available"));
     }
     
     /**

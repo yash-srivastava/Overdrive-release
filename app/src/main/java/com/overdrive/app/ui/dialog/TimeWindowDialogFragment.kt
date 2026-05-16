@@ -120,7 +120,7 @@ class TimeWindowDialogFragment : DialogFragment() {
         
         // Window title
         val tvTitle = windowView.findViewById<TextView>(R.id.tvWindowTitle)
-        tvTitle.text = "Time Window ${index + 1}"
+        tvTitle.text = getString(R.string.time_window_index_title, index + 1)
         
         // Start time
         val tvStartTime = windowView.findViewById<TextView>(R.id.tvStartTime)
@@ -177,7 +177,7 @@ class TimeWindowDialogFragment : DialogFragment() {
             
             // Update titles
             windowViews.forEachIndexed { i, view ->
-                view.findViewById<TextView>(R.id.tvWindowTitle).text = "Time Window ${i + 1}"
+                view.findViewById<TextView>(R.id.tvWindowTitle).text = getString(R.string.time_window_index_title, i + 1)
             }
             
             updateAddButtonVisibility()

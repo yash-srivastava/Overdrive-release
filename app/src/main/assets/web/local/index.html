@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Live View - OverDrive</title>
+    <title data-i18n="app.live_view_title">Live View - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon.webp">
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="../shared/app-icon.webp">
@@ -29,8 +29,8 @@
                 <div class="brand">
                     <div class="brand-logo"><img src="../shared/app-icon.webp" alt="OverDrive"></div>
                     <div class="brand-text">
-                        <span class="brand-name">OverDrive</span>
-                        <span class="brand-tagline">Sentry System</span>
+                        <span class="brand-name" data-i18n="app.name">OverDrive</span>
+                        <span class="brand-tagline" data-i18n="app.tagline">Sentry System</span>
                         <span class="brand-version" id="appVersion"></span>
                     </div>
                 </div>
@@ -46,7 +46,7 @@
                         <path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/>
                         <path d="M2 12a9 9 0 0 0 8 8"/><circle cx="2" cy="12" r="2"/>
                     </svg>
-                    <span>Live View</span>
+                    <span data-i18n="nav.live_view">Live View</span>
                 </a>
                 <a href="events.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -55,25 +55,25 @@
                         <line x1="8" y1="2" x2="8" y2="6"/>
                         <line x1="3" y1="10" x2="21" y2="10"/>
                     </svg>
-                    <span>Events</span>
+                    <span data-i18n="nav.events">Events</span>
                 </a>
                 <a href="surveillance.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                     </svg>
-                    <span>Surveillance</span>
+                    <span data-i18n="nav.surveillance">Surveillance</span>
                 </a>
                 <a href="recording.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/>
                     </svg>
-                    <span>Recordings</span>
+                    <span data-i18n="nav.recordings">Recordings</span>
                 </a>
                 <a href="performance.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
                     </svg>
-                    <span>Performance</span>
+                    <span data-i18n="nav.performance">Performance</span>
                 </a>
                 <a href="abrp.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -82,7 +82,7 @@
                         <circle cx="6" cy="6" r="3"/>
                         <circle cx="6" cy="18" r="3"/>
                     </svg>
-                    <span>ABRP</span>
+                    <span data-i18n="nav.abrp">ABRP</span>
                 </a>
                 <a href="mqtt.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -92,42 +92,42 @@
                         <path d="M5.64 18.36A9 9 0 0 1 3 12a9 9 0 0 1 2.64-6.36"/>
                         <path d="M18.36 5.64A9 9 0 0 1 21 12a9 9 0 0 1-2.64 6.36"/>
                     </svg>
-                    <span>MQTT</span>
+                    <span data-i18n="nav.mqtt">MQTT</span>
                 </a>
                 <a href="trips.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 17h2v-7l4 4 4-4 4 4 4-4v7h2"/>
                         <path d="M4 5h16"/>
                     </svg>
-                    <span>Trips</span>
+                    <span data-i18n="nav.trips">Trips</span>
                 </a>
                 <a href="notifications.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
                         <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
                     </svg>
-                    <span>Notifications</span>
+                    <span data-i18n="nav.notifications">Notifications</span>
                 </a>
                 <a href="vehicle-control.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="3" y="11" width="18" height="11" rx="2"/>
                         <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                     </svg>
-                    <span>Vehicle Control</span>
+                    <span data-i18n="nav.vehicle_control">Vehicle Control</span>
                 </a>
             </nav>
             <div class="sidebar-footer">
                 <div class="status-card">
                     <div class="status-row">
-                        <span class="status-label"><span class="status-dot" id="connDot"></span>Device</span>
+                        <span class="status-label" data-i18n="status.device"><span class="status-dot" id="connDot"></span>Device</span>
                         <span class="status-value" id="deviceId">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">ACC</span>
+                        <span class="status-label" data-i18n="status.acc">ACC</span>
                         <span class="status-value" id="accValue">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">
+                        <span class="status-label" data-i18n="status.battery_12v">
                             <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="6" y="7" width="12" height="10" rx="1"/><path d="M6 10H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h2"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/>
                             </svg>12V
@@ -135,11 +135,11 @@
                         <span class="status-value" id="batteryValue">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">Sentry</span>
-                        <span class="status-value" id="survStatus">OFF</span>
+                        <span class="status-label" data-i18n="status.sentry">Sentry</span>
+                        <span class="status-value" id="survStatus" data-i18n="status.off">OFF</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">
+                        <span class="status-label" data-i18n="status.network">
                             <span id="networkIcon"><svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg></span>Net
                         </span>
                         <span class="status-value" id="networkValue">--</span>
@@ -147,7 +147,7 @@
                 </div>
                 <div class="status-card ev-card" id="evCard">
                     <div class="ev-header-row">
-                        <span class="ev-title">Vehicle Status</span>
+                        <span class="ev-title" data-i18n="status.vehicle_status">Vehicle Status</span>
                         <span class="ev-percent-text" id="evPercentValue">--%</span>
                     </div>
                     <div class="ev-svg-container">
@@ -228,11 +228,11 @@
                         </div>
                     </div>
                     <div class="ev-soh-row" id="evSohRow" style="display:none;">
-                        <span class="ev-soh-label">SOH</span>
+                        <span class="ev-soh-label" data-i18n="vehicle.soh_label">SOH</span>
                         <span class="ev-soh-val" id="evSohValue">--%</span>
                     </div>
                     <div class="ev-personalized-range" id="evPersonalizedRow" style="display:none;">
-                        <span class="ev-personalized-label">⚡ Personalized</span>
+                        <span class="ev-personalized-label" data-i18n="vehicle.personalized_label">⚡ Personalized</span>
                         <span class="ev-personalized-val" id="evPersonalizedRange">-- km</span>
                     </div>
                 </div>
@@ -246,7 +246,7 @@
                             <path d="M13 10h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V9.83a2 2 0 0 0-.59-1.42L18 6"/>
                             <path d="M6 14v-3"/>
                         </svg>
-                        <span class="fuel-title">Fuel</span>
+                        <span class="fuel-title" data-i18n="vehicle.fuel">Fuel</span>
                         <span class="fuel-percent" id="fuelPercentValue">--%</span>
                     </div>
                     <div class="fuel-bar-track">
@@ -307,16 +307,16 @@
                                 <div class="top-bar-left">
                                     <div class="connection-status" id="connectionStatus">
                                         <span class="conn-dot"></span>
-                                        <span class="status-text">Select Camera</span>
+                                        <span class="status-text" data-i18n="pip.select_camera">Select Camera</span>
                                     </div>
                                     <div class="decoder-chip" id="decoderChip" style="display:none;">GPU</div>
                                 </div>
                                 <div class="top-bar-right">
                                     <select id="qualitySelector" class="quality-select-sota" onchange="BYD.stream.setQuality(this.value)">
-                                        <option value="ULTRA_LOW">Ultra Low (400k)</option>
-                                        <option value="LOW" selected>Low (600k)</option>
-                                        <option value="MEDIUM">Medium (1M)</option>
-                                        <option value="HIGH">High (1.5M)</option>
+                                        <option value="ULTRA_LOW" data-i18n="stream.quality_ultra_low">Ultra Low (400k)</option>
+                                        <option value="LOW" selected data-i18n="stream.quality_low">Low (600k)</option>
+                                        <option value="MEDIUM" data-i18n="stream.quality_medium">Medium (1M)</option>
+                                        <option value="HIGH" data-i18n="stream.quality_high">High (1.5M)</option>
                                     </select>
                                     <button class="top-bar-btn" onclick="BYD.stream.toggleFullscreen()">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -338,10 +338,10 @@
                                             <path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/>
                                         </svg>
                                     </div>
-                                    <span class="idle-text">Tap a camera on the car below</span>
+                                    <span class="idle-text" data-i18n="stream.idle_hint">Tap a camera on the car below</span>
                                 </div>
                                 <div class="camera-label-overlay" id="cameraLabelOverlay" style="display:none;">
-                                    <span id="currentCameraLabel">Front Camera</span>
+                                    <span id="currentCameraLabel" data-i18n="stream.front_camera">Front Camera</span>
                                 </div>
                             </div>
 
@@ -354,27 +354,27 @@
                                     <div class="cam-hotspot" data-cam="1" onclick="BYD.stream.selectCamera(1)">
                                         <div class="hotspot-pulse"></div>
                                         <div class="hotspot-ring"></div>
-                                        <span class="hotspot-label">FRONT</span>
+                                        <span class="hotspot-label" data-i18n="stream.hotspot_front">FRONT</span>
                                     </div>
                                     <div class="cam-hotspot" data-cam="3" onclick="BYD.stream.selectCamera(3)">
                                         <div class="hotspot-pulse"></div>
                                         <div class="hotspot-ring"></div>
-                                        <span class="hotspot-label">REAR</span>
+                                        <span class="hotspot-label" data-i18n="stream.hotspot_rear">REAR</span>
                                     </div>
                                     <div class="cam-hotspot" data-cam="4" onclick="BYD.stream.selectCamera(4)">
                                         <div class="hotspot-pulse"></div>
                                         <div class="hotspot-ring"></div>
-                                        <span class="hotspot-label">LEFT</span>
+                                        <span class="hotspot-label" data-i18n="stream.hotspot_left">LEFT</span>
                                     </div>
                                     <div class="cam-hotspot" data-cam="2" onclick="BYD.stream.selectCamera(2)">
                                         <div class="hotspot-pulse"></div>
                                         <div class="hotspot-ring"></div>
-                                        <span class="hotspot-label">RIGHT</span>
+                                        <span class="hotspot-label" data-i18n="stream.hotspot_right">RIGHT</span>
                                     </div>
                                     <div class="cam-hotspot cam-all" data-cam="0" onclick="BYD.stream.selectCamera(0)">
                                         <div class="hotspot-pulse"></div>
                                         <div class="hotspot-ring"></div>
-                                        <span class="hotspot-label">ALL</span>
+                                        <span class="hotspot-label" data-i18n="stream.hotspot_all">ALL</span>
                                     </div>
                                 </div>
                             </div>
@@ -384,7 +384,7 @@
 
                 <div class="mini-preview" id="miniPreview" onclick="BYD.tabs.switchTo(BYD.tabs.activeTab === 'map' ? 'cameras' : 'map')">
                     <div class="mini-preview-content" id="miniPreviewContent"></div>
-                    <div class="mini-preview-label" id="miniPreviewLabel">Cameras</div>
+                    <div class="mini-preview-label" id="miniPreviewLabel" data-i18n="stream.mini_cameras">Cameras</div>
                 </div>
             </div>
         </main>
@@ -787,11 +787,11 @@
                 const label = document.getElementById('miniPreviewLabel');
                 const content = document.getElementById('miniPreviewContent');
                 if (tab === 'map') {
-                    label.textContent = 'Cameras';
+                    label.textContent = BYD.i18n.t('liveview.cameras');
                     content.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg>';
                     setTimeout(() => { if (BYD.map.map) BYD.map.map.invalidateSize(); }, 100);
                 } else {
-                    label.textContent = 'Location';
+                    label.textContent = BYD.i18n.t('liveview.location');
                     content.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>';
                 }
                 this.activeTab = tab;
@@ -815,7 +815,7 @@
                 // Update UI
                 const labelEl = document.getElementById('currentCameraLabel');
                 const overlayEl = document.getElementById('cameraLabelOverlay');
-                if (labelEl) labelEl.textContent = 'Select Camera';
+                if (labelEl) labelEl.textContent = BYD.i18n.t('pip.select_camera');
                 if (overlayEl) overlayEl.style.display = 'none';
                 
                 // Show idle state
@@ -834,11 +834,12 @@
                 }
             });
             
-            // Update camera label
-            const labels = {0: 'All Cameras', 1: 'Front Camera', 2: 'Right Camera', 3: 'Rear Camera', 4: 'Left Camera'};
+            // Update camera label. Reuse existing pip.title_* keys (these
+            // labels are conceptually identical to the PiP camera titles).
+            const camKeys = {0: 'pip.title_all_cameras', 1: 'pip.title_front_camera', 2: 'pip.title_right_camera', 3: 'pip.title_rear_camera', 4: 'pip.title_left_camera'};
             const labelEl = document.getElementById('currentCameraLabel');
             const overlayEl = document.getElementById('cameraLabelOverlay');
-            if (labelEl) labelEl.textContent = labels[mode] || 'Camera';
+            if (labelEl) labelEl.textContent = camKeys[mode] ? BYD.i18n.t(camKeys[mode]) : BYD.i18n.t('pip.default_camera');
             if (overlayEl) overlayEl.style.display = 'block';
             
             this.currentViewMode = mode;
@@ -880,7 +881,7 @@
             // 3. Enable Streaming on Backend
             const enabled = await this.enableStreaming();
             if (!enabled) {
-                if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to enable streaming', 'error');
+                if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('liveview.enable_failed'), 'error');
                 return;
             }
             
@@ -981,12 +982,12 @@
             const textEl = el.querySelector('.status-text');
             if (status === 'live') {
                 el.classList.add('live');
-                if (textEl) textEl.textContent = 'Live';
+                if (textEl) textEl.textContent = BYD.i18n.t('liveview.live');
             } else if (status === 'connecting') {
                 el.classList.add('connecting');
-                if (textEl) textEl.textContent = 'Connecting...';
+                if (textEl) textEl.textContent = BYD.i18n.t('pip.connecting');
             } else {
-                if (textEl) textEl.textContent = 'Select Camera';
+                if (textEl) textEl.textContent = BYD.i18n.t('pip.select_camera');
             }
         };
         
@@ -1008,11 +1009,15 @@
             }
         };
         
-        // Init
-        BYD.core.init();
-        BYD.stream.init();
-        BYD.map.init();
-        SurvSettings.initHeatmapOnly();
+        // i18n must load before the rest of init so first paint doesn't
+        // flash English to a non-English user. All other inits are
+        // synchronous and don't depend on the catalog being present.
+        BYD.i18n.init().then(function () {
+            BYD.core.init();
+            BYD.stream.init();
+            BYD.map.init();
+            SurvSettings.initHeatmapOnly();
+        });
         
         // Load saved quality from backend and pre-select
         (async function() {

@@ -49,7 +49,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginStart="10dp"
                         android:layout_weight="1"
-                        android:text="Surveillance Mode"
+                        android:text="@string/sentry_mode_title"
                         android:textColor="@color/text_primary"
                         android:textSize="16sp"
                         android:fontFamily="sans-serif-medium" />
@@ -82,14 +82,14 @@
                             android:layout_width="0dp"
                             android:layout_weight="1"
                             android:layout_height="wrap_content"
-                            android:text="Status"
+                            android:text="@string/sentry_status_label"
                             android:textColor="@color/text_muted"
                             android:textSize="13sp" />
                         <TextView
                             android:id="@+id/tvStatus"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Idle"
+                            android:text="@string/sentry_status_idle"
                             android:textColor="@color/text_primary"
                             android:textSize="13sp"
                             android:fontFamily="sans-serif-medium" />
@@ -135,7 +135,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginStart="10dp"
                         android:layout_weight="1"
-                        android:text="Safe Locations"
+                        android:text="@string/sentry_safe_locations_title"
                         android:textColor="@color/text_primary"
                         android:textSize="16sp"
                         android:fontFamily="sans-serif-medium" />
@@ -157,7 +157,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
-                    android:text="Camera won't start when parked at these locations. Saves battery and storage."
+                    android:text="@string/sentry_safe_locations_desc"
                     android:textColor="@color/text_muted"
                     android:textSize="13sp" />
 
@@ -179,14 +179,14 @@
                             android:layout_width="0dp"
                             android:layout_weight="1"
                             android:layout_height="wrap_content"
-                            android:text="Status"
+                            android:text="@string/sentry_status_label"
                             android:textColor="@color/text_muted"
                             android:textSize="12sp" />
                         <TextView
                             android:id="@+id/tvSafeLocStatus"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="--"
+                            android:text="@string/sentry_safe_loc_status_dashes"
                             android:textColor="@color/text_primary"
                             android:textSize="12sp"
                             android:fontFamily="sans-serif-medium" />
@@ -209,7 +209,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
-                    android:text="📍 Add Current Location"
+                    android:text="@string/sentry_add_current_location"
                     android:textAllCaps="false"
                     app:cornerRadius="12dp" />
 
@@ -251,7 +251,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="10dp"
-                        android:text="Detection Settings"
+                        android:text="@string/sentry_detection_settings"
                         android:textColor="@color/text_primary"
                         android:textSize="16sp"
                         android:fontFamily="sans-serif-medium" />
@@ -282,14 +282,14 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Detection Distance"
+                                android:text="@string/sentry_detection_distance"
                                 android:textColor="@color/text_primary"
                                 android:textSize="14sp"
                                 android:fontFamily="sans-serif-medium" />
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="How far to detect objects (3m - 15m)"
+                                android:text="@string/sentry_detection_distance_desc"
                                 android:textColor="@color/text_muted"
                                 android:textSize="13sp" />
                         </LinearLayout>
@@ -298,7 +298,7 @@
                             android:layout_width="70dp"
                             android:layout_height="wrap_content"
                             android:gravity="end"
-                            android:text="~8m"
+                            android:text="@string/sentry_distance_initial"
                             android:textColor="@color/brand_primary"
                             android:textSize="13sp"
                             android:fontFamily="monospace" />
@@ -325,7 +325,7 @@
                         android:layout_marginTop="4dp"
                         android:background="@color/bg_elevated"
                         android:padding="8dp"
-                        android:text="Balanced — detects people up to ~8m away"
+                        android:text="@string/sentry_distance_hint_default"
                         android:textColor="@color/text_secondary"
                         android:textSize="12sp" />
                 </LinearLayout>
@@ -355,14 +355,14 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Motion Sensitivity"
+                                android:text="@string/sentry_motion_sensitivity"
                                 android:textColor="@color/text_primary"
                                 android:textSize="14sp"
                                 android:fontFamily="sans-serif-medium" />
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="How easily motion triggers recording"
+                                android:text="@string/sentry_motion_sensitivity_desc"
                                 android:textColor="@color/text_muted"
                                 android:textSize="13sp" />
                         </LinearLayout>
@@ -371,7 +371,7 @@
                             android:layout_width="70dp"
                             android:layout_height="wrap_content"
                             android:gravity="end"
-                            android:text="Default"
+                            android:text="@string/sentry_sensitivity_default"
                             android:textColor="@color/brand_primary"
                             android:textSize="13sp"
                             android:fontFamily="monospace" />
@@ -398,7 +398,7 @@
                         android:layout_marginTop="4dp"
                         android:background="@color/bg_elevated"
                         android:padding="8dp"
-                        android:text="Balanced — triggers on walking people, ignores bugs/leaves"
+                        android:text="@string/sentry_sensitivity_hint_default"
                         android:textColor="@color/text_secondary"
                         android:textSize="12sp" />
                 </LinearLayout>
@@ -428,14 +428,14 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Shadow Rejection"
+                                android:text="@string/sentry_shadow_rejection"
                                 android:textColor="@color/text_primary"
                                 android:textSize="14sp"
                                 android:fontFamily="sans-serif-medium" />
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Filter shadows, reflections, faint light changes"
+                                android:text="@string/sentry_shadow_rejection_desc"
                                 android:textColor="@color/text_muted"
                                 android:textSize="13sp" />
                         </LinearLayout>
@@ -444,7 +444,7 @@
                             android:layout_width="70dp"
                             android:layout_height="wrap_content"
                             android:gravity="end"
-                            android:text="NORMAL"
+                            android:text="@string/sentry_flash_immunity_normal"
                             android:textColor="@color/brand_primary"
                             android:textSize="13sp"
                             android:fontFamily="monospace" />
@@ -479,14 +479,14 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Detect Objects"
+                        android:text="@string/sentry_detect_objects"
                         android:textColor="@color/text_primary"
                         android:textSize="14sp"
                         android:fontFamily="sans-serif-medium" />
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Select what triggers recording"
+                        android:text="@string/sentry_detect_objects_desc"
                         android:textColor="@color/text_muted"
                         android:textSize="13sp"
                         android:layout_marginBottom="12dp" />
@@ -502,7 +502,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:checked="true"
-                            android:text="Person"
+                            android:text="@string/recording_lib_chip_person"
                             android:textColor="@color/chip_text"
                             app:chipBackgroundColor="@color/chip_background"
                             app:chipStrokeColor="@color/toggle_button_stroke"
@@ -516,7 +516,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginStart="8dp"
                             android:checked="true"
-                            android:text="Vehicle"
+                            android:text="@string/recording_lib_chip_vehicle"
                             android:textColor="@color/chip_text"
                             app:chipBackgroundColor="@color/chip_background"
                             app:chipStrokeColor="@color/toggle_button_stroke"
@@ -530,7 +530,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginStart="8dp"
                             android:checked="true"
-                            android:text="Bike"
+                            android:text="@string/recording_lib_chip_bike"
                             android:textColor="@color/chip_text"
                             app:chipBackgroundColor="@color/chip_background"
                             app:chipStrokeColor="@color/toggle_button_stroke"
@@ -576,7 +576,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="10dp"
-                        android:text="Recording Settings"
+                        android:text="@string/sentry_recording_settings"
                         android:textColor="@color/text_primary"
                         android:textSize="16sp"
                         android:fontFamily="sans-serif-medium" />
@@ -607,14 +607,14 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Pre-event Buffer"
+                                android:text="@string/sentry_pre_event_buffer"
                                 android:textColor="@color/text_primary"
                                 android:textSize="14sp"
                                 android:fontFamily="sans-serif-medium" />
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Seconds captured before motion event"
+                                android:text="@string/sentry_pre_event_buffer_desc"
                                 android:textColor="@color/text_muted"
                                 android:textSize="13sp" />
                         </LinearLayout>
@@ -623,7 +623,7 @@
                             android:layout_width="70dp"
                             android:layout_height="wrap_content"
                             android:gravity="end"
-                            android:text="5s"
+                            android:text="@string/sentry_pre_buffer_default"
                             android:textColor="@color/brand_primary"
                             android:textSize="13sp"
                             android:fontFamily="monospace" />
@@ -668,14 +668,14 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Post-event Buffer"
+                                android:text="@string/sentry_post_event_buffer"
                                 android:textColor="@color/text_primary"
                                 android:textSize="14sp"
                                 android:fontFamily="sans-serif-medium" />
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Seconds captured after motion stops"
+                                android:text="@string/sentry_post_event_buffer_desc"
                                 android:textColor="@color/text_muted"
                                 android:textSize="13sp" />
                         </LinearLayout>
@@ -684,7 +684,7 @@
                             android:layout_width="70dp"
                             android:layout_height="wrap_content"
                             android:gravity="end"
-                            android:text="10s"
+                            android:text="@string/sentry_post_buffer_default"
                             android:textColor="@color/brand_primary"
                             android:textSize="13sp"
                             android:fontFamily="monospace" />
@@ -729,14 +729,14 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Video Quality"
+                                android:text="@string/sentry_video_quality"
                                 android:textColor="@color/text_primary"
                                 android:textSize="14sp"
                                 android:fontFamily="sans-serif-medium" />
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Higher quality = larger files"
+                                android:text="@string/sentry_video_quality_desc"
                                 android:textColor="@color/text_muted"
                                 android:textSize="13sp" />
                         </LinearLayout>
@@ -756,7 +756,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="Low" />
+                            android:text="@string/bitrate_low" />
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnBitrateMedium"
@@ -764,7 +764,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="Med" />
+                            android:text="@string/bitrate_med" />
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnBitrateHigh"
@@ -772,7 +772,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="High" />
+                            android:text="@string/bitrate_high" />
                     </com.google.android.material.button.MaterialButtonToggleGroup>
                 </LinearLayout>
 
@@ -800,14 +800,14 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Video Codec"
+                                android:text="@string/sentry_video_codec"
                                 android:textColor="@color/text_primary"
                                 android:textSize="14sp"
                                 android:fontFamily="sans-serif-medium" />
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="H.265 produces 50% smaller files"
+                                android:text="@string/sentry_video_codec_desc"
                                 android:textColor="@color/text_muted"
                                 android:textSize="13sp" />
                         </LinearLayout>
@@ -827,7 +827,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="H.264" />
+                            android:text="@string/codec_h264" />
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnCodecH265"
@@ -835,7 +835,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="H.265" />
+                            android:text="@string/codec_h265" />
                     </com.google.android.material.button.MaterialButtonToggleGroup>
                 </LinearLayout>
 
@@ -876,7 +876,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="10dp"
-                        android:text="Surveillance Storage"
+                        android:text="@string/sentry_storage_title"
                         android:textColor="@color/text_primary"
                         android:textSize="16sp"
                         android:fontFamily="sans-serif-medium" />
@@ -907,14 +907,14 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Storage Location"
+                                android:text="@string/recording_storage_location"
                                 android:textColor="@color/text_primary"
                                 android:textSize="14sp"
                                 android:fontFamily="sans-serif-medium" />
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Choose where to save surveillance events"
+                                android:text="@string/sentry_storage_choose"
                                 android:textColor="@color/text_muted"
                                 android:textSize="13sp" />
                         </LinearLayout>
@@ -934,7 +934,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="📱 Internal"
+                            android:text="@string/storage_internal"
                             android:textSize="12sp" />
 
                         <com.google.android.material.button.MaterialButton
@@ -943,7 +943,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="💾 SD Card"
+                            android:text="@string/storage_sd_card"
                             android:textSize="12sp" />
 
                     </com.google.android.material.button.MaterialButtonToggleGroup>
@@ -971,7 +971,7 @@
                         android:layout_weight="1"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="8dp"
-                        android:text="SD Card: Not detected"
+                        android:text="@string/storage_sd_not_detected"
                         android:textColor="@color/text_muted"
                         android:textSize="12sp" />
 
@@ -1000,7 +1000,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Storage Usage"
+                        android:text="@string/storage_usage_label"
                         android:textColor="@color/text_primary"
                         android:textSize="14sp"
                         android:fontFamily="sans-serif-medium" />
@@ -1008,7 +1008,7 @@
                         android:id="@+id/tvSurveillanceStoragePath"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Events saved to Overdrive/surveillance"
+                        android:text="@string/sentry_storage_path"
                         android:textColor="@color/text_muted"
                         android:textSize="13sp" />
 
@@ -1035,14 +1035,14 @@
                             android:layout_width="0dp"
                             android:layout_weight="1"
                             android:layout_height="wrap_content"
-                            android:text="-- used"
+                            android:text="@string/storage_used_dashes"
                             android:textColor="@color/text_muted"
                             android:textSize="12sp" />
                         <TextView
                             android:id="@+id/tvSurveillanceLimit"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="-- limit"
+                            android:text="@string/storage_limit_dashes"
                             android:textColor="@color/text_muted"
                             android:textSize="12sp" />
                     </LinearLayout>
@@ -1073,14 +1073,14 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Storage Limit"
+                                android:text="@string/storage_limit_label"
                                 android:textColor="@color/text_primary"
                                 android:textSize="14sp"
                                 android:fontFamily="sans-serif-medium" />
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Auto-delete oldest when limit reached"
+                                android:text="@string/storage_limit_desc"
                                 android:textColor="@color/text_muted"
                                 android:textSize="13sp" />
                         </LinearLayout>
@@ -1089,7 +1089,7 @@
                             android:layout_width="70dp"
                             android:layout_height="wrap_content"
                             android:gravity="end"
-                            android:text="500 MB"
+                            android:text="@string/storage_default_value_500mb"
                             android:textColor="@color/brand_primary"
                             android:textSize="13sp"
                             android:fontFamily="monospace" />
@@ -1149,7 +1149,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginStart="10dp"
                         android:layout_weight="1"
-                        android:text="BYD Dashcam Cleanup"
+                        android:text="@string/cdr_cleanup_title"
                         android:textColor="@color/text_primary"
                         android:textSize="16sp"
                         android:fontFamily="sans-serif-medium" />
@@ -1162,7 +1162,7 @@
                         android:background="@drawable/status_indicator"
                         android:paddingHorizontal="8dp"
                         android:paddingVertical="2dp"
-                        android:text="OFF"
+                        android:text="@string/cdr_cleanup_off"
                         android:textColor="@color/text_muted"
                         android:textSize="10sp" />
 
@@ -1182,7 +1182,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="16dp"
-                    android:text="Auto-delete old dashcam files to free SD card space for surveillance events"
+                    android:text="@string/cdr_cleanup_desc_long"
                     android:textColor="@color/text_muted"
                     android:textSize="13sp" />
 
@@ -1202,14 +1202,14 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="CDR Usage"
+                            android:text="@string/cdr_usage_label"
                             android:textColor="@color/text_muted"
                             android:textSize="11sp" />
                         <TextView
                             android:id="@+id/tvCdrUsage"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="--"
+                            android:text="@string/cdr_value_dashes"
                             android:textColor="@color/text_primary"
                             android:textSize="14sp"
                             android:fontFamily="sans-serif-medium" />
@@ -1223,14 +1223,14 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Files"
+                            android:text="@string/cdr_files_label"
                             android:textColor="@color/text_muted"
                             android:textSize="11sp" />
                         <TextView
                             android:id="@+id/tvCdrFileCount"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="--"
+                            android:text="@string/cdr_value_dashes"
                             android:textColor="@color/text_primary"
                             android:textSize="14sp"
                             android:fontFamily="sans-serif-medium" />
@@ -1244,14 +1244,14 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Deletable"
+                            android:text="@string/cdr_deletable_label"
                             android:textColor="@color/text_muted"
                             android:textSize="11sp" />
                         <TextView
                             android:id="@+id/tvCdrDeletable"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="--"
+                            android:text="@string/cdr_value_dashes"
                             android:textColor="@color/status_error"
                             android:textSize="14sp"
                             android:fontFamily="sans-serif-medium" />
@@ -1284,14 +1284,14 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Reserved Space"
+                                android:text="@string/cdr_reserved_short"
                                 android:textColor="@color/text_primary"
                                 android:textSize="14sp"
                                 android:fontFamily="sans-serif-medium" />
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Minimum free space to maintain"
+                                android:text="@string/cdr_reserved_desc"
                                 android:textColor="@color/text_muted"
                                 android:textSize="13sp" />
                         </LinearLayout>
@@ -1300,7 +1300,7 @@
                             android:layout_width="70dp"
                             android:layout_height="wrap_content"
                             android:gravity="end"
-                            android:text="2 GB"
+                            android:text="@string/cdr_reserved_default"
                             android:textColor="@color/brand_primary"
                             android:textSize="13sp"
                             android:fontFamily="monospace" />
@@ -1344,14 +1344,14 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Protect Recent"
+                                android:text="@string/cdr_protect_short"
                                 android:textColor="@color/text_primary"
                                 android:textSize="14sp"
                                 android:fontFamily="sans-serif-medium" />
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Don't delete files newer than"
+                                android:text="@string/cdr_protect_desc"
                                 android:textColor="@color/text_muted"
                                 android:textSize="13sp" />
                         </LinearLayout>
@@ -1360,7 +1360,7 @@
                             android:layout_width="70dp"
                             android:layout_height="wrap_content"
                             android:gravity="end"
-                            android:text="24h"
+                            android:text="@string/cdr_protect_default"
                             android:textColor="@color/brand_primary"
                             android:textSize="13sp"
                             android:fontFamily="monospace" />
@@ -1387,7 +1387,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="16dp"
-                    android:text="🗑️ Clean Up Now"
+                    android:text="@string/action_clean_up_now"
                     android:textColor="@color/status_error"
                     app:strokeColor="@color/status_error"
                     app:cornerRadius="8dp" />
@@ -1403,7 +1403,7 @@
             android:layout_width="match_parent"
             android:layout_height="52dp"
             android:enabled="false"
-            android:text="Apply Changes"
+            android:text="@string/action_apply_changes"
             android:textAllCaps="false"
             app:cornerRadius="12dp"
             app:icon="@android:drawable/ic_menu_save"

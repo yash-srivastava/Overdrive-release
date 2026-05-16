@@ -22,7 +22,7 @@
             android:layout_width="32dp"
             android:layout_height="32dp"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Expand/Collapse"
+            android:contentDescription="@string/cd_expand_collapse"
             android:src="@drawable/ic_expand"
             app:tint="@color/brand_primary" />
 
@@ -30,7 +30,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
-            android:text="📋"
+            android:text="@string/logs_panel_clipboard_emoji"
             android:textSize="14sp" />
 
         <TextView
@@ -38,7 +38,7 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
             android:layout_weight="1"
-            android:text="Logs"
+            android:text="@string/logs_panel_title"
             android:textColor="@color/text_primary"
             android:textSize="14sp"
             android:textStyle="bold" />
@@ -57,7 +57,7 @@
             android:layout_height="32dp"
             android:layout_marginStart="8dp"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Clear logs"
+            android:contentDescription="@string/cd_clear_logs"
             android:src="@drawable/ic_clear"
             app:tint="@color/text_muted" />
 

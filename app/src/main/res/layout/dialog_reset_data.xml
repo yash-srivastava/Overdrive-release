@@ -24,7 +24,7 @@
                 android:layout_width="36dp"
                 android:layout_height="36dp"
                 android:src="@drawable/ic_delete"
-                android:contentDescription="Reset"
+                android:contentDescription="@string/cd_reset"
                 app:tint="@color/status_error" />
 
             <LinearLayout
@@ -37,7 +37,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Reset Data"
+                    android:text="@string/reset_title"
                     android:textColor="@color/text_primary"
                     android:textSize="18sp"
                     android:fontFamily="sans-serif-medium" />
@@ -45,7 +45,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Wipe accumulated data by category"
+                    android:text="@string/reset_subtitle"
                     android:textColor="@color/text_muted"
                     android:textSize="12sp"
                     android:layout_marginTop="2dp" />
@@ -66,7 +66,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="⚠ This cannot be undone. Recordings, trips, and battery history will be permanently deleted."
+                android:text="@string/reset_warning"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp"
                 android:padding="12dp" />
@@ -77,13 +77,13 @@
             android:id="@+id/cbResetTrips"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Trips"
+            android:text="@string/reset_cat_trips"
             android:textColor="@color/text_primary"
             android:textSize="14sp" />
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Trip history, routes, weekly/monthly rollups"
+            android:text="@string/reset_cat_trips_desc"
             android:textColor="@color/text_muted"
             android:textSize="11sp"
             android:layout_marginStart="32dp"
@@ -93,13 +93,13 @@
             android:id="@+id/cbResetSocHistory"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="SoC &amp; 12V history"
+            android:text="@string/reset_cat_soc_history"
             android:textColor="@color/text_primary"
             android:textSize="14sp" />
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="SoC samples, charging sessions, voltage logs"
+            android:text="@string/reset_cat_soc_history_desc"
             android:textColor="@color/text_muted"
             android:textSize="11sp"
             android:layout_marginStart="32dp"
@@ -109,13 +109,13 @@
             android:id="@+id/cbResetSoh"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="SoH calibration"
+            android:text="@string/reset_cat_soh"
             android:textColor="@color/text_primary"
             android:textSize="14sp" />
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Re-detects nominal capacity, re-seeds estimate from BMS"
+            android:text="@string/reset_cat_soh_desc"
             android:textColor="@color/text_muted"
             android:textSize="11sp"
             android:layout_marginStart="32dp"
@@ -125,13 +125,13 @@
             android:id="@+id/cbResetAbrpToken"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="ABRP token"
+            android:text="@string/reset_cat_abrp_token"
             android:textColor="@color/text_primary"
             android:textSize="14sp" />
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Disables ABRP telemetry until re-paired"
+            android:text="@string/reset_cat_abrp_token_desc"
             android:textColor="@color/text_muted"
             android:textSize="11sp"
             android:layout_marginStart="32dp"
@@ -141,13 +141,13 @@
             android:id="@+id/cbResetBydCloud"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="BYD Cloud credentials"
+            android:text="@string/reset_cat_byd_cloud"
             android:textColor="@color/text_primary"
             android:textSize="14sp" />
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Username, login key, VIN — re-login required"
+            android:text="@string/reset_cat_byd_cloud_desc"
             android:textColor="@color/text_muted"
             android:textSize="11sp"
             android:layout_marginStart="32dp"
@@ -157,13 +157,13 @@
             android:id="@+id/cbResetMediaRecordings"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Recordings (videos)"
+            android:text="@string/reset_cat_recordings"
             android:textColor="@color/text_primary"
             android:textSize="14sp" />
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="All MP4s in the recordings folder"
+            android:text="@string/reset_cat_recordings_desc"
             android:textColor="@color/text_muted"
             android:textSize="11sp"
             android:layout_marginStart="32dp"
@@ -173,13 +173,13 @@
             android:id="@+id/cbResetMediaSurveillance"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Sentry events"
+            android:text="@string/reset_cat_sentry_events"
             android:textColor="@color/text_primary"
             android:textSize="14sp" />
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Surveillance event clips and JSON sidecars"
+            android:text="@string/reset_cat_sentry_events_desc"
             android:textColor="@color/text_muted"
             android:textSize="11sp"
             android:layout_marginStart="32dp"
@@ -189,13 +189,13 @@
             android:id="@+id/cbResetMediaProximity"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Proximity recordings"
+            android:text="@string/reset_cat_proximity"
             android:textColor="@color/text_primary"
             android:textSize="14sp" />
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Radar-triggered event MP4s"
+            android:text="@string/reset_cat_proximity_desc"
             android:textColor="@color/text_muted"
             android:textSize="11sp"
             android:layout_marginStart="32dp"
@@ -205,13 +205,13 @@
             android:id="@+id/cbResetMediaTrips"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Trip telemetry files"
+            android:text="@string/reset_cat_trip_files"
             android:textColor="@color/text_primary"
             android:textSize="14sp" />
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Per-trip JSON telemetry on disk"
+            android:text="@string/reset_cat_trip_files_desc"
             android:textColor="@color/text_muted"
             android:textSize="11sp"
             android:layout_marginStart="32dp"
@@ -230,7 +230,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Select all"
+                android:text="@string/action_select_all"
                 android:textSize="13sp" />
 
             <com.google.android.material.button.MaterialButton
@@ -239,7 +239,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Clear"
+                android:text="@string/action_clear_plain"
                 android:layout_marginStart="8dp"
                 android:textSize="13sp" />
         </LinearLayout>

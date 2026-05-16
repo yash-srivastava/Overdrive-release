@@ -12,7 +12,7 @@
         android:layout_marginStart="24dp"
         android:layout_marginTop="24dp"
         android:layout_marginBottom="12dp"
-        android:text="Background Services"
+        android:text="@string/daemons_section_title"
         android:textColor="@color/text_muted"
         android:textSize="13sp"
         android:fontFamily="sans-serif-medium"

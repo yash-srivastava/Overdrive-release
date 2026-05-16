@@ -174,7 +174,7 @@ class MainActivity : AppCompatActivity() {
                             .consumeJustUpdatedVersion(this)
                         if (updatedVersion != null) {
                             runOnUiThread {
-                                Toast.makeText(this, "✅ Updated to $updatedVersion", Toast.LENGTH_LONG).show()
+                                Toast.makeText(this, getString(R.string.toast_updated_to, updatedVersion), Toast.LENGTH_LONG).show()
                                 logsViewModel.info("Update", "App updated to $updatedVersion")
                             }
                             // Plant the Telegram post-update hint file so when
@@ -229,7 +229,7 @@ class MainActivity : AppCompatActivity() {
             // Show post-update message if app was just updated
             val updatedVersion = com.overdrive.app.updater.AppUpdater.consumeJustUpdatedVersion(this)
             if (updatedVersion != null) {
-                Toast.makeText(this, "✅ Updated to $updatedVersion", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, getString(R.string.toast_updated_to, updatedVersion), Toast.LENGTH_LONG).show()
                 logsViewModel.info("Update", "App updated to $updatedVersion")
             }
 
@@ -356,7 +356,7 @@ class MainActivity : AppCompatActivity() {
      * Manual update check — shows toast if already up to date.
      */
     fun checkForAppUpdateManual() {
-        Toast.makeText(this, "Checking for updates...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, getString(R.string.toast_checking_for_updates), Toast.LENGTH_SHORT).show()
         val updater = com.overdrive.app.updater.AppUpdater(this)
         appUpdater = updater
         updater.checkForUpdate(object : com.overdrive.app.updater.AppUpdater.UpdateCallback {
@@ -369,11 +369,11 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onNoUpdate(currentVersion: String) {
-                Toast.makeText(this@MainActivity, "✅ App is up to date (v$currentVersion)", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@MainActivity, getString(R.string.toast_app_up_to_date, currentVersion), Toast.LENGTH_LONG).show()
             }
 
             override fun onError(error: String) {
-                Toast.makeText(this@MainActivity, "❌ Update check failed: $error", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@MainActivity, getString(R.string.toast_update_check_failed, error), Toast.LENGTH_LONG).show()
             }
         })
     }
@@ -529,7 +529,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 android.util.Log.e("MainActivity", "Storage permission denied by user")
                 logsViewModel.error("Storage", "⚠ Storage permission denied - recordings may not work")
-                Toast.makeText(this, "Storage permission required for recordings", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, getString(R.string.toast_storage_permission_required), Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -553,7 +553,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 android.util.Log.e("MainActivity", "Storage permission denied by user")
                 logsViewModel.error("Storage", "⚠ Storage permission denied - recordings may not work")
-                Toast.makeText(this, "Storage permission required for recordings", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, getString(R.string.toast_storage_permission_required), Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -736,11 +736,23 @@ class MainActivity : AppCompatActivity() {
             override fun onDrawerOpened(drawerView: View) {
                 checkTrafficMonitorStatus()
                 updateCameraProbeMenuItem()
+                refreshLanguageFooter()
             }
             override fun onDrawerSlide(drawerView: View, slideOffset: Float) {}
             override fun onDrawerClosed(drawerView: View) {}
             override fun onDrawerStateChanged(newState: Int) {}
         })
+
+        // Pinned language footer at the bottom of the drawer.
+        findViewById<View>(R.id.drawerLanguageFooter)?.setOnClickListener {
+            drawerLayout.closeDrawers()
+            com.overdrive.app.ui.dialog.LanguagePickerDialog.show(this) {
+                // Recreate so AppCompat reapplies the new locale to the entire
+                // activity tree (toolbar title, all visible Fragments, drawer).
+                recreate()
+            }
+        }
+        refreshLanguageFooter()
         
         // Add LogsPanelFragment if not already added
         if (savedInstanceState == null) {
@@ -769,9 +781,9 @@ class MainActivity : AppCompatActivity() {
             val url = tvCurrentUrl.text.toString()
             if (url.isNotEmpty() && !url.startsWith("No tunnel") && !url.startsWith("Waiting") && !url.startsWith("Starting") && url != "Connecting...") {
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                val clip = ClipData.newPlainText("URL", url)
+                val clip = ClipData.newPlainText(getString(R.string.clip_label_url), url)
                 clipboard.setPrimaryClip(clip)
-                Toast.makeText(this, "URL copied!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(R.string.toast_url_copied_short), Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -952,9 +964,9 @@ class MainActivity : AppCompatActivity() {
         // Set current status
         val statusText = dialogView.findViewById<TextView>(R.id.tvCurrentCamera)
         if (isManual && currentId >= 0) {
-            statusText.text = "Current: Camera $currentId (Manual)"
+            statusText.text = getString(R.string.camera_current_manual, currentId)
         } else {
-            statusText.text = "Current: Auto"
+            statusText.text = getString(R.string.camera_current_auto_label)
         }
         
         // Set radio button selection
@@ -968,7 +980,7 @@ class MainActivity : AppCompatActivity() {
         
         val dialog = android.app.AlertDialog.Builder(this, R.style.Theme_Overdrive_Dialog)
             .setView(dialogView)
-            .setNegativeButton("Close", null)
+            .setNegativeButton(getString(R.string.dialog_close), null)
             .create()
         
         // Save immediately on radio button selection — no Apply button needed
@@ -994,14 +1006,14 @@ class MainActivity : AppCompatActivity() {
 
                         runOnUiThread {
                             if (responseCode == 200) {
-                                Toast.makeText(this, "✓ Camera set to Auto", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(this, getString(R.string.toast_camera_set_to_auto), Toast.LENGTH_SHORT).show()
                             } else {
-                                Toast.makeText(this, "Failed to save", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(this, getString(R.string.toast_failed_to_save_short), Toast.LENGTH_SHORT).show()
                             }
                             updateCameraProbeMenuItem()
                         }
                     } catch (e: Exception) {
-                        runOnUiThread { Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_SHORT).show() }
+                        runOnUiThread { Toast.makeText(this, getString(R.string.toast_failed_with_message, e.message ?: ""), Toast.LENGTH_SHORT).show() }
                     }
                 }.start()
             } else {
@@ -1020,14 +1032,14 @@ class MainActivity : AppCompatActivity() {
 
                         runOnUiThread {
                             if (responseCode == 200) {
-                                Toast.makeText(this, "✓ Camera $selectedCamId set — next ACC cycle", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(this, getString(R.string.toast_camera_id_set, selectedCamId), Toast.LENGTH_SHORT).show()
                             } else {
-                                Toast.makeText(this, "Failed to save", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(this, getString(R.string.toast_failed_to_save_short), Toast.LENGTH_SHORT).show()
                             }
                             updateCameraProbeMenuItem()
                         }
                     } catch (e: Exception) {
-                        runOnUiThread { Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_SHORT).show() }
+                        runOnUiThread { Toast.makeText(this, getString(R.string.toast_failed_with_message, e.message ?: ""), Toast.LENGTH_SHORT).show() }
                     }
                 }.start()
             }
@@ -1040,7 +1052,7 @@ class MainActivity : AppCompatActivity() {
      * Clear saved camera config and restart the camera daemon.
      */
     private fun performCameraReconfigure() {
-        Toast.makeText(this, "Clearing camera config...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, getString(R.string.toast_clearing_camera_config), Toast.LENGTH_SHORT).show()
         logsViewModel.info("Camera", "Clearing saved camera probe config for re-probe")
         
         Thread {
@@ -1053,7 +1065,7 @@ class MainActivity : AppCompatActivity() {
                 
                 runOnUiThread {
                     logsViewModel.info("Camera", "Camera config cleared — restarting daemon")
-                    Toast.makeText(this, "Restarting camera daemon...", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, getString(R.string.toast_restarting_camera_daemon), Toast.LENGTH_SHORT).show()
                 }
                 
                 // Kill the camera daemon — DaemonLauncher's watchdog will auto-restart it
@@ -1066,8 +1078,8 @@ class MainActivity : AppCompatActivity() {
                     override fun onLaunched() {
                         runOnUiThread {
                             logsViewModel.info("Camera", "Camera daemon stopped — will auto-restart with full probe")
-                            Toast.makeText(this@MainActivity, 
-                                "✅ Camera daemon restarting with full probe", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this@MainActivity,
+                                getString(R.string.toast_camera_daemon_restarting), Toast.LENGTH_LONG).show()
                             
                             // Re-launch the daemon after a brief delay
                             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
@@ -1082,8 +1094,8 @@ class MainActivity : AppCompatActivity() {
                     override fun onError(error: String) {
                         runOnUiThread {
                             logsViewModel.error("Camera", "Failed to stop daemon: $error")
-                            Toast.makeText(this@MainActivity, 
-                                "⚠ Config cleared but daemon restart failed. Please restart manually.", 
+                            Toast.makeText(this@MainActivity,
+                                getString(R.string.toast_camera_restart_failed),
                                 Toast.LENGTH_LONG).show()
                         }
                     }
@@ -1092,7 +1104,7 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 runOnUiThread {
                     logsViewModel.error("Camera", "Reconfigure failed: ${e.message}")
-                    Toast.makeText(this, "❌ Failed: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, getString(R.string.toast_failed_with_message_x, e.message ?: ""), Toast.LENGTH_LONG).show()
                 }
             }
         }.start()
@@ -1172,10 +1184,10 @@ class MainActivity : AppCompatActivity() {
                 // Status text
                 val statusView = dialogView.findViewById<TextView>(R.id.tvSohStatus)
                 if (finalHasEstimate) {
-                    statusView.text = "Estimation active"
+                    statusView.text = getString(R.string.soh_estimation_active)
                     statusView.setTextColor(resources.getColor(R.color.brand_primary, null))
                 } else {
-                    statusView.text = "⚠ No estimate yet — waiting for data"
+                    statusView.text = getString(R.string.soh_no_estimate_yet)
                     statusView.setTextColor(resources.getColor(R.color.text_muted, null))
                 }
                 
@@ -1193,7 +1205,7 @@ class MainActivity : AppCompatActivity() {
                 
                 val dialog = android.app.AlertDialog.Builder(this, R.style.Theme_Overdrive_Dialog)
                     .setView(dialogView)
-                    .setPositiveButton("Close", null)
+                    .setPositiveButton(getString(R.string.dialog_close), null)
                     .create()
                 
                 // Wire up reset button
@@ -1212,12 +1224,12 @@ class MainActivity : AppCompatActivity() {
      */
     private fun confirmSohReset() {
         android.app.AlertDialog.Builder(this)
-            .setTitle("Reset SOH Estimation?")
-            .setMessage("This will clear all SOH data and force re-estimation from scratch.\n\nUse this if:\n• Battery was replaced\n• SOH reading seems incorrect\n• You want to recalibrate\n\nThe system will re-seed from the next available data source (OEM, charge calibration, or instantaneous reading).")
-            .setPositiveButton("Reset") { _, _ ->
+            .setTitle(getString(R.string.dialog_reset_soh_title))
+            .setMessage(getString(R.string.dialog_reset_soh_message))
+            .setPositiveButton(getString(R.string.dialog_reset)) { _, _ ->
                 performSohReset()
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(getString(R.string.action_cancel), null)
             .show()
     }
     
@@ -1239,7 +1251,7 @@ class MainActivity : AppCompatActivity() {
                 
                 if (responseCode == 200) {
                     runOnUiThread {
-                        Toast.makeText(this, "✅ SOH estimation reset — will recalculate from next data", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, getString(R.string.toast_soh_reset_success), Toast.LENGTH_LONG).show()
                         logsViewModel.info("SOH", "SOH estimation reset by user")
                     }
                 } else {
@@ -1248,15 +1260,15 @@ class MainActivity : AppCompatActivity() {
                     val deleted = if (sohFile.exists()) sohFile.delete() else true
                     runOnUiThread {
                         if (deleted) {
-                            Toast.makeText(this, "✅ SOH estimation reset — will recalculate from next data", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this, getString(R.string.toast_soh_reset_success), Toast.LENGTH_LONG).show()
                         } else {
-                            Toast.makeText(this, "❌ Reset failed — daemon not responding and file not writable", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this, getString(R.string.toast_soh_reset_failed_no_daemon), Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    Toast.makeText(this, "❌ Reset failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, getString(R.string.toast_soh_reset_failed_with_message, e.message ?: ""), Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -1287,8 +1299,8 @@ class MainActivity : AppCompatActivity() {
 
         val dialog = android.app.AlertDialog.Builder(this, R.style.Theme_Overdrive_Dialog)
             .setView(dialogView)
-            .setPositiveButton("Reset Selected", null)  // Wired below to allow keep-open on validate
-            .setNegativeButton("Cancel", null)
+            .setPositiveButton(getString(R.string.dialog_reset_selected), null)  // Wired below to allow keep-open on validate
+            .setNegativeButton(getString(R.string.action_cancel), null)
             .create()
 
         // Quick toggles
@@ -1307,7 +1319,7 @@ class MainActivity : AppCompatActivity() {
             ok.setOnClickListener {
                 val selected = checkboxes.filter { it.first.isChecked }.map { it.second }
                 if (selected.isEmpty()) {
-                    Toast.makeText(this, "Select at least one category", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, getString(R.string.toast_select_at_least_one_category), Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
                 dialog.dismiss()
@@ -1320,22 +1332,22 @@ class MainActivity : AppCompatActivity() {
 
     private fun confirmAndPerformReset(categories: List<String>) {
         val labels = mapOf(
-            "trips" to "Trips",
-            "socHistory" to "SoC + 12V history",
-            "soh" to "SoH calibration",
-            "abrpToken" to "ABRP token",
-            "bydCloud" to "BYD Cloud credentials",
-            "mediaRecordings" to "Recordings",
-            "mediaSurveillance" to "Sentry events",
-            "mediaProximity" to "Proximity recordings",
-            "mediaTrips" to "Trip telemetry files"
+            "trips" to getString(R.string.reset_label_trips),
+            "socHistory" to getString(R.string.reset_label_soc_history),
+            "soh" to getString(R.string.reset_label_soh),
+            "abrpToken" to getString(R.string.reset_label_abrp_token),
+            "bydCloud" to getString(R.string.reset_label_byd_cloud),
+            "mediaRecordings" to getString(R.string.reset_label_recordings),
+            "mediaSurveillance" to getString(R.string.reset_label_sentry_events),
+            "mediaProximity" to getString(R.string.reset_label_proximity),
+            "mediaTrips" to getString(R.string.reset_label_trip_files)
         )
         val list = categories.joinToString("\n") { "• " + (labels[it] ?: it) }
         android.app.AlertDialog.Builder(this)
-            .setTitle("Reset the following?")
-            .setMessage("This cannot be undone.\n\n$list")
-            .setPositiveButton("Reset") { _, _ -> performReset(categories, labels) }
-            .setNegativeButton("Cancel", null)
+            .setTitle(getString(R.string.dialog_reset_following_title))
+            .setMessage(getString(R.string.dialog_reset_following_message, list))
+            .setPositiveButton(getString(R.string.dialog_reset)) { _, _ -> performReset(categories, labels) }
+            .setNegativeButton(getString(R.string.action_cancel), null)
             .show()
     }
 
@@ -1384,19 +1396,19 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
                         android.app.AlertDialog.Builder(this)
-                            .setTitle("Reset complete")
+                            .setTitle(getString(R.string.dialog_reset_complete_title))
                             .setMessage(lines.toString().trim())
-                            .setPositiveButton("OK", null)
+                            .setPositiveButton(getString(R.string.dialog_ok), null)
                             .show()
                         logsViewModel.info("Reset", "Categories: ${categories.joinToString(",")}")
                     } else {
                         val err = data?.optString("error") ?: "HTTP $code"
-                        Toast.makeText(this, "Reset failed: $err", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, getString(R.string.toast_reset_failed_with_error, err), Toast.LENGTH_LONG).show()
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    Toast.makeText(this, "Reset failed: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, getString(R.string.toast_reset_failed_with_error, e.message ?: ""), Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -1416,7 +1428,7 @@ class MainActivity : AppCompatActivity() {
      */
     private fun checkTrafficMonitorStatus() {
         // Show loading state while we check
-        updateTrafficMonitorMenuItemText("🔄 Traffic Monitor: Checking...")
+        updateTrafficMonitorMenuItemText(getString(R.string.traffic_monitor_loading))
         
         val adb = AdbDaemonLauncher(this)
         // Use 'grep ... || echo NOT_DISABLED' to ensure exit code 0 regardless of grep result
@@ -1443,19 +1455,24 @@ class MainActivity : AppCompatActivity() {
                     runOnUiThread {
                         // Actual ADB connection failure
                         trafficMonitorEnabled = null
-                        updateTrafficMonitorMenuItemText("⚠️ Traffic Monitor (tap to check)")
+                        updateTrafficMonitorMenuItemText(getString(R.string.traffic_monitor_tap_to_check))
                     }
                 }
             }
         )
     }
     
+    private fun refreshLanguageFooter() {
+        val tv = findViewById<TextView>(R.id.tvDrawerLanguageCurrent) ?: return
+        tv.text = com.overdrive.app.ui.dialog.LanguagePickerDialog.currentLabel(this)
+    }
+
     private fun updateTrafficMonitorMenuItem(enabled: Boolean) {
         val menuItem = navigationView.menu.findItem(R.id.nav_traffic_monitor)
         if (enabled) {
-            menuItem?.title = "✅ Traffic Monitor: Enabled"
+            menuItem?.title = getString(R.string.traffic_monitor_enabled_title)
         } else {
-            menuItem?.title = "⛔ Traffic Monitor: Disabled"
+            menuItem?.title = getString(R.string.traffic_monitor_disabled_title)
         }
     }
     
@@ -1477,55 +1494,32 @@ class MainActivity : AppCompatActivity() {
             checkTrafficMonitorStatus()
             
             android.app.AlertDialog.Builder(this)
-                .setTitle("⚠️ Cannot Check Status")
-                .setMessage(
-                    "ADB connection is not ready yet.\n\n" +
-                    "The app needs ADB access to manage system packages. " +
-                    "Please ensure:\n\n" +
-                    "• USB Debugging is enabled in Developer Options\n" +
-                    "• The ADB authorization prompt has been accepted\n\n" +
-                    "The status will update automatically once connected."
-                )
-                .setPositiveButton("OK", null)
+                .setTitle(getString(R.string.dialog_traffic_cannot_check_title))
+                .setMessage(getString(R.string.dialog_traffic_cannot_check_message))
+                .setPositiveButton(getString(R.string.dialog_ok), null)
                 .show()
             return
         }
-        
+
         if (currentlyEnabled) {
             // Currently enabled — offer to disable with full explanation
             android.app.AlertDialog.Builder(this)
-                .setTitle("Disable BYD Traffic Monitor?")
-                .setMessage(
-                    "The BYD Traffic Monitor (com.byd.trafficmonitor) is a built-in system app " +
-                    "that continuously monitors road traffic conditions in the background.\n\n" +
-                    "⚠️ Why disable it?\n\n" +
-                    "• Consumes mobile data (even when parked)\n" +
-                    "• Uses CPU and battery in the background\n" +
-                    "• Not needed if you use a separate navigation app\n" +
-                    "• Can interfere with the dashcam's network usage\n\n" +
-                    "This is safe to disable — it only affects the built-in traffic overlay on the map. " +
-                    "Your navigation, Bluetooth, and all other car functions remain unaffected.\n\n" +
-                    "A hard reboot is required after disabling (hold center console button 5 seconds)."
-                )
-                .setPositiveButton("Disable") { _, _ ->
+                .setTitle(getString(R.string.dialog_traffic_disable_title))
+                .setMessage(getString(R.string.dialog_traffic_disable_message))
+                .setPositiveButton(getString(R.string.dialog_disable)) { _, _ ->
                     setTrafficMonitorEnabled(false)
                 }
-                .setNegativeButton("Keep Enabled", null)
+                .setNegativeButton(getString(R.string.dialog_keep_enabled), null)
                 .show()
         } else {
             // Currently disabled — offer to re-enable
             android.app.AlertDialog.Builder(this)
-                .setTitle("Re-enable BYD Traffic Monitor?")
-                .setMessage(
-                    "The BYD Traffic Monitor is currently disabled.\n\n" +
-                    "Re-enabling it will restore the built-in traffic overlay on the navigation map. " +
-                    "Note that it will run in the background and consume mobile data.\n\n" +
-                    "A hard reboot is required after enabling (hold center console button 5 seconds)."
-                )
-                .setPositiveButton("Enable") { _, _ ->
+                .setTitle(getString(R.string.dialog_traffic_enable_title))
+                .setMessage(getString(R.string.dialog_traffic_enable_message))
+                .setPositiveButton(getString(R.string.dialog_enable)) { _, _ ->
                     setTrafficMonitorEnabled(true)
                 }
-                .setNegativeButton("Keep Disabled", null)
+                .setNegativeButton(getString(R.string.dialog_keep_disabled), null)
                 .show()
         }
     }
@@ -1541,7 +1535,7 @@ class MainActivity : AppCompatActivity() {
         }
         
         val action = if (enable) "Enabling" else "Disabling"
-        Toast.makeText(this, "$action traffic monitor...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, getString(R.string.toast_traffic_monitor_changing, action), Toast.LENGTH_SHORT).show()
         
         val adb = AdbDaemonLauncher(this)
         adb.executeShellCommand(cmd, object : AdbDaemonLauncher.LaunchCallback {
@@ -1559,20 +1553,16 @@ class MainActivity : AppCompatActivity() {
                     
                     // Show reboot reminder
                     android.app.AlertDialog.Builder(this@MainActivity)
-                        .setTitle("✅ Traffic Monitor ${state.replaceFirstChar { it.uppercase() }}")
-                        .setMessage(
-                            "The change has been applied.\n\n" +
-                            "Please perform a hard reboot now:\n" +
-                            "Press and hold the central console button for 5 seconds."
-                        )
-                        .setPositiveButton("OK", null)
+                        .setTitle(getString(R.string.dialog_traffic_status_title, state.replaceFirstChar { it.uppercase() }))
+                        .setMessage(getString(R.string.dialog_traffic_reboot_message))
+                        .setPositiveButton(getString(R.string.dialog_ok), null)
                         .show()
                 }
             }
-            
+
             override fun onError(error: String) {
                 runOnUiThread {
-                    Toast.makeText(this@MainActivity, "❌ Failed: $error", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@MainActivity, getString(R.string.toast_failed_with_message_x, error), Toast.LENGTH_LONG).show()
                     logsViewModel.error("TrafficMonitor", "Failed to ${if (enable) "enable" else "disable"}: $error")
                 }
             }

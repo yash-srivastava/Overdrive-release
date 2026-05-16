@@ -23,7 +23,7 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:src="@mipmap/ic_launcher_foreground"
-            android:contentDescription="OverDrive Logo"
+            android:contentDescription="@string/nav_header_logo_desc"
             android:scaleType="centerCrop" />
 
     </com.google.android.material.card.MaterialCardView>
@@ -44,7 +44,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="2dp"
-        android:text="Sentry System"
+        android:text="@string/nav_header_tagline"
         android:textColor="@color/text_muted"
         android:textSize="11sp"
         android:textAllCaps="true"
@@ -86,7 +86,7 @@
                 android:id="@+id/tvDeviceId"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="byd-xxxxxxxx"
+                android:text="@string/nav_header_device_id_placeholder"
                 android:textColor="@color/brand_primary"
                 android:textSize="12sp"
                 android:fontFamily="monospace" />

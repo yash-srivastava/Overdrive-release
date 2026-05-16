@@ -28,7 +28,7 @@
                 android:background="@drawable/overlay_action_button_bg"
                 android:gravity="center"
                 android:padding="8dp"
-                android:text="Generate login URL"
+                android:text="@string/tailscale_generate_login_url"
                 android:textColor="@color/brand_primary"
                 android:textSize="13sp"
                 android:textStyle="bold" />
@@ -55,13 +55,13 @@
                         android:layout_height="20dp"
                         android:src="@drawable/ic_dashboard"
                         app:tint="@color/brand_primary"
-                        android:contentDescription="QR" />
+                        android:contentDescription="@string/cd_qr" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="10dp"
-                        android:text="Scan to Login"
+                        android:text="@string/tailscale_scan_to_login"
                         android:textColor="@color/text_primary"
                         android:textSize="16sp"
                         android:fontFamily="sans-serif-medium" />
@@ -79,7 +79,7 @@
                         android:layout_width="180dp"
                         android:layout_height="180dp"
                         android:background="@color/white"
-                        android:contentDescription="QR Code"
+                        android:contentDescription="@string/cd_qr_code"
                         android:padding="8dp"
                         android:scaleType="fitCenter" />
 
@@ -90,7 +90,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
-                    android:text="Waiting for login URL..."
+                    android:text="@string/tailscale_qr_waiting"
                     android:textColor="@color/text_muted"
                     android:textSize="13sp"
                     android:gravity="center" />
@@ -106,7 +106,7 @@
             android:layout_marginTop="16dp"
             android:checked="false"
             android:paddingVertical="8dp"
-            android:text="Enable Tailscale Proxy"
+            android:text="@string/tailscale_enable_proxy"
             android:textColor="@color/text_primary" />
 
         <TextView
@@ -114,7 +114,7 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="48dp"
             android:layout_marginTop="4dp"
-            android:text="Routes MQTT through Tailscale so you can reach a private broker on your tailnet without port forwarding."
+            android:text="@string/tailscale_proxy_explainer"
             android:textColor="@color/text_muted"
             android:textSize="12sp" />
 
@@ -123,7 +123,7 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="48dp"
             android:layout_marginTop="12dp"
-            android:text="⚠️ While enabled, MQTT to public brokers (HiveMQ, AWS IoT, etc.) will fail — Tailscale only routes to your tailnet. Saving will restart the daemon."
+            android:text="@string/tailscale_proxy_warning"
             android:textColor="@color/status_warning"
             android:textSize="12sp" />
 

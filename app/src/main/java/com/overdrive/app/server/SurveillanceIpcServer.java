@@ -275,10 +275,10 @@ public class SurveillanceIpcServer implements Runnable {
                                 zoneData.optInt("radiusM", 150));
                         response.put("success", zone != null);
                         if (zone != null) response.put("zone", zone.toJson());
-                        else response.put("error", "Max zones reached (10)");
+                        else response.put("error", Messages.get("errors.zones_max_reached", 10));
                     } else {
                         response.put("success", false);
-                        response.put("error", "Missing zone data");
+                        response.put("error", Messages.get("errors.zones_missing_data"));
                     }
                     break;
                 }
@@ -292,7 +292,7 @@ public class SurveillanceIpcServer implements Runnable {
                         response.put("success", updated);
                     } else {
                         response.put("success", false);
-                        response.put("error", "Missing id or updates");
+                        response.put("error", Messages.get("errors.missing_id_or_updates"));
                     }
                     break;
                 }
@@ -305,7 +305,7 @@ public class SurveillanceIpcServer implements Runnable {
                         response.put("success", removed);
                     } else {
                         response.put("success", false);
-                        response.put("error", "Missing id");
+                        response.put("error", Messages.get("errors.missing_id"));
                     }
                     break;
                 }
@@ -395,7 +395,7 @@ public class SurveillanceIpcServer implements Runnable {
                 default:
                     logger.warn("Unknown IPC command: " + command);
                     response.put("success", false);
-                    response.put("error", "Unknown command: " + command);
+                    response.put("error", Messages.get("errors.unknown_command", command));
             }
         } catch (Exception e) {
             logger.error("Error handling IPC command", e);
@@ -1228,7 +1228,7 @@ public class SurveillanceIpcServer implements Runnable {
     private void handleSetAbrpConfig(JSONObject request, JSONObject response) throws Exception {
         if (abrpConfig == null) {
             response.put("success", false);
-            response.put("error", "ABRP not initialized");
+            response.put("error", Messages.get("errors.abrp_not_initialized"));
             return;
         }
 
@@ -1267,7 +1267,7 @@ public class SurveillanceIpcServer implements Runnable {
     private void handleGetAbrpConfig(JSONObject response) throws Exception {
         if (abrpConfig == null) {
             response.put("success", false);
-            response.put("error", "ABRP not initialized");
+            response.put("error", Messages.get("errors.abrp_not_initialized"));
             return;
         }
 
@@ -1297,7 +1297,7 @@ public class SurveillanceIpcServer implements Runnable {
     private void handleDeleteAbrpToken(JSONObject response) throws Exception {
         if (abrpConfig == null) {
             response.put("success", false);
-            response.put("error", "ABRP not initialized");
+            response.put("error", Messages.get("errors.abrp_not_initialized"));
             return;
         }
 
@@ -1318,7 +1318,7 @@ public class SurveillanceIpcServer implements Runnable {
     private void handleGetMqttConnections(JSONObject response) throws Exception {
         if (mqttManager == null) {
             response.put("success", false);
-            response.put("error", "MQTT not initialized");
+            response.put("error", Messages.get("errors.mqtt_not_initialized"));
             return;
         }
         response.put("success", true);
@@ -1329,7 +1329,7 @@ public class SurveillanceIpcServer implements Runnable {
     private void handleAddMqttConnection(JSONObject request, JSONObject response) throws Exception {
         if (mqttManager == null) {
             response.put("success", false);
-            response.put("error", "MQTT not initialized");
+            response.put("error", Messages.get("errors.mqtt_not_initialized"));
             return;
         }
 
@@ -1340,21 +1340,21 @@ public class SurveillanceIpcServer implements Runnable {
             response.put("message", "MQTT connection added");
         } else {
             response.put("success", false);
-            response.put("error", "Max connections reached (" + com.overdrive.app.mqtt.MqttConnectionStore.MAX_CONNECTIONS + ")");
+            response.put("error", Messages.get("errors.max_connections_reached", com.overdrive.app.mqtt.MqttConnectionStore.MAX_CONNECTIONS));
         }
     }
 
     private void handleUpdateMqttConnection(JSONObject request, JSONObject response) throws Exception {
         if (mqttManager == null) {
             response.put("success", false);
-            response.put("error", "MQTT not initialized");
+            response.put("error", Messages.get("errors.mqtt_not_initialized"));
             return;
         }
 
         String id = request.optString("id", null);
         if (id == null || id.isEmpty()) {
             response.put("success", false);
-            response.put("error", "Missing connection ID");
+            response.put("error", Messages.get("errors.missing_connection_id"));
             return;
         }
 
@@ -1363,21 +1363,21 @@ public class SurveillanceIpcServer implements Runnable {
         if (updated) {
             response.put("message", "MQTT connection updated");
         } else {
-            response.put("error", "Connection not found: " + id);
+            response.put("error", Messages.get("errors.connection_not_found", id));
         }
     }
 
     private void handleDeleteMqttConnection(JSONObject request, JSONObject response) throws Exception {
         if (mqttManager == null) {
             response.put("success", false);
-            response.put("error", "MQTT not initialized");
+            response.put("error", Messages.get("errors.mqtt_not_initialized"));
             return;
         }
 
         String id = request.optString("id", null);
         if (id == null || id.isEmpty()) {
             response.put("success", false);
-            response.put("error", "Missing connection ID");
+            response.put("error", Messages.get("errors.missing_connection_id"));
             return;
         }
 
@@ -1386,14 +1386,14 @@ public class SurveillanceIpcServer implements Runnable {
         if (deleted) {
             response.put("message", "MQTT connection deleted");
         } else {
-            response.put("error", "Connection not found: " + id);
+            response.put("error", Messages.get("errors.connection_not_found", id));
         }
     }
 
     private void handleGetMqttStatus(JSONObject response) throws Exception {
         if (mqttManager == null) {
             response.put("success", false);
-            response.put("error", "MQTT not initialized");
+            response.put("error", Messages.get("errors.mqtt_not_initialized"));
             return;
         }
         response.put("success", true);
@@ -1403,7 +1403,7 @@ public class SurveillanceIpcServer implements Runnable {
     private void handleGetMqttTelemetry(JSONObject response) throws Exception {
         if (mqttManager == null) {
             response.put("success", false);
-            response.put("error", "MQTT not initialized");
+            response.put("error", Messages.get("errors.mqtt_not_initialized"));
             return;
         }
         response.put("success", true);

@@ -168,7 +168,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="2s"
+                        android:text="@string/slider_min_2s"
                         android:textColor="@color/text_muted"
                         android:textSize="11sp" />
 
@@ -185,7 +185,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="15s"
+                        android:text="@string/slider_max_15s"
                         android:textColor="@color/text_muted"
                         android:textSize="11sp" />
 
@@ -197,7 +197,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginBottom="20dp"
                     android:gravity="center"
-                    android:text="5 seconds"
+                    android:text="@string/recording_pre_buffer_initial"
                     android:textColor="@color/brand_primary"
                     android:textSize="14sp"
                     android:textStyle="bold" />
@@ -228,7 +228,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="5s"
+                        android:text="@string/slider_min_5s"
                         android:textColor="@color/text_muted"
                         android:textSize="11sp" />
 
@@ -245,7 +245,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="30s"
+                        android:text="@string/slider_max_30s"
                         android:textColor="@color/text_muted"
                         android:textSize="11sp" />
 
@@ -257,7 +257,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginBottom="16dp"
                     android:gravity="center"
-                    android:text="10 seconds"
+                    android:text="@string/recording_post_buffer_initial"
                     android:textColor="@color/brand_primary"
                     android:textSize="14sp"
                     android:textStyle="bold" />
@@ -325,7 +325,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="Low" />
+                        android:text="@string/quality_low" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnRecQualityReduced"
@@ -333,7 +333,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="Reduced" />
+                        android:text="@string/quality_reduced" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnRecQualityNormal"
@@ -341,7 +341,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="Normal" />
+                        android:text="@string/quality_normal" />
 
                 </com.google.android.material.button.MaterialButtonToggleGroup>
                 
@@ -368,7 +368,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="Low" />
+                        android:text="@string/quality_low" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnBitrateMedium"
@@ -376,7 +376,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="Med" />
+                        android:text="@string/bitrate_med" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnBitrateHigh"
@@ -384,7 +384,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="High" />
+                        android:text="@string/bitrate_high" />
 
                 </com.google.android.material.button.MaterialButtonToggleGroup>
                 
@@ -410,7 +410,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="H.264" />
+                        android:text="@string/codec_h264" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnCodecH265"
@@ -418,7 +418,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="H.265" />
+                        android:text="@string/codec_h265" />
 
                 </com.google.android.material.button.MaterialButtonToggleGroup>
 
@@ -458,7 +458,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Telemetry Overlay"
+                            android:text="@string/recording_telemetry_overlay_title"
                             android:textColor="@color/text_primary"
                             android:textSize="16sp"
                             android:fontFamily="sans-serif-medium" />
@@ -466,7 +466,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Show speed, gear, pedals on recorded video"
+                            android:text="@string/recording_telemetry_overlay_desc"
                             android:textColor="@color/text_muted"
                             android:textSize="13sp"
                             android:layout_marginTop="4dp" />
@@ -519,14 +519,14 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Storage Location"
+                    android:text="@string/recording_storage_location"
                     android:textColor="@color/text_secondary"
                     android:textSize="14sp" />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Choose where to save recordings"
+                    android:text="@string/recording_storage_choose"
                     android:textColor="@color/text_muted"
                     android:textSize="11sp"
                     android:layout_marginTop="2dp" />
@@ -546,7 +546,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="📱 Internal"
+                        android:text="@string/storage_internal"
                         android:textSize="12sp" />
 
                     <com.google.android.material.button.MaterialButton
@@ -555,7 +555,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="💾 SD Card"
+                        android:text="@string/storage_sd_card"
                         android:textSize="12sp" />
 
                 </com.google.android.material.button.MaterialButtonToggleGroup>
@@ -581,7 +581,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="8dp"
-                        android:text="SD Card: Not detected"
+                        android:text="@string/storage_sd_not_detected"
                         android:textColor="@color/text_muted"
                         android:textSize="12sp" />
 
@@ -631,7 +631,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="-- used"
+                        android:text="@string/storage_used_dashes"
                         android:textColor="@color/text_secondary"
                         android:textSize="12sp" />
 
@@ -641,7 +641,7 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:gravity="end"
-                        android:text="-- limit"
+                        android:text="@string/storage_limit_dashes"
                         android:textColor="@color/text_secondary"
                         android:textSize="12sp" />
 
@@ -674,7 +674,7 @@
                         android:id="@+id/tvStorageMinLabel"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="100MB"
+                        android:text="@string/slider_min_100mb"
                         android:textColor="@color/text_muted"
                         android:textSize="11sp" />
 
@@ -692,7 +692,7 @@
                         android:id="@+id/tvStorageMaxLabel"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="1000MB"
+                        android:text="@string/slider_max_1000mb"
                         android:textColor="@color/text_muted"
                         android:textSize="11sp" />
 
@@ -703,7 +703,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center"
-                    android:text="500 MB"
+                    android:text="@string/storage_default_value_500mb"
                     android:textColor="@color/brand_primary"
                     android:textSize="16sp"
                     android:textStyle="bold" />
@@ -741,7 +741,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="BYD Dashcam Cleanup"
+                        android:text="@string/cdr_cleanup_title"
                         android:textColor="@color/text_primary"
                         android:textSize="16sp"
                         android:textStyle="bold" />
@@ -754,7 +754,7 @@
                         android:background="@drawable/status_indicator"
                         android:paddingHorizontal="8dp"
                         android:paddingVertical="2dp"
-                        android:text="OFF"
+                        android:text="@string/cdr_cleanup_off"
                         android:textColor="@color/text_muted"
                         android:textSize="10sp" />
 
@@ -769,7 +769,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Auto-delete old dashcam files to free SD card space"
+                    android:text="@string/cdr_cleanup_desc_short"
                     android:textColor="@color/text_muted"
                     android:textSize="12sp" />
 
@@ -794,14 +794,14 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="CDR Usage"
+                            android:text="@string/cdr_usage_label"
                             android:textColor="@color/text_muted"
                             android:textSize="11sp" />
                         <TextView
                             android:id="@+id/tvCdrUsage"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="--"
+                            android:text="@string/cdr_value_dashes"
                             android:textColor="@color/text_primary"
                             android:textSize="14sp"
                             android:textStyle="bold" />
@@ -815,14 +815,14 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Files"
+                            android:text="@string/cdr_files_label"
                             android:textColor="@color/text_muted"
                             android:textSize="11sp" />
                         <TextView
                             android:id="@+id/tvCdrFileCount"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="--"
+                            android:text="@string/cdr_value_dashes"
                             android:textColor="@color/text_primary"
                             android:textSize="14sp"
                             android:textStyle="bold" />
@@ -836,14 +836,14 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Deletable"
+                            android:text="@string/cdr_deletable_label"
                             android:textColor="@color/text_muted"
                             android:textSize="11sp" />
                         <TextView
                             android:id="@+id/tvCdrDeletable"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="--"
+                            android:text="@string/cdr_value_dashes"
                             android:textColor="@color/status_error"
                             android:textSize="14sp"
                             android:textStyle="bold" />
@@ -855,7 +855,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Reserved Space for Overdrive"
+                    android:text="@string/cdr_reserved_title"
                     android:textColor="@color/text_secondary"
                     android:textSize="13sp" />
 
@@ -880,7 +880,7 @@
                         android:layout_width="60dp"
                         android:layout_height="wrap_content"
                         android:gravity="end"
-                        android:text="2 GB"
+                        android:text="@string/cdr_reserved_default"
                         android:textColor="@color/brand_primary"
                         android:textSize="13sp"
                         android:textStyle="bold" />
@@ -892,7 +892,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
-                    android:text="Protect Recent Files"
+                    android:text="@string/cdr_protect_title"
                     android:textColor="@color/text_secondary"
                     android:textSize="13sp" />
 
@@ -917,7 +917,7 @@
                         android:layout_width="60dp"
                         android:layout_height="wrap_content"
                         android:gravity="end"
-                        android:text="24h"
+                        android:text="@string/cdr_protect_default"
                         android:textColor="@color/brand_primary"
                         android:textSize="13sp"
                         android:textStyle="bold" />
@@ -931,7 +931,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="16dp"
-                    android:text="🗑️ Clean Up Now"
+                    android:text="@string/action_clean_up_now"
                     android:textColor="@color/status_error"
                     app:strokeColor="@color/status_error"
                     app:cornerRadius="8dp" />
@@ -948,7 +948,7 @@
             android:layout_height="52dp"
             android:layout_marginTop="8dp"
             android:enabled="false"
-            android:text="✓ Apply Settings"
+            android:text="@string/action_apply_settings"
             app:cornerRadius="12dp" />
 
     </LinearLayout>

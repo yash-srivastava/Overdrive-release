@@ -227,13 +227,43 @@ public final class BydDeviceHelper {
     }
 
     /**
+     * Resolve the IBYDAutoListener-derived interface for a given device class
+     * by inspecting registerListener parameter types. Some devices (e.g. ADAS)
+     * declare a derived interface (IBYDAutoADASListener) instead of the base
+     * IBYDAutoListener — Class.forName on the base name would still find a
+     * class, but the proxy must implement the device-specific subtype or
+     * registerListener.invoke fails with IllegalArgumentException.
+     */
+    private static Class<?> getListenerInterface(Class<?> cls, String listenerInterfaceName) {
+        if (cls != null) {
+            Method[] methods = cls.getDeclaredMethods();
+            for (Method method : methods) {
+                if (method.getName().equals("registerListener")) {
+                    Class<?>[] parameterTypes = method.getParameterTypes();
+                    if (parameterTypes.length == 1) {
+                        Class<?>[] interfaces = parameterTypes[0].getInterfaces();
+                        if (interfaces.length == 1 && interfaces[0].getName().equals(listenerInterfaceName)) {
+                            return interfaces[0];
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
      * Register a listener on a device using IBYDAutoListener interface.
      * Creates a dynamic proxy that forwards all calls to the callback.
      */
     public static boolean registerListener(Object device, ListenerCallback callback) {
         if (device == null) return false;
         try {
-            Class<?> iListener = Class.forName("android.hardware.IBYDAutoListener");
+            String listenerInterfaceName = "android.hardware.IBYDAutoListener";
+            Class<?> iListener = getListenerInterface(device.getClass(), listenerInterfaceName);
+            if (iListener == null) {
+                iListener = Class.forName(listenerInterfaceName);
+            }
             Object proxy = java.lang.reflect.Proxy.newProxyInstance(
                 iListener.getClassLoader(),
                 new Class<?>[]{iListener},
@@ -269,7 +299,11 @@ public final class BydDeviceHelper {
     public static boolean registerListener(Object device, int[] featureIds, ListenerCallback callback) {
         if (device == null) return false;
         try {
-            Class<?> iListener = Class.forName("android.hardware.IBYDAutoListener");
+            String listenerInterfaceName = "android.hardware.IBYDAutoListener";
+            Class<?> iListener = getListenerInterface(device.getClass(), listenerInterfaceName);
+            if (iListener == null) {
+                iListener = Class.forName(listenerInterfaceName);
+            }
             Object proxy = java.lang.reflect.Proxy.newProxyInstance(
                 iListener.getClassLoader(),
                 new Class<?>[]{iListener},
@@ -626,6 +660,29 @@ public final class BydDeviceHelper {
     // ==================== EXTENDED GETTER METHODS ====================
 
     /**
+     * Call get(int deviceType, int featureId) on a BYD device.
+     * Returns the SDK result code, or -1 on any failure.
+     */
+    public static int callGetSingle(Object device, int featureId) {
+        if (device == null) return -1;
+        try {
+            int deviceType = resolveDeviceType(device);
+            if (deviceType == Integer.MIN_VALUE) return -1;
+            Method m = findMethodCached(device, "get", getSingleMethodCache,
+                    int.class, int.class);
+            if (m != null) {
+                Object result = m.invoke(device, deviceType, featureId);
+                if (result instanceof Number) return ((Number) result).intValue();
+            }
+        } catch (SecurityException e) {
+            logger.debug("callGetSingle permission denied for id=" + featureId + " — " + e.getMessage());
+        } catch (Exception e) {
+            logger.debug("callGetSingle failed for id=" + featureId + " — " + e.getMessage());
+        }
+        return -1;
+    }
+
+    /**
      * Call getDouble(int deviceType, int featureId) on a BYD device.
      * Returns Double.NaN on any failure.
      */
@@ -813,6 +870,7 @@ public final class BydDeviceHelper {
     // ==================== INTERNAL HELPERS ====================
 
     private static final java.util.Map<Class<?>, Method> getMethodCache = new java.util.HashMap<>();
+    private static final java.util.Map<Class<?>, Method> getSingleMethodCache = new java.util.HashMap<>();
     private static final java.util.Map<Class<?>, Method> getDoubleMethodCache = new java.util.HashMap<>();
     private static final java.util.Map<Class<?>, Method> getIntArrayMethodCache = new java.util.HashMap<>();
     private static final java.util.Map<Class<?>, Method> getDoubleArrayMethodCache = new java.util.HashMap<>();

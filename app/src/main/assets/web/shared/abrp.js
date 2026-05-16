@@ -46,23 +46,23 @@ const ABRP = {
                 // Connection status
                 const statusEl = document.getElementById('connectionStatus');
                 if (statusEl) {
-                    statusEl.textContent = s.running ? '🟢 Connected' : '🔴 Disconnected';
+                    statusEl.textContent = s.running ? '🟢 ' + BYD.i18n.t('abrp.connected') : '🔴 ' + BYD.i18n.t('abrp.disconnected');
                 }
 
                 // Last upload
                 const lastEl = document.getElementById('lastUpload');
                 if (lastEl) {
                     if (s.lastUploadTime && s.lastUploadTime > 0) {
-                        lastEl.textContent = new Date(s.lastUploadTime).toLocaleTimeString();
+                        lastEl.textContent = new Date(s.lastUploadTime).toLocaleTimeString(BYD.i18n.getLang());
                     } else {
-                        lastEl.textContent = 'Never';
+                        lastEl.textContent = BYD.i18n.t('abrp.never');
                     }
                 }
 
                 // Upload counts
                 const countEl = document.getElementById('uploadCount');
                 if (countEl) {
-                    countEl.textContent = (s.totalUploads || 0) + ' / ' + (s.failedUploads || 0) + ' failed';
+                    countEl.textContent = BYD.i18n.t('abrp.upload_count', {total: s.totalUploads || 0, failed: s.failedUploads || 0});
                 }
 
                 // Telemetry table
@@ -79,7 +79,7 @@ const ABRP = {
         const field = document.getElementById('abrpTokenField');
         const token = field ? field.value.trim() : '';
         if (!token) {
-            this.setTokenStatus('Please enter a token', 'error');
+            this.setTokenStatus(BYD.i18n.t('abrp.err_enter_token'), 'error');
             return;
         }
 
@@ -91,14 +91,14 @@ const ABRP = {
             });
             const data = await resp.json();
             if (data.success) {
-                this.setTokenStatus('Token saved successfully', 'success');
+                this.setTokenStatus(BYD.i18n.t('abrp.token_saved'), 'success');
                 if (field) field.value = '';
                 this.loadConfig();
             } else {
-                this.setTokenStatus(data.error || 'Failed to save token', 'error');
+                this.setTokenStatus(data.error || BYD.i18n.t('abrp.token_save_failed'), 'error');
             }
         } catch (e) {
-            this.setTokenStatus('Network error saving token', 'error');
+            this.setTokenStatus(BYD.i18n.t('abrp.token_network_save'), 'error');
         }
     },
 
@@ -107,13 +107,13 @@ const ABRP = {
             const resp = await fetch('/api/abrp/token', { method: 'DELETE' });
             const data = await resp.json();
             if (data.success) {
-                this.setTokenStatus('Token deleted', 'success');
+                this.setTokenStatus(BYD.i18n.t('abrp.token_deleted'), 'success');
                 this.loadConfig();
             } else {
-                this.setTokenStatus(data.error || 'Failed to delete token', 'error');
+                this.setTokenStatus(data.error || BYD.i18n.t('abrp.token_delete_failed'), 'error');
             }
         } catch (e) {
-            this.setTokenStatus('Network error deleting token', 'error');
+            this.setTokenStatus(BYD.i18n.t('abrp.token_network_delete'), 'error');
         }
     },
 
@@ -143,15 +143,15 @@ const ABRP = {
 
     updateTelemetryTable(t) {
         const fields = {
-            tlm_utc:         t.utc != null ? new Date(t.utc * 1000).toLocaleTimeString() : '--',
+            tlm_utc:         t.utc != null ? new Date(t.utc * 1000).toLocaleTimeString(BYD.i18n.getLang()) : '--',
             tlm_soc:         t.soc != null ? t.soc.toFixed(1) + '%' : '--%',
             tlm_power:       t.power != null ? t.power.toFixed(1) + ' kW' : '-- kW',
             tlm_speed:       t.speed != null ? BYD.units.speed(t.speed) : '-- ' + BYD.units.speedLabel(),
             tlm_lat:         t.lat != null ? t.lat.toFixed(6) : '--',
             tlm_lon:         t.lon != null ? t.lon.toFixed(6) : '--',
-            tlm_is_charging: t.is_charging != null ? (t.is_charging ? 'Yes' : 'No') : '--',
-            tlm_is_dcfc:     t.is_dcfc != null ? (t.is_dcfc ? 'Yes' : 'No') : '--',
-            tlm_is_parked:   t.is_parked != null ? (t.is_parked ? 'Yes' : 'No') : '--',
+            tlm_is_charging: t.is_charging != null ? (t.is_charging ? BYD.i18n.t('common.yes') : BYD.i18n.t('common.no')) : '--',
+            tlm_is_dcfc:     t.is_dcfc != null ? (t.is_dcfc ? BYD.i18n.t('common.yes') : BYD.i18n.t('common.no')) : '--',
+            tlm_is_parked:   t.is_parked != null ? (t.is_parked ? BYD.i18n.t('common.yes') : BYD.i18n.t('common.no')) : '--',
             tlm_elevation:   t.elevation != null ? t.elevation.toFixed(1) + ' m' : '-- m',
             tlm_heading:     t.heading != null ? t.heading.toFixed(1) + '°' : '--°',
             tlm_ext_temp:    t.ext_temp != null ? t.ext_temp.toFixed(1) + ' °C' : '-- °C',
@@ -196,19 +196,19 @@ const ABRP = {
         setEl('vehicleOdometer', t.odometer != null ? t.odometer.toFixed(0) + ' km' : '-- km');
 
         // SOH
-        setEl('vehicleSoh', t.soh != null ? 'SOH: ' + t.soh.toFixed(1) + '%' : 'SOH: --%');
+        setEl('vehicleSoh', t.soh != null ? BYD.i18n.t('abrp.soh_value', {value: t.soh.toFixed(1)}) : BYD.i18n.t('abrp.soh_unknown'));
 
         // Vehicle status badge
         const statusEl = document.getElementById('vehicleStatus');
         if (statusEl) {
             if (t.is_charging) {
-                statusEl.textContent = '⚡ Charging';
+                statusEl.textContent = '⚡ ' + BYD.i18n.t('abrp.charging');
                 statusEl.style.color = 'var(--brand-primary)';
             } else if (t.is_parked) {
-                statusEl.textContent = 'Parked';
+                statusEl.textContent = BYD.i18n.t('abrp.parked');
                 statusEl.style.color = 'var(--text-secondary)';
             } else {
-                statusEl.textContent = 'Driving';
+                statusEl.textContent = BYD.i18n.t('abrp.driving');
                 statusEl.style.color = '#22c55e';
             }
         }
@@ -217,8 +217,8 @@ const ABRP = {
         const chargingEl = document.getElementById('vehicleCharging');
         if (chargingEl) {
             chargingEl.style.display = t.is_charging ? 'inline' : 'none';
-            if (t.is_dcfc) chargingEl.textContent = '⚡ DC Fast Charging';
-            else if (t.is_charging) chargingEl.textContent = '⚡ Charging';
+            if (t.is_dcfc) chargingEl.textContent = '⚡ ' + BYD.i18n.t('abrp.dc_fast_charging');
+            else if (t.is_charging) chargingEl.textContent = '⚡ ' + BYD.i18n.t('abrp.charging');
         }
     },
 

@@ -87,7 +87,12 @@
             '<polyline points="1 20 1 14 7 14"/>' +
             '<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>' +
             '</svg>' +
-            '<span>Check for Updates</span>';
+            // Mark the span with data-i18n so the runtime re-translates it
+            // once the catalog finishes loading. Without this attribute, the
+            // initial t() call returns the literal key ("update.check_for_updates")
+            // when run before BYD.i18n.init() resolves, and there's nothing to
+            // re-evaluate later.
+            '<span data-i18n="update.check_for_updates">' + (window.BYD && BYD.i18n ? BYD.i18n.t('update.check_for_updates') : 'Check for Updates') + '</span>';
         a.addEventListener('click', function (e) {
             e.preventDefault();
             startCheckFlow();
@@ -100,16 +105,16 @@
     function startCheckFlow() {
         var link = $('navUpdateLink');
         if (link) link.style.opacity = '0.6';
-        toast('Checking for updates…', 'info');
+        toast(BYD.i18n.t('update.checking'), 'info');
 
         fetch('/api/update/check').then(function (r) { return r.json(); }).then(function (res) {
             if (link) link.style.opacity = '';
             if (res.error) {
-                toast('Update check failed: ' + res.error, 'error');
+                toast(BYD.i18n.t('update.check_failed', {error: res.error}), 'error');
                 return;
             }
             if (!res.available) {
-                toast('✅ You\'re on the latest version (' + (res.currentVersion || '') + ')', 'success');
+                toast(BYD.i18n.t('update.latest_version', {version: res.currentVersion || ''}), 'success');
                 return;
             }
             // Update available — fetch preview metadata + show modal.
@@ -120,7 +125,7 @@
             });
         }).catch(function (e) {
             if (link) link.style.opacity = '';
-            toast('Update check failed: ' + (e && e.message ? e.message : 'network error'), 'error');
+            toast(BYD.i18n.t('update.check_failed', {error: (e && e.message) ? e.message : BYD.i18n.t('errors.network')}), 'error');
         });
     }
 
@@ -141,47 +146,45 @@
         var rotationRowHtml = rotates ?
             '<div class="upd-row">' +
               '<span class="upd-icon">🔁</span>' +
-              '<div><strong>Your cloudflared link will change.</strong> The new URL will be sent to Telegram with the version number — check your chat after the update.</div>' +
+              '<div>' + BYD.i18n.t('update.rotation_warning') + '</div>' +
             '</div>' : (
                 tunnelType !== 'unknown' && tunnelType !== 'cloudflared' ?
                 '<div class="upd-row">' +
                   '<span class="upd-icon">🔗</span>' +
-                  '<div>Your <strong>' + escapeHtml(tunnelType) + '</strong> URL is stable and will not change.</div>' +
+                  '<div>' + BYD.i18n.t('update.tunnel_stable', {type: escapeHtml(tunnelType)}) + '</div>' +
                 '</div>' : ''
             );
 
         var lanRowHtml = lanIps ?
             '<div class="upd-row">' +
               '<span class="upd-icon">🏠</span>' +
-              '<div>Local network access (<code>' + escapeHtml(lanIps) + '</code>) recovers ~' +
-                  Math.round((downSec - localSec)) + 's faster than the tunnel — switch to it now if you can.</div>' +
+              '<div>' + BYD.i18n.t('update.lan_hint', {ips: escapeHtml(lanIps), seconds: Math.round((downSec - localSec))}) + '</div>' +
             '</div>' : '';
 
         var recommendRowHtml = recommend ?
             '<div class="upd-row upd-rec">' +
               '<span class="upd-icon">⚠️</span>' +
-              '<div><strong>Recommended: update from the in-car app instead.</strong> ' +
-                  escapeHtml(recommendReason || 'BYD clears the auto-start whitelist on every install. The in-car app prompts you; the webapp can\'t.') +
+              '<div>' + BYD.i18n.t('update.recommend_inapp_intro', {reason: escapeHtml(recommendReason || BYD.i18n.t('update.recommend_inapp_default'))}) +
               '</div>' +
             '</div>' : '';
 
         bg.innerHTML =
             '<div class="upd-modal" role="dialog" aria-labelledby="updTitle">' +
-              '<h2 id="updTitle">Update OverDrive to <span class="upd-newv">' + escapeHtml(res.remoteVersion || '') + '</span>?</h2>' +
-              '<div class="upd-current">Currently on ' + escapeHtml(res.currentVersion || '') + '</div>' +
+              '<h2 id="updTitle">' + BYD.i18n.t('update.title_update_to', {version: escapeHtml(res.remoteVersion || '')}) + '</h2>' +
+              '<div class="upd-current">' + escapeHtml(BYD.i18n.t('update.currently_on', {version: res.currentVersion || ''})) + '</div>' +
               (res.releaseNotes ? '<div class="upd-rel-notes">' + escapeHtml(res.releaseNotes) + '</div>' : '') +
               '<div class="upd-warn">' +
                 '<div class="upd-row">' +
                   '<span class="upd-icon">⏱️</span>' +
-                  '<div><strong>Remote access offline for ~' + Math.round(downSec / 60) + ' min.</strong> Daemons restart and the tunnel reconnects after install.</div>' +
+                  '<div>' + BYD.i18n.t('update.downtime_warning', {minutes: Math.round(downSec / 60)}) + '</div>' +
                 '</div>' +
                 rotationRowHtml +
                 lanRowHtml +
                 recommendRowHtml +
               '</div>' +
               '<div class="upd-actions">' +
-                '<button class="upd-btn upd-btn-cancel" id="updCancel">Cancel</button>' +
-                '<button class="upd-btn upd-btn-primary" id="updConfirm">' + (recommend ? 'Install Anyway' : 'Install') + '</button>' +
+                '<button class="upd-btn upd-btn-cancel" id="updCancel">' + escapeHtml(BYD.i18n.t('common.cancel')) + '</button>' +
+                '<button class="upd-btn upd-btn-primary" id="updConfirm">' + escapeHtml(recommend ? BYD.i18n.t('update.install_anyway') : BYD.i18n.t('update.install')) + '</button>' +
               '</div>' +
             '</div>';
 
@@ -202,7 +205,7 @@
 
     function startInstall(currentVersion, newVersion) {
         var btn = $('updConfirm');
-        if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
+        if (btn) { btn.disabled = true; btn.textContent = BYD.i18n.t('update.starting'); }
 
         // Remember the pre-install version so we can detect the bump on
         // reconnect even if the install marker is gone by then.
@@ -216,16 +219,16 @@
                     swapToProgressCard(currentVersion, newVersion);
                     startProgressPolling();
                 } else if (res && (res.error || res.success === false)) {
-                    if (btn) { btn.disabled = false; btn.textContent = 'Install Anyway'; }
-                    toast('Install rejected: ' + (res.error || 'unknown'), 'error');
+                    if (btn) { btn.disabled = false; btn.textContent = BYD.i18n.t('update.install_anyway'); }
+                    toast(BYD.i18n.t('update.install_rejected', {error: res.error || BYD.i18n.t('common.unknown')}), 'error');
                 } else {
-                    if (btn) { btn.disabled = false; btn.textContent = 'Install Anyway'; }
-                    toast('Install failed to start', 'error');
+                    if (btn) { btn.disabled = false; btn.textContent = BYD.i18n.t('update.install_anyway'); }
+                    toast(BYD.i18n.t('update.install_failed_start'), 'error');
                 }
             })
             .catch(function (e) {
-                if (btn) { btn.disabled = false; btn.textContent = 'Install Anyway'; }
-                toast('Install request failed: ' + (e && e.message ? e.message : 'network'), 'error');
+                if (btn) { btn.disabled = false; btn.textContent = BYD.i18n.t('update.install_anyway'); }
+                toast(BYD.i18n.t('update.install_request_failed', {error: (e && e.message) ? e.message : BYD.i18n.t('errors.network')}), 'error');
             });
     }
 
@@ -233,16 +236,15 @@
         var modal = document.querySelector('.upd-modal');
         if (!modal) return;
         modal.innerHTML =
-            '<h2>Updating OverDrive</h2>' +
+            '<h2>' + escapeHtml(BYD.i18n.t('update.updating')) + '</h2>' +
             '<div class="upd-current">' + escapeHtml(currentVersion || '') + ' → ' + escapeHtml(newVersion || '') + '</div>' +
             '<div class="upd-progress">' +
-              '<div class="upd-progress-phase" id="updPhase">Starting…</div>' +
+              '<div class="upd-progress-phase" id="updPhase">' + escapeHtml(BYD.i18n.t('update.starting')) + '</div>' +
               '<div class="upd-progress-bar"><div class="upd-progress-fill indeterminate" id="updFill"></div></div>' +
               '<div class="upd-progress-msg" id="updMsg"></div>' +
             '</div>' +
             '<div class="upd-disconnect" id="updDisconnect" style="display:none">' +
-              '<strong>Reconnecting…</strong> The head unit is installing the update. ' +
-              'This page will refresh automatically when the new version is online.' +
+              '<strong>' + escapeHtml(BYD.i18n.t('update.reconnecting')) + '</strong> ' + escapeHtml(BYD.i18n.t('update.headunit_installing')) +
               '<div id="updReconnectHint" style="margin-top:8px;color:#9aa6b3;"></div>' +
             '</div>';
     }
@@ -261,7 +263,7 @@
                 }
                 if (p.phase === 'error') {
                     clearInterval(pollTimer); pollTimer = null;
-                    toast('Install failed: ' + (p.error || p.message || 'unknown'), 'error');
+                    toast(BYD.i18n.t('update.install_failed', {error: p.error || p.message || BYD.i18n.t('common.unknown')}), 'error');
                 }
             }).catch(function () {
                 consecutiveFailures++;
@@ -288,12 +290,12 @@
         if (!phaseEl) return;
 
         var phaseLabels = {
-            queued:           'Queued — preparing…',
-            downloading:      'Downloading APK',
-            verifying:        'Verifying download',
-            stopping_daemons: 'Stopping daemons (tunnel will go offline)',
-            installing:       'Installing — head unit restarting',
-            error:            'Failed'
+            queued:           BYD.i18n.t('update.phase_queued'),
+            downloading:      BYD.i18n.t('update.phase_downloading'),
+            verifying:        BYD.i18n.t('update.phase_verifying'),
+            stopping_daemons: BYD.i18n.t('update.phase_stopping'),
+            installing:       BYD.i18n.t('update.phase_installing'),
+            error:            BYD.i18n.t('update.phase_error')
         };
         phaseEl.textContent = phaseLabels[p.phase] || p.phase || '';
         if (msgEl) msgEl.textContent = p.message || '';
@@ -314,7 +316,7 @@
         var disc = $('updDisconnect');
         if (disc) disc.style.display = 'block';
         var phaseEl = $('updPhase');
-        if (phaseEl) phaseEl.textContent = 'Installing — waiting for head unit to come back…';
+        if (phaseEl) phaseEl.textContent = BYD.i18n.t('update.waiting_for_headunit');
         var fillEl = $('updFill');
         if (fillEl) fillEl.classList.add('indeterminate');
 
@@ -329,8 +331,7 @@
         reconnectTimer = setInterval(function () {
             attempts++;
             if (hintEl) {
-                hintEl.textContent = 'Attempt ' + attempts + ' of ' + maxAttempts +
-                        ' (~' + Math.max(0, (maxAttempts - attempts) * 5) + 's remaining)';
+                hintEl.textContent = BYD.i18n.t('update.attempt_of', {n: attempts, total: maxAttempts, remaining: Math.max(0, (maxAttempts - attempts) * 5)});
             }
             fetch('/status', { cache: 'no-store' })
                 .then(function (r) { return r.ok ? r.json() : null; })
@@ -347,7 +348,7 @@
                     if (newV && preInstallVersion && newV === preInstallVersion && attempts > 6) {
                         clearInterval(reconnectTimer); reconnectTimer = null;
                         var phEl = $('updPhase');
-                        if (phEl) phEl.textContent = 'Daemon back online but version unchanged — install may have failed.';
+                        if (phEl) phEl.textContent = BYD.i18n.t('update.version_unchanged');
                     }
                 })
                 .catch(function () { /* still down */ });
@@ -355,8 +356,7 @@
             if (attempts >= maxAttempts) {
                 clearInterval(reconnectTimer); reconnectTimer = null;
                 var phEl = $('updPhase');
-                if (phEl) phEl.textContent = 'Could not reach head unit. ' +
-                        'On a tunnel? Check Telegram for the new URL, or use the local IP.';
+                if (phEl) phEl.textContent = BYD.i18n.t('update.cannot_reach_headunit');
             }
         }, 5000);
     }
@@ -365,8 +365,8 @@
         var modal = document.querySelector('.upd-modal');
         if (modal) {
             modal.innerHTML =
-                '<h2>✅ Updated to ' + escapeHtml(newVersion) + '</h2>' +
-                '<div class="upd-current">Reloading the page…</div>';
+                '<h2>' + escapeHtml(BYD.i18n.t('update.updated_to', {version: newVersion})) + '</h2>' +
+                '<div class="upd-current">' + escapeHtml(BYD.i18n.t('update.reloading')) + '</div>';
         }
         try {
             localStorage.setItem('upd_lastSeenVersion', newVersion);
@@ -392,7 +392,7 @@
                 if (status && status.appVersion) {
                     var lastSeen = localStorage.getItem('upd_lastSeenVersion') || '';
                     if (lastSeen && lastSeen !== status.appVersion) {
-                        toast('✅ Updated to ' + status.appVersion, 'success');
+                        toast(BYD.i18n.t('update.updated_to', {version: status.appVersion}), 'success');
                     }
                     localStorage.setItem('upd_lastSeenVersion', status.appVersion);
                 }

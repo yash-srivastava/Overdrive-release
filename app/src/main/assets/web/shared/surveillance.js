@@ -61,33 +61,32 @@ BYD.surveillance = {
     lastConfigTimestamp: 0,  // Track config file timestamp for sync
 
     distanceMap: {
-        1: { size: 0.25, label: '~3m (near)', hint: 'Near — only detects large/close objects (cars, groups)' },
-        2: { size: 0.18, label: '~5m', hint: 'Close — good for parking lots, detects people nearby' },
-        3: { size: 0.12, label: '~8m', hint: 'Balanced — detects people up to ~8m away' },
-        4: { size: 0.08, label: '~10m', hint: 'Far — catches distant movement, may include passersby' },
-        5: { size: 0.05, label: '~15m (far)', hint: 'Very Far — maximum range, use in quiet areas' }
+        1: { size: 0.25 },
+        2: { size: 0.18 },
+        3: { size: 0.12 },
+        4: { size: 0.08 },
+        5: { size: 0.05 }
     },
+    distanceLabel(v) { return BYD.i18n.t('surveillance.distance.' + v + '_label'); },
+    distanceHint(v) { return BYD.i18n.t('surveillance.distance.' + v + '_hint'); },
 
     // Sensitivity controls motion detection thresholds (requiredBlocks + densityThreshold)
     // Block size is LOCKED at 32 - only density and required count vary
     sensitivityMap: {
-        1: { label: 'Strict', required: 4, density: 48, hint: 'Strict — large objects only (car/group), ignores single walkers' },
-        2: { label: 'Conservative', required: 3, density: 40, hint: 'Conservative — solid objects, good for windy conditions' },
-        3: { label: 'Default', required: 2, density: 32, hint: 'Balanced — triggers on walking people, ignores bugs/leaves' },
-        4: { label: 'Sensitive', required: 2, density: 16, hint: 'Sensitive — catches motion immediately on block entry' },
-        5: { label: 'Aggressive', required: 1, density: 12, hint: 'Aggressive — triggers on any motion, use indoors/garages only' }
+        1: { required: 4, density: 48 },
+        2: { required: 3, density: 40 },
+        3: { required: 2, density: 32 },
+        4: { required: 2, density: 16 },
+        5: { required: 1, density: 12 }
     },
+    sensitivityLabel(v) { return BYD.i18n.t('surveillance.sens.' + v + '_label'); },
+    sensitivityHint(v) { return BYD.i18n.t('surveillance.sens.' + v + '_hint'); },
 
     flashImmunityMap: { 0: 'SENSITIVE', 1: 'NORMAL', 2: 'STRICT', 3: 'MAX' },
 
-    // V2 sensitivity level labels
-    v2SensitivityLabels: {
-        1: '1 — Low',
-        2: '2',
-        3: '3 — Default',
-        4: '4',
-        5: '5 — Max'
-    },
+    // V2 sensitivity level labels — looked up via BYD.i18n
+    v2SensLabel(v) { return BYD.i18n.t('surveillance.v2_sens_label.' + v); },
+    v2SensHint(v) { return BYD.i18n.t('surveillance.v2_sens_hint.' + v); },
 
     // V2 environment presets: { sensitivityLevel, detectionZone, loiteringTime, shadowFilter }
     v2Presets: {
@@ -205,10 +204,10 @@ BYD.surveillance = {
                 const limitEl = document.getElementById('survStorageLimit');
                 const fillEl = document.getElementById('survStorageFill');
                 
-                if (usedEl) usedEl.textContent = data.sentrySizeFormatted + ' used';
-                
+                if (usedEl) usedEl.textContent = BYD.i18n.t('surveillance.size_used', {size: data.sentrySizeFormatted});
+
                 const limitMb = this.config.surveillanceLimitMb || 500;
-                if (limitEl) limitEl.textContent = limitMb + ' MB limit';
+                if (limitEl) limitEl.textContent = BYD.i18n.t('surveillance.size_limit_mb', {mb: limitMb});
                 
                 // Calculate percentage
                 const usedBytes = data.sentrySize || 0;
@@ -254,11 +253,11 @@ BYD.surveillance = {
                 body: JSON.stringify({ cameraFps: fps })
             });
             if (BYD.utils && BYD.utils.toast) {
-                BYD.utils.toast('Camera FPS set to ' + fps + ' — takes effect on next ACC OFF', 'success');
+                BYD.utils.toast(BYD.i18n.t('surveillance.fps_set', {fps: fps}), 'success');
             }
         } catch (e) {
             console.error('Failed to save FPS:', e);
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to save FPS', 'error');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('surveillance.fps_save_failed'), 'error');
         }
     },
     
@@ -283,7 +282,7 @@ BYD.surveillance = {
         // Update range labels
         const minLabel = document.getElementById('survLimitMin');
         const maxLabel = document.getElementById('survLimitMax');
-        if (minLabel) minLabel.textContent = '100 MB';
+        if (minLabel) minLabel.textContent = BYD.i18n.t('surveillance.limit_min_default');
         if (maxLabel) maxLabel.textContent = maxLimit >= 1000 ? (maxLimit / 1000) + ' GB' : maxLimit + ' MB';
     },
     
@@ -297,7 +296,7 @@ BYD.surveillance = {
         if (sdCardBtn) {
             sdCardBtn.disabled = !this.storageInfo.sdCardAvailable;
             if (!this.storageInfo.sdCardAvailable) {
-                sdCardBtn.title = 'SD Card not available';
+                sdCardBtn.title = BYD.i18n.t('recording.sd_card_unavailable');
             } else {
                 sdCardBtn.title = '';
             }
@@ -314,24 +313,24 @@ BYD.surveillance = {
             
             if (this.storageInfo.sdCardAvailable) {
                 if (dotEl) dotEl.className = 'sd-status-dot online';
-                if (textEl) textEl.textContent = 'SD Card: Available';
+                if (textEl) textEl.textContent = BYD.i18n.t('recording.sd_card_available');
                 if (spaceEl) {
                     spaceEl.style.display = 'block';
-                    document.getElementById('survSdFree').textContent = this.formatSize(this.storageInfo.sdCardFreeSpace) + ' free';
-                    document.getElementById('survSdTotal').textContent = this.formatSize(this.storageInfo.sdCardTotalSpace) + ' total';
+                    document.getElementById('survSdFree').textContent = BYD.i18n.t('recording.size_free', {size: this.formatSize(this.storageInfo.sdCardFreeSpace)});
+                    document.getElementById('survSdTotal').textContent = BYD.i18n.t('recording.size_total', {size: this.formatSize(this.storageInfo.sdCardTotalSpace)});
                 }
             } else {
                 if (dotEl) dotEl.className = 'sd-status-dot offline';
-                if (textEl) textEl.textContent = 'SD Card: Not detected';
+                if (textEl) textEl.textContent = BYD.i18n.t('recording.sd_card_not_detected');
                 if (spaceEl) spaceEl.style.display = 'none';
             }
         }
-        
+
         // Update storage path display
         const pathEl = document.getElementById('survStoragePath');
         if (pathEl && this.storageInfo.surveillancePath) {
             const shortPath = this.storageInfo.surveillancePath.replace('/storage/emulated/0/', '');
-            pathEl.textContent = 'Events saved to ' + shortPath;
+            pathEl.textContent = BYD.i18n.t('surveillance.events_saved_to', {path: shortPath});
         }
     },
     
@@ -344,7 +343,7 @@ BYD.surveillance = {
     
     setStorageType(type) {
         if (type === 'SD_CARD' && !this.storageInfo.sdCardAvailable) {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('SD Card not available', 'error');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.sd_card_unavailable'), 'error');
             return;
         }
         
@@ -415,7 +414,7 @@ BYD.surveillance = {
         // Update badge
         const badge = document.getElementById('cdrCleanupBadge');
         if (badge) {
-            badge.textContent = this.cdrConfig.enabled ? 'ON' : 'OFF';
+            badge.textContent = this.cdrConfig.enabled ? BYD.i18n.t('status.on') : BYD.i18n.t('status.off');
             badge.className = 'status-badge ' + (this.cdrConfig.enabled ? 'active' : 'inactive');
         }
         
@@ -439,7 +438,7 @@ BYD.surveillance = {
         // Update info
         if (this.cdrInfo) {
             const pathEl = document.getElementById('cdrPath');
-            if (pathEl) pathEl.textContent = this.cdrInfo.cdrPath || 'Not found';
+            if (pathEl) pathEl.textContent = this.cdrInfo.cdrPath || BYD.i18n.t('surveillance.not_found');
 
             const usageEl = document.getElementById('cdrUsage');
             if (usageEl) usageEl.textContent = this.cdrInfo.cdrUsage || '--';
@@ -456,13 +455,13 @@ BYD.surveillance = {
             const monEl = document.getElementById('cdrMonitoring');
             if (monEl) {
                 if (!this.cdrConfig.enabled) {
-                    monEl.textContent = 'Disabled';
+                    monEl.textContent = BYD.i18n.t('common.disabled');
                     monEl.style.color = '';
                 } else if (this.cdrInfo.monitoringActive) {
-                    monEl.textContent = 'Running';
+                    monEl.textContent = BYD.i18n.t('common.running');
                     monEl.style.color = '#22c55e';
                 } else {
-                    monEl.textContent = 'Idle';
+                    monEl.textContent = BYD.i18n.t('common.idle');
                     monEl.style.color = '#94a3b8';
                 }
             }
@@ -482,13 +481,13 @@ BYD.surveillance = {
     },
 
     _formatRelativeTime(ts) {
-        if (!ts || ts <= 0) return 'Never';
+        if (!ts || ts <= 0) return BYD.i18n.t('recording.never');
         const diffSec = Math.floor((Date.now() - ts) / 1000);
-        if (diffSec < 0) return 'Just now';
-        if (diffSec < 60) return diffSec + 's ago';
-        if (diffSec < 3600) return Math.floor(diffSec / 60) + ' min ago';
-        if (diffSec < 86400) return Math.floor(diffSec / 3600) + 'h ago';
-        return Math.floor(diffSec / 86400) + 'd ago';
+        if (diffSec < 0) return BYD.i18n.t('recording.just_now');
+        if (diffSec < 60) return BYD.i18n.t('recording.seconds_ago', {n: diffSec});
+        if (diffSec < 3600) return BYD.i18n.t('recording.minutes_ago', {n: Math.floor(diffSec / 60)});
+        if (diffSec < 86400) return BYD.i18n.t('recording.hours_ago', {n: Math.floor(diffSec / 3600)});
+        return BYD.i18n.t('recording.days_ago', {n: Math.floor(diffSec / 86400)});
     },
     
     async toggleCdrCleanup() {
@@ -501,9 +500,9 @@ BYD.surveillance = {
             });
             this.cdrConfig.enabled = enabled;
             this.updateCdrUI();
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(enabled ? 'CDR cleanup enabled' : 'CDR cleanup disabled', 'success');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(enabled ? BYD.i18n.t('recording.cdr_enabled') : BYD.i18n.t('recording.cdr_disabled'), 'success');
         } catch (e) {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to toggle CDR cleanup', 'error');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.cdr_toggle_failed'), 'error');
         }
     },
     
@@ -546,7 +545,7 @@ BYD.surveillance = {
     
     async triggerCdrCleanup() {
         try {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Cleaning up dashcam files...', 'info');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.cdr_cleaning'), 'info');
             
             const resp = await fetch('/api/storage/external/cleanup', {
                 method: 'POST',
@@ -556,18 +555,18 @@ BYD.surveillance = {
             const data = await resp.json();
             
             if (data.success) {
-                const msg = data.filesDeleted > 0 
-                    ? `Freed ${data.freedFormatted} (${data.filesDeleted} files)`
-                    : 'No files needed cleanup';
+                const msg = data.filesDeleted > 0
+                    ? BYD.i18n.t('recording.cdr_freed', {size: data.freedFormatted, files: data.filesDeleted})
+                    : BYD.i18n.t('recording.cdr_no_cleanup');
                 if (BYD.utils && BYD.utils.toast) BYD.utils.toast(msg, 'success');
                 
                 // Refresh CDR info
                 this.loadCdrConfig();
             } else {
-                if (BYD.utils && BYD.utils.toast) BYD.utils.toast(data.error || 'Cleanup failed', 'error');
+                if (BYD.utils && BYD.utils.toast) BYD.utils.toast(data.error || BYD.i18n.t('recording.cdr_cleanup_failed'), 'error');
             }
         } catch (e) {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to trigger cleanup', 'error');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('recording.cdr_trigger_failed'), 'error');
         }
     },
     
@@ -583,7 +582,7 @@ BYD.surveillance = {
         const update = () => {
             const el = document.getElementById('currentTime');
             if (el) {
-                el.textContent = new Date().toLocaleTimeString('en-US', {
+                el.textContent = new Date().toLocaleTimeString(BYD.i18n.getLang(), {
                     hour: '2-digit',
                     minute: '2-digit',
                     hour12: false
@@ -676,17 +675,17 @@ BYD.surveillance = {
         document.getElementById('survEnabled').checked = this.config.enabled;
         
         const badge = document.getElementById('survStatusBadge');
-        badge.textContent = this.config.enabled ? '● ON' : '○ OFF';
+        badge.textContent = this.config.enabled ? BYD.i18n.t('surveillance.badge_on') : BYD.i18n.t('surveillance.badge_off');
         badge.className = 'status-badge ' + (this.config.enabled ? 'active' : 'inactive');
-        
+
         document.getElementById('preRecSlider').value = this.config.preRecordSeconds;
         document.getElementById('preRecValue').textContent = this.config.preRecordSeconds + 's';
-        document.getElementById('preLabel').textContent = this.config.preRecordSeconds + 's before';
+        document.getElementById('preLabel').textContent = BYD.i18n.t('surveillance.before_seconds', {n: this.config.preRecordSeconds});
         document.getElementById('timelinePre').style.flex = this.config.preRecordSeconds / 10;
-        
+
         document.getElementById('postRecSlider').value = this.config.postRecordSeconds;
         document.getElementById('postRecValue').textContent = this.config.postRecordSeconds + 's';
-        document.getElementById('postLabel').textContent = this.config.postRecordSeconds + 's after';
+        document.getElementById('postLabel').textContent = BYD.i18n.t('surveillance.after_seconds', {n: this.config.postRecordSeconds});
         document.getElementById('timelinePost').style.flex = this.config.postRecordSeconds / 20;
         
         document.querySelectorAll('#bitrateBtns .btn-toggle').forEach(btn => 
@@ -729,24 +728,24 @@ BYD.surveillance = {
             this.config.enabled = enabled;
             this.savedConfig.enabled = enabled;
             this.updateUI();
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(enabled ? 'Surveillance enabled' : 'Surveillance disabled', 'success');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(enabled ? BYD.i18n.t('surveillance.enabled') : BYD.i18n.t('surveillance.disabled'), 'success');
         } catch (e) {
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to toggle surveillance', 'error');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('surveillance.toggle_failed'), 'error');
         }
     },
 
     updateDistance(value) {
         this.config.distance = parseInt(value);
         this.config.minObjectSize = (this.distanceMap[value] || {}).size || 0.08;
-        document.getElementById('distanceValue').textContent = (this.distanceMap[value] || {}).label || '~8m';
-        document.getElementById('distanceHint').textContent = (this.distanceMap[value] || {}).hint || '';
+        document.getElementById('distanceValue').textContent = this.distanceLabel(value) || BYD.i18n.t('surveillance.label_default_size');
+        document.getElementById('distanceHint').textContent = this.distanceHint(value) || '';
         this.markChanged();
     },
 
     updateSensitivity(value) {
         this.config.sensitivity = parseInt(value);
-        document.getElementById('sensitivityValue').textContent = (this.sensitivityMap[value] || {}).label || 'Default';
-        document.getElementById('sensitivityHint').textContent = (this.sensitivityMap[value] || {}).hint || '';
+        document.getElementById('sensitivityValue').textContent = this.sensitivityLabel(value) || BYD.i18n.t('surveillance.label_default');
+        document.getElementById('sensitivityHint').textContent = this.sensitivityHint(value) || '';
         this.markChanged();
     },
 
@@ -767,7 +766,7 @@ BYD.surveillance = {
     updatePreRec(value) {
         this.config.preRecordSeconds = parseInt(value);
         document.getElementById('preRecValue').textContent = value + 's';
-        document.getElementById('preLabel').textContent = value + 's before';
+        document.getElementById('preLabel').textContent = BYD.i18n.t('surveillance.before_seconds', {n: value});
         document.getElementById('timelinePre').style.flex = value / 10;
         this.markChanged();
     },
@@ -775,7 +774,7 @@ BYD.surveillance = {
     updatePostRec(value) {
         this.config.postRecordSeconds = parseInt(value);
         document.getElementById('postRecValue').textContent = value + 's';
-        document.getElementById('postLabel').textContent = value + 's after';
+        document.getElementById('postLabel').textContent = BYD.i18n.t('surveillance.after_seconds', {n: value});
         document.getElementById('timelinePost').style.flex = value / 20;
         this.markChanged();
     },
@@ -809,28 +808,9 @@ BYD.surveillance = {
 
     // ==================== V2 Motion Detection ====================
 
-    // V2 environment preset hint texts
-    v2EnvPresetHints: {
-        outdoor: 'Standard filtering for open parking lots and driveways. Handles sun, clouds, and headlights.',
-        garage: 'Aggressive light filtering for indoor parking. Ignores fluorescent flicker and reflections.',
-        street: 'Tuned for busy areas with foot traffic. Longer loitering time to ignore passersby.'
-    },
-
-    // V2 sensitivity hint texts
-    v2SensitivityHints: {
-        1: 'Only detects large, close movement like someone touching the car.',
-        2: 'Detects solid objects nearby. Good for windy conditions.',
-        3: 'Balanced — detects a person approaching within about 3 meters.',
-        4: 'Sensitive — catches motion quickly, good for people at distance.',
-        5: 'Maximum — detects any movement in the camera view. May increase false alerts.'
-    },
-
-    // V2 detection zone hint texts
-    v2DetectionZoneHints: {
-        close: 'Only triggers when someone is right next to the car (~1.5m).',
-        normal: 'Standard detection range (~3m around the car).',
-        extended: 'Detects activity further out (~5m+). May pick up more passing traffic.'
-    },
+    // V2 hint texts — looked up via BYD.i18n
+    v2EnvPresetHint(preset) { return BYD.i18n.t('surveillance.env_hint.' + preset); },
+    v2DetectionZoneHint(zone) { return BYD.i18n.t('surveillance.zone_hint.' + zone); },
 
     setEnvironmentPreset(preset) {
         this.config.environmentPreset = preset;
@@ -842,7 +822,10 @@ BYD.surveillance = {
 
         // Update environment preset hint
         var _eh = document.getElementById('envPresetHint');
-        if (_eh) _eh.textContent = this.v2EnvPresetHints[preset] || '';
+        if (_eh) {
+            _eh.setAttribute('data-i18n', 'surveillance.env_hint.' + preset);
+            _eh.textContent = this.v2EnvPresetHint(preset) || '';
+        }
 
         // Apply preset values to other V2 controls (UI only, not sent yet)
         const p = this.v2Presets[preset];
@@ -855,15 +838,24 @@ BYD.surveillance = {
             const sensSlider = document.getElementById('v2SensitivitySlider');
             if (sensSlider) sensSlider.value = p.sensitivityLevel;
             const sensValue = document.getElementById('v2SensitivityValue');
-            if (sensValue) sensValue.textContent = this.v2SensitivityLabels[p.sensitivityLevel] || p.sensitivityLevel;
+            if (sensValue) {
+                sensValue.setAttribute('data-i18n', 'surveillance.v2_sens_label.' + p.sensitivityLevel);
+                sensValue.textContent = this.v2SensLabel(p.sensitivityLevel) || p.sensitivityLevel;
+            }
             var _sh = document.getElementById('v2SensitivityHint');
-            if (_sh) _sh.textContent = this.v2SensitivityHints[p.sensitivityLevel] || '';
+            if (_sh) {
+                _sh.setAttribute('data-i18n', 'surveillance.v2_sens_hint.' + p.sensitivityLevel);
+                _sh.textContent = this.v2SensHint(p.sensitivityLevel) || '';
+            }
 
             // Update detection zone buttons + hint
             document.querySelectorAll('#detectionZoneBtns .btn-toggle').forEach(btn =>
                 btn.classList.toggle('active', btn.dataset.value === p.detectionZone));
             var _dh = document.getElementById('detectionZoneHint');
-            if (_dh) _dh.textContent = this.v2DetectionZoneHints[p.detectionZone] || '';
+            if (_dh) {
+                _dh.setAttribute('data-i18n', 'surveillance.zone_hint.' + p.detectionZone);
+                _dh.textContent = this.v2DetectionZoneHint(p.detectionZone) || '';
+            }
 
             // Update loitering slider + label
             const loiterSlider = document.getElementById('loiteringTimeSlider');
@@ -884,9 +876,15 @@ BYD.surveillance = {
     updateV2Sensitivity(value) {
         this.config.sensitivityLevel = parseInt(value);
         const label = document.getElementById('v2SensitivityValue');
-        if (label) label.textContent = this.v2SensitivityLabels[value] || value;
+        if (label) {
+            label.setAttribute('data-i18n', 'surveillance.v2_sens_label.' + value);
+            label.textContent = this.v2SensLabel(value) || value;
+        }
         var _sh = document.getElementById('v2SensitivityHint');
-        if (_sh) _sh.textContent = this.v2SensitivityHints[value] || '';
+        if (_sh) {
+            _sh.setAttribute('data-i18n', 'surveillance.v2_sens_hint.' + value);
+            _sh.textContent = this.v2SensHint(value) || '';
+        }
         this._deselectPresetIfCustom();
         this.markChanged();
     },
@@ -896,7 +894,10 @@ BYD.surveillance = {
         document.querySelectorAll('#detectionZoneBtns .btn-toggle').forEach(btn =>
             btn.classList.toggle('active', btn.dataset.value === zone));
         var _dh = document.getElementById('detectionZoneHint');
-        if (_dh) _dh.textContent = this.v2DetectionZoneHints[zone] || '';
+        if (_dh) {
+            _dh.setAttribute('data-i18n', 'surveillance.zone_hint.' + zone);
+            _dh.textContent = this.v2DetectionZoneHint(zone) || '';
+        }
         this._deselectPresetIfCustom();
         this.markChanged();
     },
@@ -911,14 +912,11 @@ BYD.surveillance = {
     
     updateShadowFilter(value) {
         this.config.shadowFilter = parseInt(value);
-        const hints = {
-            0: 'Shadow filtering disabled. May cause false recordings from tree shadows and cloud movement.',
-            1: 'Light filtering — catches obvious shadows. Good for garages with fluorescent lights.',
-            2: 'Balanced filtering — catches most tree shadows while preserving real motion detection.',
-            3: 'Aggressive filtering — maximum shadow rejection. Use when parked under trees with heavy wind.'
-        };
         const hint = document.getElementById('shadowFilterHint');
-        if (hint) hint.textContent = hints[this.config.shadowFilter] || '';
+        if (hint) {
+            hint.setAttribute('data-i18n', 'surveillance.shadow_hint.' + this.config.shadowFilter);
+            hint.textContent = BYD.i18n.t('surveillance.shadow_hint.' + this.config.shadowFilter) || '';
+        }
         this.markChanged();
     },
     
@@ -942,14 +940,20 @@ BYD.surveillance = {
                 btn.classList.toggle('active', btn.dataset.value === matchedPreset));
             if (customBtn) customBtn.classList.remove('active');
             var _eh = document.getElementById('envPresetHint');
-            if (_eh) _eh.textContent = this.v2EnvPresetHints[matchedPreset] || '';
+            if (_eh) {
+                _eh.setAttribute('data-i18n', 'surveillance.env_hint.' + matchedPreset);
+                _eh.textContent = this.v2EnvPresetHint(matchedPreset) || '';
+            }
         } else {
             // No preset matches — show Custom
             document.querySelectorAll('#envPresetBtns .btn-toggle').forEach(btn =>
                 btn.classList.remove('active'));
             if (customBtn) customBtn.classList.add('active');
             var _eh = document.getElementById('envPresetHint');
-            if (_eh) _eh.textContent = 'Custom configuration — select a preset to reset to recommended values.';
+            if (_eh) {
+                _eh.setAttribute('data-i18n', 'surveillance.custom_config');
+                _eh.textContent = BYD.i18n.t('surveillance.custom_config');
+            }
         }
     },
 
@@ -1111,8 +1115,19 @@ BYD.surveillance = {
             [1, 1],  // 2: left   — bottom-right
             [0, 1]   // 3: rear   — bottom-left
         ];
-        var quadLabels = ['FRONT', 'RIGHT', 'LEFT', 'REAR'];
-        var threatLabels = ['', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+        var quadLabels = [
+            BYD.i18n.t('surveillance.camera_front'),
+            BYD.i18n.t('surveillance.camera_right'),
+            BYD.i18n.t('surveillance.camera_left'),
+            BYD.i18n.t('surveillance.camera_rear')
+        ];
+        var threatLabels = [
+            '',
+            BYD.i18n.t('surveillance.heatmap_threat_low'),
+            BYD.i18n.t('surveillance.heatmap_threat_medium'),
+            BYD.i18n.t('surveillance.heatmap_threat_high'),
+            BYD.i18n.t('surveillance.heatmap_threat_critical')
+        ];
 
         for (var qi = 0; qi < data.quadrants.length; qi++) {
             var q = data.quadrants[qi];
@@ -1144,7 +1159,7 @@ BYD.surveillance = {
                 ctx.fillStyle = 'rgba(128, 128, 128, 0.25)';
                 ctx.fillRect(qx, qy, quadW, quadH);
                 ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-                ctx.fillText(quadLabels[q.id] + ' — OFF', qx + 8, qy + 6);
+                ctx.fillText(BYD.i18n.t('surveillance.heatmap_camera_off', {camera: quadLabels[q.id]}), qx + 8, qy + 6);
                 continue;
             }
 
@@ -1153,7 +1168,7 @@ BYD.surveillance = {
                 ctx.fillStyle = 'rgba(59, 130, 246, 0.20)';
                 ctx.fillRect(qx, qy, quadW, quadH);
                 ctx.fillStyle = 'rgba(147, 197, 253, 0.8)';
-                ctx.fillText(quadLabels[q.id] + ' — LIGHT SHIFT', qx + 8, qy + 6);
+                ctx.fillText(BYD.i18n.t('surveillance.heatmap_camera_light_shift', {camera: quadLabels[q.id]}), qx + 8, qy + 6);
                 continue;
             }
 
@@ -1199,7 +1214,7 @@ BYD.surveillance = {
             ctx.fillStyle = labelColor;
             var label = quadLabels[q.id];
             if (activeCount > 0) {
-                label += '  ' + activeCount + ' blocks';
+                label += '  ' + BYD.i18n.t('surveillance.heatmap_blocks', {n: activeCount});
                 if (threat > 0 && threat < threatLabels.length) {
                     label += ' · ' + threatLabels[threat];
                 }
@@ -1223,22 +1238,22 @@ BYD.surveillance = {
         ctx.fillStyle = 'rgba(34, 197, 94, 0.7)';
         ctx.fillRect(legendX, legendY, 12, 12);
         ctx.fillStyle = 'rgba(255,255,255,0.7)';
-        ctx.fillText('Low', legendX + 16, legendY + 6);
+        ctx.fillText(BYD.i18n.t('surveillance.heatmap_legend_low'), legendX + 16, legendY + 6);
         // Yellow
         ctx.fillStyle = 'rgba(234, 179, 8, 0.7)';
         ctx.fillRect(legendX + 55, legendY, 12, 12);
         ctx.fillStyle = 'rgba(255,255,255,0.7)';
-        ctx.fillText('Medium', legendX + 71, legendY + 6);
+        ctx.fillText(BYD.i18n.t('surveillance.heatmap_legend_medium'), legendX + 71, legendY + 6);
         // Red
         ctx.fillStyle = 'rgba(239, 68, 68, 0.7)';
         ctx.fillRect(legendX + 130, legendY, 12, 12);
         ctx.fillStyle = 'rgba(255,255,255,0.7)';
-        ctx.fillText('High', legendX + 146, legendY + 6);
+        ctx.fillText(BYD.i18n.t('surveillance.heatmap_legend_high'), legendX + 146, legendY + 6);
         // Blue
         ctx.fillStyle = 'rgba(59, 130, 246, 0.7)';
         ctx.fillRect(legendX + 190, legendY, 12, 12);
         ctx.fillStyle = 'rgba(255,255,255,0.7)';
-        ctx.fillText('Suppressed', legendX + 206, legendY + 6);
+        ctx.fillText(BYD.i18n.t('surveillance.heatmap_legend_suppressed'), legendX + 206, legendY + 6);
     },
 
     updateV2UI() {
@@ -1266,9 +1281,11 @@ BYD.surveillance = {
         var _eh = document.getElementById('envPresetHint');
         if (_eh) {
             if (presetMatches) {
-                _eh.textContent = this.v2EnvPresetHints[savedPreset] || '';
+                _eh.setAttribute('data-i18n', 'surveillance.env_hint.' + savedPreset);
+                _eh.textContent = this.v2EnvPresetHint(savedPreset) || '';
             } else {
-                _eh.textContent = 'Custom configuration — select a preset to reset to recommended values.';
+                _eh.setAttribute('data-i18n', 'surveillance.custom_config');
+                _eh.textContent = BYD.i18n.t('surveillance.custom_config');
             }
         }
 
@@ -1276,15 +1293,24 @@ BYD.surveillance = {
         const sensSlider = document.getElementById('v2SensitivitySlider');
         if (sensSlider) sensSlider.value = this.config.sensitivityLevel;
         const sensValue = document.getElementById('v2SensitivityValue');
-        if (sensValue) sensValue.textContent = this.v2SensitivityLabels[this.config.sensitivityLevel] || this.config.sensitivityLevel;
+        if (sensValue) {
+            sensValue.setAttribute('data-i18n', 'surveillance.v2_sens_label.' + this.config.sensitivityLevel);
+            sensValue.textContent = this.v2SensLabel(this.config.sensitivityLevel) || this.config.sensitivityLevel;
+        }
         var _sh = document.getElementById('v2SensitivityHint');
-        if (_sh) _sh.textContent = this.v2SensitivityHints[this.config.sensitivityLevel] || '';
+        if (_sh) {
+            _sh.setAttribute('data-i18n', 'surveillance.v2_sens_hint.' + this.config.sensitivityLevel);
+            _sh.textContent = this.v2SensHint(this.config.sensitivityLevel) || '';
+        }
 
         // Detection zone
         document.querySelectorAll('#detectionZoneBtns .btn-toggle').forEach(btn =>
             btn.classList.toggle('active', btn.dataset.value === this.config.detectionZone));
         var _dh = document.getElementById('detectionZoneHint');
-        if (_dh) _dh.textContent = this.v2DetectionZoneHints[this.config.detectionZone] || '';
+        if (_dh) {
+            _dh.setAttribute('data-i18n', 'surveillance.zone_hint.' + this.config.detectionZone);
+            _dh.textContent = this.v2DetectionZoneHint(this.config.detectionZone) || '';
+        }
 
         // Loitering time
         const loiterSlider = document.getElementById('loiteringTimeSlider');
@@ -1296,6 +1322,11 @@ BYD.surveillance = {
         const shadowSelect = document.getElementById('shadowFilterSelect');
         if (shadowSelect && this.config.shadowFilter !== undefined) {
             shadowSelect.value = this.config.shadowFilter;
+        }
+        const shadowHint = document.getElementById('shadowFilterHint');
+        if (shadowHint && this.config.shadowFilter !== undefined) {
+            shadowHint.setAttribute('data-i18n', 'surveillance.shadow_hint.' + this.config.shadowFilter);
+            shadowHint.textContent = BYD.i18n.t('surveillance.shadow_hint.' + this.config.shadowFilter) || '';
         }
 
         // Camera toggles
@@ -1331,7 +1362,7 @@ BYD.surveillance = {
     async applySettings() {
         const btn = document.getElementById('btnApply');
         const origText = btn.innerHTML;
-        btn.innerHTML = '⏳ Saving...';
+        btn.innerHTML = BYD.i18n.t('surveillance.saving');
         btn.disabled = true;
         
         try {
@@ -1364,14 +1395,14 @@ BYD.surveillance = {
             // Refresh storage stats after save (cleanup may have run)
             setTimeout(() => this.loadStorageStats(), 1000);
             
-            let msg = 'Settings applied';
-            
+            let msg = BYD.i18n.t('surveillance.settings_applied');
+
             // Show cleanup info if files will be deleted
             if (storageData.cleanup && storageData.cleanup.surveillanceToDelete) {
-                msg = `Settings applied. Deleting ~${storageData.cleanup.surveillanceFilesEstimate} old events (${storageData.cleanup.surveillanceToDelete})`;
+                msg = BYD.i18n.t('surveillance.settings_applied_deleting', {files: storageData.cleanup.surveillanceFilesEstimate, size: storageData.cleanup.surveillanceToDelete});
             }
-            
-            btn.innerHTML = '✓ Saved';
+
+            btn.innerHTML = BYD.i18n.t('surveillance.saved_check');
             setTimeout(() => { btn.innerHTML = origText; }, 1500);
             
             if (BYD.utils && BYD.utils.toast) BYD.utils.toast(msg, 'success');
@@ -1379,7 +1410,7 @@ BYD.surveillance = {
             console.error('applySettings error:', e);
             btn.innerHTML = origText;
             btn.disabled = false;
-            if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to save: ' + (e.message || 'unknown error'), 'error');
+            if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('surveillance.save_failed', {error: e.message || BYD.i18n.t('errors.generic')}), 'error');
         }
     },
 
@@ -1435,10 +1466,14 @@ BYD.surveillance = {
         const survState = document.getElementById('survState');
         if (survState) {
             if (status.safeZoneSuppressed || status.inSafeZone) {
-                survState.textContent = '🏠 Safe Zone' + (status.safeZoneName ? ' (' + status.safeZoneName + ')' : '');
+                survState.textContent = status.safeZoneName
+                    ? BYD.i18n.t('surveillance.state_safe_zone_named', {name: status.safeZoneName})
+                    : BYD.i18n.t('surveillance.state_safe_zone');
                 survState.style.color = 'var(--brand-secondary)';
             } else {
-                survState.textContent = status.gpuSurveillance ? 'Active' : 'Idle';
+                survState.textContent = status.gpuSurveillance
+                    ? BYD.i18n.t('surveillance.state_active')
+                    : BYD.i18n.t('common.idle');
                 survState.style.color = '';
             }
         }
@@ -1470,8 +1505,12 @@ BYD.surveillance = {
 
         const badge = document.getElementById('deterrentBadge');
         if (badge) {
-            const labels = { silent: 'SILENT', flash_lights: 'FLASH', find_car: 'HORN' };
-            badge.textContent = labels[action] || 'SILENT';
+            const labels = {
+                silent: BYD.i18n.t('surveillance.deterrent_silent_badge'),
+                flash_lights: BYD.i18n.t('surveillance.deterrent_flash_badge'),
+                find_car: BYD.i18n.t('surveillance.deterrent_horn_badge')
+            };
+            badge.textContent = labels[action] || BYD.i18n.t('surveillance.deterrent_silent_badge');
             badge.className = 'status-badge ' + (action === 'silent' ? 'inactive' : 'active');
         }
 
@@ -1520,7 +1559,7 @@ window.BydCloud = {
 
         if (status.verified) {
             this.isConfigured = true;
-            if (badge) { badge.textContent = '\u25cf CONNECTED'; badge.className = 'status-badge active'; }
+            if (badge) { badge.textContent = BYD.i18n.t('surveillance.byd_badge_connected'); badge.className = 'status-badge active'; }
             if (info) {
                 info.style.display = 'block';
                 document.getElementById('bydVinDisplay').textContent = status.vin || '\u2014';
@@ -1531,26 +1570,26 @@ window.BydCloud = {
             if (emailInput) emailInput.value = status.username || '';
             var regionSelect = document.getElementById('bydRegion');
             if (regionSelect && status.region) regionSelect.value = status.region;
-            if (pwdInput) pwdInput.placeholder = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022  (leave blank to keep)';
-            if (pinInput) pinInput.placeholder = '\u2022\u2022\u2022\u2022\u2022\u2022';
-            if (pwdHint) pwdHint.textContent = 'Leave blank to keep current password';
-            if (pinHint) pinHint.textContent = 'Leave blank to keep current PIN';
-            if (saveBtn) saveBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Update Credentials';
+            if (pwdInput) pwdInput.placeholder = BYD.i18n.t('surveillance.byd_password_placeholder_keep');
+            if (pinInput) pinInput.placeholder = BYD.i18n.t('surveillance.byd_pin_placeholder_keep');
+            if (pwdHint) pwdHint.textContent = BYD.i18n.t('surveillance.byd_pwd_keep');
+            if (pinHint) pinHint.textContent = BYD.i18n.t('surveillance.byd_pin_keep');
+            if (saveBtn) saveBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> ' + BYD.i18n.t('surveillance.update_credentials');
         } else {
             this.isConfigured = status.configured || false;
             if (status.configured && !status.verified) {
-                if (badge) { badge.textContent = 'SAVED'; badge.className = 'status-badge inactive'; }
+                if (badge) { badge.textContent = BYD.i18n.t('surveillance.byd_badge_saved'); badge.className = 'status-badge inactive'; }
             } else {
-                if (badge) { badge.textContent = 'NOT SET'; badge.className = 'status-badge inactive'; }
+                if (badge) { badge.textContent = BYD.i18n.t('surveillance.byd_badge_not_set'); badge.className = 'status-badge inactive'; }
             }
             if (info) info.style.display = 'none';
             if (clearSection) clearSection.style.display = 'none';
             if (testBtn) { testBtn.disabled = true; testBtn.style.color = 'var(--text-muted)'; testBtn.style.borderColor = 'var(--border-default)'; }
-            if (pwdInput) pwdInput.placeholder = 'BYD app password';
+            if (pwdInput) pwdInput.placeholder = BYD.i18n.t('surveillance.byd_pwd_placeholder');
             if (pinInput) pinInput.placeholder = '123456';
-            if (pwdHint) pwdHint.textContent = 'Your BYD app login password';
-            if (pinHint) pinHint.textContent = 'The 4-6 digit PIN you set in the official BYD app';
-            if (saveBtn) saveBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save Credentials';
+            if (pwdHint) pwdHint.textContent = BYD.i18n.t('surveillance.byd_pwd_hint');
+            if (pinHint) pinHint.textContent = BYD.i18n.t('surveillance.byd_pin_hint');
+            if (saveBtn) saveBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> ' + BYD.i18n.t('surveillance.save_credentials');
         }
 
         BYD.surveillance.config.bydCloudEnabled = status.verified || false;
@@ -1572,19 +1611,19 @@ window.BydCloud = {
 
             if (pushBadge) {
                 if (cp.connected && cp.lastMessageAge >= 0 && cp.lastMessageAge < 120) {
-                    pushBadge.textContent = 'LIVE';
+                    pushBadge.textContent = BYD.i18n.t('surveillance.byd_badge_live');
                     pushBadge.className = 'status-badge active';
                 } else if (cp.connected && cp.lastMessageAge >= 0 && cp.lastMessageAge < 600) {
-                    pushBadge.textContent = 'OK';
+                    pushBadge.textContent = BYD.i18n.t('surveillance.byd_badge_ok');
                     pushBadge.className = 'status-badge active';
                 } else if (cp.connected && cp.lastMessageAge >= 600) {
-                    pushBadge.textContent = 'STALE';
+                    pushBadge.textContent = BYD.i18n.t('surveillance.byd_badge_stale');
                     pushBadge.className = 'status-badge inactive';
                 } else if (cp.connected) {
-                    pushBadge.textContent = 'WAITING';
+                    pushBadge.textContent = BYD.i18n.t('surveillance.byd_badge_waiting');
                     pushBadge.className = 'status-badge inactive';
                 } else {
-                    pushBadge.textContent = 'OFFLINE';
+                    pushBadge.textContent = BYD.i18n.t('surveillance.byd_badge_offline');
                     pushBadge.className = 'status-badge inactive';
                 }
             }
@@ -1592,9 +1631,9 @@ window.BydCloud = {
             if (pushAge) {
                 if (cp.lastMessageAge >= 0) {
                     var age = cp.lastMessageAge;
-                    pushAge.textContent = age < 60 ? age + 's ago' : Math.floor(age / 60) + 'm ago';
+                    pushAge.textContent = age < 60 ? BYD.i18n.t('surveillance.byd_age_seconds', {n: age}) : BYD.i18n.t('surveillance.byd_age_minutes', {n: Math.floor(age / 60)});
                 } else {
-                    pushAge.textContent = cp.connected ? 'waiting for data' : '';
+                    pushAge.textContent = cp.connected ? BYD.i18n.t('surveillance.byd_waiting_data') : '';
                 }
             }
 
@@ -1603,7 +1642,7 @@ window.BydCloud = {
                     var lockIcon = cp.lockState === 'locked' ? '\uD83D\uDD12' : '\uD83D\uDD13';
                     pushLock.textContent = lockIcon + ' ' + cp.lockState;
                 } else if (cp.connected && cp.lastMessageAge < 0) {
-                    pushLock.textContent = 'Waiting for T-Box push...';
+                    pushLock.textContent = BYD.i18n.t('surveillance.byd_waiting_tbox');
                 } else {
                     pushLock.textContent = '';
                 }
@@ -1615,7 +1654,7 @@ window.BydCloud = {
             }
             if (pushCharging) {
                 if (cp.chargingState && cp.chargingState !== 'unknown') {
-                    var chgLabel = { 'not_charging': 'Not charging', 'charging': 'Charging' };
+                    var chgLabel = { 'not_charging': BYD.i18n.t('surveillance.byd_charge_not_charging'), 'charging': BYD.i18n.t('surveillance.byd_charge_charging') };
                     pushCharging.textContent = '\u26A1 ' + (chgLabel[cp.chargingState] || cp.chargingState);
                 } else {
                     pushCharging.textContent = '';
@@ -1638,15 +1677,15 @@ window.BydCloud = {
         const region = document.getElementById('bydRegion').value;
         const saveBtn = document.getElementById('bydSaveBtn');
 
-        if (!email) { this.showStatus('Email is required', 'error'); return; }
+        if (!email) { this.showStatus(BYD.i18n.t('surveillance.byd_email_required'), 'error'); return; }
         if (!this.isConfigured && (!password || !pin)) {
-            this.showStatus('Password and control PIN are required for first setup', 'error');
+            this.showStatus(BYD.i18n.t('surveillance.byd_pwd_pin_required'), 'error');
             return;
         }
 
         saveBtn.disabled = true;
-        saveBtn.textContent = 'Saving...';
-        this.showStatus('Saving credentials and testing login...', 'info');
+        saveBtn.textContent = BYD.i18n.t('surveillance.byd_saving');
+        this.showStatus(BYD.i18n.t('surveillance.byd_save_progress'), 'info');
 
         try {
             const body = { username: email, region: region };
@@ -1666,19 +1705,19 @@ window.BydCloud = {
             const data = await resp.json();
 
             if (data.success) {
-                this.showStatus('\u2713 Saved and verified! VIN: ' + data.vin, 'success');
+                this.showStatus(BYD.i18n.t('surveillance.byd_save_verified', {vin: data.vin}), 'success');
                 document.getElementById('bydPassword').value = '';
                 document.getElementById('bydPin').value = '';
             } else {
-                this.showStatus('\u2717 ' + (data.error || 'Save failed'), 'error');
+                this.showStatus('\u2717 ' + (data.error || BYD.i18n.t('surveillance.byd_save_failed')), 'error');
             }
         } catch (e) {
             if (e.name === 'AbortError') {
-                this.showStatus('Request is taking long... checking status in a moment', 'info');
+                this.showStatus(BYD.i18n.t('surveillance.byd_request_long'), 'info');
                 // The server might still be processing — wait and check
                 await new Promise(function(r) { setTimeout(r, 5000); });
             } else {
-                this.showStatus('\u2717 Network error: ' + e.message, 'error');
+                this.showStatus('\u2717 ' + BYD.i18n.t('vehicle.network_error_msg', {message: e.message}), 'error');
             }
         } finally {
             saveBtn.disabled = false;
@@ -1689,8 +1728,8 @@ window.BydCloud = {
     async testConnection() {
         const testBtn = document.getElementById('bydTestBtn');
         testBtn.disabled = true;
-        testBtn.textContent = 'Testing...';
-        this.showStatus('Logging in and flashing lights...', 'info');
+        testBtn.textContent = BYD.i18n.t('surveillance.byd_test_testing');
+        this.showStatus(BYD.i18n.t('surveillance.byd_test_progress'), 'info');
 
         try {
             const controller = new AbortController();
@@ -1705,28 +1744,28 @@ window.BydCloud = {
             clearTimeout(timeoutId);
             const data = await resp.json();
             if (data.success) {
-                this.showStatus('\u2713 Flash command sent \u2014 check your car!', 'success');
+                this.showStatus(BYD.i18n.t('surveillance.byd_test_sent'), 'success');
             } else {
-                this.showStatus('\u2717 ' + (data.error || 'Test failed'), 'error');
+                this.showStatus('\u2717 ' + (data.error || BYD.i18n.t('surveillance.byd_test_failed')), 'error');
             }
         } catch (e) {
             if (e.name === 'AbortError') {
-                this.showStatus('Command may have been sent \u2014 check your car', 'info');
+                this.showStatus(BYD.i18n.t('surveillance.byd_test_check_car'), 'info');
             } else {
                 this.showStatus('\u2717 ' + e.message, 'error');
             }
         } finally {
             testBtn.disabled = false;
-            testBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg> Test Connection';
+            testBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg> ' + BYD.i18n.t('surveillance.test_connection');
         }
     },
 
     async clearCredentials() {
-        if (!confirm('Clear BYD Cloud credentials?\n\nDeterrent actions (flash lights, horn) will stop working until you set up again.')) return;
+        if (!confirm(BYD.i18n.t('surveillance.confirm_clear_byd_creds'))) return;
 
         try {
             await fetch('/api/bydcloud/clear', { method: 'POST' });
-            this.showStatus('Credentials cleared', 'info');
+            this.showStatus(BYD.i18n.t('surveillance.byd_creds_cleared'), 'info');
             document.getElementById('bydEmail').value = '';
             document.getElementById('bydPassword').value = '';
             document.getElementById('bydPin').value = '';

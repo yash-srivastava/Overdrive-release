@@ -48,7 +48,7 @@ public class MqttApiHandler {
         if (path.startsWith("/api/mqtt/connections/") && method.equals("PUT")) {
             String id = path.substring("/api/mqtt/connections/".length());
             if (!id.matches("[a-f0-9\\-]{4,36}")) {
-                HttpResponse.sendJsonError(out, "Invalid connection id");
+                HttpResponse.sendJsonError(out, Messages.get("errors.mqtt_invalid_connection_id"));
                 return true;
             }
             handleUpdateConnection(out, id, body);
@@ -59,7 +59,7 @@ public class MqttApiHandler {
         if (path.startsWith("/api/mqtt/connections/") && method.equals("DELETE")) {
             String id = path.substring("/api/mqtt/connections/".length());
             if (!id.matches("[a-f0-9\\-]{4,36}")) {
-                HttpResponse.sendJsonError(out, "Invalid connection id");
+                HttpResponse.sendJsonError(out, Messages.get("errors.mqtt_invalid_connection_id"));
                 return true;
             }
             handleDeleteConnection(out, id);
@@ -86,7 +86,7 @@ public class MqttApiHandler {
         if (ipcResponse != null) {
             HttpResponse.sendJson(out, ipcResponse.toString());
         } else {
-            HttpResponse.sendJsonError(out, "Failed to communicate with daemon");
+            HttpResponse.sendJsonError(out, Messages.get("errors.ipc_communication_failed"));
         }
     }
 
@@ -97,10 +97,10 @@ public class MqttApiHandler {
             if (ipcResponse != null) {
                 HttpResponse.sendJson(out, ipcResponse.toString());
             } else {
-                HttpResponse.sendJsonError(out, "Failed to communicate with daemon");
+                HttpResponse.sendJsonError(out, Messages.get("errors.ipc_communication_failed"));
             }
         } catch (Exception e) {
-            HttpResponse.sendJsonError(out, "Invalid request body: " + e.getMessage());
+            HttpResponse.sendJsonError(out, Messages.get("errors.invalid_request_body_with_detail", e.getMessage()));
         }
     }
 
@@ -112,10 +112,10 @@ public class MqttApiHandler {
             if (ipcResponse != null) {
                 HttpResponse.sendJson(out, ipcResponse.toString());
             } else {
-                HttpResponse.sendJsonError(out, "Failed to communicate with daemon");
+                HttpResponse.sendJsonError(out, Messages.get("errors.ipc_communication_failed"));
             }
         } catch (Exception e) {
-            HttpResponse.sendJsonError(out, "Invalid request body: " + e.getMessage());
+            HttpResponse.sendJsonError(out, Messages.get("errors.invalid_request_body_with_detail", e.getMessage()));
         }
     }
 
@@ -126,7 +126,7 @@ public class MqttApiHandler {
         if (ipcResponse != null) {
             HttpResponse.sendJson(out, ipcResponse.toString());
         } else {
-            HttpResponse.sendJsonError(out, "Failed to communicate with daemon");
+            HttpResponse.sendJsonError(out, Messages.get("errors.ipc_communication_failed"));
         }
     }
 
@@ -135,7 +135,7 @@ public class MqttApiHandler {
         if (ipcResponse != null) {
             HttpResponse.sendJson(out, ipcResponse.toString());
         } else {
-            HttpResponse.sendJsonError(out, "Failed to communicate with daemon");
+            HttpResponse.sendJsonError(out, Messages.get("errors.ipc_communication_failed"));
         }
     }
 
@@ -144,7 +144,7 @@ public class MqttApiHandler {
         if (ipcResponse != null) {
             HttpResponse.sendJson(out, ipcResponse.toString());
         } else {
-            HttpResponse.sendJsonError(out, "Failed to communicate with daemon");
+            HttpResponse.sendJsonError(out, Messages.get("errors.ipc_communication_failed"));
         }
     }
 

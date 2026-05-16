@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Layered background for the language footer that lives at the bottom
+     of the nav drawer. A 1dp top border separates it from the scrolling
+     menu list above without needing a Divider element. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/bg_elevated" />
+        </shape>
+    </item>
+    <item android:height="1dp" android:gravity="top">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/card_border" />
+        </shape>
+    </item>
+</layer-list>

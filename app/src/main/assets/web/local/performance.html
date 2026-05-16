@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Performance - OverDrive</title>
+    <title data-i18n="app.performance_title">Performance - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon.webp">
     <link rel="stylesheet" href="../shared/styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -472,8 +472,8 @@
                 <div class="brand">
                     <div class="brand-logo"><img src="../shared/app-icon.webp" alt="OverDrive"></div>
                     <div class="brand-text">
-                        <span class="brand-name">OverDrive</span>
-                        <span class="brand-tagline">Sentry System</span>
+                        <span class="brand-name" data-i18n="app.name">OverDrive</span>
+                        <span class="brand-tagline" data-i18n="app.tagline">Sentry System</span>
                         <span class="brand-version" id="appVersion"></span>
                     </div>
                 </div>
@@ -489,7 +489,7 @@
                         <path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/>
                         <path d="M2 12a9 9 0 0 0 8 8"/><circle cx="2" cy="12" r="2"/>
                     </svg>
-                    <span>Live View</span>
+                    <span data-i18n="nav.live_view">Live View</span>
                 </a>
                 <a href="events.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -497,25 +497,25 @@
                         <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/>
                         <line x1="3" y1="10" x2="21" y2="10"/>
                     </svg>
-                    <span>Events</span>
+                    <span data-i18n="nav.events">Events</span>
                 </a>
                 <a href="surveillance.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                     </svg>
-                    <span>Surveillance</span>
+                    <span data-i18n="nav.surveillance">Surveillance</span>
                 </a>
                 <a href="recording.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/>
                     </svg>
-                    <span>Recordings</span>
+                    <span data-i18n="nav.recordings">Recordings</span>
                 </a>
                 <a href="performance.html" class="nav-link active">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
                     </svg>
-                    <span>Performance</span>
+                    <span data-i18n="nav.performance">Performance</span>
                 </a>
                 <a href="abrp.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -524,7 +524,7 @@
                         <circle cx="6" cy="6" r="3"/>
                         <circle cx="6" cy="18" r="3"/>
                     </svg>
-                    <span>ABRP</span>
+                    <span data-i18n="nav.abrp">ABRP</span>
                 </a>
                 <a href="mqtt.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -534,42 +534,42 @@
                         <path d="M5.64 18.36A9 9 0 0 1 3 12a9 9 0 0 1 2.64-6.36"/>
                         <path d="M18.36 5.64A9 9 0 0 1 21 12a9 9 0 0 1-2.64 6.36"/>
                     </svg>
-                    <span>MQTT</span>
+                    <span data-i18n="nav.mqtt">MQTT</span>
                 </a>
                 <a href="trips.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 17h2v-7l4 4 4-4 4 4 4-4v7h2"/>
                         <path d="M4 5h16"/>
                     </svg>
-                    <span>Trips</span>
+                    <span data-i18n="nav.trips">Trips</span>
                 </a>
                 <a href="notifications.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
                         <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
                     </svg>
-                    <span>Notifications</span>
+                    <span data-i18n="nav.notifications">Notifications</span>
                 </a>
                 <a href="vehicle-control.html" class="nav-link">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="3" y="11" width="18" height="11" rx="2"/>
                         <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                     </svg>
-                    <span>Vehicle Control</span>
+                    <span data-i18n="nav.vehicle_control">Vehicle Control</span>
                 </a>
             </nav>
             <div class="sidebar-footer">
                 <div class="status-card">
                     <div class="status-row">
-                        <span class="status-label"><span class="status-dot" id="connDot"></span>Device</span>
+                        <span class="status-label" data-i18n="status.device"><span class="status-dot" id="connDot"></span>Device</span>
                         <span class="status-value" id="deviceId">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">ACC</span>
+                        <span class="status-label" data-i18n="status.acc">ACC</span>
                         <span class="status-value" id="accValue">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">
+                        <span class="status-label" data-i18n="status.battery_12v">
                             <svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="6" y="7" width="12" height="10" rx="1"/><path d="M6 10H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h2"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/>
                             </svg>12V
@@ -577,11 +577,11 @@
                         <span class="status-value" id="batteryValue">--</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">Sentry</span>
-                        <span class="status-value" id="survStatus">OFF</span>
+                        <span class="status-label" data-i18n="status.sentry">Sentry</span>
+                        <span class="status-value" id="survStatus" data-i18n="status.off">OFF</span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">
+                        <span class="status-label" data-i18n="status.network">
                             <span id="networkIcon"><svg class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg></span>Net
                         </span>
                         <span class="status-value" id="networkValue">--</span>
@@ -590,7 +590,7 @@
                 <!-- EV Battery & Charging Card -->
                 <div class="status-card ev-card" id="evCard">
                     <div class="ev-header-row">
-                        <span class="ev-title">Vehicle Status</span>
+                        <span class="ev-title" data-i18n="status.vehicle_status">Vehicle Status</span>
                         <span class="ev-percent-text" id="evPercentValue">--%</span>
                     </div>
                     <div class="ev-svg-container">
@@ -689,7 +689,7 @@
                             <path d="M13 10h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h0a2 2 0 0 0 2-2V9.83a2 2 0 0 0-.59-1.42L18 6"/>
                             <path d="M6 14v-3"/>
                         </svg>
-                        <span class="fuel-title">Fuel</span>
+                        <span class="fuel-title" data-i18n="performance.fuel_title">Fuel</span>
                         <span class="fuel-percent" id="fuelPercentValue">--%</span>
                     </div>
                     <div class="fuel-bar-track">
@@ -707,16 +707,16 @@
                         <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
                     </svg>
                 </button>
-                <span style="font-weight:600;">Performance</span>
+                <span style="font-weight:600;" data-i18n="performance.page_header_short">Performance</span>
                 <div style="width:40px;"></div>
             </div>
 
             <header class="page-header">
-                <h1 class="page-title">Performance Monitor</h1>
+                <h1 class="page-title" data-i18n="performance.page_title">Performance Monitor</h1>
                 <div class="header-actions">
                     <div class="monitoring-status">
                         <span class="monitoring-dot" id="monitoringDot"></span>
-                        <span id="monitoringText">Monitoring</span>
+                        <span id="monitoringText" data-i18n="performance.monitoring">Monitoring</span>
                     </div>
                     <div class="header-badge">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -733,28 +733,28 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;margin-right:8px;stroke:var(--success);">
                                 <rect x="6" y="7" width="12" height="10" rx="1"/><path d="M6 10H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h2"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/>
                             </svg>
-                            Battery SOC History
+                            <span data-i18n="performance.soc_history">Battery SOC History</span>
                         </div>
                         <div class="soc-time-selector" id="socTimeSelector">
-                            <button class="time-btn" data-hours="24" onclick="BYD.performance.setSocTimeRange(24)">24h</button>
-                            <button class="time-btn active" data-hours="72" onclick="BYD.performance.setSocTimeRange(72)">3 Days</button>
-                            <button class="time-btn" data-hours="168" onclick="BYD.performance.setSocTimeRange(168)">7 Days</button>
+                            <button class="time-btn" data-hours="24" onclick="BYD.performance.setSocTimeRange(24)" data-i18n="performance.range_24h">24h</button>
+                            <button class="time-btn active" data-hours="72" onclick="BYD.performance.setSocTimeRange(72)" data-i18n="performance.range_3d">3 Days</button>
+                            <button class="time-btn" data-hours="168" onclick="BYD.performance.setSocTimeRange(168)" data-i18n="performance.range_7d">7 Days</button>
                         </div>
                     </div>
                     <div class="soc-stats-row">
-                        <div class="soc-stat"><span class="soc-stat-value" id="socCurrent">--%</span><span class="soc-stat-label">Current</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="socKwh">-- kWh</span><span class="soc-stat-label">Energy</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="socMin">--%</span><span class="soc-stat-label">Min</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="socMax">--%</span><span class="soc-stat-label">Max</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="socAvg">--%</span><span class="soc-stat-label">Avg</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="chargingSessions">--</span><span class="soc-stat-label">Charges</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="socCurrent">--%</span><span class="soc-stat-label" data-i18n="performance.label_current">Current</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="socKwh">-- kWh</span><span class="soc-stat-label" data-i18n="performance.label_energy">Energy</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="socMin">--%</span><span class="soc-stat-label" data-i18n="performance.label_min">Min</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="socMax">--%</span><span class="soc-stat-label" data-i18n="performance.label_max">Max</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="socAvg">--%</span><span class="soc-stat-label" data-i18n="performance.label_avg">Avg</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="chargingSessions">--</span><span class="soc-stat-label" data-i18n="performance.label_charges">Charges</span></div>
                     </div>
                     <div class="chart-container" style="height: 250px;">
                         <canvas id="socChart" class="chart-canvas"></canvas>
                     </div>
                     <div class="chart-legend" style="margin-top:12px;justify-content:center;">
-                        <div class="legend-item"><span class="legend-dot" style="background:var(--success);"></span>SOC %</div>
-                        <div class="legend-item"><span class="legend-dot" style="background:var(--brand-secondary);"></span>Charging</div>
+                        <div class="legend-item"><span class="legend-dot" style="background:var(--success);"></span><span data-i18n="performance.legend_soc">SOC %</span></div>
+                        <div class="legend-item"><span class="legend-dot" style="background:var(--brand-secondary);"></span><span data-i18n="abrp.charging">Charging</span></div>
                     </div>
                 </div>
 
@@ -765,28 +765,28 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;margin-right:8px;stroke:#fbbf24;">
                                 <rect x="6" y="7" width="12" height="10" rx="1"/><path d="M6 10H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h2"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/>
                             </svg>
-                            12V Battery History
+                            <span data-i18n="performance.batt12v_history">12V Battery History</span>
                         </div>
                         <div class="soc-time-selector" id="voltageTimeSelector">
-                            <button class="time-btn" data-hours="24" onclick="BYD.performance.setBatteryTimeRange(24)">24h</button>
-                            <button class="time-btn active" data-hours="72" onclick="BYD.performance.setBatteryTimeRange(72)">3 Days</button>
-                            <button class="time-btn" data-hours="168" onclick="BYD.performance.setBatteryTimeRange(168)">7 Days</button>
+                            <button class="time-btn" data-hours="24" onclick="BYD.performance.setBatteryTimeRange(24)" data-i18n="performance.range_24h">24h</button>
+                            <button class="time-btn active" data-hours="72" onclick="BYD.performance.setBatteryTimeRange(72)" data-i18n="performance.range_3d">3 Days</button>
+                            <button class="time-btn" data-hours="168" onclick="BYD.performance.setBatteryTimeRange(168)" data-i18n="performance.range_7d">7 Days</button>
                         </div>
                     </div>
                     <div class="soc-stats-row">
-                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vCurrent">--V</span><span class="soc-stat-label">Current</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vMin">--V</span><span class="soc-stat-label">Min</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vMax">--V</span><span class="soc-stat-label">Max</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vAvg">--V</span><span class="soc-stat-label">Avg</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vCurrent">--V</span><span class="soc-stat-label" data-i18n="performance.label_current">Current</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vMin">--V</span><span class="soc-stat-label" data-i18n="performance.label_min">Min</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vMax">--V</span><span class="soc-stat-label" data-i18n="performance.label_max">Max</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="volt12vAvg">--V</span><span class="soc-stat-label" data-i18n="performance.label_avg">Avg</span></div>
                     </div>
                     <div class="chart-container" style="height: 200px;">
                         <canvas id="voltageChart" class="chart-canvas"></canvas>
                     </div>
-                    <div class="chart-hint">Touch or hover to see values</div>
+                    <div class="chart-hint" data-i18n="performance.chart_hint">Touch or hover to see values</div>
                     <div class="chart-legend" style="margin-top:8px;justify-content:center;">
-                        <div class="legend-item"><span class="legend-dot" style="background:#fbbf24;"></span>12V Voltage</div>
-                        <div class="legend-item"><span class="legend-dot" style="background:rgba(239,68,68,0.5);"></span>Warning (11.5V)</div>
-                        <div class="legend-item"><span class="legend-dot" style="background:rgba(14,165,233,0.3);"></span>Charging</div>
+                        <div class="legend-item"><span class="legend-dot" style="background:#fbbf24;"></span><span data-i18n="performance.legend_12v">12V Voltage</span></div>
+                        <div class="legend-item"><span class="legend-dot" style="background:rgba(239,68,68,0.5);"></span><span data-i18n="performance.legend_warn_115">Warning (11.5V)</span></div>
+                        <div class="legend-item"><span class="legend-dot" style="background:rgba(14,165,233,0.3);"></span><span data-i18n="abrp.charging">Charging</span></div>
                     </div>
                 </div>
 
@@ -797,31 +797,31 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;margin-right:8px;stroke:#a855f7;">
                                 <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
                             </svg>
-                            Battery Health
+                            <span data-i18n="performance.battery_health">Battery Health</span>
                         </div>
                         <div class="soc-time-selector" id="healthTimeSelector">
-                            <button class="time-btn" data-hours="24" onclick="BYD.performance.setHealthTimeRange(24)">24h</button>
-                            <button class="time-btn active" data-hours="72" onclick="BYD.performance.setHealthTimeRange(72)">3 Days</button>
-                            <button class="time-btn" data-hours="168" onclick="BYD.performance.setHealthTimeRange(168)">7 Days</button>
+                            <button class="time-btn" data-hours="24" onclick="BYD.performance.setHealthTimeRange(24)" data-i18n="performance.range_24h">24h</button>
+                            <button class="time-btn active" data-hours="72" onclick="BYD.performance.setHealthTimeRange(72)" data-i18n="performance.range_3d">3 Days</button>
+                            <button class="time-btn" data-hours="168" onclick="BYD.performance.setHealthTimeRange(168)" data-i18n="performance.range_7d">7 Days</button>
                         </div>
                     </div>
                     <div class="soc-stats-row">
-                        <div class="soc-stat"><span class="soc-stat-value" id="sohValue" style="color:#a855f7;">--%</span><span class="soc-stat-label">SOH</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="estCapacity">-- kWh</span><span class="soc-stat-label">Est. Cap</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="tempHighVal">--°C</span><span class="soc-stat-label">Temp Hi</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="tempLowVal">--°C</span><span class="soc-stat-label">Temp Lo</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="tempDeltaVal">--°C</span><span class="soc-stat-label">Δ Temp</span></div>
-                        <div class="soc-stat"><span class="soc-stat-value" id="thermalStatus">--</span><span class="soc-stat-label">Status</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="sohValue" style="color:#a855f7;">--%</span><span class="soc-stat-label" data-i18n="performance.label_soh">SOH</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="estCapacity">-- kWh</span><span class="soc-stat-label" data-i18n="performance.label_est_cap">Est. Cap</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="tempHighVal">--°C</span><span class="soc-stat-label" data-i18n="performance.label_temp_hi">Temp Hi</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="tempLowVal">--°C</span><span class="soc-stat-label" data-i18n="performance.label_temp_lo">Temp Lo</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="tempDeltaVal">--°C</span><span class="soc-stat-label" data-i18n="performance.label_temp_delta">Δ Temp</span></div>
+                        <div class="soc-stat"><span class="soc-stat-value" id="thermalStatus">--</span><span class="soc-stat-label" data-i18n="performance.label_status">Status</span></div>
                     </div>
                     <div class="chart-container" style="height: 220px;">
                         <canvas id="thermalChart" class="chart-canvas"></canvas>
                     </div>
-                    <div class="chart-hint">Touch or hover to see values</div>
+                    <div class="chart-hint" data-i18n="performance.chart_hint">Touch or hover to see values</div>
                     <div class="chart-legend" style="margin-top:8px;justify-content:center;">
-                        <div class="legend-item"><span class="legend-dot" style="background:#ef4444;"></span>High</div>
-                        <div class="legend-item"><span class="legend-dot" style="background:#22c55e;"></span>Low</div>
-                        <div class="legend-item"><span class="legend-dot" style="background:#3b82f6;"></span>Average</div>
-                        <div class="legend-item"><span class="legend-dot" style="background:rgba(14,165,233,0.3);"></span>Charging</div>
+                        <div class="legend-item"><span class="legend-dot" style="background:#ef4444;"></span><span data-i18n="performance.legend_high">High</span></div>
+                        <div class="legend-item"><span class="legend-dot" style="background:#22c55e;"></span><span data-i18n="performance.legend_low">Low</span></div>
+                        <div class="legend-item"><span class="legend-dot" style="background:#3b82f6;"></span><span data-i18n="performance.legend_avg">Average</span></div>
+                        <div class="legend-item"><span class="legend-dot" style="background:rgba(14,165,233,0.3);"></span><span data-i18n="abrp.charging">Charging</span></div>
                     </div>
                 </div>
 
@@ -833,26 +833,26 @@
                                 <rect x="6" y="7" width="12" height="10" rx="1"/><path d="M6 10H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h2"/><path d="M18 10h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2"/>
                                 <path d="M9 12.5L11 10.5 12 12 13 10.5 15 12.5"/>
                             </svg>
-                            State of Health (SOH)
+                            <span data-i18n="performance.soh_card_title">State of Health (SOH)</span>
                         </div>
-                        <button class="btn btn-danger" id="btnResetSoh" onclick="BYD.performance.resetSoh()" style="font-size:11px;padding:4px 10px;border-radius:6px;">Reset</button>
+                        <button class="btn btn-danger" id="btnResetSoh" onclick="BYD.performance.resetSoh()" style="font-size:11px;padding:4px 10px;border-radius:6px;" data-i18n="performance.btn_reset">Reset</button>
                     </div>
 
                     <!-- Active SOH + Source Selector -->
                     <div style="display:flex;align-items:center;gap:16px;margin:16px 0;">
                         <div style="text-align:center;min-width:100px;">
                             <div id="sohDetailPercent" style="font-family:'JetBrains Mono',monospace;font-size:42px;font-weight:700;color:#a855f7;line-height:1;">--%</div>
-                            <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">Active SOH</div>
-                            <div id="sohEmaValue" style="font-size:11px;color:var(--text-muted);margin-top:2px;">EMA: --%</div>
+                            <div style="font-size:12px;color:var(--text-muted);margin-top:4px;" data-i18n="performance.active_soh">Active SOH</div>
+                            <div id="sohEmaValue" style="font-size:11px;color:var(--text-muted);margin-top:2px;" data-i18n="performance.ema_placeholder">EMA: --%</div>
                         </div>
                         <div style="flex:1;">
-                            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">SOH Source (used by ABRP, Trips, MQTT, Range)</div>
+                            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;" data-i18n="performance.soh_source_caption">SOH Source (used by ABRP, Trips, MQTT, Range)</div>
                             <div class="soc-time-selector" id="sohSourceSelector">
-                                <button class="time-btn active" data-source="auto" onclick="BYD.performance.setSohSource('auto')">Auto</button>
-                                <button class="time-btn" data-source="oem" onclick="BYD.performance.setSohSource('oem')">OEM</button>
-                                <button class="time-btn" data-source="capacity_ah" onclick="BYD.performance.setSohSource('capacity_ah')">Cap-Ah</button>
-                                <button class="time-btn" data-source="calibration" onclick="BYD.performance.setSohSource('calibration')">Calib</button>
-                                <button class="time-btn" data-source="energy" onclick="BYD.performance.setSohSource('energy')">Energy</button>
+                                <button class="time-btn active" data-source="auto" onclick="BYD.performance.setSohSource('auto')" data-i18n="performance.src_auto">Auto</button>
+                                <button class="time-btn" data-source="oem" onclick="BYD.performance.setSohSource('oem')" data-i18n="performance.src_oem">OEM</button>
+                                <button class="time-btn" data-source="capacity_ah" onclick="BYD.performance.setSohSource('capacity_ah')" data-i18n="performance.src_cap_ah">Cap-Ah</button>
+                                <button class="time-btn" data-source="calibration" onclick="BYD.performance.setSohSource('calibration')" data-i18n="performance.src_calib">Calib</button>
+                                <button class="time-btn" data-source="energy" onclick="BYD.performance.setSohSource('energy')" data-i18n="performance.src_energy">Energy</button>
                             </div>
                         </div>
                     </div>
@@ -860,19 +860,19 @@
                     <!-- Raw Values from All Sources -->
                     <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:8px;margin:12px 0;">
                         <div style="background:var(--bg-elevated);padding:10px 8px;border-radius:8px;text-align:center;">
-                            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">OEM</div>
+                            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;" data-i18n="performance.src_oem">OEM</div>
                             <div id="sohRawOem" style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:600;color:var(--text-primary);margin-top:2px;">--</div>
                         </div>
                         <div style="background:var(--bg-elevated);padding:10px 8px;border-radius:8px;text-align:center;">
-                            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Cap-Ah</div>
+                            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;" data-i18n="performance.src_cap_ah">Cap-Ah</div>
                             <div id="sohRawCapAh" style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:600;color:var(--text-primary);margin-top:2px;">--</div>
                         </div>
                         <div style="background:var(--bg-elevated);padding:10px 8px;border-radius:8px;text-align:center;">
-                            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Calib</div>
+                            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;" data-i18n="performance.src_calib">Calib</div>
                             <div id="sohRawCalib" style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:600;color:var(--text-primary);margin-top:2px;">--</div>
                         </div>
                         <div style="background:var(--bg-elevated);padding:10px 8px;border-radius:8px;text-align:center;">
-                            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Energy</div>
+                            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;" data-i18n="performance.src_energy">Energy</div>
                             <div id="sohRawEnergy" style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:600;color:var(--text-primary);margin-top:2px;">--</div>
                         </div>
                     </div>
@@ -880,15 +880,15 @@
                     <!-- Metadata row -->
                     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
                         <div style="background:var(--bg-elevated);padding:8px 10px;border-radius:6px;">
-                            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;">Nominal</div>
+                            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;" data-i18n="performance.meta_nominal">Nominal</div>
                             <div id="sohDetailNominal" style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;color:var(--text-primary);margin-top:2px;">-- kWh</div>
                         </div>
                         <div style="background:var(--bg-elevated);padding:8px 10px;border-radius:6px;">
-                            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;">Samples</div>
+                            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;" data-i18n="performance.meta_samples">Samples</div>
                             <div id="sohDetailSamples" style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;color:var(--text-primary);margin-top:2px;">--</div>
                         </div>
                         <div style="background:var(--bg-elevated);padding:8px 10px;border-radius:6px;">
-                            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;">Updated</div>
+                            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;" data-i18n="performance.meta_updated">Updated</div>
                             <div id="sohDetailUpdated" style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;color:var(--text-primary);margin-top:2px;">--</div>
                         </div>
                     </div>
@@ -906,19 +906,19 @@
                                     <rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/>
                                     <path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/>
                                 </svg>
-                                CPU
+                                <span data-i18n="performance.card_cpu">CPU</span>
                             </div>
                         </div>
                         <div class="metric-value"><span id="cpuValue">--</span><span class="unit">%</span></div>
-                        <div class="metric-subtitle">App: <span id="cpuAppValue">--</span>%</div>
+                        <div class="metric-subtitle"><span data-i18n="performance.card_app_label">App</span>: <span id="cpuAppValue">--</span>%</div>
                         <div class="metric-bar"><div class="metric-bar-fill" id="cpuBar" style="width: 0%"></div></div>
                         <div class="stats-row">
                             <div class="stat-item">
-                                <span class="stat-label">Frequency</span>
+                                <span class="stat-label" data-i18n="performance.card_frequency">Frequency</span>
                                 <span class="stat-value" id="cpuFreq">-- MHz</span>
                             </div>
                             <div class="stat-item">
-                                <span class="stat-label">Temperature</span>
+                                <span class="stat-label" data-i18n="performance.card_temperature">Temperature</span>
                                 <span class="stat-value" id="cpuTemp">--°C</span>
                             </div>
                         </div>
@@ -932,7 +932,7 @@
                                     <path d="M6 19v-3M10 19v-3M14 19v-3M18 19v-3M6 8v-3M10 8v-3M14 8v-3M18 8v-3"/>
                                     <rect x="2" y="8" width="20" height="8" rx="1"/>
                                 </svg>
-                                Memory
+                                <span data-i18n="performance.card_memory">Memory</span>
                             </div>
                         </div>
                         <div class="metric-value"><span id="memValue">--</span><span class="unit">%</span></div>
@@ -941,15 +941,15 @@
                         <div class="memory-breakdown">
                             <div class="breakdown-item">
                                 <div class="breakdown-value" id="appMemTotal">--</div>
-                                <div class="breakdown-label">App Total</div>
+                                <div class="breakdown-label" data-i18n="performance.card_app_total">App Total</div>
                             </div>
                             <div class="breakdown-item">
                                 <div class="breakdown-value" id="appMemNative">--</div>
-                                <div class="breakdown-label">Native</div>
+                                <div class="breakdown-label" data-i18n="performance.card_native">Native</div>
                             </div>
                             <div class="breakdown-item">
                                 <div class="breakdown-value" id="appMemJava">--</div>
-                                <div class="breakdown-label">Java Heap</div>
+                                <div class="breakdown-label" data-i18n="performance.card_java_heap">Java Heap</div>
                             </div>
                         </div>
                     </div>
@@ -962,20 +962,20 @@
                                     <rect x="2" y="6" width="20" height="12" rx="2"/>
                                     <path d="M6 10h4v4H6zM14 10h4v4h-4z"/>
                                 </svg>
-                                GPU
+                                <span data-i18n="performance.card_gpu">GPU</span>
                             </div>
                             <span class="gpu-status-badge" id="gpuStatusBadge" style="display:none;"></span>
                         </div>
                         <div class="metric-value"><span id="gpuValue">--</span><span class="unit">%</span></div>
-                        <div class="metric-subtitle" id="gpuSubtitle">Graphics Processing</div>
+                        <div class="metric-subtitle" id="gpuSubtitle" data-i18n="performance.card_gpu_default_subtitle">Graphics Processing</div>
                         <div class="metric-bar"><div class="metric-bar-fill" id="gpuBar" style="width: 0%"></div></div>
                         <div class="stats-row">
                             <div class="stat-item">
-                                <span class="stat-label">Frequency</span>
+                                <span class="stat-label" data-i18n="performance.card_frequency">Frequency</span>
                                 <span class="stat-value" id="gpuFreq">-- MHz</span>
                             </div>
                             <div class="stat-item">
-                                <span class="stat-label">Temperature</span>
+                                <span class="stat-label" data-i18n="performance.card_temperature">Temperature</span>
                                 <span class="stat-value" id="gpuTemp">--°C</span>
                             </div>
                         </div>
@@ -993,18 +993,18 @@
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
                                 </svg>
-                                App Stats
+                                <span data-i18n="performance.card_app_stats">App Stats</span>
                             </div>
                         </div>
                         <div class="metric-value"><span id="threadCount">--</span><span class="unit">threads</span></div>
-                        <div class="metric-subtitle">Active Threads</div>
+                        <div class="metric-subtitle" data-i18n="performance.card_active_threads">Active Threads</div>
                         <div class="stats-row">
                             <div class="stat-item">
-                                <span class="stat-label">Open FDs</span>
+                                <span class="stat-label" data-i18n="performance.card_open_fds">Open FDs</span>
                                 <span class="stat-value" id="openFds">--</span>
                             </div>
                             <div class="stat-item">
-                                <span class="stat-label">GC Count</span>
+                                <span class="stat-label" data-i18n="performance.card_gc_count">GC Count</span>
                                 <span class="stat-value" id="gcCount">--</span>
                             </div>
                         </div>
@@ -1021,24 +1021,24 @@
                                     <line x1="10" y1="10" x2="10" y2="14"/>
                                     <line x1="14" y1="10" x2="14" y2="14"/>
                                 </svg>
-                                EV Battery
+                                <span data-i18n="performance.card_ev_battery">EV Battery</span>
                             </div>
                             <span class="gpu-status-badge" id="sohBadge" style="display:none;"></span>
                         </div>
                         <div class="metric-value"><span id="evSocValue">--</span><span class="unit">%</span></div>
-                        <div class="metric-subtitle"><span id="evKwhValue">--</span> kWh remaining</div>
+                        <div class="metric-subtitle"><span id="evKwhValue">--</span> <span data-i18n="performance.card_kwh_remaining_suffix">kWh remaining</span></div>
                         <div class="metric-bar"><div class="metric-bar-fill ev-battery" id="evSocBar" style="width: 0%"></div></div>
                         <div class="stats-row">
                             <div class="stat-item">
-                                <span class="stat-label">Range</span>
+                                <span class="stat-label" data-i18n="performance.card_range">Range</span>
                                 <span class="stat-value" id="evRangeValue">-- km</span>
                             </div>
                             <div class="stat-item">
-                                <span class="stat-label">SOH</span>
+                                <span class="stat-label" data-i18n="performance.label_soh">SOH</span>
                                 <span class="stat-value" id="evSohValue">--%</span>
                             </div>
                             <div class="stat-item">
-                                <span class="stat-label">Status</span>
+                                <span class="stat-label" data-i18n="performance.card_status">Status</span>
                                 <span class="stat-value" id="evChargingStatus">--</span>
                             </div>
                         </div>
@@ -1048,25 +1048,25 @@
                 <!-- CPU Usage Chart -->
                 <div class="chart-card">
                     <div class="chart-header">
-                        <div class="chart-title">CPU Usage History (60s)</div>
+                        <div class="chart-title" data-i18n="performance.chart_cpu_history">CPU Usage History (60s)</div>
                         <div class="chart-legend">
-                            <div class="legend-item"><span class="legend-dot system"></span>System</div>
-                            <div class="legend-item"><span class="legend-dot app"></span>App</div>
+                            <div class="legend-item"><span class="legend-dot system"></span><span data-i18n="performance.legend_system">System</span></div>
+                            <div class="legend-item"><span class="legend-dot app"></span><span data-i18n="performance.legend_app">App</span></div>
                         </div>
                     </div>
                     <div class="chart-container">
                         <canvas id="cpuChart" class="chart-canvas"></canvas>
                     </div>
-                    <div class="chart-hint">Touch or hover to see values</div>
+                    <div class="chart-hint" data-i18n="performance.chart_hint">Touch or hover to see values</div>
                 </div>
 
                 <!-- Memory Usage Chart -->
                 <div class="chart-card">
                     <div class="chart-header">
-                        <div class="chart-title">Memory Usage History (60s)</div>
+                        <div class="chart-title" data-i18n="performance.chart_mem_history">Memory Usage History (60s)</div>
                         <div class="chart-legend">
-                            <div class="legend-item"><span class="legend-dot system"></span>System</div>
-                            <div class="legend-item"><span class="legend-dot app"></span>App</div>
+                            <div class="legend-item"><span class="legend-dot system"></span><span data-i18n="performance.legend_system">System</span></div>
+                            <div class="legend-item"><span class="legend-dot app"></span><span data-i18n="performance.legend_app">App</span></div>
                         </div>
                     </div>
                     <div class="chart-container">
@@ -1077,9 +1077,9 @@
                 <!-- GPU Usage Chart -->
                 <div class="chart-card">
                     <div class="chart-header">
-                        <div class="chart-title">GPU Usage History (60s)</div>
+                        <div class="chart-title" data-i18n="performance.chart_gpu_history">GPU Usage History (60s)</div>
                         <div class="chart-legend">
-                            <div class="legend-item"><span class="legend-dot gpu"></span>GPU Load</div>
+                            <div class="legend-item"><span class="legend-dot gpu"></span><span data-i18n="performance.legend_gpu_load">GPU Load</span></div>
                         </div>
                     </div>
                     <div class="chart-container">
@@ -1097,14 +1097,14 @@
                                 <line x1="10" y1="11" x2="10" y2="17"/>
                                 <line x1="14" y1="11" x2="14" y2="17"/>
                             </svg>
-                            Reset Data
+                            <span data-i18n="performance.reset_data_title">Reset Data</span>
                         </div>
                     </div>
                     <div id="resetCategoriesList">
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Trips</div>
-                                <div class="setting-desc">Trip history, routes, weekly/monthly rollups, consumption buckets</div>
+                                <div class="setting-name" data-i18n="performance.cat_trips">Trips</div>
+                                <div class="setting-desc" data-i18n="performance.cat_trips_desc">Trip history, routes, weekly/monthly rollups, consumption buckets</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch"><input type="checkbox" data-cat="trips"><span class="toggle-slider"></span></label>
@@ -1112,8 +1112,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">SoC &amp; 12V history</div>
-                                <div class="setting-desc">All SOC samples, charging sessions and battery voltage logs</div>
+                                <div class="setting-name" data-i18n="performance.cat_soc_history_label">SoC &amp; 12V history</div>
+                                <div class="setting-desc" data-i18n="performance.cat_soc_history_desc">All SOC samples, charging sessions and battery voltage logs</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch"><input type="checkbox" data-cat="socHistory"><span class="toggle-slider"></span></label>
@@ -1121,8 +1121,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">SoH calibration</div>
-                                <div class="setting-desc">Re-detects nominal capacity and re-seeds estimate from BMS</div>
+                                <div class="setting-name" data-i18n="performance.cat_soh_label">SoH calibration</div>
+                                <div class="setting-desc" data-i18n="performance.cat_soh_desc">Re-detects nominal capacity and re-seeds estimate from BMS</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch"><input type="checkbox" data-cat="soh"><span class="toggle-slider"></span></label>
@@ -1130,8 +1130,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">ABRP token</div>
-                                <div class="setting-desc">Disables ABRP telemetry until re-paired</div>
+                                <div class="setting-name" data-i18n="performance.cat_abrp_token">ABRP token</div>
+                                <div class="setting-desc" data-i18n="performance.cat_abrp_token_desc">Disables ABRP telemetry until re-paired</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch"><input type="checkbox" data-cat="abrpToken"><span class="toggle-slider"></span></label>
@@ -1139,8 +1139,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">BYD Cloud credentials</div>
-                                <div class="setting-desc">Username, login key, VIN, region — re-login required</div>
+                                <div class="setting-name" data-i18n="performance.cat_byd_cloud">BYD Cloud credentials</div>
+                                <div class="setting-desc" data-i18n="performance.cat_byd_cloud_desc">Username, login key, VIN, region — re-login required</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch"><input type="checkbox" data-cat="bydCloud"><span class="toggle-slider"></span></label>
@@ -1148,8 +1148,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Recordings (videos)</div>
-                                <div class="setting-desc">Deletes every MP4 in the recordings folder</div>
+                                <div class="setting-name" data-i18n="performance.cat_recordings_label">Recordings (videos)</div>
+                                <div class="setting-desc" data-i18n="performance.cat_recordings_desc">Deletes every MP4 in the recordings folder</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch"><input type="checkbox" data-cat="mediaRecordings"><span class="toggle-slider"></span></label>
@@ -1157,8 +1157,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Sentry events</div>
-                                <div class="setting-desc">Surveillance event clips and JSON sidecars</div>
+                                <div class="setting-name" data-i18n="performance.cat_sentry_events">Sentry events</div>
+                                <div class="setting-desc" data-i18n="performance.cat_sentry_events_desc">Surveillance event clips and JSON sidecars</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch"><input type="checkbox" data-cat="mediaSurveillance"><span class="toggle-slider"></span></label>
@@ -1166,8 +1166,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Proximity recordings</div>
-                                <div class="setting-desc">Radar-triggered event MP4s</div>
+                                <div class="setting-name" data-i18n="performance.cat_proximity">Proximity recordings</div>
+                                <div class="setting-desc" data-i18n="performance.cat_proximity_desc">Radar-triggered event MP4s</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch"><input type="checkbox" data-cat="mediaProximity"><span class="toggle-slider"></span></label>
@@ -1175,8 +1175,8 @@
                         </div>
                         <div class="setting-row">
                             <div class="setting-info">
-                                <div class="setting-name">Trip telemetry files</div>
-                                <div class="setting-desc">Per-trip JSON telemetry on disk (DB rows handled by Trips above)</div>
+                                <div class="setting-name" data-i18n="performance.cat_trip_telemetry">Trip telemetry files</div>
+                                <div class="setting-desc" data-i18n="performance.cat_trip_telemetry_desc">Per-trip JSON telemetry on disk (DB rows handled by Trips above)</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch"><input type="checkbox" data-cat="mediaTrips"><span class="toggle-slider"></span></label>
@@ -1184,9 +1184,9 @@
                         </div>
                     </div>
                     <div style="display:flex;gap:8px;padding:12px 0 4px;">
-                        <button class="btn" onclick="BYD.performance.toggleAllResetCategories(true)" style="flex:1;background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--card-border);">Select all</button>
-                        <button class="btn" onclick="BYD.performance.toggleAllResetCategories(false)" style="flex:1;background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--card-border);">Clear</button>
-                        <button class="btn btn-danger" onclick="BYD.performance.runReset()" style="flex:2;">Reset Selected</button>
+                        <button class="btn" onclick="BYD.performance.toggleAllResetCategories(true)" style="flex:1;background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--card-border);" data-i18n="performance.btn_select_all">Select all</button>
+                        <button class="btn" onclick="BYD.performance.toggleAllResetCategories(false)" style="flex:1;background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--card-border);" data-i18n="performance.btn_clear">Clear</button>
+                        <button class="btn btn-danger" onclick="BYD.performance.runReset()" style="flex:2;" data-i18n="performance.btn_reset_selected">Reset Selected</button>
                     </div>
                 </div>
 
@@ -1206,8 +1206,10 @@
             document.getElementById('sidebar').classList.toggle('open');
             document.getElementById('sidebarOverlay').classList.toggle('show');
         }
-        BYD.core.init();
-        BYD.performance.init();
+        BYD.i18n.init().then(function () {
+            BYD.core.init();
+            BYD.performance.init();
+        });
     </script>
 </body>
 </html>

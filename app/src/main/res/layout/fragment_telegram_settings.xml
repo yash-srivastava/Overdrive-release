@@ -32,14 +32,14 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="🤖 Bot Configuration"
+                    android:text="@string/telegram_bot_config_title"
                     android:textAppearance="@style/TextAppearance.Overdrive.Subtitle"
                     android:layout_marginBottom="16dp" />
 
                 <com.google.android.material.textfield.TextInputLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:hint="Bot Token"
+                    android:hint="@string/telegram_bot_token_hint"
                     app:endIconMode="password_toggle"
                     app:boxBackgroundColor="@color/bg_elevated"
                     app:boxStrokeColor="@color/card_border"
@@ -67,7 +67,7 @@
                         android:id="@+id/btnConnectTest"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Connect &amp; Test"
+                        android:text="@string/telegram_connect_test"
                         app:backgroundTint="@color/brand_primary"
                         android:textColor="@color/bg_base"
                         app:cornerRadius="12dp" />
@@ -81,7 +81,7 @@
                         android:id="@+id/tvBotStatus"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Not connected"
+                        android:text="@string/telegram_not_connected"
                         android:textColor="@color/text_secondary" />
 
                 </LinearLayout>
@@ -117,7 +117,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="🔗 Owner Pairing"
+                    android:text="@string/telegram_owner_pairing_title"
                     android:textAppearance="@style/TextAppearance.Overdrive.Subtitle"
                     android:layout_marginBottom="16dp" />
 
@@ -132,7 +132,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Generate a PIN and send /pair &lt;PIN&gt; to your bot in Telegram"
+                        android:text="@string/telegram_pairing_instructions"
                         android:textColor="@color/text_secondary"
                         android:textSize="13sp"
                         android:layout_marginBottom="16dp" />
@@ -147,7 +147,7 @@
                             android:id="@+id/btnGeneratePin"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Generate PIN"
+                            android:text="@string/telegram_generate_pin"
                             style="@style/Widget.Overdrive.Button.Outlined" />
 
                         <TextView
@@ -192,7 +192,7 @@
                         android:id="@+id/btnUnpair"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Unpair"
+                        android:text="@string/telegram_unpair"
                         style="@style/Widget.Overdrive.Button.Outlined"
                         app:strokeColor="@color/status_danger"
                         android:textColor="@color/status_danger" />
@@ -222,7 +222,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="🔔 Notifications"
+                    android:text="@string/telegram_notifications_title"
                     android:textAppearance="@style/TextAppearance.Overdrive.Subtitle"
                     android:layout_marginBottom="16dp" />
 
@@ -230,7 +230,7 @@
                     android:id="@+id/switchCriticalAlerts"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Critical Alerts"
+                    android:text="@string/telegram_critical_alerts"
                     android:textColor="@color/text_primary"
                     android:checked="true"
                     android:paddingVertical="8dp" />
@@ -239,7 +239,7 @@
                     android:id="@+id/switchConnectivity"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Tunnel URL Updates"
+                    android:text="@string/telegram_tunnel_url_updates"
                     android:textColor="@color/text_primary"
                     android:checked="true"
                     android:paddingVertical="8dp" />
@@ -248,7 +248,7 @@
                     android:id="@+id/switchMotionText"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Motion Alerts (Text)"
+                    android:text="@string/telegram_motion_alerts"
                     android:textColor="@color/text_primary"
                     android:checked="true"
                     android:paddingVertical="8dp" />
@@ -257,7 +257,7 @@
                     android:id="@+id/switchVideoUploads"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Auto-upload event videos"
+                    android:text="@string/telegram_auto_upload_videos"
                     android:textColor="@color/text_primary"
                     android:checked="false"
                     android:paddingVertical="8dp" />
@@ -265,7 +265,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="⚠️ Automatically upload videos after surveillance events (uses mobile data)"
+                    android:text="@string/telegram_auto_upload_warning"
                     android:textColor="@color/text_muted"
                     android:textSize="12sp"
                     android:layout_marginStart="48dp" />
@@ -292,7 +292,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="⚙️ Telegram Bot Daemon"
+                    android:text="@string/telegram_daemon_title"
                     android:textAppearance="@style/TextAppearance.Overdrive.Subtitle"
                     android:layout_marginBottom="16dp" />
 
@@ -300,14 +300,14 @@
                     android:id="@+id/switchAutoStartAccOff"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Auto-start when vehicle is off"
+                    android:text="@string/telegram_autostart_off"
                     android:textColor="@color/text_primary"
                     android:paddingVertical="8dp" />
 
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Bot will start on vehicle off and stop on vehicle on"
+                    android:text="@string/telegram_autostart_off_desc"
                     android:textColor="@color/text_muted"
                     android:textSize="12sp"
                     android:layout_marginStart="48dp"
@@ -330,14 +330,14 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="Status"
+                        android:text="@string/telegram_status_label"
                         android:textColor="@color/text_secondary" />
 
                     <TextView
                         android:id="@+id/tvDaemonStatus"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="🔴 Stopped"
+                        android:text="@string/telegram_status_stopped"
                         android:textColor="@color/text_muted" />
 
                 </LinearLayout>

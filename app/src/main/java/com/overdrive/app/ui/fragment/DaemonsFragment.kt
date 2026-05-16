@@ -117,7 +117,7 @@ class DaemonsFragment : Fragment() {
             DaemonType.CLOUDFLARED_TUNNEL -> showCloudflaredSettingsDialog()
             else -> {
                 // Other daemons don't need configuration yet
-                Toast.makeText(context, "No configuration needed for ${type.displayName}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, getString(R.string.toast_no_config_needed, type.displayName), Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -138,19 +138,19 @@ class DaemonsFragment : Fragment() {
                 currentToken?.let { editToken.setText(it) }
                 
                 val dialog = AlertDialog.Builder(context, R.style.Theme_Overdrive_Dialog)
-                    .setTitle("🌐 Zrok Tunnel Token")
-                    .setMessage("Enter your Zrok enable token.\nGet one at: zrok.io")
+                    .setTitle(getString(R.string.dialog_zrok_token_title))
+                    .setMessage(getString(R.string.dialog_zrok_token_message))
                     .setView(dialogView)
-                    .setPositiveButton("Save") { _, _ ->
+                    .setPositiveButton(getString(R.string.dialog_save)) { _, _ ->
                         val token = editToken.text.toString().trim()
                         if (token.isNotEmpty()) {
                             saveZrokToken(token)
                         } else {
-                            Toast.makeText(context, "Token cannot be empty", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, getString(R.string.toast_token_cannot_be_empty), Toast.LENGTH_SHORT).show()
                         }
                     }
-                    .setNegativeButton("Cancel", null)
-                    .setNeutralButton("Delete") { _, _ ->
+                    .setNegativeButton(getString(R.string.action_cancel), null)
+                    .setNeutralButton(getString(R.string.dialog_delete)) { _, _ ->
                         deleteZrokToken()
                     }
                     .create()
@@ -244,7 +244,7 @@ class DaemonsFragment : Fragment() {
                                 qrCodeText.text = url
                                 qrCodeText.setTextColor(ContextCompat.getColor(context, R.color.brand_primary))
                             } else {
-                                qrCodeText.text = "Failed to generate login url"
+                                qrCodeText.text = getString(R.string.tailscale_failed_login_url)
                                 qrCodeText.setTextColor(ContextCompat.getColor(context, R.color.status_danger))
                                 loginGenerated = false
                             }
@@ -258,16 +258,16 @@ class DaemonsFragment : Fragment() {
                     activity?.runOnUiThread {
                         qrCodeContainer.visibility = View.GONE
                         loginGenerated = false
-                        loginGenerateButton.text = "Logged in. Click to login to a different account"
+                        loginGenerateButton.text = getString(R.string.tailscale_logged_in_relogin)
                     }
                 }
             }
 
             val dialog = AlertDialog.Builder(context, R.style.Theme_Overdrive_Dialog)
-                .setTitle("📡 Tailscale Tunnel Settings")
-                .setMessage("Configure tailscale")
+                .setTitle(getString(R.string.dialog_tailscale_settings_title))
+                .setMessage(getString(R.string.dialog_tailscale_settings_message))
                 .setView(dialogView)
-                .setPositiveButton("Save") { _, _ ->
+                .setPositiveButton(getString(R.string.dialog_save)) { _, _ ->
                     val enableProxy = proxySwitch.isChecked
                     daemonsViewModel.tailscaleController.isProxyEnabled { wasEnabled ->
                         activity?.runOnUiThread {
@@ -280,8 +280,8 @@ class DaemonsFragment : Fragment() {
                         }
                     }
                 }
-                .setNegativeButton("Cancel", null)
-                .setNeutralButton("Delete") { _, _ ->
+                .setNegativeButton(getString(R.string.action_cancel), null)
+                .setNeutralButton(getString(R.string.dialog_delete)) { _, _ ->
                     confirmResetTailscaleEnvironment()
                 }
                 .create()
@@ -297,20 +297,12 @@ class DaemonsFragment : Fragment() {
         val context = context ?: return
 
         AlertDialog.Builder(context, R.style.Theme_Overdrive_Dialog)
-            .setTitle("Enable Tailscale Proxy?")
-            .setMessage(
-                "This routes MQTT through Tailscale so you can reach a private broker on your tailnet without port forwarding.\n\n" +
-                "While enabled:\n" +
-                "• MQTT to a tailnet broker works (e.g. Mosquitto on a device on your tailnet)\n" +
-                "• MQTT to public brokers (HiveMQ, AWS IoT, etc.) will fail — Tailscale only routes to your tailnet\n" +
-                "• The Tailscale daemon will restart to apply the change\n" +
-                "• Other app traffic and the rest of the device are not affected\n\n" +
-                "You can turn this off anytime."
-            )
-            .setPositiveButton("Enable") { _, _ ->
+            .setTitle(getString(R.string.dialog_tailscale_proxy_enable_title))
+            .setMessage(getString(R.string.dialog_tailscale_proxy_enable_message))
+            .setPositiveButton(getString(R.string.dialog_enable)) { _, _ ->
                 saveTailscaleProxySettings(true)
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(getString(R.string.action_cancel), null)
             .show()
     }
     
@@ -321,19 +313,12 @@ class DaemonsFragment : Fragment() {
         val context = context ?: return
         
         AlertDialog.Builder(context, R.style.Theme_Overdrive_Dialog)
-            .setTitle("⚠️ Reset Zrok Environment")
-            .setMessage(
-                "This will:\n" +
-                "• Stop the zrok tunnel if running\n" +
-                "• Remove the zrok environment from this device\n" +
-                "• Delete the saved token\n\n" +
-                "You will need to re-enter your token and re-enable. This uses one of your 5 device slots on zrok.io.\n\n" +
-                "Are you sure?"
-            )
-            .setPositiveButton("Reset") { _, _ ->
+            .setTitle(getString(R.string.dialog_zrok_reset_title))
+            .setMessage(getString(R.string.dialog_zrok_reset_message))
+            .setPositiveButton(getString(R.string.dialog_reset)) { _, _ ->
                 resetZrokEnvironment()
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(getString(R.string.action_cancel), null)
             .show()
     }
     
@@ -342,11 +327,11 @@ class DaemonsFragment : Fragment() {
      */
     private fun resetZrokEnvironment() {
         val context = context ?: return
-        Toast.makeText(context, "Resetting zrok environment...", Toast.LENGTH_SHORT).show()
-        
+        Toast.makeText(context, getString(R.string.toast_resetting_zrok), Toast.LENGTH_SHORT).show()
+
         // First stop the tunnel if running
         daemonsViewModel.stopDaemon(DaemonType.ZROK_TUNNEL)
-        
+
         // Then disable the environment (removes environment.json and reserved tokens)
         daemonsViewModel.zrokController.disableEnvironment(object : com.overdrive.app.ui.daemon.DaemonCallback {
             override fun onStatusChanged(status: com.overdrive.app.ui.model.DaemonStatus, message: String) {
@@ -354,21 +339,21 @@ class DaemonsFragment : Fragment() {
                 daemonsViewModel.zrokController.deleteEnableToken { success ->
                     activity?.runOnUiThread {
                         if (success) {
-                            Toast.makeText(context, "✅ Zrok environment reset. Enter a new token to set up again.", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, getString(R.string.toast_zrok_reset_success), Toast.LENGTH_LONG).show()
                         } else {
-                            Toast.makeText(context, "✅ Environment reset (token file may need manual cleanup)", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, getString(R.string.toast_zrok_reset_partial), Toast.LENGTH_LONG).show()
                         }
-                        daemonsViewModel.updateZrokNeedsConfig("No token configured. Tap to set up.")
+                        daemonsViewModel.updateZrokNeedsConfig(getString(R.string.zrok_no_token_configured))
                     }
                 }
             }
-            
+
             override fun onError(error: String) {
                 // Even if disable fails, still try to delete the token
                 daemonsViewModel.zrokController.deleteEnableToken { _ ->
                     activity?.runOnUiThread {
-                        Toast.makeText(context, "Environment reset (with warnings: $error)", Toast.LENGTH_LONG).show()
-                        daemonsViewModel.updateZrokNeedsConfig("No token configured. Tap to set up.")
+                        Toast.makeText(context, getString(R.string.toast_zrok_reset_warnings, error), Toast.LENGTH_LONG).show()
+                        daemonsViewModel.updateZrokNeedsConfig(getString(R.string.zrok_no_token_configured))
                     }
                 }
             }
@@ -382,19 +367,12 @@ class DaemonsFragment : Fragment() {
         val context = context ?: return
 
         AlertDialog.Builder(context, R.style.Theme_Overdrive_Dialog)
-            .setTitle("⚠️ Reset Tailscale Environment")
-            .setMessage(
-                "This will:\n" +
-                "• Stop the tailscale tunnel if running\n" +
-                "• Remove the tailscale environment from this device\n" +
-                "• You will still need to remove the device from the tailscale console\n\n" +
-                "You will need to log in again.\n\n" +
-                "Are you sure?"
-            )
-            .setPositiveButton("Reset") { _, _ ->
+            .setTitle(getString(R.string.dialog_tailscale_reset_title))
+            .setMessage(getString(R.string.dialog_tailscale_reset_message))
+            .setPositiveButton(getString(R.string.dialog_reset)) { _, _ ->
                 resetTailscaleEnvironment()
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(getString(R.string.action_cancel), null)
             .show()
     }
 
@@ -403,7 +381,7 @@ class DaemonsFragment : Fragment() {
      */
     private fun resetTailscaleEnvironment() {
         val context = context ?: return
-        Toast.makeText(context, "Resetting tailscale environment...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, getString(R.string.toast_resetting_tailscale), Toast.LENGTH_SHORT).show()
 
         // First stop the tunnel if running
         daemonsViewModel.stopDaemon(DaemonType.TAILSCALE_TUNNEL)
@@ -411,11 +389,11 @@ class DaemonsFragment : Fragment() {
         // Then disable the environment (removes environment.json and reserved tokens)
         daemonsViewModel.tailscaleController.disableEnvironment(object : com.overdrive.app.ui.daemon.DaemonCallback {
             override fun onStatusChanged(status: com.overdrive.app.ui.model.DaemonStatus, message: String) {
-                Toast.makeText(context, "✅ Tailscale environment reset. Login to set up again.", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, getString(R.string.toast_tailscale_reset_success), Toast.LENGTH_LONG).show()
             }
 
             override fun onError(error: String) {
-                Toast.makeText(context, "Tailscale environment reset (with warnings: $error)", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, getString(R.string.toast_tailscale_reset_warnings, error), Toast.LENGTH_LONG).show()
             }
         })
     }
@@ -437,12 +415,12 @@ class DaemonsFragment : Fragment() {
                             )
                         }
                         if (enabled) {
-                            Toast.makeText(context, "Tailscale proxy enabled", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, getString(R.string.toast_tailscale_proxy_enabled), Toast.LENGTH_SHORT).show()
                         } else {
-                            Toast.makeText(context, "Tailscale proxy disabled", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, getString(R.string.toast_tailscale_proxy_disabled), Toast.LENGTH_SHORT).show()
                         }
                     } else {
-                        Toast.makeText(context, "Failed to save proxy settings", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, getString(R.string.toast_tailscale_proxy_save_failed), Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -453,25 +431,25 @@ class DaemonsFragment : Fragment() {
         daemonsViewModel.zrokController.saveEnableToken(token) { success ->
             activity?.runOnUiThread {
                 if (success) {
-                    Toast.makeText(context, "✅ Token saved", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, getString(R.string.toast_zrok_token_saved), Toast.LENGTH_SHORT).show()
                     // Refresh Zrok status
                     daemonsViewModel.refreshDaemonStatus(DaemonType.ZROK_TUNNEL)
                 } else {
-                    Toast.makeText(context, "❌ Failed to save token", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, getString(R.string.toast_zrok_token_save_failed), Toast.LENGTH_SHORT).show()
                 }
             }
         }
     }
-    
+
     private fun deleteZrokToken() {
         daemonsViewModel.zrokController.deleteEnableToken { success ->
             activity?.runOnUiThread {
                 if (success) {
-                    Toast.makeText(context, "Token deleted", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, getString(R.string.toast_zrok_token_deleted), Toast.LENGTH_SHORT).show()
                     // Update state to show configuration needed
-                    daemonsViewModel.updateZrokNeedsConfig("No token configured. Tap to set up.")
+                    daemonsViewModel.updateZrokNeedsConfig(getString(R.string.zrok_no_token_configured))
                 } else {
-                    Toast.makeText(context, "❌ Failed to delete token", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, getString(R.string.toast_zrok_token_delete_failed), Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -488,7 +466,7 @@ class DaemonsFragment : Fragment() {
         val ctx = context ?: return
         val daemonName = type.displayName.replace(" ", "_").lowercase()
         
-        Toast.makeText(ctx, "Fetching ${type.displayName} log...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(ctx, getString(R.string.toast_fetching_log, type.displayName), Toast.LENGTH_SHORT).show()
         
         // Use tail to limit output — 10000 lines is ~1-2MB which is safe for ADB + String
         val adb = com.overdrive.app.launcher.AdbDaemonLauncher(ctx)
@@ -498,66 +476,66 @@ class DaemonsFragment : Fragment() {
                 override fun onLog(message: String) {
                     activity?.runOnUiThread {
                         if (message.isBlank()) {
-                            Toast.makeText(ctx, "Log file is empty or not found", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(ctx, getString(R.string.toast_log_empty_or_missing), Toast.LENGTH_SHORT).show()
                             return@runOnUiThread
                         }
-                        
+
                         try {
                             // Parse: first part is line count, after separator is the log content
                             val parts = message.split("---SEPARATOR---", limit = 2)
                             val totalLines = parts.getOrNull(0)?.trim()?.toIntOrNull() ?: 0
                             val logContent = parts.getOrNull(1)?.trimStart('\n') ?: message
-                            
+
                             if (logContent.isBlank()) {
-                                Toast.makeText(ctx, "Log file is empty", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(ctx, getString(R.string.toast_log_empty), Toast.LENGTH_SHORT).show()
                                 return@runOnUiThread
                             }
-                            
+
                             // Write to a shareable file in cache dir
                             val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
                             val fileName = "${daemonName}_${timestamp}.log"
                             val cacheDir = java.io.File(ctx.cacheDir, "logs")
                             cacheDir.mkdirs()
                             val logFile = java.io.File(cacheDir, fileName)
-                            
+
                             // Add header with metadata
                             val header = buildString {
-                                appendLine("=== ${type.displayName} Log ===")
-                                appendLine("Source: $logPath")
-                                appendLine("Exported: ${java.util.Date()}")
+                                appendLine(getString(R.string.log_header_title, type.displayName))
+                                appendLine(getString(R.string.log_header_source, logPath))
+                                appendLine(getString(R.string.log_header_exported, java.util.Date().toString()))
                                 if (totalLines > 10000) {
-                                    appendLine("NOTE: Log truncated to last 10000 lines (total: $totalLines lines)")
+                                    appendLine(getString(R.string.log_header_truncated, totalLines))
                                 }
                                 appendLine("===")
                                 appendLine()
                             }
                             logFile.writeText(header + logContent)
-                            
+
                             // Share via intent
                             val uri = androidx.core.content.FileProvider.getUriForFile(
                                 ctx,
                                 "${ctx.packageName}.fileprovider",
                                 logFile
                             )
-                            
+
                             val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                                 this.type = "text/plain"
                                 putExtra(android.content.Intent.EXTRA_STREAM, uri)
-                                putExtra(android.content.Intent.EXTRA_SUBJECT, "${type.displayName} Log - $timestamp")
+                                putExtra(android.content.Intent.EXTRA_SUBJECT, getString(R.string.log_share_title, type.displayName, timestamp))
                                 addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             }
-                            startActivity(android.content.Intent.createChooser(shareIntent, "Share ${type.displayName} Log"))
+                            startActivity(android.content.Intent.createChooser(shareIntent, getString(R.string.log_share_chooser, type.displayName)))
                         } catch (e: Exception) {
-                            Toast.makeText(ctx, "❌ Failed to save log: ${e.message}", Toast.LENGTH_LONG).show()
+                            Toast.makeText(ctx, getString(R.string.toast_log_save_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
                         }
                     }
                 }
-                
+
                 override fun onLaunched() {}
-                
+
                 override fun onError(error: String) {
                     activity?.runOnUiThread {
-                        Toast.makeText(ctx, "❌ Log file not found or unreadable", Toast.LENGTH_LONG).show()
+                        Toast.makeText(ctx, getString(R.string.toast_log_not_found), Toast.LENGTH_LONG).show()
                     }
                 }
             }

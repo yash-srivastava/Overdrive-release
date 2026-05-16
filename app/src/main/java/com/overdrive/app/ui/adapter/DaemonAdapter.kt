@@ -148,7 +148,10 @@ class DaemonAdapter(
                     onConfigureClick.invoke(state.type)
                 }
                 // Make status text look clickable
-                tvDaemonStatus.text = "${state.configurationMessage ?: "Configuration required"} ⚙️"
+                tvDaemonStatus.text = itemView.context.getString(
+                    R.string.daemon_configuration_message,
+                    state.configurationMessage ?: itemView.context.getString(R.string.daemon_configuration_required)
+                )
             } else if (hasSubprocesses) {
                 // Click to expand/collapse subprocesses
                 mainRow.setOnClickListener {

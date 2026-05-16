@@ -55,7 +55,7 @@ public class AbrpApiHandler {
             HttpResponse.sendJson(out, ipcResponse.toString());
         } else {
             logger.warn(TAG + ": Failed to get ABRP config via IPC");
-            HttpResponse.sendJsonError(out, "Failed to communicate with daemon");
+            HttpResponse.sendJsonError(out, Messages.get("errors.ipc_communication_failed"));
         }
     }
 
@@ -79,11 +79,11 @@ public class AbrpApiHandler {
                 HttpResponse.sendJson(out, ipcResponse.toString());
             } else {
                 logger.warn(TAG + ": Failed to set ABRP config via IPC");
-                HttpResponse.sendJsonError(out, "Failed to communicate with daemon");
+                HttpResponse.sendJsonError(out, Messages.get("errors.ipc_communication_failed"));
             }
         } catch (Exception e) {
             logger.error(TAG + ": Error parsing ABRP config request: " + e.getMessage());
-            HttpResponse.sendJsonError(out, "Invalid request body: " + e.getMessage());
+            HttpResponse.sendJsonError(out, Messages.get("errors.invalid_request_body_with_detail", e.getMessage()));
         }
     }
 
@@ -93,7 +93,7 @@ public class AbrpApiHandler {
             HttpResponse.sendJson(out, ipcResponse.toString());
         } else {
             logger.warn(TAG + ": Failed to get ABRP status via IPC");
-            HttpResponse.sendJsonError(out, "Failed to communicate with daemon");
+            HttpResponse.sendJsonError(out, Messages.get("errors.ipc_communication_failed"));
         }
     }
 
@@ -103,7 +103,7 @@ public class AbrpApiHandler {
             HttpResponse.sendJson(out, ipcResponse.toString());
         } else {
             logger.warn(TAG + ": Failed to delete ABRP token via IPC");
-            HttpResponse.sendJsonError(out, "Failed to communicate with daemon");
+            HttpResponse.sendJsonError(out, Messages.get("errors.ipc_communication_failed"));
         }
     }
 

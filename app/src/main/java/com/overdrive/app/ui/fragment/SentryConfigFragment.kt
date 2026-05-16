@@ -321,7 +321,7 @@ class SentryConfigFragment : Fragment() {
                 
                 // Check if SD card is available when selecting SD card
                 if (newType == "SD_CARD" && !sdCardAvailable) {
-                    Toast.makeText(context, "SD Card not available", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, getString(R.string.toast_sd_card_not_available), Toast.LENGTH_SHORT).show()
                     // Revert to internal
                     toggleSurveillanceStorage.check(R.id.btnSurvStorageInternal)
                     return@addOnButtonCheckedListener
@@ -461,30 +461,30 @@ class SentryConfigFragment : Fragment() {
     
     private fun triggerCdrCleanup() {
         btnCdrCleanupNow?.isEnabled = false
-        btnCdrCleanupNow?.text = "Cleaning..."
-        
+        btnCdrCleanupNow?.text = getString(R.string.cdr_cleaning_in_progress)
+
         executor.submit {
             try {
                 val cleaner = com.overdrive.app.storage.ExternalStorageCleaner.getInstance()
                 val result = cleaner.forceCleanup(500 * 1024 * 1024) // Free 500MB
-                
+
                 activity?.runOnUiThread {
                     btnCdrCleanupNow?.isEnabled = true
-                    btnCdrCleanupNow?.text = "🗑️ Clean Up Now"
-                    
+                    btnCdrCleanupNow?.text = getString(R.string.action_clean_up_now)
+
                     if (result.isSuccess) {
-                        val msg = "Deleted ${result.filesDeleted} files (${com.overdrive.app.storage.ExternalStorageCleaner.formatSize(result.bytesFreed)})"
+                        val msg = getString(R.string.toast_cleanup_deleted, result.filesDeleted, com.overdrive.app.storage.ExternalStorageCleaner.formatSize(result.bytesFreed))
                         Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                         loadCdrConfig() // Refresh stats
                     } else {
-                        Toast.makeText(context, "Cleanup failed: ${result.error}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, getString(R.string.toast_cleanup_failed, result.error ?: ""), Toast.LENGTH_SHORT).show()
                     }
                 }
             } catch (e: Exception) {
                 activity?.runOnUiThread {
                     btnCdrCleanupNow?.isEnabled = true
-                    btnCdrCleanupNow?.text = "🗑️ Clean Up Now"
-                    Toast.makeText(context, "Cleanup error: ${e.message}", Toast.LENGTH_SHORT).show()
+                    btnCdrCleanupNow?.text = getString(R.string.action_clean_up_now)
+                    Toast.makeText(context, getString(R.string.toast_cleanup_error, e.message ?: ""), Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -523,11 +523,11 @@ class SentryConfigFragment : Fragment() {
                 
                 // Update status text
                 if (data.optBoolean("inSafeZone", false)) {
-                    tvSafeLocStatus?.text = "🟢 In Safe Zone (${data.optString("currentZone", "")})"
+                    tvSafeLocStatus?.text = getString(R.string.safe_loc_in_zone, data.optString("currentZone", ""))
                 } else if (data.optBoolean("hasGps", false) && data.optInt("zoneCount", 0) > 0) {
-                    tvSafeLocStatus?.text = "🔴 Outside (${data.optInt("nearestDistanceM", 0)}m to nearest)"
+                    tvSafeLocStatus?.text = getString(R.string.safe_loc_outside, data.optInt("nearestDistanceM", 0))
                 } else {
-                    tvSafeLocStatus?.text = if (data.optInt("zoneCount", 0) == 0) "No zones configured" else "Waiting for GPS..."
+                    tvSafeLocStatus?.text = if (data.optInt("zoneCount", 0) == 0) getString(R.string.safe_loc_no_zones) else getString(R.string.safe_loc_waiting_gps)
                 }
                 
                 // Update zone list
@@ -555,27 +555,27 @@ class SentryConfigFragment : Fragment() {
     private fun addCurrentLocationAsSafe() {
         // Show dialog for zone name
         val input = android.widget.EditText(requireContext())
-        input.hint = "e.g. Home, Office"
-        input.setText("Home")
-        
+        input.hint = getString(R.string.dialog_add_safe_location_hint)
+        input.setText(getString(R.string.dialog_add_safe_location_default))
+
         android.app.AlertDialog.Builder(requireContext())
-            .setTitle("Add Safe Location")
-            .setMessage("Uses current GPS location. Name this zone:")
+            .setTitle(getString(R.string.dialog_add_safe_location_title))
+            .setMessage(getString(R.string.dialog_add_safe_location_message))
             .setView(input)
-            .setPositiveButton("Add") { _, _ ->
-                val name = input.text.toString().ifBlank { "Unnamed" }
+            .setPositiveButton(getString(R.string.dialog_add)) { _, _ ->
+                val name = input.text.toString().ifBlank { getString(R.string.safe_loc_unnamed) }
                 viewModel.addCurrentLocationAsSafe(name, 150) { success ->
                     activity?.runOnUiThread {
                         if (success) {
-                            Toast.makeText(context, "Zone '$name' added", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, getString(R.string.toast_zone_added, name), Toast.LENGTH_SHORT).show()
                             loadSafeLocations()
                         } else {
-                            Toast.makeText(context, "Failed to add zone (no GPS?)", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, getString(R.string.toast_zone_add_failed), Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(getString(R.string.action_cancel), null)
             .show()
     }
     
@@ -589,14 +589,14 @@ class SentryConfigFragment : Fragment() {
     
     private fun deleteSafeZone(id: String) {
         android.app.AlertDialog.Builder(requireContext())
-            .setTitle("Delete Zone")
-            .setMessage("Remove this safe zone?")
-            .setPositiveButton("Delete") { _, _ ->
+            .setTitle(getString(R.string.dialog_delete_zone_title))
+            .setMessage(getString(R.string.dialog_delete_zone_message))
+            .setPositiveButton(getString(R.string.dialog_delete)) { _, _ ->
                 viewModel.deleteSafeZone(id) {
                     activity?.runOnUiThread { loadSafeLocations() }
                 }
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(getString(R.string.action_cancel), null)
             .show()
     }
     
@@ -652,7 +652,7 @@ class SentryConfigFragment : Fragment() {
         hasUnsavedChanges = false
         btnApply.isEnabled = false
         
-        Toast.makeText(context, "Settings applied", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, getString(R.string.toast_settings_applied_short), Toast.LENGTH_LONG).show()
     }
     
     private fun saveCdrSettings() {
@@ -766,31 +766,31 @@ class SentryConfigFragment : Fragment() {
         
         if (sdCardAvailable) {
             survSdCardStatusDot?.setBackgroundResource(R.drawable.status_dot_online)
-            tvSurvSdCardStatus?.text = "SD Card: Available"
-            
+            tvSurvSdCardStatus?.text = getString(R.string.sd_card_available)
+
             // Show free space
             try {
                 val storageManager = com.overdrive.app.storage.StorageManager.getInstance()
                 val freeSpace = storageManager.sdCardFreeSpace
                 val totalSpace = storageManager.sdCardTotalSpace
-                tvSurvSdCardSpace?.text = "${com.overdrive.app.storage.StorageManager.formatSize(freeSpace)} free"
+                tvSurvSdCardSpace?.text = getString(R.string.sd_card_free_format, com.overdrive.app.storage.StorageManager.formatSize(freeSpace))
             } catch (e: Exception) {
                 tvSurvSdCardSpace?.text = ""
             }
         } else {
             survSdCardStatusDot?.setBackgroundResource(R.drawable.status_dot_offline)
-            tvSurvSdCardStatus?.text = "SD Card: Not detected"
+            tvSurvSdCardStatus?.text = getString(R.string.storage_sd_not_detected)
             tvSurvSdCardSpace?.text = ""
         }
-        
+
         // Update storage path display
         try {
             val storageManager = com.overdrive.app.storage.StorageManager.getInstance()
             val path = storageManager.surveillancePath
             val shortPath = path.replace("/storage/emulated/0/", "")
-            tvSurveillanceStoragePath?.text = "Events saved to $shortPath"
+            tvSurveillanceStoragePath?.text = getString(R.string.events_saved_to_path, shortPath)
         } catch (e: Exception) {
-            tvSurveillanceStoragePath?.text = "Events saved to Overdrive/surveillance"
+            tvSurveillanceStoragePath?.text = getString(R.string.events_saved_default)
         }
         
         // Update slider max based on storage type
@@ -926,10 +926,10 @@ class SentryConfigFragment : Fragment() {
     
     private fun updateStatusDisplay(status: SentryConfigViewModel.SentryStatus) {
         val statusText = when {
-            !status.enabled -> "Status: Disabled"
-            status.recording -> "Status: 🔴 Recording"
-            status.active -> "Status: ✅ Active (monitoring)"
-            else -> "Status: ⏸️ Enabled (waiting for ACC OFF)"
+            !status.enabled -> getString(R.string.sentry_status_disabled)
+            status.recording -> getString(R.string.sentry_status_recording)
+            status.active -> getString(R.string.sentry_status_active)
+            else -> getString(R.string.sentry_status_waiting)
         }
         tvStatus.text = statusText
         

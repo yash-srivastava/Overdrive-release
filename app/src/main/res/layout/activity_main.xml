@@ -16,7 +16,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="BYD Champ"
+            android:text="@string/legacy_app_title"
             android:textSize="24sp"
             android:textStyle="bold"
             android:textColor="@color/brand_primary"
@@ -43,7 +43,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Camera Selection"
+                    android:text="@string/legacy_camera_selection"
                     android:textColor="@color/text_secondary"
                     android:textSize="12sp"
                     android:layout_marginBottom="12dp"/>
@@ -60,8 +60,8 @@
                         android:layout_weight="1"
                         android:layout_height="48dp"
                         android:layout_margin="4dp"
-                        android:textOn="CAM1 ✓"
-                        android:textOff="CAM1"
+                        android:textOn="@string/legacy_cam1_on"
+                        android:textOff="@string/legacy_cam1_off"
                         android:textSize="12sp"
                         android:textColor="@color/text_primary"
                         android:background="@drawable/camera_button_bg"/>
@@ -72,8 +72,8 @@
                         android:layout_weight="1"
                         android:layout_height="48dp"
                         android:layout_margin="4dp"
-                        android:textOn="CAM2 ✓"
-                        android:textOff="CAM2"
+                        android:textOn="@string/legacy_cam2_on"
+                        android:textOff="@string/legacy_cam2_off"
                         android:textSize="12sp"
                         android:textColor="@color/text_primary"
                         android:background="@drawable/camera_button_bg"/>
@@ -84,8 +84,8 @@
                         android:layout_weight="1"
                         android:layout_height="48dp"
                         android:layout_margin="4dp"
-                        android:textOn="CAM3 ✓"
-                        android:textOff="CAM3"
+                        android:textOn="@string/legacy_cam3_on"
+                        android:textOff="@string/legacy_cam3_off"
                         android:textSize="12sp"
                         android:textColor="@color/text_primary"
                         android:background="@drawable/camera_button_bg"/>
@@ -96,8 +96,8 @@
                         android:layout_weight="1"
                         android:layout_height="48dp"
                         android:layout_margin="4dp"
-                        android:textOn="CAM4 ✓"
-                        android:textOff="CAM4"
+                        android:textOn="@string/legacy_cam4_on"
+                        android:textOff="@string/legacy_cam4_off"
                         android:textSize="12sp"
                         android:textColor="@color/text_primary"
                         android:background="@drawable/camera_button_bg"/>
@@ -129,7 +129,7 @@
                     android:layout_weight="1"
                     android:layout_height="48dp"
                     android:layout_marginEnd="8dp"
-                    android:text="START REC"
+                    android:text="@string/legacy_start_rec"
                     android:textSize="12sp"
                     app:backgroundTint="@color/status_success"
                     android:textColor="@color/bg_base"
@@ -140,7 +140,7 @@
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="48dp"
-                    android:text="STOP REC"
+                    android:text="@string/legacy_stop_rec"
                     android:textSize="12sp"
                     app:backgroundTint="@color/status_danger"
                     android:textColor="@color/white"
@@ -170,7 +170,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Status"
+                    android:text="@string/legacy_status_label"
                     android:textColor="@color/text_secondary"
                     android:textSize="12sp"
                     android:layout_marginBottom="12dp"/>
@@ -179,7 +179,7 @@
                     android:id="@+id/tvStatus"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Status: Idle"
+                    android:text="@string/legacy_status_idle"
                     android:textSize="13sp"
                     android:textColor="@color/status_warning"
                     android:layout_marginBottom="6dp"/>
@@ -188,7 +188,7 @@
                     android:id="@+id/tvStreamStatus"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="📡 Stream: Starting..."
+                    android:text="@string/legacy_stream_starting"
                     android:textSize="13sp"
                     android:textColor="@color/brand_secondary"
                     android:layout_marginBottom="6dp"/>
@@ -197,7 +197,7 @@
                     android:id="@+id/tvDeviceId"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="🔑 ID: ..."
+                    android:text="@string/legacy_id_loading"
                     android:textSize="13sp"
                     android:textColor="@color/brand_secondary"
                     android:layout_marginBottom="6dp"/>
@@ -206,7 +206,7 @@
                     android:id="@+id/tvTunnelUrl"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="🌐 Tunnel: Not connected"
+                    android:text="@string/legacy_tunnel_not_connected"
                     android:textSize="12sp"
                     android:textColor="@color/brand_primary"
                     android:textIsSelectable="true"
@@ -217,7 +217,7 @@
                     android:id="@+id/tvBatteryVoltage"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="🔋 Battery: --V"
+                    android:text="@string/legacy_battery_dashes"
                     android:textSize="13sp"
                     android:textColor="@color/status_success"/>
 
@@ -244,7 +244,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Services"
+                    android:text="@string/legacy_services"
                     android:textColor="@color/text_secondary"
                     android:textSize="12sp"
                     android:layout_marginBottom="12dp"/>
@@ -263,7 +263,7 @@
                         android:layout_weight="1"
                         android:layout_height="40dp"
                         android:layout_marginEnd="4dp"
-                        android:text="TUNNEL"
+                        android:text="@string/legacy_tunnel"
                         android:textSize="10sp"/>
 
                     <com.google.android.material.button.MaterialButton
@@ -273,7 +273,7 @@
                         android:layout_weight="1"
                         android:layout_height="40dp"
                         android:layout_marginEnd="8dp"
-                        android:text="STOP TUN"
+                        android:text="@string/legacy_stop_tun"
                         android:textSize="10sp"
                         android:enabled="false"/>
 
@@ -284,7 +284,7 @@
                         android:layout_weight="1"
                         android:layout_height="40dp"
                         android:layout_marginEnd="4dp"
-                        android:text="PROXY"
+                        android:text="@string/legacy_proxy"
                         android:textSize="10sp"/>
 
                     <com.google.android.material.button.MaterialButton
@@ -293,7 +293,7 @@
                         android:layout_width="0dp"
                         android:layout_weight="1"
                         android:layout_height="40dp"
-                        android:text="STOP PRX"
+                        android:text="@string/legacy_stop_prx"
                         android:textSize="10sp"/>
                 </LinearLayout>
 
@@ -310,7 +310,7 @@
                         android:layout_weight="1"
                         android:layout_height="40dp"
                         android:layout_marginEnd="4dp"
-                        android:text="SENTRY"
+                        android:text="@string/legacy_sentry"
                         android:textSize="10sp"/>
 
                     <com.google.android.material.button.MaterialButton
@@ -320,7 +320,7 @@
                         android:layout_weight="1"
                         android:layout_height="40dp"
                         android:layout_marginEnd="8dp"
-                        android:text="STOP SNT"
+                        android:text="@string/legacy_stop_snt"
                         android:textSize="10sp"/>
 
                     <com.google.android.material.button.MaterialButton
@@ -330,7 +330,7 @@
                         android:layout_weight="1"
                         android:layout_height="40dp"
                         android:layout_marginEnd="4dp"
-                        android:text="CAM"
+                        android:text="@string/legacy_cam"
                         android:textSize="10sp"/>
 
                     <com.google.android.material.button.MaterialButton
@@ -339,7 +339,7 @@
                         android:layout_width="0dp"
                         android:layout_weight="1"
                         android:layout_height="40dp"
-                        android:text="STOP CAM"
+                        android:text="@string/legacy_stop_cam"
                         android:textSize="10sp"/>
                 </LinearLayout>
 
@@ -369,8 +369,8 @@
                     android:layout_weight="1"
                     android:layout_height="48dp"
                     android:layout_marginEnd="8dp"
-                    android:textOn="🛡️ SENTRY"
-                    android:textOff="🛡️ SENTRY"
+                    android:textOn="@string/legacy_sentry_on"
+                    android:textOff="@string/legacy_sentry_off"
                     android:textSize="11sp"
                     android:textColor="@color/text_primary"
                     android:background="@drawable/sentry_button_bg"/>
@@ -381,8 +381,8 @@
                     android:layout_weight="1"
                     android:layout_height="48dp"
                     android:layout_marginEnd="8dp"
-                    android:textOn="🔒 VPN"
-                    android:textOff="🔓 VPN"
+                    android:textOn="@string/legacy_vpn_on"
+                    android:textOff="@string/legacy_vpn_off"
                     android:textSize="11sp"
                     android:textColor="@color/text_primary"
                     android:background="@drawable/sentry_button_bg"/>
@@ -392,8 +392,8 @@
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="48dp"
-                    android:textOn="🌐 PUBLIC"
-                    android:textOff="🔒 PRIVATE"
+                    android:textOn="@string/legacy_stream_public"
+                    android:textOff="@string/legacy_stream_private"
                     android:textSize="11sp"
                     android:textColor="@color/text_primary"
                     android:background="@drawable/stream_mode_button_bg"/>
@@ -405,7 +405,7 @@
             android:id="@+id/btnStopDaemon"
             android:layout_width="match_parent"
             android:layout_height="48dp"
-            android:text="STOP SERVICE"
+            android:text="@string/legacy_stop_service"
             android:textSize="12sp"
             app:backgroundTint="@color/status_danger"
             android:textColor="@color/white"
@@ -431,7 +431,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="📋 Logs"
+                    android:text="@string/legacy_logs_title"
                     android:textSize="12sp"
                     android:textColor="@color/text_secondary"
                     android:layout_marginBottom="8dp"/>
@@ -447,7 +447,7 @@
                         android:id="@+id/tvLogs"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="> Ready. Select cameras to begin."
+                        android:text="@string/legacy_logs_ready"
                         android:fontFamily="monospace"
                         android:textColor="@color/brand_primary"
                         android:textSize="11sp"/>

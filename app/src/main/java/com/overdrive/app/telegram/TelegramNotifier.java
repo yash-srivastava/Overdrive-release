@@ -2,6 +2,7 @@ package com.overdrive.app.telegram;
 
 import android.util.Log;
 
+import com.overdrive.app.server.Messages;
 import com.overdrive.app.telegram.event.CriticalEvent;
 import com.overdrive.app.telegram.event.MotionEvent;
 import com.overdrive.app.telegram.event.TelegramEventBus;
@@ -60,9 +61,9 @@ public class TelegramNotifier {
                 JSONObject cmd = new JSONObject();
                 cmd.put("cmd", "sendVideo");
                 cmd.put("path", filePath);
-                String caption = "📹 Recording";
-                if (aiDetection != null) caption += " (" + aiDetection + ")";
-                caption += " - " + durationSeconds + "s";
+                String caption = (aiDetection != null)
+                        ? Messages.get("telegram.recording_caption", aiDetection, durationSeconds)
+                        : Messages.get("telegram.recording_caption_no_label", durationSeconds);
                 cmd.put("caption", caption);
                 sendIpc(cmd);
             } catch (Exception e) {
@@ -296,13 +297,10 @@ public class TelegramNotifier {
                     "yyyy-MM-dd HH:mm:ss", java.util.Locale.US);
                 String timeStr = sdf.format(new java.util.Date(timestamp));
                 
-                String emoji = "🚨";
                 String distance = triggerLevel.equals("RED") ? "0-0.5m" : "0-0.8m";
-                
-                String message = emoji + " Proximity Alert\n" +
-                               "Time: " + timeStr + "\n" +
-                               "Trigger: " + triggerLevel + " (" + distance + ")\n" +
-                               "Recording started...";
+
+                String message = Messages.get("telegram.proximity_alert",
+                        timeStr, triggerLevel, distance);
                 
                 JSONObject cmd = new JSONObject();
                 cmd.put("cmd", "sendMessage");

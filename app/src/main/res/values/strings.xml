@@ -1,53 +1,53 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">OverDrive</string>
-    
+
     <!-- Accessibility Service -->
     <string name="accessibility_service_description">Keeps Overdrive vehicle monitoring active in the background. This service does not read or interact with screen content.</string>
-    
+
     <!-- Recording Mode Labels -->
     <string name="recording_mode_title">Recording Mode (ACC ON)</string>
     <string name="recording_mode_subtitle">Choose when to record while driving</string>
-    
+
     <string name="recording_mode_none_title">None (Default)</string>
     <string name="recording_mode_none_desc">No recording - saves battery and resources</string>
     <string name="recording_mode_none_full">🚫 None (Default)\nNo recording - saves battery and resources</string>
-    
+
     <string name="recording_mode_continuous_title">Continuous Recording</string>
     <string name="recording_mode_continuous_desc">Record all the time when cameras are active</string>
     <string name="recording_mode_continuous_full">📹 Continuous Recording\nRecord all the time when cameras are active</string>
-    
+
     <string name="recording_mode_drive_title">Drive Mode Recording</string>
     <string name="recording_mode_drive_desc">Record only when driving (D/R/S/M gear)</string>
     <string name="recording_mode_drive_full">🚗 Drive Mode Recording\nRecord only when driving (D/R/S/M gear)</string>
-    
+
     <string name="recording_mode_proximity_title">Proximity Guard</string>
     <string name="recording_mode_proximity_desc">Record when objects approach the vehicle</string>
     <string name="recording_mode_proximity_full">🛡️ Proximity Guard\nRecord when objects approach the vehicle</string>
-    
+
     <!-- Proximity Guard Settings Labels -->
     <string name="proximity_settings_title">Proximity Guard Settings</string>
-    
+
     <string name="proximity_trigger_label">Trigger Sensitivity</string>
     <string name="proximity_trigger_red_only">Close Only (0–0.5m)</string>
     <string name="proximity_trigger_yellow_red">Medium + Close (0–0.8m)</string>
-    
+
     <string name="proximity_pre_buffer_label">Pre-event Buffer</string>
     <string name="proximity_pre_buffer_desc">Seconds captured before event</string>
     <string name="proximity_pre_buffer_value">%d seconds</string>
-    
+
     <string name="proximity_post_buffer_label">Post-event Buffer</string>
     <string name="proximity_post_buffer_desc">Seconds captured after radar clears</string>
     <string name="proximity_post_buffer_value">%d seconds</string>
-    
+
     <string name="proximity_continuation_info">ℹ️ Recording continues if radar triggers again within post-buffer time</string>
-    
+
     <!-- Quality Settings Labels -->
     <string name="quality_settings_title">Quality Settings</string>
     <string name="quality_label">Recording Quality</string>
     <string name="bitrate_label">Recording Bitrate</string>
     <string name="codec_label">Video Codec (H.265 = 50%% smaller)</string>
-    
+
     <!-- Storage Labels -->
     <string name="storage_title">Recording Storage</string>
     <string name="storage_usage_label">Storage Usage</string>
@@ -56,33 +56,33 @@
     <string name="storage_limit_desc">Auto-delete oldest when limit reached</string>
     <string name="storage_used_format">%s used</string>
     <string name="storage_limit_format">%s limit</string>
-    
+
     <!-- Recording Status Labels -->
     <string name="recording_status_idle">Not Recording</string>
     <string name="recording_status_active">Recording</string>
     <string name="recording_status_monitoring">Monitoring</string>
-    
+
     <!-- Event Types -->
     <string name="event_type_normal">Normal</string>
     <string name="event_type_sentry">Sentry</string>
     <string name="event_type_proximity">Proximity</string>
-    
+
     <!-- Filter Labels -->
     <string name="filter_all">All</string>
     <string name="filter_sentry">Sentry</string>
     <string name="filter_normal">Normal</string>
     <string name="filter_proximity">Proximity</string>
-    
+
     <!-- Storage Breakdown -->
     <string name="storage_count_normal">%d Normal</string>
     <string name="storage_count_sentry">%d Sentry</string>
     <string name="storage_count_proximity">%d Proximity</string>
-    
+
     <!-- Recording Controls -->
     <string name="recording_start">Start</string>
     <string name="recording_stop">Stop</string>
     <string name="recording_apply">Apply Settings</string>
-    
+
     <!-- Slider Range Labels -->
     <string name="slider_min_2s">2s</string>
     <string name="slider_max_15s">15s</string>
@@ -92,4 +92,800 @@
     <string name="slider_max_1000mb">1000MB</string>
 
     <string name="cloudflare_paid_version">Cloudflare Paid Version</string>
+    <!-- ============================================================
+         i18n string extraction (Step 1: Layouts)
+         ============================================================ -->
+
+    <!-- Drawer menu -->
+    <string name="menu_dashboard">Dashboard</string>
+    <string name="menu_daemons">Daemons</string>
+    <string name="menu_events">Events</string>
+    <string name="menu_recording">Recording</string>
+    <string name="menu_surveillance">Surveillance</string>
+    <string name="menu_adb_console">ADB Console</string>
+    <string name="menu_telegram">Telegram</string>
+    <string name="menu_abrp">ABRP</string>
+    <string name="menu_mqtt">MQTT</string>
+    <string name="menu_trips">Trips</string>
+    <string name="menu_vehicle_control">Vehicle Control</string>
+    <string name="menu_reconfigure_camera">Reconfigure Camera</string>
+    <string name="menu_battery_health_soh">Battery Health (SOH)</string>
+    <string name="menu_check_for_updates">Check for Updates</string>
+    <string name="menu_reset_data">Reset Data</string>
+    <string name="menu_traffic_monitor_checking">Traffic Monitor: Checking…</string>
+
+    <!-- Common buttons / labels -->
+    <string name="action_cancel">Cancel</string>
+    <string name="action_save">💾 Save</string>
+    <string name="action_save_plain">Save</string>
+    <string name="action_undo">↩ Undo</string>
+    <string name="action_clear">🗑 Clear</string>
+    <string name="action_clear_plain">Clear</string>
+    <string name="action_select_all">Select all</string>
+    <string name="action_select_all_short">All</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_done">DONE</string>
+    <string name="action_remind_me_later">REMIND ME LATER</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_run">Run</string>
+    <string name="action_clear_output">Clear Output</string>
+    <string name="action_apply_changes">Apply Changes</string>
+    <string name="action_apply_settings">✓ Apply Settings</string>
+    <string name="action_clean_up_now">🗑️ Clean Up Now</string>
+
+    <!-- Nav header -->
+    <string name="nav_header_logo_desc">OverDrive Logo</string>
+    <string name="nav_header_tagline">Sentry System</string>
+    <string name="nav_header_device_id_placeholder">byd-xxxxxxxx</string>
+
+    <!-- Common content descriptions -->
+    <string name="cd_camera">Camera</string>
+    <string name="cd_camera_preview">Camera preview</string>
+    <string name="cd_qr">QR</string>
+    <string name="cd_qr_code">QR Code</string>
+    <string name="cd_info">Info</string>
+    <string name="cd_auth">Auth</string>
+    <string name="cd_show_hide_token">Show/Hide Token</string>
+    <string name="cd_copy_token">Copy Token</string>
+    <string name="cd_copy_url">Copy URL</string>
+    <string name="cd_clear_logs">Clear logs</string>
+    <string name="cd_expand_collapse">Expand/Collapse</string>
+    <string name="cd_recording_status">Recording status</string>
+    <string name="cd_trip_tracking_status">Trip tracking status</string>
+    <string name="cd_video_thumbnail">Video thumbnail</string>
+    <string name="cd_play">Play</string>
+    <string name="cd_back">Back</string>
+    <string name="cd_play_pause">Play/Pause</string>
+    <string name="cd_delete">Delete</string>
+    <string name="cd_delete_zone">Delete zone</string>
+    <string name="cd_expand">Expand</string>
+    <string name="cd_configure">Configure</string>
+    <string name="cd_download_log">Download log</string>
+    <string name="cd_daemons">Daemons</string>
+    <string name="cd_recording">Recording</string>
+    <string name="cd_reset">Reset</string>
+    <string name="cd_battery">Battery</string>
+    <string name="cd_previous_month">Previous month</string>
+    <string name="cd_next_month">Next month</string>
+    <string name="cd_previous_week">Previous week</string>
+    <string name="cd_next_week">Next week</string>
+    <string name="cd_toggle_full_month">Toggle full month view</string>
+    <string name="cd_step_completed">Step completed</string>
+    <string name="cd_permission_granted">Permission granted</string>
+
+    <!-- overlay_status -->
+    <string name="overlay_rec_inactive_label">REC ✗</string>
+    <string name="overlay_trip_inactive_label">TRIP ✗</string>
+
+    <!-- item_log_entry placeholders (timestamp/tag/message are runtime, but these are
+         placeholder/preview text used at design time and visible in some empty states) -->
+    <string name="log_entry_default_timestamp">12:34:56</string>
+    <string name="log_entry_default_tag">[TAG]</string>
+    <string name="log_entry_default_message">Log message here</string>
+
+    <!-- item_safe_location -->
+    <string name="safe_loc_default_name">Home</string>
+    <string name="safe_loc_default_radius">150m</string>
+    <string name="safe_loc_default_coords">31.2304, 121.4737</string>
+    <string name="safe_loc_min_radius">50m</string>
+    <string name="safe_loc_max_radius">500m</string>
+
+    <!-- item_daemon_card -->
+    <string name="daemon_card_default_name">Daemon Name</string>
+    <string name="daemon_card_default_status">Status message</string>
+    <string name="daemon_card_subprocesses">SUBPROCESSES</string>
+
+    <!-- item_time_window -->
+    <string name="time_window_default_title">Time Window 1</string>
+    <string name="time_window_remove_icon">🗑</string>
+    <string name="time_window_start">Start</string>
+    <string name="time_window_end">End</string>
+    <string name="time_window_arrow">→</string>
+    <string name="time_window_default_start">22:00</string>
+    <string name="time_window_default_end">06:00</string>
+    <string name="time_window_active_days">ACTIVE DAYS</string>
+    <string name="day_initial_monday">M</string>
+    <string name="day_initial_tuesday">T</string>
+    <string name="day_initial_wednesday">W</string>
+    <string name="day_initial_thursday">T</string>
+    <string name="day_initial_friday">F</string>
+    <string name="day_initial_saturday">S</string>
+    <string name="day_initial_sunday">S</string>
+
+    <!-- fragment_logs_panel -->
+    <string name="logs_panel_clipboard_emoji">📋</string>
+    <string name="logs_panel_title">Logs</string>
+
+    <!-- activity_main_new / activity_main-land -->
+    <string name="access_mode_private">PRIVATE</string>
+    <string name="url_label">URL:</string>
+    <string name="url_connecting">Connecting…</string>
+
+    <!-- dialog_tailscale_settings -->
+    <string name="tailscale_generate_login_url">Generate login URL</string>
+    <string name="tailscale_scan_to_login">Scan to Login</string>
+    <string name="tailscale_qr_waiting">Waiting for login URL…</string>
+    <string name="tailscale_enable_proxy">Enable Tailscale Proxy</string>
+    <string name="tailscale_proxy_explainer">Routes MQTT through Tailscale so you can reach a private broker on your tailnet without port forwarding.</string>
+    <string name="tailscale_proxy_warning">⚠️ While enabled, MQTT to public brokers (HiveMQ, AWS IoT, etc.) will fail — Tailscale only routes to your tailnet. Saving will restart the daemon.</string>
+
+    <!-- dialog_camera_selection -->
+    <string name="camera_selection_title">Camera Selection</string>
+    <string name="camera_selection_subtitle">Select panoramic camera source</string>
+    <string name="camera_current_auto">Current: Auto</string>
+    <string name="camera_option_auto">Auto (detect on startup)</string>
+    <string name="camera_option_0">Camera 0</string>
+    <string name="camera_option_1">Camera 1</string>
+    <string name="camera_option_2">Camera 2</string>
+    <string name="camera_option_3">Camera 3</string>
+    <string name="camera_option_4">Camera 4</string>
+    <string name="camera_option_5">Camera 5</string>
+    <string name="camera_selection_hint">Restart the daemon after changing camera ID for the setting to take effect.</string>
+
+    <!-- fragment_dashboard -->
+    <string name="dashboard_scan_to_connect">Scan to Connect</string>
+    <string name="dashboard_qr_waiting">Waiting for tunnel…</string>
+    <string name="dashboard_daemons_running_default">0/5 Running</string>
+    <string name="dashboard_recording_idle">Idle</string>
+    <string name="dashboard_device_info">Device Info</string>
+    <string name="dashboard_device_id_label">Device ID</string>
+    <string name="dashboard_device_id_loading">…</string>
+    <string name="dashboard_access_mode_label">Access Mode</string>
+    <string name="dashboard_remote_access">Remote Access</string>
+    <string name="dashboard_access_code">Access Code</string>
+    <string name="dashboard_token_masked">••••••••</string>
+    <string name="dashboard_regenerate_token">Regenerate Token</string>
+
+    <!-- fragment_recording_controls -->
+    <string name="quality_low">Low</string>
+    <string name="quality_reduced">Reduced</string>
+    <string name="quality_normal">Normal</string>
+    <string name="bitrate_low">Low</string>
+    <string name="bitrate_med">Med</string>
+    <string name="bitrate_high">High</string>
+    <string name="codec_h264">H.264</string>
+    <string name="codec_h265">H.265</string>
+    <string name="recording_telemetry_overlay_title">Telemetry Overlay</string>
+    <string name="recording_telemetry_overlay_desc">Show speed, gear, pedals on recorded video</string>
+    <string name="recording_storage_location">Storage Location</string>
+    <string name="recording_storage_choose">Choose where to save recordings</string>
+    <string name="storage_internal">📱 Internal</string>
+    <string name="storage_sd_card">💾 SD Card</string>
+    <string name="storage_sd_not_detected">SD Card: Not detected</string>
+    <string name="storage_used_dashes">-- used</string>
+    <string name="storage_limit_dashes">-- limit</string>
+    <string name="storage_default_value_500mb">500 MB</string>
+    <string name="recording_pre_buffer_initial">5 seconds</string>
+    <string name="recording_post_buffer_initial">10 seconds</string>
+    <string name="cdr_cleanup_title">BYD Dashcam Cleanup</string>
+    <string name="cdr_cleanup_off">OFF</string>
+    <string name="cdr_cleanup_desc_short">Auto-delete old dashcam files to free SD card space</string>
+    <string name="cdr_cleanup_desc_long">Auto-delete old dashcam files to free SD card space for surveillance events</string>
+    <string name="cdr_usage_label">CDR Usage</string>
+    <string name="cdr_files_label">Files</string>
+    <string name="cdr_deletable_label">Deletable</string>
+    <string name="cdr_value_dashes">--</string>
+    <string name="cdr_reserved_title">Reserved Space for Overdrive</string>
+    <string name="cdr_reserved_short">Reserved Space</string>
+    <string name="cdr_reserved_desc">Minimum free space to maintain</string>
+    <string name="cdr_reserved_default">2 GB</string>
+    <string name="cdr_protect_title">Protect Recent Files</string>
+    <string name="cdr_protect_short">Protect Recent</string>
+    <string name="cdr_protect_desc">Don\'t delete files newer than</string>
+    <string name="cdr_protect_default">24h</string>
+
+    <!-- dialog_setup_guide -->
+    <string name="setup_guide_title">Getting Started</string>
+    <string name="setup_guide_subtitle">Three quick steps to get the best experience:</string>
+    <string name="setup_step_one_label">1</string>
+    <string name="setup_step_two_label">2</string>
+    <string name="setup_step_three_label">3</string>
+    <string name="setup_language_title">Pick Your Language</string>
+    <string name="setup_language_body">Defaults to your head unit\'s language. Tap to choose a different one for the OverDrive app and the web tunnel.</string>
+    <string name="setup_language_button">Choose Language</string>
+    <string name="setup_autostart_title">Disable Auto-Start Restriction</string>
+    <string name="setup_autostart_body">Tap below to open BYD Auto-Start. Find OverDrive in the list and uncheck the box. BYD wipes this on every install — you\'ll redo it after updates.</string>
+    <string name="setup_autostart_button">Open BYD Auto-Start</string>
+    <string name="setup_overlay_title">Allow Display Over Other Apps</string>
+    <string name="setup_overlay_body">Enable this to show a floating status indicator for recording and trip tracking on top of other apps.</string>
+    <string name="setup_overlay_button">Open Overlay Settings</string>
+
+    <!-- Language picker (drawer footer + bottom sheet) -->
+    <string name="menu_language">Language</string>
+    <string name="cd_language_icon">Language</string>
+    <string name="cd_close">Close</string>
+    <string name="language_picker_title">Language</string>
+    <string name="language_auto_title">Auto</string>
+    <!-- %1$s is the native-script name of the locale that "Auto" currently
+         resolves to, e.g. "Auto · English". -->
+    <string name="language_auto_subtitle">Follow system · %1$s</string>
+    <!-- Drawer footer subtitle when on Auto, e.g. "English · Auto". -->
+    <string name="language_label_auto_fmt">%1$s · Auto</string>
+
+    <!-- fragment_adb_console -->
+    <string name="adb_prompt">$</string>
+    <string name="adb_command_hint">Enter command…</string>
+    <string name="adb_preset_commands_header">PRESET COMMANDS</string>
+    <string name="adb_output_header">OUTPUT</string>
+    <string name="adb_output_ready">$ Ready for commands…</string>
+
+    <!-- fragment_webview -->
+    <string name="webview_loading">Loading…</string>
+    <string name="webview_unreachable_emoji">📡</string>
+    <string name="webview_camera_daemon_not_running">Camera Daemon Not Running</string>
+    <string name="webview_start_camera_daemon">Start the Camera Daemon from the Daemons screen to access this page.</string>
+
+    <!-- dialog_roi_drawing -->
+    <string name="roi_title">📐 Configure Detection Zone</string>
+    <string name="roi_instructions">Tap to add points. Drag points to adjust. Draw a polygon around the area you want to monitor.</string>
+
+    <!-- fragment_telegram_settings -->
+    <string name="telegram_bot_config_title">🤖 Bot Configuration</string>
+    <string name="telegram_bot_token_hint">Bot Token</string>
+    <string name="telegram_connect_test">Connect &amp; Test</string>
+    <string name="telegram_not_connected">Not connected</string>
+    <string name="telegram_owner_pairing_title">🔗 Owner Pairing</string>
+    <string name="telegram_pairing_instructions">Generate a PIN and send /pair &lt;PIN&gt; to your bot in Telegram</string>
+    <string name="telegram_generate_pin">Generate PIN</string>
+    <string name="telegram_unpair">Unpair</string>
+    <string name="telegram_notifications_title">🔔 Notifications</string>
+    <string name="telegram_critical_alerts">Critical Alerts</string>
+    <string name="telegram_tunnel_url_updates">Tunnel URL Updates</string>
+    <string name="telegram_motion_alerts">Motion Alerts (Text)</string>
+    <string name="telegram_auto_upload_videos">Auto-upload event videos</string>
+    <string name="telegram_auto_upload_warning">⚠️ Automatically upload videos after surveillance events (uses mobile data)</string>
+    <string name="telegram_daemon_title">⚙️ Telegram Bot Daemon</string>
+    <string name="telegram_autostart_off">Auto-start when vehicle is off</string>
+    <string name="telegram_autostart_off_desc">Bot will start on vehicle off and stop on vehicle on</string>
+    <string name="telegram_status_label">Status</string>
+    <string name="telegram_status_stopped">🔴 Stopped</string>
+
+    <!-- dialog_zrok_token -->
+    <string name="zrok_enable_token_hint">Enable Token</string>
+    <string name="zrok_token_storage_note">Token is stored securely and shared between app and daemon processes.</string>
+    <string name="zrok_reset_environment">⚠️ Reset Zrok Environment</string>
+    <string name="zrok_reset_environment_desc">Removes environment and token. You will need to re-enable with your token (uses a device slot).</string>
+
+    <!-- dialog_reset_data -->
+    <string name="reset_title">Reset Data</string>
+    <string name="reset_subtitle">Wipe accumulated data by category</string>
+    <string name="reset_warning">⚠ This cannot be undone. Recordings, trips, and battery history will be permanently deleted.</string>
+    <string name="reset_cat_trips">Trips</string>
+    <string name="reset_cat_trips_desc">Trip history, routes, weekly/monthly rollups</string>
+    <string name="reset_cat_soc_history">SoC &amp; 12V history</string>
+    <string name="reset_cat_soc_history_desc">SoC samples, charging sessions, voltage logs</string>
+    <string name="reset_cat_soh">SoH calibration</string>
+    <string name="reset_cat_soh_desc">Re-detects nominal capacity, re-seeds estimate from BMS</string>
+    <string name="reset_cat_abrp_token">ABRP token</string>
+    <string name="reset_cat_abrp_token_desc">Disables ABRP telemetry until re-paired</string>
+    <string name="reset_cat_byd_cloud">BYD Cloud credentials</string>
+    <string name="reset_cat_byd_cloud_desc">Username, login key, VIN — re-login required</string>
+    <string name="reset_cat_recordings">Recordings (videos)</string>
+    <string name="reset_cat_recordings_desc">All MP4s in the recordings folder</string>
+    <string name="reset_cat_sentry_events">Sentry events</string>
+    <string name="reset_cat_sentry_events_desc">Surveillance event clips and JSON sidecars</string>
+    <string name="reset_cat_proximity">Proximity recordings</string>
+    <string name="reset_cat_proximity_desc">Radar-triggered event MP4s</string>
+    <string name="reset_cat_trip_files">Trip telemetry files</string>
+    <string name="reset_cat_trip_files_desc">Per-trip JSON telemetry on disk</string>
+
+    <!-- fragment_abrp_settings -->
+    <string name="abrp_token_config_title">🔑 ABRP Token Configuration</string>
+    <string name="abrp_token_hint">ABRP User Token</string>
+    <string name="abrp_save_test">Save &amp; Test</string>
+    <string name="abrp_not_configured">Not configured</string>
+    <string name="abrp_service_control_title">⚙️ Service Control</string>
+    <string name="abrp_enable_telemetry">Enable ABRP Telemetry</string>
+    <string name="abrp_connection_status_label">Connection Status</string>
+    <string name="abrp_disconnected">🔴 Disconnected</string>
+    <string name="abrp_last_upload_label">Last Upload</string>
+    <string name="abrp_last_upload_never">Never</string>
+    <string name="abrp_telemetry_preview_title">📊 Telemetry Preview</string>
+    <string name="abrp_no_telemetry">No telemetry data available</string>
+    <string name="abrp_token_management_title">🗑️ Token Management</string>
+    <string name="abrp_delete_token">Delete Token</string>
+
+    <!-- fragment_recording_library -->
+    <string name="recording_lib_filter_all">All</string>
+    <string name="recording_lib_filter_rec">Rec</string>
+    <string name="recording_lib_filter_sentry">Sentry</string>
+    <string name="recording_lib_filter_prox">Prox</string>
+    <string name="recording_lib_filter_what">What:</string>
+    <string name="recording_lib_filter_severity">Severity:</string>
+    <string name="recording_lib_chip_any">Any</string>
+    <string name="recording_lib_chip_person">Person</string>
+    <string name="recording_lib_chip_vehicle">Vehicle</string>
+    <string name="recording_lib_chip_bike">Bike</string>
+    <string name="recording_lib_chip_animal">Animal</string>
+    <string name="recording_lib_chip_alert">Alert</string>
+    <string name="recording_lib_chip_critical">Critical</string>
+    <string name="recording_lib_selected_count_zero">0 selected</string>
+    <string name="recording_lib_empty_emoji">📹</string>
+    <string name="recording_lib_no_recordings">No recordings</string>
+
+    <!-- fragment_sentry_config -->
+    <string name="sentry_mode_title">Surveillance Mode</string>
+    <string name="sentry_status_label">Status</string>
+    <string name="sentry_status_idle">Idle</string>
+    <string name="sentry_safe_locations_title">Safe Locations</string>
+    <string name="sentry_safe_locations_desc">Camera won\'t start when parked at these locations. Saves battery and storage.</string>
+    <string name="sentry_safe_loc_status_dashes">--</string>
+    <string name="sentry_add_current_location">📍 Add Current Location</string>
+    <string name="sentry_detection_settings">Detection Settings</string>
+    <string name="sentry_detection_distance">Detection Distance</string>
+    <string name="sentry_detection_distance_desc">How far to detect objects (3m - 15m)</string>
+    <string name="sentry_distance_initial">~8m</string>
+    <string name="sentry_distance_hint_default">Balanced — detects people up to ~8m away</string>
+    <string name="sentry_motion_sensitivity">Motion Sensitivity</string>
+    <string name="sentry_motion_sensitivity_desc">How easily motion triggers recording</string>
+    <string name="sentry_sensitivity_default">Default</string>
+    <string name="sentry_sensitivity_hint_default">Balanced — triggers on walking people, ignores bugs/leaves</string>
+    <string name="sentry_shadow_rejection">Shadow Rejection</string>
+    <string name="sentry_shadow_rejection_desc">Filter shadows, reflections, faint light changes</string>
+    <string name="sentry_flash_immunity_normal">NORMAL</string>
+    <string name="sentry_detect_objects">Detect Objects</string>
+    <string name="sentry_detect_objects_desc">Select what triggers recording</string>
+    <string name="sentry_recording_settings">Recording Settings</string>
+    <string name="sentry_pre_event_buffer">Pre-event Buffer</string>
+    <string name="sentry_pre_event_buffer_desc">Seconds captured before motion event</string>
+    <string name="sentry_pre_buffer_default">5s</string>
+    <string name="sentry_post_event_buffer">Post-event Buffer</string>
+    <string name="sentry_post_event_buffer_desc">Seconds captured after motion stops</string>
+    <string name="sentry_post_buffer_default">10s</string>
+    <string name="sentry_video_quality">Video Quality</string>
+    <string name="sentry_video_quality_desc">Higher quality = larger files</string>
+    <string name="sentry_video_codec">Video Codec</string>
+    <string name="sentry_video_codec_desc">H.265 produces 50%% smaller files</string>
+    <string name="sentry_storage_title">Surveillance Storage</string>
+    <string name="sentry_storage_choose">Choose where to save surveillance events</string>
+    <string name="sentry_storage_path">Events saved to Overdrive/surveillance</string>
+
+    <!-- fragment_video_player -->
+    <string name="player_title_recording">Recording</string>
+    <string name="player_time_zero">0:00</string>
+    <string name="player_time_separator"> / </string>
+
+    <!-- activity_main (legacy) -->
+    <string name="legacy_app_title">BYD Champ</string>
+    <string name="legacy_camera_selection">Camera Selection</string>
+    <string name="legacy_cam1_on">CAM1 ✓</string>
+    <string name="legacy_cam1_off">CAM1</string>
+    <string name="legacy_cam2_on">CAM2 ✓</string>
+    <string name="legacy_cam2_off">CAM2</string>
+    <string name="legacy_cam3_on">CAM3 ✓</string>
+    <string name="legacy_cam3_off">CAM3</string>
+    <string name="legacy_cam4_on">CAM4 ✓</string>
+    <string name="legacy_cam4_off">CAM4</string>
+    <string name="legacy_start_rec">START REC</string>
+    <string name="legacy_stop_rec">STOP REC</string>
+    <string name="legacy_status_label">Status</string>
+    <string name="legacy_status_idle">Status: Idle</string>
+    <string name="legacy_stream_starting">📡 Stream: Starting…</string>
+    <string name="legacy_id_loading">🔑 ID: …</string>
+    <string name="legacy_tunnel_not_connected">🌐 Tunnel: Not connected</string>
+    <string name="legacy_battery_dashes">🔋 Battery: --V</string>
+    <string name="legacy_services">Services</string>
+    <string name="legacy_tunnel">TUNNEL</string>
+    <string name="legacy_stop_tun">STOP TUN</string>
+    <string name="legacy_proxy">PROXY</string>
+    <string name="legacy_stop_prx">STOP PRX</string>
+    <string name="legacy_sentry">SENTRY</string>
+    <string name="legacy_stop_snt">STOP SNT</string>
+    <string name="legacy_cam">CAM</string>
+    <string name="legacy_stop_cam">STOP CAM</string>
+    <string name="legacy_sentry_on">🛡️ SENTRY</string>
+    <string name="legacy_sentry_off">🛡️ SENTRY</string>
+    <string name="legacy_vpn_on">🔒 VPN</string>
+    <string name="legacy_vpn_off">🔓 VPN</string>
+    <string name="legacy_stream_public">🌐 PUBLIC</string>
+    <string name="legacy_stream_private">🔒 PRIVATE</string>
+    <string name="legacy_stop_service">STOP SERVICE</string>
+    <string name="legacy_logs_title">📋 Logs</string>
+    <string name="legacy_logs_ready">&gt; Ready. Select cameras to begin.</string>
+
+    <!-- fragment_daemons -->
+    <string name="daemons_section_title">Background Services</string>
+
+    <!-- dialog_time_window -->
+    <string name="time_window_dialog_title">⏰ Schedule Configuration</string>
+    <string name="time_window_dialog_subtitle">Configure when surveillance should be active</string>
+    <string name="time_window_add_button">+ Add Window (1/3)</string>
+    <string name="time_window_tip">💡 Tip: Overnight windows (e.g., 22:00 - 06:00) are supported. Surveillance will only activate during these windows when ACC is OFF.</string>
+
+    <!-- dialog_update_progress -->
+    <string name="update_preparing">Preparing update…</string>
+    <string name="update_percent_zero">0%</string>
+
+    <!-- dialog_battery_health -->
+    <string name="battery_health_title">Battery Health</string>
+    <string name="battery_health_subtitle">State of Health</string>
+    <string name="battery_health_dashes">--</string>
+    <string name="battery_health_waiting">Waiting for data…</string>
+    <string name="battery_health_source">Source</string>
+    <string name="battery_health_method">Method</string>
+    <string name="battery_health_capacity">Capacity</string>
+    <string name="battery_health_samples">Samples</string>
+    <string name="battery_health_last_updated">Last Updated</string>
+    <string name="battery_health_reset">⚠️ Reset SOH Estimation</string>
+    <string name="battery_health_reset_desc">Clears all data and re-estimates from scratch. Use if battery was replaced or reading seems incorrect.</string>
+
+    <!-- ============================================================
+         Step 2: Kotlin / Java UI literal extraction
+         ============================================================ -->
+
+    <!-- Notifications -->
+    <string name="notif_channel_overdrive_name">Overdrive</string>
+    <string name="notif_channel_overdrive_desc">Background daemons</string>
+    <string name="notif_channel_critical_name">Critical Alerts</string>
+    <string name="notif_channel_critical_desc">Critical errors and recovery actions</string>
+    <string name="notif_channel_updates_name">Updates</string>
+    <string name="notif_channel_updates_desc">App update notifications</string>
+    <string name="notif_overdrive_title">Overdrive Service</string>
+    <string name="notif_overdrive_text">Daemons running in background</string>
+    <string name="notif_update_available_title">Update Available</string>
+    <string name="notif_update_available_text">A new version of OverDrive is available</string>
+    <string name="notif_update_downloading_title">Downloading update…</string>
+    <string name="notif_update_ready_title">Update ready to install</string>
+    <string name="notif_update_failed_title">Update failed</string>
+
+    <!-- Toasts / dialogs -->
+    <string name="toast_url_copied">URL copied to clipboard</string>
+    <string name="toast_token_copied">Token copied to clipboard</string>
+    <string name="toast_copied">Copied to clipboard</string>
+    <string name="toast_no_storage_permission">Storage permission required</string>
+    <string name="toast_no_location_permission">Location permission required</string>
+    <string name="toast_settings_saved">Settings saved</string>
+    <string name="toast_settings_applied">Settings applied</string>
+    <string name="toast_failed_generic">Operation failed</string>
+    <string name="toast_no_internet">No internet connection</string>
+    <string name="toast_camera_daemon_started">Camera daemon started</string>
+    <string name="toast_camera_daemon_stopped">Camera daemon stopped</string>
+
+    <string name="dialog_confirm_title">Confirm</string>
+    <string name="dialog_ok">OK</string>
+    <string name="dialog_yes">Yes</string>
+    <string name="dialog_no">No</string>
+
+    <!-- Dynamic format strings -->
+    <string name="battery_at_pct">Battery at %1$d%%</string>
+    <string name="storage_used_size">%1$s used</string>
+    <string name="storage_limit_size">%1$s limit</string>
+    <string name="time_seconds_value">%1$d seconds</string>
+    <string name="time_hours_value">%1$dh</string>
+
+    <!-- Plurals -->
+    <plurals name="trip_stored">
+        <item quantity="one">%d trip stored</item>
+        <item quantity="other">%d trips stored</item>
+    </plurals>
+    <plurals name="recordings_count">
+        <item quantity="one">%d recording</item>
+        <item quantity="other">%d recordings</item>
+    </plurals>
+    <plurals name="events_count">
+        <item quantity="one">%d event</item>
+        <item quantity="other">%d events</item>
+    </plurals>
+    <plurals name="files_count">
+        <item quantity="one">%d file</item>
+        <item quantity="other">%d files</item>
+    </plurals>
+    <plurals name="recordings_deleted_count">
+        <item quantity="one">%d recording deleted</item>
+        <item quantity="other">%d recordings deleted</item>
+    </plurals>
+    <plurals name="delete_recordings_title">
+        <item quantity="one">Delete %d Recording</item>
+        <item quantity="other">Delete %d Recordings</item>
+    </plurals>
+    <plurals name="delete_recordings_message">
+        <item quantity="one">This will permanently delete %d recording. This cannot be undone.</item>
+        <item quantity="other">This will permanently delete %d recordings. This cannot be undone.</item>
+    </plurals>
+
+    <!-- ============================================================
+         Step 2 (continued): MainActivity, fragments, dialogs
+         ============================================================ -->
+
+    <!-- MainActivity -->
+    <string name="toast_updated_to">✅ Updated to %1$s</string>
+    <string name="toast_checking_for_updates">Checking for updates…</string>
+    <string name="toast_app_up_to_date">✅ App is up to date (v%1$s)</string>
+    <string name="toast_update_check_failed">❌ Update check failed: %1$s</string>
+    <string name="toast_storage_permission_required">Storage permission required for recordings</string>
+    <string name="toast_url_copied_short">URL copied!</string>
+    <string name="toast_camera_set_to_auto">✓ Camera set to Auto</string>
+    <string name="toast_failed_to_save_short">Failed to save</string>
+    <string name="toast_failed_with_message">Failed: %1$s</string>
+    <string name="toast_camera_id_set">✓ Camera %1$d set — next ACC cycle</string>
+    <string name="toast_clearing_camera_config">Clearing camera config…</string>
+    <string name="toast_restarting_camera_daemon">Restarting camera daemon…</string>
+    <string name="toast_camera_daemon_restarting">✅ Camera daemon restarting with full probe</string>
+    <string name="toast_camera_restart_failed">⚠ Config cleared but daemon restart failed. Please restart manually.</string>
+    <string name="toast_failed_with_message_x">❌ Failed: %1$s</string>
+    <string name="toast_soh_reset_success">✅ SOH estimation reset — will recalculate from next data</string>
+    <string name="toast_soh_reset_failed_no_daemon">❌ Reset failed — daemon not responding and file not writable</string>
+    <string name="toast_soh_reset_failed_with_message">❌ Reset failed: %1$s</string>
+    <string name="toast_select_at_least_one_category">Select at least one category</string>
+    <string name="toast_reset_failed_with_error">Reset failed: %1$s</string>
+    <string name="toast_traffic_monitor_changing">%1$s traffic monitor…</string>
+
+    <string name="dialog_close">Close</string>
+    <string name="dialog_reset">Reset</string>
+    <string name="dialog_delete">Delete</string>
+    <string name="dialog_save">Save</string>
+    <string name="dialog_add">Add</string>
+    <string name="dialog_enable">Enable</string>
+    <string name="dialog_disable">Disable</string>
+    <string name="dialog_keep_enabled">Keep Enabled</string>
+    <string name="dialog_keep_disabled">Keep Disabled</string>
+    <string name="dialog_regenerate">Regenerate</string>
+    <string name="dialog_reset_selected">Reset Selected</string>
+
+    <string name="dialog_reset_soh_title">Reset SOH Estimation?</string>
+    <string name="dialog_reset_soh_message">This will clear all SOH data and force re-estimation from scratch.\n\nUse this if:\n• Battery was replaced\n• SOH reading seems incorrect\n• You want to recalibrate\n\nThe system will re-seed from the next available data source (OEM, charge calibration, or instantaneous reading).</string>
+
+    <string name="dialog_reset_following_title">Reset the following?</string>
+    <string name="dialog_reset_following_message">This cannot be undone.\n\n%1$s</string>
+    <string name="dialog_reset_complete_title">Reset complete</string>
+
+    <string name="dialog_traffic_cannot_check_title">⚠️ Cannot Check Status</string>
+    <string name="dialog_traffic_cannot_check_message">ADB connection is not ready yet.\n\nThe app needs ADB access to manage system packages. Please ensure:\n\n• USB Debugging is enabled in Developer Options\n• The ADB authorization prompt has been accepted\n\nThe status will update automatically once connected.</string>
+
+    <string name="dialog_traffic_disable_title">Disable BYD Traffic Monitor?</string>
+    <string name="dialog_traffic_disable_message">The BYD Traffic Monitor (com.byd.trafficmonitor) is a built-in system app that continuously monitors road traffic conditions in the background.\n\n⚠️ Why disable it?\n\n• Consumes mobile data (even when parked)\n• Uses CPU and battery in the background\n• Not needed if you use a separate navigation app\n• Can interfere with the dashcam\'s network usage\n\nThis is safe to disable — it only affects the built-in traffic overlay on the map. Your navigation, Bluetooth, and all other car functions remain unaffected.\n\nA hard reboot is required after disabling (hold center console button 5 seconds).</string>
+
+    <string name="dialog_traffic_enable_title">Re-enable BYD Traffic Monitor?</string>
+    <string name="dialog_traffic_enable_message">The BYD Traffic Monitor is currently disabled.\n\nRe-enabling it will restore the built-in traffic overlay on the navigation map. Note that it will run in the background and consume mobile data.\n\nA hard reboot is required after enabling (hold center console button 5 seconds).</string>
+
+    <string name="dialog_traffic_status_title">✅ Traffic Monitor %1$s</string>
+    <string name="dialog_traffic_reboot_message">The change has been applied.\n\nPlease perform a hard reboot now:\nPress and hold the central console button for 5 seconds.</string>
+
+    <string name="traffic_monitor_loading">🔄 Traffic Monitor: Checking…</string>
+    <string name="traffic_monitor_tap_to_check">⚠️ Traffic Monitor (tap to check)</string>
+    <string name="traffic_monitor_enabled_title">✅ Traffic Monitor: Enabled</string>
+    <string name="traffic_monitor_disabled_title">⛔ Traffic Monitor: Disabled</string>
+
+    <!-- Reset categories -->
+    <string name="reset_label_trips">Trips</string>
+    <string name="reset_label_soc_history">SoC + 12V history</string>
+    <string name="reset_label_soh">SoH calibration</string>
+    <string name="reset_label_abrp_token">ABRP token</string>
+    <string name="reset_label_byd_cloud">BYD Cloud credentials</string>
+    <string name="reset_label_recordings">Recordings</string>
+    <string name="reset_label_sentry_events">Sentry events</string>
+    <string name="reset_label_proximity">Proximity recordings</string>
+    <string name="reset_label_trip_files">Trip telemetry files</string>
+
+    <!-- ROI dialog -->
+    <string name="roi_camera_front">Camera 1 - Front</string>
+    <string name="roi_camera_right">Camera 2 - Right</string>
+    <string name="roi_camera_rear">Camera 3 - Rear</string>
+    <string name="roi_camera_left">Camera 4 - Left</string>
+    <string name="toast_roi_saved_for_camera">ROI saved for Camera %1$d</string>
+    <string name="toast_roi_min_points">Please add at least %1$d points</string>
+
+    <!-- Sentry config -->
+    <string name="toast_sd_card_not_available">SD Card not available</string>
+    <string name="toast_cleanup_deleted">Deleted %1$d files (%2$s)</string>
+    <string name="toast_cleanup_failed">Cleanup failed: %1$s</string>
+    <string name="toast_cleanup_error">Cleanup error: %1$s</string>
+    <string name="cdr_cleaning_in_progress">Cleaning…</string>
+    <string name="dialog_add_safe_location_title">Add Safe Location</string>
+    <string name="dialog_add_safe_location_message">Uses current GPS location. Name this zone:</string>
+    <string name="dialog_add_safe_location_hint">e.g. Home, Office</string>
+    <string name="dialog_add_safe_location_default">Home</string>
+    <string name="safe_loc_unnamed">Unnamed</string>
+    <string name="toast_zone_added">Zone \'%1$s\' added</string>
+    <string name="toast_zone_add_failed">Failed to add zone (no GPS?)</string>
+    <string name="dialog_delete_zone_title">Delete Zone</string>
+    <string name="dialog_delete_zone_message">Remove this safe zone?</string>
+    <string name="toast_settings_applied_short">Settings applied</string>
+    <string name="sentry_status_disabled">Status: Disabled</string>
+    <string name="sentry_status_recording">Status: 🔴 Recording</string>
+    <string name="sentry_status_active">Status: ✅ Active (monitoring)</string>
+    <string name="sentry_status_waiting">Status: ⏸️ Enabled (waiting for ACC OFF)</string>
+    <string name="safe_loc_in_zone">🟢 In Safe Zone (%1$s)</string>
+    <string name="safe_loc_outside">🔴 Outside (%1$dm to nearest)</string>
+    <string name="safe_loc_no_zones">No zones configured</string>
+    <string name="safe_loc_waiting_gps">Waiting for GPS…</string>
+    <string name="sd_card_available">SD Card: Available</string>
+    <string name="sd_card_free_format">%1$s free</string>
+    <string name="events_saved_to_path">Events saved to %1$s</string>
+    <string name="events_saved_default">Events saved to Overdrive/surveillance</string>
+
+    <!-- Format helpers -->
+    <string name="format_seconds_suffix">%1$ds</string>
+    <string name="format_mb_value">%1$d MB</string>
+    <string name="format_mb_limit">%1$d MB limit</string>
+    <string name="format_used_size">%1$s used</string>
+    <string name="format_gb_value">%1$d GB</string>
+    <string name="format_hours_suffix">%1$dh</string>
+
+    <!-- Dashboard -->
+    <string name="toast_access_code_copied">Access code copied</string>
+    <string name="dialog_regenerate_token_title">Regenerate Token</string>
+    <string name="dialog_regenerate_token_message">This will invalidate the current token. All active sessions will be logged out. Continue?</string>
+    <string name="toast_token_regenerated_logged_out">New token generated. All sessions logged out.</string>
+    <string name="toast_token_regenerated_restart">Token regenerated. Daemon may need restart to apply.</string>
+    <string name="toast_token_regenerated_no_notify">Token regenerated. Could not notify daemon.</string>
+    <string name="toast_token_regenerated">Token regenerated</string>
+    <string name="dashboard_no_tunnel">No tunnel running</string>
+    <string name="dashboard_starting_zrok">Starting Zrok tunnel…</string>
+    <string name="dashboard_starting_cloudflared">Starting Cloudflared tunnel…</string>
+    <string name="dashboard_starting_tailscale">Starting Tailscale tunnel…</string>
+    <string name="dashboard_waiting_url">Waiting for tunnel URL…</string>
+    <string name="dashboard_recording_active">🔴 Recording</string>
+    <string name="dashboard_recording_idle_label">Idle</string>
+    <string name="dashboard_daemons_running">%1$d/%2$d Running</string>
+    <string name="tunnel_label_cloudflared">Cloudflared</string>
+    <string name="tunnel_label_zrok">Zrok</string>
+    <string name="tunnel_label_tailscale">Tailscale</string>
+    <string name="clip_label_access_code">Access Code</string>
+    <string name="clip_label_url">URL</string>
+
+    <!-- Telegram -->
+    <string name="toast_enter_bot_token">Enter bot token</string>
+    <string name="telegram_status_testing">Testing…</string>
+    <string name="telegram_status_connected">🟢 Connected</string>
+    <string name="telegram_status_failed">🔴 Failed</string>
+    <string name="telegram_status_running">🟢 Running</string>
+    <string name="telegram_status_starting">⏳ Starting…</string>
+    <string name="telegram_bot_username_format">@%1$s</string>
+    <string name="toast_bot_connected_starting">Bot connected! Starting daemon for pairing…</string>
+    <string name="toast_daemon_running_send_pair">Daemon running. Send /pair &lt;PIN&gt; to your bot.</string>
+    <string name="toast_daemon_start_failed">Failed to start daemon: %1$s</string>
+    <string name="toast_config_saved_for_daemon">Config saved for daemon</string>
+    <string name="toast_warning_daemon_config_failed">Warning: Could not save daemon config: %1$s</string>
+    <string name="telegram_pin_expiry_format">(%1$d:%2$02d)</string>
+    <string name="toast_pin_expired">PIN expired</string>
+    <string name="toast_owner_unpaired">Owner unpaired</string>
+
+    <!-- ABRP -->
+    <string name="toast_enter_abrp_token">Enter ABRP user token</string>
+    <string name="abrp_token_status_testing">Testing…</string>
+    <string name="abrp_token_status_format">Token: %1$s</string>
+    <string name="abrp_save_failed_status">⚠️ Save failed</string>
+    <string name="abrp_failed_to_configure">Failed to configure ABRP</string>
+    <string name="abrp_failed_to_connect">Failed to connect to daemon</string>
+    <string name="toast_abrp_token_saved">ABRP token saved and service enabled</string>
+    <string name="toast_abrp_telemetry_enabled">ABRP telemetry enabled</string>
+    <string name="toast_abrp_telemetry_disabled">ABRP telemetry disabled</string>
+    <string name="toast_abrp_failed_update">Failed to update ABRP service</string>
+    <string name="toast_abrp_token_deleted">ABRP token deleted</string>
+    <string name="toast_warning_daemon_config_write">Warning: Could not write daemon config</string>
+    <string name="abrp_disconnected_status">🔴 Disconnected</string>
+    <string name="abrp_retrying_status">🟡 Retrying (%1$d failures)</string>
+    <string name="abrp_connected_status">🟢 Connected</string>
+    <string name="abrp_never">Never</string>
+    <string name="abrp_no_telemetry_text">No telemetry data available</string>
+
+    <!-- Daemons fragment -->
+    <string name="toast_no_config_needed">No configuration needed for %1$s</string>
+    <string name="dialog_zrok_token_title">🌐 Zrok Tunnel Token</string>
+    <string name="dialog_zrok_token_message">Enter your Zrok enable token.\nGet one at: zrok.io</string>
+    <string name="toast_token_cannot_be_empty">Token cannot be empty</string>
+    <string name="dialog_tailscale_settings_title">📡 Tailscale Tunnel Settings</string>
+    <string name="dialog_tailscale_settings_message">Configure tailscale</string>
+    <string name="tailscale_failed_login_url">Failed to generate login url</string>
+    <string name="tailscale_logged_in_relogin">Logged in. Click to login to a different account</string>
+    <string name="dialog_tailscale_proxy_enable_title">Enable Tailscale Proxy?</string>
+    <string name="dialog_tailscale_proxy_enable_message">This routes MQTT through Tailscale so you can reach a private broker on your tailnet without port forwarding.\n\nWhile enabled:\n• MQTT to a tailnet broker works (e.g. Mosquitto on a device on your tailnet)\n• MQTT to public brokers (HiveMQ, AWS IoT, etc.) will fail — Tailscale only routes to your tailnet\n• The Tailscale daemon will restart to apply the change\n• Other app traffic and the rest of the device are not affected\n\nYou can turn this off anytime.</string>
+    <string name="dialog_zrok_reset_title">⚠️ Reset Zrok Environment</string>
+    <string name="dialog_zrok_reset_message">This will:\n• Stop the zrok tunnel if running\n• Remove the zrok environment from this device\n• Delete the saved token\n\nYou will need to re-enter your token and re-enable. This uses one of your 5 device slots on zrok.io.\n\nAre you sure?</string>
+    <string name="toast_resetting_zrok">Resetting zrok environment…</string>
+    <string name="toast_zrok_reset_success">✅ Zrok environment reset. Enter a new token to set up again.</string>
+    <string name="toast_zrok_reset_partial">✅ Environment reset (token file may need manual cleanup)</string>
+    <string name="toast_zrok_reset_warnings">Environment reset (with warnings: %1$s)</string>
+    <string name="zrok_no_token_configured">No token configured. Tap to set up.</string>
+    <string name="dialog_tailscale_reset_title">⚠️ Reset Tailscale Environment</string>
+    <string name="dialog_tailscale_reset_message">This will:\n• Stop the tailscale tunnel if running\n• Remove the tailscale environment from this device\n• You will still need to remove the device from the tailscale console\n\nYou will need to log in again.\n\nAre you sure?</string>
+    <string name="toast_resetting_tailscale">Resetting tailscale environment…</string>
+    <string name="toast_tailscale_reset_success">✅ Tailscale environment reset. Login to set up again.</string>
+    <string name="toast_tailscale_reset_warnings">Tailscale environment reset (with warnings: %1$s)</string>
+    <string name="toast_tailscale_proxy_enabled">Tailscale proxy enabled</string>
+    <string name="toast_tailscale_proxy_disabled">Tailscale proxy disabled</string>
+    <string name="toast_tailscale_proxy_save_failed">Failed to save proxy settings</string>
+    <string name="toast_zrok_token_saved">✅ Token saved</string>
+    <string name="toast_zrok_token_save_failed">❌ Failed to save token</string>
+    <string name="toast_zrok_token_deleted">Token deleted</string>
+    <string name="toast_zrok_token_delete_failed">❌ Failed to delete token</string>
+    <string name="toast_fetching_log">Fetching %1$s log…</string>
+    <string name="toast_log_empty_or_missing">Log file is empty or not found</string>
+    <string name="toast_log_empty">Log file is empty</string>
+    <string name="toast_log_save_failed">❌ Failed to save log: %1$s</string>
+    <string name="toast_log_not_found">❌ Log file not found or unreadable</string>
+    <string name="log_share_title">%1$s Log - %2$s</string>
+    <string name="log_share_chooser">Share %1$s Log</string>
+    <string name="log_header_title">=== %1$s Log ===</string>
+    <string name="log_header_source">Source: %1$s</string>
+    <string name="log_header_exported">Exported: %1$s</string>
+    <string name="log_header_truncated">NOTE: Log truncated to last 10000 lines (total: %1$d lines)</string>
+
+    <!-- Recording controls -->
+    <string name="toast_settings_applied_format">Settings applied. %1$s</string>
+    <string name="toast_failed_save_settings">Failed to save settings</string>
+
+    <!-- Recording library -->
+    <string name="toast_cannot_play_video">Cannot play video: %1$s</string>
+    <string name="dialog_delete_recording_title">Delete Recording</string>
+    <string name="dialog_delete_recording_message">Delete %1$s?\nThis cannot be undone.</string>
+    <string name="toast_recording_deleted">Recording deleted</string>
+    <string name="toast_recording_delete_failed">Failed to delete recording</string>
+    <string name="toast_batch_delete_partial">%1$d deleted, %2$d failed</string>
+    <string name="play_with_chooser">Play with</string>
+
+    <!-- Setup guide -->
+    <string name="setup_version_banner">🔄 Updated to v%1$s — re-confirm autostart, BYD wipes it on every install</string>
+    <string name="setup_overlay_already_granted">✓ Already Granted</string>
+
+    <!-- Recording storage path -->
+    <string name="recordings_saved_to_path">Recordings saved to %1$s</string>
+    <string name="recordings_saved_default">Recordings saved to Overdrive/recordings</string>
+
+    <!-- Telegram extras -->
+    <string name="telegram_status_restored">⚠️ Restored from config</string>
+    <string name="telegram_click_connect_to_verify">Click \'Connect &amp; Test\' to verify</string>
+    <string name="telegram_paired_with">✅ Paired with %1$s (@%2$s)</string>
+
+    <!-- ABRP extras -->
+    <string name="abrp_token_label_format">Token: %1$s</string>
+    <string name="abrp_not_configured_short">Not configured</string>
+
+    <!-- MainActivity status -->
+    <string name="camera_current_manual">Current: Camera %1$d (Manual)</string>
+    <string name="camera_current_auto_label">Current: Auto</string>
+    <string name="soh_estimation_active">Estimation active</string>
+    <string name="soh_no_estimate_yet">⚠ No estimate yet — waiting for data</string>
+
+    <!-- Recording tabs -->
+    <string name="recording_tab_controls">Controls</string>
+    <string name="recording_tab_library">Library</string>
+
+    <!-- Misc -->
+    <string name="time_window_index_title">Time Window %1$d</string>
+    <string name="recording_lib_selected_count">%1$d selected</string>
+    <string name="video_player_playback_error">Playback error</string>
+    <string name="video_player_no_events">No events</string>
+    <string name="daemon_configuration_required">Configuration required</string>
+    <string name="daemon_configuration_message">%1$s ⚙️</string>
+    <string name="dashboard_token_masked_text">••••••••</string>
+
+    <!-- Navigation graph fragment labels (shown as toolbar/ActionBar titles) -->
+    <string name="nav_page_dashboard">Dashboard</string>
+    <string name="nav_page_daemons">Daemons</string>
+    <string name="nav_page_recording">Recording</string>
+    <string name="nav_page_adb_console">ADB Console</string>
+    <string name="nav_page_surveillance">Surveillance</string>
+    <string name="nav_page_events">Events</string>
+    <string name="nav_page_video_player">Video Player</string>
+    <string name="nav_page_telegram">Telegram</string>
+    <string name="nav_page_abrp">ABRP</string>
+    <string name="nav_page_mqtt">MQTT</string>
+    <string name="nav_page_trips">Trips</string>
+    <string name="nav_page_vehicle_control">Vehicle Control</string>
+
+    <!-- StatusOverlayService persistent notification (foreground service) -->
+    <string name="status_overlay_notif_title">OverDrive Status</string>
+    <string name="status_overlay_notif_text">Status overlay active</string>
 </resources>

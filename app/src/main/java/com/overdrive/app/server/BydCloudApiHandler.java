@@ -97,7 +97,7 @@ public class BydCloudApiHandler {
             JSONObject bydCloud = fullConfig.optJSONObject("bydCloud");
             if (bydCloud == null) {
                 response.put("success", false);
-                response.put("error", "BYD Cloud not configured");
+                response.put("error", Messages.get("errors.bydcloud_not_configured"));
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
@@ -165,7 +165,7 @@ public class BydCloudApiHandler {
             // Validate inputs
             if (username.isEmpty()) {
                 response.put("success", false);
-                response.put("error", "Email is required");
+                response.put("error", Messages.get("errors.bydcloud_email_required"));
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
@@ -184,7 +184,7 @@ public class BydCloudApiHandler {
                 signPassword = existing.signPassword;
             } else {
                 response.put("success", false);
-                response.put("error", "Password is required for first setup");
+                response.put("error", Messages.get("errors.bydcloud_password_required_first_setup"));
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
@@ -192,7 +192,7 @@ public class BydCloudApiHandler {
             if (!controlPin.isEmpty()) {
                 if (!controlPin.matches("\\d{4,6}")) {
                     response.put("success", false);
-                    response.put("error", "Control PIN must be 4-6 digits");
+                    response.put("error", Messages.get("errors.bydcloud_pin_format"));
                     HttpResponse.sendJson(out, response.toString());
                     return;
                 }
@@ -201,7 +201,7 @@ public class BydCloudApiHandler {
                 commandPwd = existing.commandPwd;
             } else {
                 response.put("success", false);
-                response.put("error", "Control PIN is required for first setup");
+                response.put("error", Messages.get("errors.bydcloud_pin_required_first_setup"));
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
@@ -224,7 +224,7 @@ public class BydCloudApiHandler {
             if (tablesStream == null) {
                 logger.error("  FAILED: Bangcle tables not found at /data/local/tmp/ or in assets");
                 response.put("success", false);
-                response.put("error", "Bangcle crypto tables not found. Reinstall the app.");
+                response.put("error", Messages.get("errors.bydcloud_bangcle_tables_missing_reinstall"));
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
@@ -254,7 +254,7 @@ public class BydCloudApiHandler {
             } catch (Exception e) {
                 logger.warn("  Step 2/3: FAILED to fetch vehicles: " + e.getMessage());
                 response.put("success", false);
-                response.put("error", "Login succeeded but no vehicles found: " + e.getMessage());
+                response.put("error", Messages.get("errors.bydcloud_login_no_vehicles_with_detail", e.getMessage()));
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
@@ -267,7 +267,7 @@ public class BydCloudApiHandler {
             } catch (Exception e) {
                 logger.warn("  Step 3/3: FAILED to verify PIN: " + e.getMessage());
                 response.put("success", false);
-                response.put("error", "Login succeeded but control PIN verification failed: " + e.getMessage());
+                response.put("error", Messages.get("errors.bydcloud_login_pin_verify_failed_with_detail", e.getMessage()));
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
@@ -292,7 +292,7 @@ public class BydCloudApiHandler {
             response.put("success", true);
             response.put("vin", vin);
             if (!energyType.isEmpty()) response.put("energyType", energyType);
-            response.put("message", "Connected successfully");
+            response.put("message", Messages.get("messages.bydcloud_connected"));
 
         } catch (Exception e) {
             logger.warn("BYD Cloud setup failed: " + e.getMessage());
@@ -313,7 +313,7 @@ public class BydCloudApiHandler {
             BydCloudConfig config = BydCloudConfig.fromUnifiedConfig();
             if (!config.isConfigured()) {
                 response.put("success", false);
-                response.put("error", "BYD Cloud not configured. Set up credentials first.");
+                response.put("error", Messages.get("errors.bydcloud_not_configured_setup_required"));
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
@@ -334,7 +334,7 @@ public class BydCloudApiHandler {
                 InputStream tablesStream = getTablesStream();
                 if (tablesStream == null) {
                     response.put("success", false);
-                    response.put("error", "Bangcle crypto tables not found");
+                    response.put("error", Messages.get("errors.bydcloud_bangcle_tables_missing"));
                     HttpResponse.sendJson(out, response.toString());
                     return;
                 }
@@ -361,7 +361,7 @@ public class BydCloudApiHandler {
             response.put("success", true);
             response.put("commandSuccess", success);
             response.put("action", action);
-            response.put("message", success ? "Command executed" : "Command dispatched");
+            response.put("message", Messages.get(success ? "messages.bydcloud_command_executed" : "messages.bydcloud_command_dispatched"));
 
         } catch (Exception e) {
             logger.warn("BYD Cloud test failed: " + e.getMessage());
@@ -381,7 +381,7 @@ public class BydCloudApiHandler {
 
         JSONObject response = new JSONObject();
         response.put("success", true);
-        response.put("message", "Credentials cleared");
+        response.put("message", Messages.get("messages.bydcloud_credentials_cleared"));
         HttpResponse.sendJson(out, response.toString());
     }
 

@@ -148,7 +148,15 @@ public class HttpServer {
             // Extract web/local and web/shared directories
             extractAssetDir(assetManager, "web/local", new File(WEB_ROOT, "local"));
             extractAssetDir(assetManager, "web/shared", new File(WEB_ROOT, "shared"));
-            
+            // Extract i18n catalogs (one JSON per supported locale).
+            // The web/i18n directory is created by the NLLB translation pipeline
+            // — at minimum web/i18n/en.json must exist for the runtime to load.
+            extractAssetDir(assetManager, "web/i18n", new File(WEB_ROOT, "i18n"));
+            // Extract server-side i18n catalogs (Messages.java lookup source).
+            // Kept distinct from web/i18n so the HTTP /i18n/ route doesn't accidentally
+            // expose internal error keys, and the two catalogs can diverge if needed.
+            extractAssetDir(assetManager, "server-i18n", new File(WEB_ROOT, "server-i18n"));
+
             // Extract overlay icons for telemetry overlay
             extractAssetDir(assetManager, "overlay", new File("/data/local/tmp/overlay"));
             
@@ -329,6 +337,16 @@ public class HttpServer {
                     cookieHeader = line.substring(7).trim();
                 } else if (lower.startsWith("authorization:")) {
                     authHeader = line.substring(14).trim();
+                } else if (lower.startsWith("accept-language:")) {
+                    // First-touch locale hint. Only used if the user has never
+                    // explicitly chosen via the picker (LocaleManager file empty).
+                    String al = line.substring(16).trim();
+                    if (!al.isEmpty()) {
+                        try { LocaleManager.fromAcceptLanguage(al); } catch (Exception ignored) {}
+                        // Note: we don't auto-persist Accept-Language; the picker
+                        // is the only thing that writes the state file. JS-side
+                        // navigator.language detection feeds the picker.
+                    }
                 } else if (lower.startsWith("host:")) {
                     hostHeader = line.substring(5).trim();
                 } else if (lower.startsWith("x-forwarded-for:")) {
@@ -556,6 +574,36 @@ public class HttpServer {
             } else if (path.equals("/vehicle-control.html") || path.equals("/vehicle-control")) {
                 if (!serveStaticFile(out, "local/vehicle-control.html")) {
                     HttpResponse.sendError(out, 404, "vehicle-control.html not found");
+                }
+            } else if (path.equals("/api/i18n/lang")) {
+                // GET → current locale; POST {"lang":"zh-CN"} → persist + echo
+                if (method.equals("GET")) {
+                    JSONObject resp = new JSONObject();
+                    resp.put("lang", LocaleManager.get());
+                    JSONObject supported = new JSONObject();
+                    for (String s : LocaleManager.SUPPORTED) supported.put(s, true);
+                    resp.put("supported", supported);
+                    HttpResponse.sendJson(out, resp.toString());
+                } else if (method.equals("POST")) {
+                    String want;
+                    try {
+                        want = new JSONObject(body).optString("lang", "");
+                    } catch (Exception e) { want = ""; }
+                    String resolved = LocaleManager.set(want);
+                    HttpResponse.sendJson(out, "{\"lang\":\"" + resolved + "\"}");
+                } else {
+                    HttpResponse.sendError(out, 405, "Method Not Allowed");
+                }
+            } else if (path.startsWith("/i18n/")) {
+                // Catalog JSON: /i18n/en.json, /i18n/zh-CN.json, …
+                // 404s on unsupported tags so the runtime falls back to en.
+                String tag = path.substring(6);
+                int dot = tag.lastIndexOf('.');
+                String base = dot > 0 ? tag.substring(0, dot) : tag;
+                if (!LocaleManager.isSupported(base)) {
+                    HttpResponse.sendError(out, 404, "Unknown locale");
+                } else if (!serveStaticFile(out, "i18n/" + tag)) {
+                    HttpResponse.sendError(out, 404, "Catalog missing: " + tag);
                 }
             } else if (path.startsWith("/shared/") || path.startsWith("/local/")) {
                 // Strip ?query and #fragment so cache-busting versions like
@@ -841,6 +889,15 @@ public class HttpServer {
                 status.put("distanceUnit", (collector != null && collector.isMilesMode()) ? "mi" : "km");
             } catch (Exception ignored) {
                 status.put("distanceUnit", "km");
+            }
+
+            // Active UI locale — exposed so the WebView can sync its i18n
+            // state with changes made elsewhere (Android settings drawer,
+            // another logged-in client). Always one of LocaleManager.SUPPORTED.
+            try {
+                status.put("locale", LocaleManager.get());
+            } catch (Exception ignored) {
+                status.put("locale", "en");
             }
         } catch (Exception e) {
             // Vehicle data not available
