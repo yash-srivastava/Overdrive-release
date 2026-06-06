@@ -416,7 +416,7 @@
     <string name="dialog_reset_complete_title">Перезагрузка завершена</string>
     <string name="dialog_traffic_cannot_check_title">Не могу проверить статус</string>
     <string name="dialog_traffic_cannot_check_message">Подключение ADB еще не готово.\n\nПриложение нуждается в доступе ADB для управления системными пакетами. Пожалуйста, убедитесь:\n\n• USB Debugging включена в параметрах разработчика\n• Просьба о разрешении ADB была принята\n\nСтатус будет обновляться автоматически после подключения.</string>
-    <string name="dialog_traffic_disable_title">Выключить ЗЗ0XX Монитор движения?</string>
+    <string name="dialog_traffic_disable_title">Отключить монитор трафика BYD?</string>
     <string name="dialog_traffic_disable_message">BYD Traffic Monitor (com.byd.trafficmonitor) - встроенное системное приложение, которое постоянно отслеживает условия дорожного движения в фоне.\n\n️ Почему отключить его?\n\n• Потребляет мобильные данные (даже при парковке)\n• Использует CPU и батарею в фоне\n• Не требуется, если вы используете отдельное навигационное приложение\n• Может помешать использованию сети Dashcam\n\nЭто безопасно отключить  это влияет только на встроенное перекрытие дорожного движения на карте. Ваша навигация, Bluetooth и все другие функции автомобиля остаются незатронутыми.\n\nСердкий перезагрузка</string>
     <string name="dialog_traffic_enable_title">Возобновить управление на дороге BYD?</string>
     <string name="dialog_traffic_enable_message">Монитор трафика BYD в настоящее время отключен.\n\nВосстановление его активации восстановит встроенный перекрытие трафика на навигационной карте. Обратите внимание, что он будет работать в фоне и потреблять мобильные данные.\n\nСердкое перезагрузка требуется после включения (поддерживайте кнопку центральной консоли 5 секунд).</string>
@@ -447,11 +447,11 @@
     <string name="toast_token_regenerated">Регенерированный токен</string>
     <string name="dashboard_no_tunnel">Никакого туннеля .</string>
     <string name="dashboard_starting_zrok">Запуск туннеля Zrok...</string>
-    <string name="dashboard_starting_cloudflared">Начало тунеля \"Облаковой\"</string>
+    <string name="dashboard_starting_cloudflared">Запуск туннеля Cloudflared…</string>
     <string name="dashboard_starting_tailscale">Запуск туннеля Tailscale...</string>
     <string name="dashboard_waiting_url">Ждём туннеля URL...</string>
     <string name="dashboard_daemons_running">%1$d/%2$d Бег</string>
-    <string name="tunnel_label_cloudflared">Облакообразные</string>
+    <string name="tunnel_label_cloudflared">Cloudflared</string>
     <string name="tunnel_label_zrok">Zrok</string>
     <string name="tunnel_label_tailscale">Tailscale</string>
     <!-- Daemon names — shown on the Daemons list and dashboard. -->
@@ -605,7 +605,7 @@
     <string name="settings_about_support_share_title">Расскажите другому владельцу</string>
     <string name="settings_about_support_share_value">Каждый общий ссылка помогает другому владельцу BYD обнаружить Overdrive.</string>
     <string name="settings_about_support_share_message">Проверьте Overdrive  открытый код наблюдения и дашкамы для BYD: https://overdrive-5lc.pages.dev/</string>
-    <string name="settings_about_support_share_chooser">Распределяйте сверхвыгоду</string>
+    <string name="settings_about_support_share_chooser">Поделиться Overdrive</string>
     <string name="settings_about_open_link_failed">Не удалось открыть ссылку.</string>
     <string name="settings_about_open_link_copied">Никакой браузер не найден. URL скопирован: %1$s</string>
     <string name="settings_about_support_kofi_title">Заправляйте следующий выпуск</string>
@@ -763,7 +763,7 @@
     <!-- Section row subtitles (portrait) -->
     <string name="settings_section_recording_subtitle">Пре/пост буферы, кодеки, ограничения хранения.</string>
     <string name="settings_section_surveillance_subtitle">Зон обнаружения, график, чувствительность к движению.</string>
-    <string name="settings_section_daemons_subtitle">Облачные, Zrok, Telegram, MQTT бегуны.</string>
+    <string name="settings_section_daemons_subtitle">Службы Cloudflared, Zrok, Telegram, MQTT.</string>
     <!-- About / data row subtitles -->
     <string name="settings_about_row_title">О OverDrive</string>
     <string name="settings_about_row_subtitle">Версия, лицензия, поддержка разработки.</string>
@@ -889,7 +889,7 @@
          provider, so translators should keep numeric placeholders intact
          (do not spell out the digits). -->
     <!-- First-launch welcome — only shown on the very first dashboard visit. -->
-    <string name="dashboard_insight_welcome">Добро пожаловать  Овердрайв теперь ваш второй пара глаз.</string>
+    <string name="dashboard_insight_welcome">Добро пожаловать — Overdrive теперь ваша вторая пара глаз.</string>
     <!-- Parking delta. %1$s = absolute SOC delta string ("8%"); %2$s = absolute kWh string ("4 kWh"). -->
     <string name="dashboard_insight_parked_charged_kwh">Взял %1$s (≈%2$s) во время парковки</string>
     <string name="dashboard_insight_parked_charged">Взял %1$s, когда был на парковке.</string>
