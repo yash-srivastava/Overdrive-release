@@ -445,7 +445,7 @@
     <string name="dashboard_starting_tailscale">Avvio tunnel Tailscale...</string>
     <string name="dashboard_waiting_url">In attesa dell URL del tunnel...</string>
     <string name="dashboard_daemons_running">%1$d/%2$d in esecuzione</string>
-    <string name="tunnel_label_cloudflared">Nuvolosa</string>
+    <string name="tunnel_label_cloudflared">Cloudflared</string>
     <string name="tunnel_label_zrok">Zrok</string>
     <string name="tunnel_label_tailscale">Tailscale</string>
     <!-- Daemon names — shown on the Daemons list and dashboard. -->
