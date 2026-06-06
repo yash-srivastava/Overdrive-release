@@ -442,7 +442,7 @@
     <string name="dashboard_starting_tailscale">Bắt đầu đường hầm Tailscale...</string>
     <string name="dashboard_waiting_url">Chờ đường hầm URL...</string>
     <string name="dashboard_daemons_running">%1$d/%2$d chạy</string>
-    <string name="tunnel_label_cloudflared">Tự nhiên</string>
+    <string name="tunnel_label_cloudflared">Cloudflared</string>
     <string name="tunnel_label_zrok">Zrok</string>
     <string name="tunnel_label_tailscale">Tailscale</string>
     <!-- Daemon names — shown on the Daemons list and dashboard. -->
@@ -596,7 +596,7 @@
     <string name="settings_about_support_share_title">Hãy nói với chủ xe khác</string>
     <string name="settings_about_support_share_value">Mỗi liên kết được chia sẻ giúp một chủ sở hữu BYD khác khám phá Overdrive.</string>
     <string name="settings_about_support_share_message">Kiểm tra Overdrive  giám sát nguồn mở &amp; dashcam cho BYD: https://overdrive-5lc.pages.dev/</string>
-    <string name="settings_about_support_share_chooser">Chia sẻ quá mức</string>
+    <string name="settings_about_support_share_chooser">Chia sẻ Overdrive</string>
     <string name="settings_about_open_link_failed">Không thể mở liên kết.</string>
     <string name="settings_about_open_link_copied">Không tìm thấy trình duyệt. URL sao chép: %1$s</string>
     <string name="settings_about_support_kofi_title">Chất nhiên liệu phát hành tiếp theo</string>
