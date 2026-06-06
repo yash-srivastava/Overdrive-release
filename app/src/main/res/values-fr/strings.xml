@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">OverDrive</string>
     <!-- Accessibility Service -->
-    <string name="accessibility_service_description">Garde la surveillance du véhicule sur le fond active. Ce service ne lit ni n\'interagit avec le contenu de l\'écran.</string>
+    <string name="accessibility_service_description">Maintient la surveillance du véhicule d\'Overdrive active en arrière-plan. Ce service ne lit pas le contenu de l\'écran et n\'interagit pas avec lui.</string>
     <!-- Recording Mode Labels -->
     <!-- Proximity Guard Settings Labels -->
     <!-- Quality Settings Labels -->
@@ -445,7 +445,7 @@
     <string name="dashboard_starting_tailscale">Je démarre le tunnel Tailscale...</string>
     <string name="dashboard_waiting_url">En attendant le tunnel URL...</string>
     <string name="dashboard_daemons_running">%1$d/%2$d en cours d\'exécution</string>
-    <string name="tunnel_label_cloudflared">Des nuages</string>
+    <string name="tunnel_label_cloudflared">Cloudflared</string>
     <string name="tunnel_label_zrok">Zrok</string>
     <string name="tunnel_label_tailscale">Tailscale</string>
     <!-- Daemon names — shown on the Daemons list and dashboard. -->
@@ -599,7 +599,7 @@
     <string name="settings_about_support_share_title">Parlez-en à un autre propriétaire</string>
     <string name="settings_about_support_share_value">Chaque lien partagé aide un autre propriétaire de BYD à découvrir Overdrive.</string>
     <string name="settings_about_support_share_message">Consultez Overdrive  surveillance open source et dashcam pour BYD: https://overdrive-5lc.pages.dev/</string>
-    <string name="settings_about_support_share_chooser">Partagez le surpoids</string>
+    <string name="settings_about_support_share_chooser">Partager Overdrive</string>
     <string name="settings_about_open_link_failed">Je n\'ai pas pu ouvrir le lien.</string>
     <string name="settings_about_open_link_copied">Aucun navigateur n\'a été trouvé. URL copié: %1$s</string>
     <string name="settings_about_support_kofi_title">Fuel la prochaine version</string>
@@ -757,7 +757,7 @@
     <!-- Section row subtitles (portrait) -->
     <string name="settings_section_recording_subtitle">Buffers pré/après, codec, limites de stockage.</string>
     <string name="settings_section_surveillance_subtitle">Zones de détection, horaire, sensibilité au mouvement.</string>
-    <string name="settings_section_daemons_subtitle">Les coureurs Zrok, Telegram, MQTT.</string>
+    <string name="settings_section_daemons_subtitle">Processus Cloudflared, Zrok, Telegram, MQTT.</string>
     <!-- About / data row subtitles -->
     <string name="settings_about_row_title">À propos de OverDrive</string>
     <string name="settings_about_row_subtitle">La version, la licence, le développement de support.</string>
