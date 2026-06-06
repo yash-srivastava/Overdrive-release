@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">OverDrive</string>
     <!-- Accessibility Service -->
-    <string name="accessibility_service_description">Bu hizmet ekran içeriğini okumamaktadır veya etkileşime girmez.</string>
+    <string name="accessibility_service_description">Overdrive araç izlemesini arka planda etkin tutar. Bu hizmet ekran içeriğini okumaz veya onunla etkileşime girmez.</string>
     <!-- Recording Mode Labels -->
     <!-- Proximity Guard Settings Labels -->
     <!-- Quality Settings Labels -->
@@ -441,11 +441,11 @@
     <string name="toast_token_regenerated">Token Yenilenmiş</string>
     <string name="dashboard_no_tunnel">Hiç tünel yürümedi .</string>
     <string name="dashboard_starting_zrok">Zrok tünelini başlatıyorum...</string>
-    <string name="dashboard_starting_cloudflared">Bulutlu tünel başlıyor...</string>
+    <string name="dashboard_starting_cloudflared">Cloudflared tüneli başlatılıyor…</string>
     <string name="dashboard_starting_tailscale">Tailscale tünelini başlatıyorum...</string>
     <string name="dashboard_waiting_url">URL tünelini bekliyoruz...</string>
     <string name="dashboard_daemons_running">%1$d/%2$d Çalışma</string>
-    <string name="tunnel_label_cloudflared">Bulutlu</string>
+    <string name="tunnel_label_cloudflared">Cloudflared</string>
     <string name="tunnel_label_zrok">Zrok</string>
     <string name="tunnel_label_tailscale">Tailscale</string>
     <!-- Daemon names — shown on the Daemons list and dashboard. -->
@@ -599,7 +599,7 @@
     <string name="settings_about_support_share_title">Başka bir araç sahibine bahset</string>
     <string name="settings_about_support_share_value">Paylaşılan her bağlantı başka bir BYD sahibinin Overdrive\'i keşfetmesine yardımcı olur.</string>
     <string name="settings_about_support_share_message">BYD için Overdrive  açık kaynaklı gözetim &amp; dashcam\'ı kontrol edin: https://overdrive-5lc.pages.dev/</string>
-    <string name="settings_about_support_share_chooser">Paylaşım Aşırı Sürüş</string>
+    <string name="settings_about_support_share_chooser">Overdrive\'ı Paylaş</string>
     <string name="settings_about_open_link_failed">Bağlantıyı açamadım.</string>
     <string name="settings_about_open_link_copied">URL kopyalandı: %1$s</string>
     <string name="settings_about_support_kofi_title">Sonraki versiyon için yakıt</string>
@@ -757,7 +757,7 @@
     <!-- Section row subtitles (portrait) -->
     <string name="settings_section_recording_subtitle">Ön / sonrası tamponlar, kodekler, depolama sınırları.</string>
     <string name="settings_section_surveillance_subtitle">Deteksiyon bölgeleri, program, hareket hassasiyeti.</string>
-    <string name="settings_section_daemons_subtitle">Bulutlu, Zrok, Telegram, MQTT koşucuları.</string>
+    <string name="settings_section_daemons_subtitle">Cloudflared, Zrok, Telegram, MQTT çalıştırıcıları.</string>
     <!-- About / data row subtitles -->
     <string name="settings_about_row_title">OverDrive hakkında</string>
     <string name="settings_about_row_subtitle">Versiyon, lisans, destek geliştirme.</string>
