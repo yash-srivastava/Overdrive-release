@@ -131,7 +131,7 @@
     <string name="camera_selection_hint">Auto escolhe a câmera certa para o seu equipamento em cada bot. câmera 1 = BYD Seal, câmera 0 = Atto equipamentos. Reiniciar o daemon após alterar o ID da câmera para a configuração entrar em vigor.</string>
     <!-- OEM Dashcam camera ID picker (Phase 5: separate forward-sensor pipeline) -->
     <string name="camera_oem_dashcam_title">ID da Câmera do Dashcam OEM</string>
-    <string name="camera_oem_dashcam_hint">Escolha o id da AVMCamera que aponta para o sensor de dashcam avançado. Dashcam é um OPPOSITE do pano: Seal/Han pano = 1 → dashcam = 0; Atto / Tang pano = 0 → dashcam = 1. Deixe em Auto para deixar a escolha da Sobrecarga.</string>
+    <string name="camera_oem_dashcam_hint">Escolha o id da AVMCamera que aponta para o sensor do dashcam frontal. O dashcam é o OPOSTO do panorâmico (pano): Seal/Han pano = 1 → dashcam = 0; Atto / Tang pano = 0 → dashcam = 1. Deixe em Auto para que o OverDrive faça a escolha.</string>
     <string name="camera_oem_dashcam_auto_resolved">Automático — usando ajuda %1$d (Pano é Ajuda %2$d)</string>
     <string name="camera_oem_dashcam_auto_unavailable">Automático — ajuda de pano é %1$d, não é possível inferir o dashcam</string>
     <string name="camera_oem_dashcam_save">Guardar</string>
@@ -445,7 +445,7 @@
     <string name="dashboard_starting_tailscale">Começando o túnel Tailscale...</string>
     <string name="dashboard_waiting_url">À espera do túnel URL...</string>
     <string name="dashboard_daemons_running">%1$d/%2$d em execução</string>
-    <string name="tunnel_label_cloudflared">Com nuvens</string>
+    <string name="tunnel_label_cloudflared">Cloudflared</string>
     <string name="tunnel_label_zrok">Zrok</string>
     <string name="tunnel_label_tailscale">Tailscale</string>
     <!-- Daemon names — shown on the Daemons list and dashboard. -->
@@ -599,7 +599,7 @@
     <string name="settings_about_support_share_title">Conte a outro proprietário</string>
     <string name="settings_about_support_share_value">Cada link compartilhado ajuda outro proprietário do BYD a descobrir o Overdrive.</string>
     <string name="settings_about_support_share_message">Confira o Overdrive  vigilância de código aberto e dashcam para BYD: https://overdrive-5lc.pages.dev/</string>
-    <string name="settings_about_support_share_chooser">Compartilhar excesso de energia</string>
+    <string name="settings_about_support_share_chooser">Compartilhar Overdrive</string>
     <string name="settings_about_open_link_failed">Não consegui abrir a ligação.</string>
     <string name="settings_about_open_link_copied">Nenhum navegador encontrado. URL copiado: %1$s</string>
     <string name="settings_about_support_kofi_title">Combustível para a próxima versão</string>
@@ -757,7 +757,7 @@
     <!-- Section row subtitles (portrait) -->
     <string name="settings_section_recording_subtitle">Buffers pré/pós, codec, limites de armazenamento.</string>
     <string name="settings_section_surveillance_subtitle">Zonas de detecção, horário, sensibilidade ao movimento.</string>
-    <string name="settings_section_daemons_subtitle">Corredores de nuvem, Zrok, Telegram, MQTT.</string>
+    <string name="settings_section_daemons_subtitle">Serviços do Cloudflared, Zrok, Telegram e MQTT.</string>
     <!-- About / data row subtitles -->
     <string name="settings_about_row_title">Sobre o OverDrive</string>
     <string name="settings_about_row_subtitle">Versão, licença, desenvolvimento de suporte.</string>
