@@ -479,7 +479,7 @@
     <string name="dialog_tailscale_reset_message">การดำเนินการนี้จะ:\n• หยุดการทำงานของ Tailscale Tunnel หากกำลังทำงานอยู่\n• ลบ Tailscale Environment ออกจากอุปกรณ์นี้\n• คุณยังจำเป็นต้องลบอุปกรณ์ออกจากหน้าควบคุมบนเว็บไซต์ของ Tailscale ด้วยตนเอง\n\nหลังการลบข้อมูล คุณจำเป็นต้องเข้าสู่ระบบใหม่อีกครั้ง\n\nคุณแน่ใจหรือไม่?</string>
     <string name="toast_resetting_tailscale">กำลังรีเซ็ต Tailscale Environment…</string>
     <string name="toast_tailscale_reset_success">รีเซ็ต Tailscale สำเร็จ กรุณาเข้าสู่ระบบเพื่อตั้งค่าใหม่</string>
-    <string name="toast_tailscale_reset_warnings">รีเซ็ตสำเร็จแต่มีคำเตือน: %1$s</string>
+    <string name="toast_tailscale_reset_warnings">รีเซ็ตสภาพแวดล้อม Tailscale แล้ว (มีคำเตือน: %1$s)</string>
     <string name="toast_tailscale_proxy_enabled">เปิดใช้งาน Tailscale Proxy เรียบร้อยแล้ว</string>
     <string name="toast_tailscale_proxy_disabled">ปิดใช้งาน Tailscale Proxy เรียบร้อยแล้ว</string>
     <string name="toast_tailscale_proxy_save_failed">บันทึกการตั้งค่า Proxy ไม่สำเร็จ</string>
@@ -594,7 +594,7 @@
          personality without being corny — short, warm, specific. -->
     <string name="settings_about_support_section">สนับสนุนโครงการโดยผู้ใช้งาน</string>
     <string name="settings_about_support_share_title">บอกต่อให้ผู้ใช้รถท่านอื่น</string>
-    <string name="settings_about_support_share_value">การแชร์ข้อมูลของคุณช่วยให้ผู้ใช้ BYD ท่านอื่นรู้จักแอปพลิเคชันนี้มากขึ้น</string>
+    <string name="settings_about_support_share_value">ทุกลิงก์ที่แชร์ช่วยให้ผู้ใช้ BYD ท่านอื่นได้รู้จักกับ Overdrive</string>
     <string name="settings_about_support_share_message">ลองใช้งาน OverDrive — แอปพลิเคชันกล้องหน้ารถและโหมดเฝ้าระวังแบบ Open-Source สำหรับ BYD: https://overdrive-5lc.pages.dev/</string>
     <string name="settings_about_support_share_chooser">แชร์ OverDrive</string>
     <string name="settings_about_open_link_failed">ไม่สามารถเปิดลิงก์ได้</string>
