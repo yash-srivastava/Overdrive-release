@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">OverDrive</string>
     <!-- Accessibility Service -->
-    <string name="accessibility_service_description">ओवरड्राइव वाहन निगरानी को पृष्ठभूमि में सक्रिय रखता है। यह सेवा स्क्रीन सामग्री को नहीं पढ़ती या बातचीत नहीं करती है।</string>
+    <string name="accessibility_service_description">Overdrive वाहन निगरानी को पृष्ठभूमि में सक्रिय रखता है। यह सेवा स्क्रीन सामग्री को न तो पढ़ती है और न ही उससे कोई संपर्क करती है।</string>
     <!-- Recording Mode Labels -->
     <!-- Proximity Guard Settings Labels -->
     <!-- Quality Settings Labels -->
@@ -445,7 +445,7 @@
     <string name="dashboard_starting_tailscale">Tailscale सुरंग शुरू...</string>
     <string name="dashboard_waiting_url">सुरंग URL के लिए इंतजार...</string>
     <string name="dashboard_daemons_running">%1$d/%2$d चल रहा है</string>
-    <string name="tunnel_label_cloudflared">बादल से उगने वाला</string>
+    <string name="tunnel_label_cloudflared">Cloudflared</string>
     <string name="tunnel_label_zrok">Zrok</string>
     <string name="tunnel_label_tailscale">Tailscale</string>
     <!-- Daemon names — shown on the Daemons list and dashboard. -->
@@ -597,9 +597,9 @@
          personality without being corny — short, warm, specific. -->
     <string name="settings_about_support_section">आप जैसे लोगों द्वारा संचालित</string>
     <string name="settings_about_support_share_title">किसी और मालिक को बताएं</string>
-    <string name="settings_about_support_share_value">प्रत्येक साझा लिंक एक और BYD मालिक ओवरड्राइव की खोज करने में मदद करता है।</string>
+    <string name="settings_about_support_share_value">प्रत्येक साझा किया गया लिंक किसी अन्य BYD मालिक को Overdrive खोजने में मदद करता है।</string>
     <string name="settings_about_support_share_message">BYD के लिए ओवरड्राइव  ओपन सोर्स निगरानी और डैशकैम देखेंः https://overdrive-5lc.pages.dev/</string>
-    <string name="settings_about_support_share_chooser">शेयर ओवरड्राइव</string>
+    <string name="settings_about_support_share_chooser">Overdrive साझा करें</string>
     <string name="settings_about_open_link_failed">लिंक नहीं खोल सका।</string>
     <string name="settings_about_open_link_copied">कोई ब्राउज़र नहीं मिला। URL कॉपीः %1$s</string>
     <string name="settings_about_support_kofi_title">अगले रिलीज को ईंधन</string>
@@ -677,7 +677,7 @@
     <string name="diagnostics_settings_subtitle">ऐप वरीयताएँ, विषय और भाषा।</string>
     <!-- SOTA Integrations page -->
     <string name="integrations_hero_title">एकीकरण</string>
-    <string name="integrations_hero_subtitle">अपनी सेवाओं से ओवरड्राइव कनेक्ट करें।</string>
+    <string name="integrations_hero_subtitle">Overdrive को अपनी सेवाओं से कनेक्ट करें।</string>
     <string name="integrations_status_unknown">कॉन्फ़िगर करने के लिए टैप करें</string>
     <string name="integrations_status_configured">कॉन्फ़िगर किया गया</string>
     <string name="integrations_status_not_set_up">स्थापित नहीं</string>
@@ -881,7 +881,7 @@
          provider, so translators should keep numeric placeholders intact
          (do not spell out the digits). -->
     <!-- First-launch welcome — only shown on the very first dashboard visit. -->
-    <string name="dashboard_insight_welcome">आपका स्वागत है  ओवरड्राइव अब आपकी दूसरी आँखों की जोड़ी है।</string>
+    <string name="dashboard_insight_welcome">आपका स्वागत है — Overdrive अब आपकी दूसरी आँखों की जोड़ी है।</string>
     <!-- Parking delta. %1$s = absolute SOC delta string ("8%"); %2$s = absolute kWh string ("4 kWh"). -->
     <string name="dashboard_insight_parked_charged_kwh">%1$s (≈%2$s) को पार्किंग के दौरान उठाया गया</string>
     <string name="dashboard_insight_parked_charged">%1$s को पार्किंग के दौरान उठाया गया</string>
