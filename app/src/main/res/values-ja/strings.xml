@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">OverDrive</string>
     <!-- Accessibility Service -->
-    <string name="accessibility_service_description">オバードライブの車両モニタリングをバックグラウンドで活性化します.このサービスは画面コンテンツを読み取ったり相互作用したりしません.</string>
+    <string name="accessibility_service_description">Overdrive の車両モニタリングをバックグラウンドで有効に保ちます。このサービスは画面の内容を読み取ったり、操作したりすることはありません。</string>
     <!-- Recording Mode Labels -->
     <!-- Proximity Guard Settings Labels -->
     <!-- Quality Settings Labels -->
@@ -438,11 +438,11 @@
     <string name="toast_token_regenerated">トークン再生</string>
     <string name="dashboard_no_tunnel">トンネルが走らない</string>
     <string name="dashboard_starting_zrok">Zrokトンネルを起動する</string>
-    <string name="dashboard_starting_cloudflared">雲端トンネルを始める...</string>
+    <string name="dashboard_starting_cloudflared">Cloudflared トンネルを開始しています…</string>
     <string name="dashboard_starting_tailscale">Tailscaleトンネルを起動する</string>
     <string name="dashboard_waiting_url">トンネルURLを待ってる</string>
     <string name="dashboard_daemons_running">%1$d/%2$d 実行</string>
-    <string name="tunnel_label_cloudflared">雲が吹いた</string>
+    <string name="tunnel_label_cloudflared">Cloudflared</string>
     <string name="tunnel_label_zrok">Zrok</string>
     <string name="tunnel_label_tailscale">Tailscale</string>
     <!-- Daemon names — shown on the Daemons list and dashboard. -->
@@ -596,7 +596,7 @@
     <string name="settings_about_support_share_title">他のオーナーにも伝えよう</string>
     <string name="settings_about_support_share_value">共有されたリンクは 他のBYDのオーナーがOverdriveを発見するのに役立ちます</string>
     <string name="settings_about_support_share_message">BYDのOverdrive オープンソース監視とダッシュカメラをチェックしてください: https://overdrive-5lc.pages.dev/</string>
-    <string name="settings_about_support_share_chooser">シェア 過剰運転</string>
+    <string name="settings_about_support_share_chooser">Overdrive を共有</string>
     <string name="settings_about_open_link_failed">リンクを開けられなかった</string>
     <string name="settings_about_open_link_copied">ブラウザが見つかりませんでした. URLコピー: %1$s</string>
     <string name="settings_about_support_kofi_title">次のリリースに燃料</string>
@@ -674,7 +674,7 @@
     <string name="diagnostics_settings_subtitle">アプリの好み テーマ 言語</string>
     <!-- SOTA Integrations page -->
     <string name="integrations_hero_title">統合</string>
-    <string name="integrations_hero_subtitle">オーバードライブをあなたのサービスに接続する</string>
+    <string name="integrations_hero_subtitle">Overdrive をお使いのサービスに接続します。</string>
     <string name="integrations_status_unknown">設定をタップする</string>
     <string name="integrations_status_configured">構成</string>
     <string name="integrations_status_not_set_up">設置されていない</string>
@@ -754,7 +754,7 @@
     <!-- Section row subtitles (portrait) -->
     <string name="settings_section_recording_subtitle">預設/後設バッファ,コードック,保存制限</string>
     <string name="settings_section_surveillance_subtitle">検出ゾーン スケジュール 動き感</string>
-    <string name="settings_section_daemons_subtitle">クラウッドフラード,Zrok,Telegram,MQTTランナー</string>
+    <string name="settings_section_daemons_subtitle">Cloudflared、Zrok、Telegram、MQTT のランナー。</string>
     <!-- About / data row subtitles -->
     <string name="settings_about_row_title">OverDriveについて</string>
     <string name="settings_about_row_subtitle">バージョン ライセンス サポート開発</string>
@@ -877,7 +877,7 @@
          provider, so translators should keep numeric placeholders intact
          (do not spell out the digits). -->
     <!-- First-launch welcome — only shown on the very first dashboard visit. -->
-    <string name="dashboard_insight_welcome">お待たせしました オーバードライブはもう2番目の目です</string>
+    <string name="dashboard_insight_welcome">ようこそ — Overdrive があなたの第二の目になりました。</string>
     <!-- Parking delta. %1$s = absolute SOC delta string ("8%"); %2$s = absolute kWh string ("4 kWh"). -->
     <string name="dashboard_insight_parked_charged_kwh">駐車中に%1$s (≈%2$s) を拾った</string>
     <string name="dashboard_insight_parked_charged">駐車中に%1$sを拾った</string>
