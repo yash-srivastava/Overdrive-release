@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">OverDrive</string>
     <!-- Accessibility Service -->
-    <string name="accessibility_service_description">這項服務不會閱讀或與屏幕內容互動.</string>
+    <string name="accessibility_service_description">讓 Overdrive 的車輛監控在背景持續運作。本服務不會讀取或與螢幕內容互動。</string>
     <!-- Recording Mode Labels -->
     <!-- Proximity Guard Settings Labels -->
     <!-- Quality Settings Labels -->
@@ -174,7 +174,7 @@
     <string name="setup_step_two_label">其他國家</string>
     <string name="setup_step_three_label">其他國家</string>
     <string name="setup_language_title">選擇自己的語言</string>
-    <string name="setup_language_body">請按一下,選擇不同的語言,</string>
+    <string name="setup_language_body">預設使用您車機主機的語言。輕觸即可為 OverDrive 應用程式和網頁通道選擇其他語言。</string>
     <string name="setup_language_button">選擇語言</string>
     <string name="setup_autostart_title">禁用自動啟動限制</string>
     <string name="setup_autostart_body">按下來打開BYD自动啟動. 在列表中找到OverDrive,然後卸下欄位.BYD在每次安裝都擦除了這個.</string>
@@ -224,7 +224,7 @@
     <string name="reset_cat_soc_history_desc">接收時間,電壓記錄</string>
     <string name="reset_cat_soh">顯示的數量</string>
     <string name="reset_cat_soh_desc">在 BMS 中重新檢測名稱容量,重新種植估計</string>
-    <string name="reset_cat_abrp_token">沒有任何問題</string>
+    <string name="reset_cat_abrp_token">ABRP 權杖</string>
     <string name="reset_cat_abrp_token_desc">禁用ABRP遠隔測量,直到修復</string>
     <string name="reset_cat_byd_cloud">BYD 雲端認證</string>
     <string name="reset_cat_byd_cloud_desc">使用者名稱,登入密钥,VIN 需要重新登入</string>
@@ -419,7 +419,7 @@
     <string name="reset_label_trips">行程</string>
     <string name="reset_label_soc_history">關於 SoC + 12V 的歷史</string>
     <string name="reset_label_soh">顯示的數量</string>
-    <string name="reset_label_abrp_token">沒有任何問題</string>
+    <string name="reset_label_abrp_token">ABRP 權杖</string>
     <string name="reset_label_byd_cloud">BYD 雲端認證</string>
     <string name="reset_label_recordings">錄影</string>
     <string name="reset_label_sentry_events">監控活動</string>
@@ -438,11 +438,11 @@
     <string name="toast_token_regenerated">標誌再生</string>
     <string name="dashboard_no_tunnel">沒有道運行</string>
     <string name="dashboard_starting_zrok">開始Zrok道...</string>
-    <string name="dashboard_starting_cloudflared">開始了雲的道...</string>
+    <string name="dashboard_starting_cloudflared">正在啟動 Cloudflared 通道…</string>
     <string name="dashboard_starting_tailscale">開始Tailscale道...</string>
     <string name="dashboard_waiting_url">在等待道URL...</string>
     <string name="dashboard_daemons_running">運行的 %1$d/%2$d</string>
-    <string name="tunnel_label_cloudflared">雲的狀況</string>
+    <string name="tunnel_label_cloudflared">Cloudflared</string>
     <string name="tunnel_label_zrok">Zrok</string>
     <string name="tunnel_label_tailscale">Tailscale</string>
     <!-- Daemon names — shown on the Daemons list and dashboard. -->
@@ -596,7 +596,7 @@
     <string name="settings_about_support_share_title">告訴另一位車主</string>
     <string name="settings_about_support_share_value">每個共享的連結都幫助另一位BYD老板發現Overdrive.</string>
     <string name="settings_about_support_share_message">查看Overdrive 開放源監控和Dashcam的BYD: https://overdrive-5lc.pages.dev/</string>
-    <string name="settings_about_support_share_chooser">分享過度驅動</string>
+    <string name="settings_about_support_share_chooser">分享 Overdrive</string>
     <string name="settings_about_open_link_failed">沒有辦法打開連結.</string>
     <string name="settings_about_open_link_copied">沒有搜尋器. URL複製: %1$s</string>
     <string name="settings_about_support_kofi_title">在下次發行中,</string>
@@ -604,7 +604,7 @@
     <string name="settings_about_license_title">授權使用</string>
     <string name="settings_about_license_value">開源. 按下來查看全文.</string>
     <string name="settings_about_source_title">源代碼</string>
-    <string name="settings_about_source_value">沒有任何相關資訊,</string>
+    <string name="settings_about_source_value">github.com/yash-srivastava/Overdrive-release</string>
     <string name="settings_about_star_title">在 GitHub 上放一個</string>
     <string name="settings_about_star_value">需要一秒, 這意味著很多.</string>
     <string name="settings_about_thanks_title">致謝</string>
@@ -754,7 +754,7 @@
     <!-- Section row subtitles (portrait) -->
     <string name="settings_section_recording_subtitle">預備/後期緩衝器,代克,存儲限制.</string>
     <string name="settings_section_surveillance_subtitle">檢測區域,時間表,運動敏感性.</string>
-    <string name="settings_section_daemons_subtitle">沒有任何樓盤符合您的搜尋 -</string>
+    <string name="settings_section_daemons_subtitle">Cloudflared、Zrok、Telegram、MQTT 執行程式。</string>
     <!-- About / data row subtitles -->
     <string name="settings_about_row_title">關於OverDrive</string>
     <string name="settings_about_row_subtitle">版本,授權,支持開發.</string>
@@ -777,7 +777,7 @@
     <!-- Privacy pane — stance + storage summary + reset               -->
     <!-- ============================================================ -->
     <string name="settings_privacy_stance_title">預設在裝置上</string>
-    <string name="settings_privacy_stance_body">沒有遠隔測量能離開您的車輛, 除了透過您明顯配置的道和集成.</string>
+    <string name="settings_privacy_stance_body">OverDrive 完全在車機主機上運作。除了透過您明確設定的通道與整合之外，沒有任何遙測資料會離開您的車輛。</string>
     <string name="settings_privacy_overline_storage">地方儲存</string>
     <string name="settings_privacy_overline_reset">數據重置</string>
     <string name="settings_privacy_storage_clips_label">在磁盤上的剪辑</string>
@@ -877,7 +877,7 @@
          provider, so translators should keep numeric placeholders intact
          (do not spell out the digits). -->
     <!-- First-launch welcome — only shown on the very first dashboard visit. -->
-    <string name="dashboard_insight_welcome">歡迎您來! 超駕駛是您的第二雙眼睛.</string>
+    <string name="dashboard_insight_welcome">歡迎使用 — Overdrive 現在是您的第二雙眼睛。</string>
     <!-- Parking delta. %1$s = absolute SOC delta string ("8%"); %2$s = absolute kWh string ("4 kWh"). -->
     <string name="dashboard_insight_parked_charged_kwh">在停車場上, 接收了%1$s (≈%2$s)</string>
     <string name="dashboard_insight_parked_charged">在停車場上拿起%1$s</string>
