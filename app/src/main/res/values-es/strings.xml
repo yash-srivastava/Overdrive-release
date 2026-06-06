@@ -445,7 +445,7 @@
     <string name="dashboard_starting_tailscale">Comienza el túnel Tailscale...</string>
     <string name="dashboard_waiting_url">Esperando el túnel URL...</string>
     <string name="dashboard_daemons_running">%1$d/%2$d En funcionamiento</string>
-    <string name="tunnel_label_cloudflared">No se puede hacer nada.</string>
+    <string name="tunnel_label_cloudflared">Cloudflared</string>
     <string name="tunnel_label_zrok">Zrok</string>
     <string name="tunnel_label_tailscale">Tailscale</string>
     <!-- Daemon names — shown on the Daemons list and dashboard. -->
@@ -599,7 +599,7 @@
     <string name="settings_about_support_share_title">Cuéntaselo a otro propietario</string>
     <string name="settings_about_support_share_value">Cada enlace compartido ayuda a otro propietario de BYD a descubrir Overdrive.</string>
     <string name="settings_about_support_share_message">Consulte Overdrive  vigilancia de código abierto y dashcam para BYD: https://overdrive-5lc.pages.dev/</string>
-    <string name="settings_about_support_share_chooser">Compartir el exceso</string>
+    <string name="settings_about_support_share_chooser">Compartir Overdrive</string>
     <string name="settings_about_open_link_failed">No pude abrir el enlace.</string>
     <string name="settings_about_open_link_copied">No se ha encontrado ningún navegador. URL copiado: %1$s</string>
     <string name="settings_about_support_kofi_title">Combustible para el próximo lanzamiento</string>
@@ -757,7 +757,7 @@
     <!-- Section row subtitles (portrait) -->
     <string name="settings_section_recording_subtitle">Buffers pre/post, codec, límites de almacenamiento.</string>
     <string name="settings_section_surveillance_subtitle">Zonas de detección, horario, sensibilidad al movimiento.</string>
-    <string name="settings_section_daemons_subtitle">Los corredores Zrok, Telegram, MQTT.</string>
+    <string name="settings_section_daemons_subtitle">Procesos de Cloudflared, Zrok, Telegram y MQTT.</string>
     <!-- About / data row subtitles -->
     <string name="settings_about_row_title">Sobre OverDrive</string>
     <string name="settings_about_row_subtitle">Versión, licencia, desarrollo de soporte.</string>
