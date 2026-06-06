@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">OverDrive</string>
     <!-- Accessibility Service -->
-    <string name="accessibility_service_description">Übertragung von Fahrzeugüberwachung im Hintergrund aktiviert. Dieser Dienst liest und interagiert nicht mit Bildschirminhalten.</string>
+    <string name="accessibility_service_description">Hält die Fahrzeugüberwachung von Overdrive im Hintergrund aktiv. Dieser Dienst liest keine Bildschirminhalte und interagiert nicht mit ihnen.</string>
     <!-- Recording Mode Labels -->
     <!-- Proximity Guard Settings Labels -->
     <!-- Quality Settings Labels -->
@@ -445,7 +445,7 @@
     <string name="dashboard_starting_tailscale">Beginn der Tailscale-Tunnel...</string>
     <string name="dashboard_waiting_url">Ich warte auf den Tunnel URL...</string>
     <string name="dashboard_daemons_running">%1$d/%2$d Lauf</string>
-    <string name="tunnel_label_cloudflared">Wolkenblatt</string>
+    <string name="tunnel_label_cloudflared">Cloudflared</string>
     <string name="tunnel_label_zrok">Zrok</string>
     <string name="tunnel_label_tailscale">Tailscale</string>
     <!-- Daemon names — shown on the Daemons list and dashboard. -->
@@ -599,7 +599,7 @@
     <string name="settings_about_support_share_title">Sag es einem anderen Besitzer</string>
     <string name="settings_about_support_share_value">Jeder gemeinsame Link hilft einem anderen BYD-Besitzer, Overdrive zu entdecken.</string>
     <string name="settings_about_support_share_message">Überprüfen Sie Overdrive  Open-Source-Überwachung &amp; Dashcam für BYD: https://overdrive-5lc.pages.dev/</string>
-    <string name="settings_about_support_share_chooser">Teilen Sie Übertreibung</string>
+    <string name="settings_about_support_share_chooser">Overdrive teilen</string>
     <string name="settings_about_open_link_failed">Ich konnte die Verbindung nicht öffnen.</string>
     <string name="settings_about_open_link_copied">Keine Browser gefunden. URL kopiert: %1$s</string>
     <string name="settings_about_support_kofi_title">Brennstoff für die nächste Veröffentlichung</string>
