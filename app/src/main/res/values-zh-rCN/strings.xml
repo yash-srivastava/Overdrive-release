@@ -100,7 +100,7 @@
     <string name="tailscale_qr_waiting">等着登录URL...</string>
     <string name="tailscale_enable_proxy">启用Tailscale代理</string>
     <string name="tailscale_proxy_explainer">通过MQTT到Tailscale的路线,这样你就可以在你的尾网上联系一个私人经纪人,</string>
-    <string name="tailscale_proxy_warning">在启用时,MQTT向公共经纪人 (HiveMQ, AWS IoT等) 将失败 Z0XX只将通往尾网.</string>
+    <string name="tailscale_proxy_warning">启用后，连接公共代理服务器（HiveMQ、AWS IoT 等）的 MQTT 将失败——Tailscale 只会路由到你的 tailnet。保存将重启守护进程。</string>
     <!-- Camera ingestion mode selector (Default vs DiLink 4) -->
     <string name="camera_mode_title">摄入方式</string>
     <string name="camera_mode_subtitle">默认适用于大多数BYD车型;DiLink 4是需要在更新的装饰 (Han / Tang 2024+) 上,其中AVM HAL 发射预先接的2x2 mozaic.</string>
@@ -131,7 +131,7 @@
     <string name="camera_selection_hint">机器自动选择适合您的装饰的相机.相机1=BYD Seal,相机0=Atto装饰. 改变相机的身份证后重新启动.</string>
     <!-- OEM Dashcam camera ID picker (Phase 5: separate forward-sensor pipeline) -->
     <string name="camera_oem_dashcam_title">OEM Dashcam 摄像头 ID</string>
-    <string name="camera_oem_dashcam_hint">选择指向前方仪表盘传感器的 AVMCamera id。 Dashcam 是 pan: Seal/Han pano = 1 -> Dashcam = 0; Atto / Tang pano = 0 → Dashcam = 1。 自动离开以允许覆盖选区。</string>
+    <string name="camera_oem_dashcam_hint">选择指向前向行车记录仪传感器的 AVMCamera id。行车记录仪与全景相反：Seal/Han 全景 = 1 → 行车记录仪 = 0；Atto / Tang 全景 = 0 → 行车记录仪 = 1。保持“自动”可让 OverDrive 自动选择。</string>
     <string name="camera_oem_dashcam_auto_resolved">自动-使用 id %1$d (pano id %2$d)</string>
     <string name="camera_oem_dashcam_auto_unavailable">自动-pano id 是 %1$d，不能推断控制摄像头</string>
     <string name="camera_oem_dashcam_save">保存</string>
@@ -438,11 +438,11 @@
     <string name="toast_token_regenerated">代币再生</string>
     <string name="dashboard_no_tunnel">没有道运行</string>
     <string name="dashboard_starting_zrok">启动Zrok道...</string>
-    <string name="dashboard_starting_cloudflared">启动云道...</string>
+    <string name="dashboard_starting_cloudflared">正在启动 Cloudflared 隧道…</string>
     <string name="dashboard_starting_tailscale">启动Tailscale道...</string>
     <string name="dashboard_waiting_url">等待道URL...</string>
     <string name="dashboard_daemons_running">%1$d/%2$d 运行</string>
-    <string name="tunnel_label_cloudflared">云的</string>
+    <string name="tunnel_label_cloudflared">Cloudflared</string>
     <string name="tunnel_label_zrok">Zrok</string>
     <string name="tunnel_label_tailscale">Tailscale</string>
     <!-- Daemon names — shown on the Daemons list and dashboard. -->
@@ -596,7 +596,7 @@
     <string name="settings_about_support_share_title">告诉另一位车主</string>
     <string name="settings_about_support_share_value">每个共享的链接都能帮助另一个BYD的所有者发现Overdrive.</string>
     <string name="settings_about_support_share_message">查看BYD的开源监控和仪表摄像头: https://overdrive-5lc.pages.dev/</string>
-    <string name="settings_about_support_share_chooser">分享过度驱动</string>
+    <string name="settings_about_support_share_chooser">分享 Overdrive</string>
     <string name="settings_about_open_link_failed">无法打开链接.</string>
     <string name="settings_about_open_link_copied">没有浏览器. URL复制: %1$s</string>
     <string name="settings_about_support_kofi_title">在下一个版本中加油</string>
@@ -604,7 +604,7 @@
     <string name="settings_about_license_title">许可证</string>
     <string name="settings_about_license_value">开源. 点击查看全文.</string>
     <string name="settings_about_source_title">源代码</string>
-    <string name="settings_about_source_value">其他类型的设备:</string>
+    <string name="settings_about_source_value">github.com/yash-srivastava/Overdrive-release</string>
     <string name="settings_about_star_title">在 GitHub 上放一个</string>
     <string name="settings_about_star_value">需要一秒钟,这意味着很多.</string>
     <string name="settings_about_thanks_title">致谢</string>
@@ -754,7 +754,7 @@
     <!-- Section row subtitles (portrait) -->
     <string name="settings_section_recording_subtitle">预/后缓冲器,代码,存储限制.</string>
     <string name="settings_section_surveillance_subtitle">检测区域,时间表,运动敏感性.</string>
-    <string name="settings_section_daemons_subtitle">云,Zrok,Telegram,MQTT的跑步者.</string>
+    <string name="settings_section_daemons_subtitle">Cloudflared、Zrok、Telegram、MQTT 运行程序。</string>
     <!-- About / data row subtitles -->
     <string name="settings_about_row_title">关于OverDrive</string>
     <string name="settings_about_row_subtitle">版本,许可证,支持开发.</string>
@@ -777,7 +777,7 @@
     <!-- Privacy pane — stance + storage summary + reset               -->
     <!-- ============================================================ -->
     <string name="settings_privacy_stance_title">默认的设备上</string>
-    <string name="settings_privacy_stance_body">只有通过你明确配置的道和集成器才能从你的车出走.</string>
+    <string name="settings_privacy_stance_body">OverDrive 完全在车机主机上运行。除了你明确配置的隧道和集成之外，没有任何遥测数据会离开你的车辆。</string>
     <string name="settings_privacy_overline_storage">地方储存</string>
     <string name="settings_privacy_overline_reset">数据重新设置</string>
     <string name="settings_privacy_storage_clips_label">磁盘上的剪辑</string>
@@ -877,7 +877,7 @@
          provider, so translators should keep numeric placeholders intact
          (do not spell out the digits). -->
     <!-- First-launch welcome — only shown on the very first dashboard visit. -->
-    <string name="dashboard_insight_welcome">欢迎您 过度驱动是您的第二双眼睛.</string>
+    <string name="dashboard_insight_welcome">欢迎——Overdrive 现已成为你的第二双眼睛。</string>
     <!-- Parking delta. %1$s = absolute SOC delta string ("8%"); %2$s = absolute kWh string ("4 kWh"). -->
     <string name="dashboard_insight_parked_charged_kwh">在停车时拿到%1$s (≈%2$s)</string>
     <string name="dashboard_insight_parked_charged">在停车时拿到%1$s</string>
