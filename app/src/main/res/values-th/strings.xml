@@ -23,7 +23,7 @@
     <string name="action_select_all">เลือกทั้งหมด</string>
     <string name="action_select_all_short">ทั้งหมด</string>
     <string name="action_delete">ลบ</string>
-    <string name="action_share">Share</string>
+    <string name="action_share">แชร์</string>
     <string name="action_done">เสร็จสิ้น</string>
     <string name="action_remind_me_later">เตือนฉันภายหลัง</string>
     <string name="action_retry">ลองใหม่</string>
@@ -51,13 +51,13 @@
     <string name="cd_player_maximize">ขยายเต็มจอ</string>
     <string name="cd_player_minimize">ออกจากการแสดงเต็มจอ</string>
     <string name="cd_player_mute">เปิด/ปิดเสียง</string>
-    <string name="cd_player_quadrant_all">Show all cameras</string>
-    <string name="cd_player_quadrant_front">Show front camera</string>
-    <string name="cd_player_quadrant_right">Show right camera</string>
-    <string name="cd_player_quadrant_rear">Show rear camera</string>
-    <string name="cd_player_quadrant_left">Show left camera</string>
+    <string name="cd_player_quadrant_all">แสดงกล้องทั้งหมด</string>
+    <string name="cd_player_quadrant_front">แสดงกล้องหน้า</string>
+    <string name="cd_player_quadrant_right">แสดงกล้องขวา</string>
+    <string name="cd_player_quadrant_rear">แสดงกล้องหลัง</string>
+    <string name="cd_player_quadrant_left">แสดงกล้องซ้าย</string>
     <string name="cd_delete">ลบ</string>
-    <string name="cd_share">Share</string>
+    <string name="cd_share">แชร์</string>
     <string name="cd_expand">ขยาย</string>
     <string name="cd_configure">ตั้งค่า</string>
     <string name="cd_download_log">ดาวน์โหลด Log</string>
@@ -75,10 +75,10 @@
          translatable=false to avoid bloating the i18n catalog. The
          _cd content-descriptions are real prose and ARE translatable —
          they go through the NLLB pipeline like every other a11y string. -->
-    <string name="overlay_mode_off_cd">Stop recording</string>
-    <string name="overlay_mode_continuous_cd">Continuous recording</string>
-    <string name="overlay_mode_drive_cd">Drive-mode recording</string>
-    <string name="overlay_mode_proximity_cd">Proximity-guard recording</string>
+    <string name="overlay_mode_off_cd">หยุดบันทึก</string>
+    <string name="overlay_mode_continuous_cd">บันทึกต่อเนื่อง</string>
+    <string name="overlay_mode_drive_cd">บันทึกโหมดขับขี่</string>
+    <string name="overlay_mode_proximity_cd">บันทึกเมื่อมีวัตถุเข้าใกล้</string>
     <!-- item_log_entry placeholders (timestamp/tag/message are runtime, but these are
          placeholder/preview text used at design time and visible in some empty states) -->
     <string name="log_entry_default_timestamp">12:34:56</string>
@@ -130,19 +130,19 @@
     <string name="camera_option_5">กล้อง 5</string>
     <string name="camera_selection_hint">โหมด \'อัตโนมัติ\' จะเลือกกล้องที่เหมาะสมกับรุ่นรถของคุณทุกครั้งที่เปิดเครื่อง กล้อง 1 = BYD Seal, กล้อง 0 = รุ่น Atto กรุณารีสตาร์ทระบบเบื้องหลัง (Daemon) หลังจากการเปลี่ยน ID กล้องเพื่อให้การตั้งค่ามีผล</string>
     <!-- OEM Dashcam camera ID picker (Phase 5: separate forward-sensor pipeline) -->
-    <string name="camera_oem_dashcam_title">OEM Dashcam Camera ID</string>
-    <string name="camera_oem_dashcam_hint">Pick the AVMCamera id that points at the forward dashcam sensor. Dashcam is the OPPOSITE of pano: Seal/Han pano = 1 → dashcam = 0; Atto / Tang pano = 0 → dashcam = 1. Leave on Auto to let OverDrive pick.</string>
-    <string name="camera_oem_dashcam_auto_resolved">Auto — using id %1$d (pano is id %2$d)</string>
-    <string name="camera_oem_dashcam_auto_unavailable">Auto — pano id is %1$d, can\'t infer dashcam</string>
-    <string name="camera_oem_dashcam_save">Save</string>
+    <string name="camera_oem_dashcam_title">หมายเลขกล้อง Dashcam OEM</string>
+    <string name="camera_oem_dashcam_hint">เลือกหมายเลขกล้อง AVM ที่ชี้ไปยังเซ็นเซอร์กล้องหน้า Dashcam จะตรงข้ามกับกล้องรอบคัน: Seal/Han รอบคัน = 1 → dashcam = 0; Atto/Tang รอบคัน = 0 → dashcam = 1 ปล่อยเป็นอัตโนมัติเพื่อให้ OverDrive เลือกให้</string>
+    <string name="camera_oem_dashcam_auto_resolved">อัตโนมัติ — ใช้กล้อง %1$d (กล้องรอบคันคือ %2$d)</string>
+    <string name="camera_oem_dashcam_auto_unavailable">อัตโนมัติ — กล้องรอบคันคือ %1$d ไม่สามารถระบุกล้อง dashcam ได้</string>
+    <string name="camera_oem_dashcam_save">บันทึก</string>
     <!-- Dashcam-side camera labels — REVERSE of the pano labels above. The
          OEM dashcam id is the opposite of the pano id, so the helpful
          "this is what your trim should pick" hint flips between the two
          dialogs. Without these strings the dashcam picker re-used the pano
          labels and told Seal owners to pick "Camera 1 — Seal" for their
          dashcam, which is the pano camera, not the dashcam. -->
-    <string name="camera_oem_option_0">Camera 0 — Seal / Han (default)</string>
-    <string name="camera_oem_option_1">Camera 1 — Atto / Tang</string>
+    <string name="camera_oem_option_0">กล้อง 0 — Seal / Han (ค่าเริ่มต้น)</string>
+    <string name="camera_oem_option_1">กล้อง 1 — Atto / Tang</string>
     <!-- Camera mapping dialog (multi-vehicle role-to-slice routing) -->
     <string name="camera_mapping_title">จับคู่ตำแหน่งกล้อง</string>
     <string name="camera_role_label">จับคู่ตำแหน่ง</string>
@@ -257,7 +257,7 @@
     <string name="recording_lib_filter_section_severity">ระดับความรุนแรง</string>
     <string name="recording_lib_filter_section_type">ประเภท</string>
     <string name="recording_lib_filter_section_place">สถานที่</string>
-    <string name="recording_lib_place_search_hint">Search places…</string>
+    <string name="recording_lib_place_search_hint">ค้นหาสถานที่…</string>
     <string name="recording_lib_chip_type_normal">ปกติ</string>
     <string name="recording_lib_chip_type_proximity">เตือนเข้าใกล้</string>
     <string name="recording_lib_date_today">วันนี้</string>
@@ -276,20 +276,20 @@
     <string name="cd_open_filters">เปิดตัวกรอง</string>
     <string name="cd_clear_filter">ล้างตัวกรอง</string>
     <!-- v5 redesign: SOTA empty state with CTA + tile type badges -->
-    <string name="recording_lib_empty_title">No recordings match</string>
-    <string name="recording_lib_empty_body">Try adjusting your date range or chip filters.</string>
-    <string name="recording_lib_empty_clear_filters">Clear filters</string>
+    <string name="recording_lib_empty_title">ไม่มีวิดีโอที่ตรงกัน</string>
+    <string name="recording_lib_empty_body">ลองปรับช่วงวันที่หรือตัวกรอง</string>
+    <string name="recording_lib_empty_clear_filters">ล้างตัวกรอง</string>
     <!-- Shown on the empty-state body when there are zero clips on disk
          (no filter is active). Sets a friendlier tone than "No recordings match". -->
-    <string name="recording_lib_empty_disk_title">Nothing recorded yet</string>
-    <string name="recording_lib_empty_disk_body">Captures will appear here as soon as the dashcam or surveillance pipeline writes a clip.</string>
+    <string name="recording_lib_empty_disk_title">ยังไม่มีการบันทึก</string>
+    <string name="recording_lib_empty_disk_body">วิดีโอจะปรากฏที่นี่เมื่อระบบกล้องหน้ารถหรือระบบเฝ้าระวังทำการบันทึก</string>
     <!-- Shown while the daemon is warming the H2 recording index on cold
          start. Includes a progress counter when the daemon reports done/total,
          otherwise a static body. The library re-polls every 1.5s and
          transitions out automatically once results land. -->
-    <string name="recording_lib_building_index_title">Building library index</string>
-    <string name="recording_lib_building_index_body">One moment while the daemon scans your recordings.</string>
-    <string name="recording_lib_building_index_progress">Indexed %1$d of %2$d clips…</string>
+    <string name="recording_lib_building_index_title">กำลังสร้างดัชนีคลังวิดีโอ</string>
+    <string name="recording_lib_building_index_body">กรุณารอสักครู่ขณะระบบตรวจสอบไฟล์วิดีโอของคุณ</string>
+    <string name="recording_lib_building_index_progress">จัดทำดัชนีแล้ว %1$d จาก %2$d คลิป…</string>
     <!-- Tile type badge labels — short, glanceable, mirrors the on-disk
          filename prefix (cam_/event_/dvr_/proximity_) so power users can
          map a tile back to its file group at a glance. -->
@@ -298,7 +298,7 @@
     <string name="recording_lib_type_proximity">PROX</string>
     <string name="recording_lib_type_oem">OEM</string>
     <!-- Toast shown when a multi-select share is dispatched. -->
-    <string name="toast_share_recordings">Sharing %1$d recordings</string>
+    <string name="toast_share_recordings">กำลังแชร์วิดีโอ %1$d ไฟล์</string>
     <!-- fragment_sentry_config -->
     <!-- fragment_video_player -->
     <string name="player_title_recording">วิดีโอ</string>
@@ -568,7 +568,7 @@
     <string name="settings_section_daemons">ระบบเบื้องหลัง (Daemons)</string>
     <string name="settings_section_privacy">ความเป็นส่วนตัวและข้อมูล</string>
     <string name="settings_section_overlay">แถบสถานะ</string>
-    <string name="settings_section_security">Security</string>
+    <string name="settings_section_security">ความปลอดภัย</string>
     <string name="settings_overlay_subtitle">เลือกข้อมูลที่ต้องการให้แสดงบนแถบสถานะลอย</string>
     <string name="settings_overlay_camera_title">สถานะกล้อง</string>
     <string name="settings_overlay_camera_subtitle">แสดงสัญลักษณ์ REC / PROX ขณะกำลังบันทึกวิดีโอ</string>
@@ -790,56 +790,56 @@
          The lock guards the OverDrive UI only. Cam daemon, AccSentry,
          surveillance, recording, Telegram alerts, status overlay, and the
          deterrent screen all run independently regardless of this state. -->
-    <string name="settings_security_title">Security</string>
-    <string name="settings_security_subtitle">Lock the OverDrive app so passengers and valets can\'t open it without your PIN.</string>
-    <string name="settings_security_stance_title">UI lock only</string>
-    <string name="settings_security_stance_body">Surveillance, recording, deterrent, alerts, and background services keep running while the app is locked. The PIN gates the OverDrive interface, nothing else.</string>
-    <string name="settings_security_overline_lock">App lock</string>
-    <string name="settings_security_overline_recovery">If you forget your PIN</string>
-    <string name="settings_security_toggle_title">Require PIN</string>
-    <string name="settings_security_toggle_subtitle_off">Off — anyone can open OverDrive.</string>
-    <string name="settings_security_toggle_subtitle_on">On — PIN required to open OverDrive.</string>
-    <string name="settings_security_change_title">Change PIN</string>
-    <string name="settings_security_change_subtitle">Confirm current PIN, then set a new one.</string>
-    <string name="settings_security_autolock_title">Auto-lock</string>
-    <string name="settings_security_autolock_immediate">Lock immediately</string>
-    <string name="settings_security_autolock_1min">After 1 minute</string>
-    <string name="settings_security_autolock_5min">After 5 minutes</string>
-    <string name="settings_security_autolock_15min">After 15 minutes</string>
-    <string name="settings_security_autolock_never">Never auto-lock by time</string>
-    <string name="settings_security_recovery_title">ADB recovery</string>
-    <string name="settings_security_recovery_body">Forgotten PIN can be cleared from a host machine over USB debugging without a factory reset. Run this command, then reopen the app.</string>
+    <string name="settings_security_title">ความปลอดภัย</string>
+    <string name="settings_security_subtitle">ล็อกแอปพลิเคชัน OverDrive เพื่อป้องกันไม่ให้ผู้โดยสารหรือพนักงานรับรถเปิดใช้งานโดยไม่มีรหัส PIN</string>
+    <string name="settings_security_stance_title">ล็อกเฉพาะหน้าจอแอป</string>
+    <string name="settings_security_stance_body">ระบบเฝ้าระวัง การบันทึก การป้องกัน การแจ้งเตือน และระบบเบื้องหลังยังคงทำงานขณะล็อกแอป รหัส PIN ใช้สำหรับเข้าสู่หน้าจอ OverDrive เท่านั้น</string>
+    <string name="settings_security_overline_lock">ล็อกแอป</string>
+    <string name="settings_security_overline_recovery">หากลืมรหัส PIN</string>
+    <string name="settings_security_toggle_title">ต้องใช้รหัส PIN</string>
+    <string name="settings_security_toggle_subtitle_off">ปิด — ใครก็สามารถเปิด OverDrive ได้</string>
+    <string name="settings_security_toggle_subtitle_on">เปิด — ต้องใช้รหัส PIN เพื่อเปิด OverDrive</string>
+    <string name="settings_security_change_title">เปลี่ยนรหัส PIN</string>
+    <string name="settings_security_change_subtitle">ยืนยันรหัส PIN ปัจจุบัน จากนั้นตั้งรหัสใหม่</string>
+    <string name="settings_security_autolock_title">ล็อกอัตโนมัติ</string>
+    <string name="settings_security_autolock_immediate">ล็อกทันที</string>
+    <string name="settings_security_autolock_1min">หลังจาก 1 นาที</string>
+    <string name="settings_security_autolock_5min">หลังจาก 5 นาที</string>
+    <string name="settings_security_autolock_15min">หลังจาก 15 นาที</string>
+    <string name="settings_security_autolock_never">ไม่ล็อกอัตโนมัติตามเวลา</string>
+    <string name="settings_security_recovery_title">กู้คืนผ่าน ADB</string>
+    <string name="settings_security_recovery_body">รหัส PIN ที่ลืมสามารถล้างได้จากเครื่องคอมพิวเตอร์ผ่าน USB debugging โดยไม่ต้องรีเซ็ตเป็นค่าเริ่มต้น รันคำสั่งนี้แล้วเปิดแอปอีกครั้ง</string>
     <!-- Verbatim ADB command. translatable=false so the i18n pipeline
          doesn't localize the literal path/command — translators following
          Crowdin would otherwise risk breaking the only recovery path. -->
-    <string name="settings_security_dialog_set_title">Set PIN</string>
-    <string name="settings_security_dialog_set_body">Pick a 4–8 digit PIN. You\'ll need this every time you open the app.</string>
-    <string name="settings_security_dialog_disable_title">Turn off PIN lock?</string>
-    <string name="settings_security_dialog_disable_body">Confirm your current PIN to turn off the app lock.</string>
-    <string name="settings_security_dialog_change_step1_title">Confirm current PIN</string>
-    <string name="settings_security_dialog_change_step1_body">Enter your current PIN, then you\'ll set a new one.</string>
-    <string name="settings_security_action_set">Set PIN</string>
-    <string name="settings_security_action_disable">Turn off lock</string>
-    <string name="settings_security_action_continue">Continue</string>
-    <string name="settings_security_pin_hint">PIN</string>
-    <string name="settings_security_pin_confirm_hint">Confirm PIN</string>
-    <string name="settings_security_error_length">PIN must be 4 to 8 digits</string>
-    <string name="settings_security_error_numeric">Digits only</string>
-    <string name="settings_security_error_mismatch">PINs don\'t match</string>
-    <string name="settings_security_error_wrong">Wrong PIN</string>
-    <string name="settings_security_error_locked_out">Too many attempts. Try again in a moment.</string>
-    <string name="settings_security_error_persist">Couldn\'t save the PIN. Try again.</string>
-    <string name="settings_security_toast_set_ok">PIN set. App lock is on.</string>
-    <string name="settings_security_toast_disable_ok">App lock turned off.</string>
+    <string name="settings_security_dialog_set_title">ตั้งรหัส PIN</string>
+    <string name="settings_security_dialog_set_body">เลือกรหัส PIN 4-8 หลัก คุณจะต้องใช้รหัสนี้ทุกครั้งที่เปิดแอป</string>
+    <string name="settings_security_dialog_disable_title">ปิดการล็อกด้วยรหัส PIN หรือไม่?</string>
+    <string name="settings_security_dialog_disable_body">ยืนยันรหัส PIN ปัจจุบันเพื่อปิดการล็อกแอป</string>
+    <string name="settings_security_dialog_change_step1_title">ยืนยันรหัส PIN ปัจจุบัน</string>
+    <string name="settings_security_dialog_change_step1_body">ป้อนรหัส PIN ปัจจุบันของคุณ จากนั้นตั้งรหัสใหม่</string>
+    <string name="settings_security_action_set">ตั้งรหัส PIN</string>
+    <string name="settings_security_action_disable">ปิดการล็อก</string>
+    <string name="settings_security_action_continue">ดำเนินการต่อ</string>
+    <string name="settings_security_pin_hint">รหัส PIN</string>
+    <string name="settings_security_pin_confirm_hint">ยืนยันรหัส PIN</string>
+    <string name="settings_security_error_length">รหัส PIN ต้องมี 4 ถึง 8 หลัก</string>
+    <string name="settings_security_error_numeric">ตัวเลขเท่านั้น</string>
+    <string name="settings_security_error_mismatch">รหัส PIN ไม่ตรงกัน</string>
+    <string name="settings_security_error_wrong">รหัส PIN ไม่ถูกต้อง</string>
+    <string name="settings_security_error_locked_out">พยายามหลายครั้งเกินไป ลองใหม่อีกครั้งในภายหลัง</string>
+    <string name="settings_security_error_persist">ไม่สามารถบันทึกรหัส PIN ได้ ลองใหม่อีกครั้ง</string>
+    <string name="settings_security_toast_set_ok">ตั้งรหัส PIN แล้ว เปิดใช้งานการล็อกแอป</string>
+    <string name="settings_security_toast_disable_ok">ปิดการล็อกแอปแล้ว</string>
     <!-- PIN unlock screen (PinLockActivity). Shown over MainActivity when
          the app lock is enabled and the session isn\'t fresh. -->
-    <string name="pin_lock_title">Enter PIN</string>
-    <string name="pin_lock_title_unlocked">Unlocked</string>
-    <string name="pin_lock_subtitle_default">Unlock OverDrive to continue.</string>
-    <string name="pin_lock_subtitle_wrong">Wrong PIN. Try again.</string>
-    <string name="pin_lock_subtitle_locked_out">Too many attempts. Try again shortly.</string>
+    <string name="pin_lock_title">ป้อนรหัส PIN</string>
+    <string name="pin_lock_title_unlocked">ปลดล็อกแล้ว</string>
+    <string name="pin_lock_subtitle_default">ปลดล็อก OverDrive เพื่อดำเนินการต่อ</string>
+    <string name="pin_lock_subtitle_wrong">รหัส PIN ไม่ถูกต้อง ลองใหม่อีกครั้ง</string>
+    <string name="pin_lock_subtitle_locked_out">พยายามหลายครั้งเกินไป ลองใหม่อีกครั้งในไม่ช้า</string>
     <!-- %1$s is a formatted countdown like "30s" or "2:45". -->
-    <string name="pin_lock_subtitle_locked_out_countdown">Locked. Try again in %1$s.</string>
+    <string name="pin_lock_subtitle_locked_out_countdown">ล็อกอยู่ ลองใหม่อีกครั้งใน %1$s</string>
     <string name="pin_lock_lockout_seconds">%1$ds</string>
     <string name="pin_lock_lockout_minutes">%1$d:%2$02d</string>
     <!-- Lock-screen recovery hint. Two-part: a translatable prose prefix
@@ -847,8 +847,8 @@
          settings_security_recovery_command resource so a future edit to
          the command stays in sync across both surfaces). The lock screen
          concatenates them at runtime via String.format. -->
-    <string name="pin_lock_recovery_hint_prefix">Forgot your PIN? Run from a connected computer:\n%1$s</string>
-    <string name="pin_lock_backspace_cd">Backspace</string>
+    <string name="pin_lock_recovery_hint_prefix">ลืมรหัส PIN? รันคำสั่งนี้จากคอมพิวเตอร์ที่เชื่อมต่อ:\n%1$s</string>
+    <string name="pin_lock_backspace_cd">ลบ</string>
     <plurals name="pin_lock_dot_a11y">
         <item quantity="other">%1$d digits entered</item>
     </plurals>
@@ -919,45 +919,45 @@
          ============================================================ -->
     <string name="rail_roadsense">RoadSense</string>
     <string name="roadsense_title">RoadSense</string>
-    <string name="roadsense_pill_scanning">Scanning</string>
+    <string name="roadsense_pill_scanning">กำลังสแกน</string>
     <string name="roadsense_pill_idle">RoadSense</string>
-    <string name="roadsense_status_idle">Idle</string>
+    <string name="roadsense_status_idle">สถานะว่าง</string>
     <!-- VEHICLE calibration (suspension-learning) — the green/orange/red dot. Worded
          about the car, not the route, since that's what maturity actually measures. -->
-    <string name="roadsense_cal_learning">Learning your vehicle</string>
-    <string name="roadsense_cal_ready">Vehicle calibrated</string>
-    <string name="roadsense_cal_partial">Calibration improving</string>
+    <string name="roadsense_cal_learning">กำลังเรียนรู้ยานพาหนะของคุณ</string>
+    <string name="roadsense_cal_ready">ปรับเทียบยานพาหนะเรียบร้อย</string>
+    <string name="roadsense_cal_partial">กำลังปรับปรุงการปรับเทียบ</string>
     <!-- Idle caption — ROUTE coverage (distinct from vehicle calibration). "Clear
          ahead" only when we've actually mapped this stretch; "New road" when we
          haven't, so an unsurveyed road isn't mistaken for confirmed-safe. -->
-    <string name="roadsense_clear_ahead">Clear ahead</string>
-    <string name="roadsense_road_mapped">Road mapped · clear</string>
-    <string name="roadsense_road_new">New road · learning</string>
+    <string name="roadsense_clear_ahead">เส้นทางข้างหน้าปลอดภัย</string>
+    <string name="roadsense_road_mapped">ตรวจสอบเส้นทางแล้ว · ปลอดภัย</string>
+    <string name="roadsense_road_new">เส้นทางใหม่ · กำลังเรียนรู้</string>
     <string name="roadsense_unit_meters">m</string>
     <string name="roadsense_dash_distance">—</string>
-    <string name="roadsense_warn_label">Warn</string>
-    <string name="roadsense_toggle_audio">Audio</string>
-    <string name="roadsense_toggle_visual">Visual</string>
+    <string name="roadsense_warn_label">แจ้งเตือน</string>
+    <string name="roadsense_toggle_audio">เสียง</string>
+    <string name="roadsense_toggle_visual">ภาพ</string>
     <!-- severity / type readouts (formatted at runtime) -->
-    <string name="roadsense_sev_minor">Minor</string>
-    <string name="roadsense_sev_moderate">Moderate</string>
-    <string name="roadsense_sev_severe">Severe</string>
-    <string name="roadsense_type_breaker">Speed breaker</string>
-    <string name="roadsense_type_pothole">Pothole</string>
-    <string name="roadsense_type_hazard">Hazard</string>
-    <string name="roadsense_type_rough">Rough section</string>
+    <string name="roadsense_sev_minor">เล็กน้อย</string>
+    <string name="roadsense_sev_moderate">ปานกลาง</string>
+    <string name="roadsense_sev_severe">รุนแรง</string>
+    <string name="roadsense_type_breaker">เนินชะลอความเร็ว</string>
+    <string name="roadsense_type_pothole">หลุมบ่อ</string>
+    <string name="roadsense_type_hazard">อันตราย</string>
+    <string name="roadsense_type_rough">ทางขรุขระ</string>
     <!-- "Moderate · Pothole" style line -->
     <string name="roadsense_hazard_format">%1$s · %2$s</string>
     <!-- Zone readouts (D-032): cluster of hazards announced as one. -->
     <!-- "3 bumps ahead" — %1$d = count -->
-    <string name="roadsense_zone_count">%1$d bumps ahead</string>
+    <string name="roadsense_zone_count">ทางขรุขระ %1$d จุดข้างหน้า</string>
     <!-- "Rough section · 40 m" — %1$d = length in metres -->
-    <string name="roadsense_zone_rough">Rough section · %1$d m</string>
+    <string name="roadsense_zone_rough">ทางขรุขระ · %1$d ม.</string>
     <!-- Calibration-Mode confirm card (R-OVL-6) -->
-    <string name="roadsense_confirm_prompt">Was this a hazard?</string>
-    <string name="roadsense_confirm_reject">Not a hazard</string>
-    <string name="roadsense_confirm_accept">Confirm</string>
+    <string name="roadsense_confirm_prompt">นี่คือสิ่งกีดขวาง/อันตรายหรือไม่?</string>
+    <string name="roadsense_confirm_reject">ไม่ใช่อันตราย</string>
+    <string name="roadsense_confirm_accept">ยืนยัน</string>
     <!-- content descriptions -->
-    <string name="roadsense_cd_cal_level">Route calibration level</string>
-    <string name="roadsense_cd_direction">Direction to next hazard</string>
+    <string name="roadsense_cd_cal_level">ระดับการปรับเทียบเส้นทาง</string>
+    <string name="roadsense_cd_direction">ทิศทางไปยังจุดอันตรายถัดไป</string>
 </resources>
