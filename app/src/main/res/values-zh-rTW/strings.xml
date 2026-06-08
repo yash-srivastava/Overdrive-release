@@ -51,11 +51,11 @@
     <string name="cd_player_maximize">最大化玩家</string>
     <string name="cd_player_minimize">排出全屏幕</string>
     <string name="cd_player_mute">轉換音频</string>
-    <string name="cd_player_quadrant_all">Show all cameras</string>
-    <string name="cd_player_quadrant_front">Show front camera</string>
-    <string name="cd_player_quadrant_right">Show right camera</string>
-    <string name="cd_player_quadrant_rear">Show rear camera</string>
-    <string name="cd_player_quadrant_left">Show left camera</string>
+    <string name="cd_player_quadrant_all">顯示所有鏡頭</string>
+    <string name="cd_player_quadrant_front">顯示前方鏡頭</string>
+    <string name="cd_player_quadrant_right">顯示右側鏡頭</string>
+    <string name="cd_player_quadrant_rear">顯示後方鏡頭</string>
+    <string name="cd_player_quadrant_left">顯示左側鏡頭</string>
     <string name="cd_delete">刪除</string>
     <string name="cd_share">Share</string>
     <string name="cd_expand">擴展</string>
@@ -958,6 +958,9 @@
     <string name="roadsense_confirm_reject">Not a hazard</string>
     <string name="roadsense_confirm_accept">Confirm</string>
     <!-- content descriptions -->
-    <string name="roadsense_cd_cal_level">Route calibration level</string>
+    <string name="roadsense_cd_cal_level">Vehicle calibration level</string>
     <string name="roadsense_cd_direction">Direction to next hazard</string>
+    <!-- Blind Spot overlay labels (native overlay window). -->
+    <string name="blindspot_overlay_left">LEFT</string>
+    <string name="blindspot_overlay_right">RIGHT</string>
 </resources>
