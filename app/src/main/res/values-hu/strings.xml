@@ -967,6 +967,9 @@
     <string name="roadsense_confirm_reject">Not a hazard</string>
     <string name="roadsense_confirm_accept">Confirm</string>
     <!-- content descriptions -->
-    <string name="roadsense_cd_cal_level">Route calibration level</string>
+    <string name="roadsense_cd_cal_level">Vehicle calibration level</string>
     <string name="roadsense_cd_direction">Direction to next hazard</string>
+    <!-- Blind Spot overlay labels (native overlay window). -->
+    <string name="blindspot_overlay_left">LEFT</string>
+    <string name="blindspot_overlay_right">RIGHT</string>
 </resources>
