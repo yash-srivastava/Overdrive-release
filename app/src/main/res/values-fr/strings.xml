@@ -969,4 +969,7 @@
     <!-- content descriptions -->
     <string name="roadsense_cd_cal_level">Niveau de calibration de la route</string>
     <string name="roadsense_cd_direction">Direction vers le danger suivant</string>
+    <!-- Blind Spot overlay labels (native overlay window). -->
+    <string name="blindspot_overlay_left">GAUCHE</string>
+    <string name="blindspot_overlay_right">DROITE</string>
 </resources>
