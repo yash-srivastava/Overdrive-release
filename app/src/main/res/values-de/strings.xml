@@ -969,4 +969,7 @@
     <!-- content descriptions -->
     <string name="roadsense_cd_cal_level">Routenkalibrierungsstufe</string>
     <string name="roadsense_cd_direction">Richtung zur nächsten Gefahr</string>
+    <!-- Blind Spot overlay labels (native overlay window). -->
+    <string name="blindspot_overlay_left">LASSEN</string>
+    <string name="blindspot_overlay_right">RECHTS</string>
 </resources>
