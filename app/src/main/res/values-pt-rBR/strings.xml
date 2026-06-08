@@ -970,6 +970,6 @@
     <string name="roadsense_cd_cal_level">Nível de calibração da rota</string>
     <string name="roadsense_cd_direction">Direção para o próximo risco</string>
     <!-- Blind Spot overlay labels (native overlay window). -->
-    <string name="blindspot_overlay_left">LEFT</string>
-    <string name="blindspot_overlay_right">RIGHT</string>
+    <string name="blindspot_overlay_left">ESQUERDA</string>
+    <string name="blindspot_overlay_right">DIREITA</string>
 </resources>
