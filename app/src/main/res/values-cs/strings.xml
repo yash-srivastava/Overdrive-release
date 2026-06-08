@@ -989,5 +989,5 @@
     <string name="roadsense_cd_direction">Směr k dalšímu nebezpečí</string>
     <!-- Blind Spot overlay labels (native overlay window). -->
     <string name="blindspot_overlay_left">LEFT</string>
-    <string name="blindspot_overlay_right">RIGHT</string>
+    <string name="blindspot_overlay_right">PRÁVO</string>
 </resources>
