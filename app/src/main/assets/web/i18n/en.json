@@ -1930,7 +1930,7 @@
     "card_commands": "Quick controls",
     "card_info": "Main info",
     "open_live_view": "Open Live View",
-    "directions": "Directions",
+    "directions": "Navigate to car",
     "no_gps_fix": "No GPS fix",
     "gps_waiting": "Waiting for vehicle position",
     "position_available": "Position available",
