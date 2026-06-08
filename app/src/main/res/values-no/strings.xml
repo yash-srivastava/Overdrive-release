@@ -969,4 +969,7 @@
     <!-- content descriptions -->
     <string name="roadsense_cd_cal_level">Rute kalibreringsnivå</string>
     <string name="roadsense_cd_direction">Retning til neste fare</string>
+    <!-- Blind Spot overlay labels (native overlay window). -->
+    <string name="blindspot_overlay_left">LEFT</string>
+    <string name="blindspot_overlay_right">RIGHT</string>
 </resources>
