@@ -978,4 +978,7 @@
     <!-- content descriptions -->
     <string name="roadsense_cd_cal_level">Nivelul calibrării traseului</string>
     <string name="roadsense_cd_direction">Direcție către următorul pericol</string>
+    <!-- Blind Spot overlay labels (native overlay window). -->
+    <string name="blindspot_overlay_left">LEFT</string>
+    <string name="blindspot_overlay_right">RIGHT</string>
 </resources>
