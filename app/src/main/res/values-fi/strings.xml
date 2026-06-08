@@ -969,4 +969,7 @@
     <!-- content descriptions -->
     <string name="roadsense_cd_cal_level">Reittien kalibrointitaso</string>
     <string name="roadsense_cd_direction">Suunta seuraavaan vaaraan</string>
+    <!-- Blind Spot overlay labels (native overlay window). -->
+    <string name="blindspot_overlay_left">LEFT</string>
+    <string name="blindspot_overlay_right">RIGHT</string>
 </resources>
