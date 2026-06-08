@@ -51,11 +51,11 @@
     <string name="cd_player_maximize">प्लेयर को अधिकतम करें</string>
     <string name="cd_player_minimize">पूर्ण स्क्रीन से बाहर निकलना</string>
     <string name="cd_player_mute">ऑडियो स्विच करें</string>
-    <string name="cd_player_quadrant_all">Show all cameras</string>
-    <string name="cd_player_quadrant_front">Show front camera</string>
-    <string name="cd_player_quadrant_right">Show right camera</string>
-    <string name="cd_player_quadrant_rear">Show rear camera</string>
-    <string name="cd_player_quadrant_left">Show left camera</string>
+    <string name="cd_player_quadrant_all">सभी कैमरे दिखाएँ</string>
+    <string name="cd_player_quadrant_front">फ्रंट कैमरा दिखाएँ</string>
+    <string name="cd_player_quadrant_right">दायाँ कैमरा दिखाएँ</string>
+    <string name="cd_player_quadrant_rear">रियर कैमरा दिखाएँ</string>
+    <string name="cd_player_quadrant_left">बायाँ कैमरा दिखाएँ</string>
     <string name="cd_delete">हटाएँ</string>
     <string name="cd_share">Share</string>
     <string name="cd_expand">विस्तार</string>
@@ -967,6 +967,9 @@
     <string name="roadsense_confirm_reject">Not a hazard</string>
     <string name="roadsense_confirm_accept">Confirm</string>
     <!-- content descriptions -->
-    <string name="roadsense_cd_cal_level">Route calibration level</string>
+    <string name="roadsense_cd_cal_level">Vehicle calibration level</string>
     <string name="roadsense_cd_direction">Direction to next hazard</string>
+    <!-- Blind Spot overlay labels (native overlay window). -->
+    <string name="blindspot_overlay_left">LEFT</string>
+    <string name="blindspot_overlay_right">RIGHT</string>
 </resources>
