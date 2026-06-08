@@ -988,6 +988,6 @@
     <string name="roadsense_cd_cal_level">Poziom kalibracji drogi</string>
     <string name="roadsense_cd_direction">Kierunek do następnego zagrożenia</string>
     <!-- Blind Spot overlay labels (native overlay window). -->
-    <string name="blindspot_overlay_left">LEFT</string>
-    <string name="blindspot_overlay_right">RIGHT</string>
+    <string name="blindspot_overlay_left">LEWO</string>
+    <string name="blindspot_overlay_right">PRAWO</string>
 </resources>
