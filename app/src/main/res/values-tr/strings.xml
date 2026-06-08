@@ -51,11 +51,11 @@
     <string name="cd_player_maximize">Oyuncunu en üst seviyeye çıkar</string>
     <string name="cd_player_minimize">Dışarı çıkış tam ekran</string>
     <string name="cd_player_mute">Ses değiştir</string>
-    <string name="cd_player_quadrant_all">Show all cameras</string>
-    <string name="cd_player_quadrant_front">Show front camera</string>
-    <string name="cd_player_quadrant_right">Show right camera</string>
-    <string name="cd_player_quadrant_rear">Show rear camera</string>
-    <string name="cd_player_quadrant_left">Show left camera</string>
+    <string name="cd_player_quadrant_all">Tüm kameraları göster</string>
+    <string name="cd_player_quadrant_front">Ön kamerayı göster</string>
+    <string name="cd_player_quadrant_right">Sağ kamerayı göster</string>
+    <string name="cd_player_quadrant_rear">Arka kamerayı göster</string>
+    <string name="cd_player_quadrant_left">Sol kamerayı göster</string>
     <string name="cd_delete">Sil</string>
     <string name="cd_share">Share</string>
     <string name="cd_expand">Genişle</string>
@@ -967,6 +967,9 @@
     <string name="roadsense_confirm_reject">Not a hazard</string>
     <string name="roadsense_confirm_accept">Confirm</string>
     <!-- content descriptions -->
-    <string name="roadsense_cd_cal_level">Route calibration level</string>
+    <string name="roadsense_cd_cal_level">Vehicle calibration level</string>
     <string name="roadsense_cd_direction">Direction to next hazard</string>
+    <!-- Blind Spot overlay labels (native overlay window). -->
+    <string name="blindspot_overlay_left">LEFT</string>
+    <string name="blindspot_overlay_right">RIGHT</string>
 </resources>
