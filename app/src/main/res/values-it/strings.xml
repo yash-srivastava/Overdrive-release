@@ -972,6 +972,6 @@ Questa azione non puo essere annullata.</string>
     <string name="roadsense_cd_cal_level">Livello di calibrazione del percorso</string>
     <string name="roadsense_cd_direction">Direzione al pericolo successivo</string>
     <!-- Blind Spot overlay labels (native overlay window). -->
-    <string name="blindspot_overlay_left">LEFT</string>
-    <string name="blindspot_overlay_right">RIGHT</string>
+    <string name="blindspot_overlay_left">SINISTRA</string>
+    <string name="blindspot_overlay_right">DIRITTO</string>
 </resources>
