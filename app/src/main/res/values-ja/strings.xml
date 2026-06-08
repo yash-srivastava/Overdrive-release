@@ -960,4 +960,7 @@
     <!-- content descriptions -->
     <string name="roadsense_cd_cal_level">ルートキャリブレーションレベル</string>
     <string name="roadsense_cd_direction">次のハザードへの方向</string>
+    <!-- Blind Spot overlay labels (native overlay window). -->
+    <string name="blindspot_overlay_left">LEFT</string>
+    <string name="blindspot_overlay_right">RIGHT</string>
 </resources>
