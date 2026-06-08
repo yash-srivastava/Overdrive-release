@@ -51,11 +51,11 @@
     <string name="cd_player_maximize">ขยายเต็มจอ</string>
     <string name="cd_player_minimize">ออกจากการแสดงเต็มจอ</string>
     <string name="cd_player_mute">เปิด/ปิดเสียง</string>
-    <string name="cd_player_quadrant_all">Show all cameras</string>
-    <string name="cd_player_quadrant_front">Show front camera</string>
-    <string name="cd_player_quadrant_right">Show right camera</string>
-    <string name="cd_player_quadrant_rear">Show rear camera</string>
-    <string name="cd_player_quadrant_left">Show left camera</string>
+    <string name="cd_player_quadrant_all">แสดงกล้องทั้งหมด</string>
+    <string name="cd_player_quadrant_front">แสดงกล้องหน้า</string>
+    <string name="cd_player_quadrant_right">แสดงกล้องด้านขวา</string>
+    <string name="cd_player_quadrant_rear">แสดงกล้องหลัง</string>
+    <string name="cd_player_quadrant_left">แสดงกล้องด้านซ้าย</string>
     <string name="cd_delete">ลบ</string>
     <string name="cd_share">Share</string>
     <string name="cd_expand">ขยาย</string>
@@ -958,6 +958,9 @@
     <string name="roadsense_confirm_reject">Not a hazard</string>
     <string name="roadsense_confirm_accept">Confirm</string>
     <!-- content descriptions -->
-    <string name="roadsense_cd_cal_level">Route calibration level</string>
+    <string name="roadsense_cd_cal_level">Vehicle calibration level</string>
     <string name="roadsense_cd_direction">Direction to next hazard</string>
+    <!-- Blind Spot overlay labels (native overlay window). -->
+    <string name="blindspot_overlay_left">LEFT</string>
+    <string name="blindspot_overlay_right">RIGHT</string>
 </resources>
