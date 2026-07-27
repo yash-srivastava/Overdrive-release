@@ -2627,6 +2627,71 @@ public class SocHistoryDatabase {
     }
 
     /**
+     * Update the electricity rate of a single charging session, recalculate its
+     * cost, and adjust the daily rollup so lifetime / monthly-cost totals stay consistent.
+     */
+    public boolean updateChargingSessionRate(long id, double newRate) {
+        if (!isInitialized || connection == null) return false;
+        try {
+            long startTime = -1, endTime = 0;
+            double energyAdded = 0;
+            double oldCost = 0;
+            try (PreparedStatement sel = connection.prepareStatement(
+                    "SELECT start_time, end_time, energy_added_kwh, session_cost FROM " + TABLE_CHARGING + " WHERE id = ?;")) {
+                sel.setLong(1, id);
+                try (ResultSet rs = sel.executeQuery()) {
+                    if (rs.next()) {
+                        startTime = rs.getLong("start_time");
+                        endTime = rs.getLong("end_time");
+                        if (endTime == 0 || endTime <= startTime) {
+                            logger.warn("updateChargingSessionRate: cannot edit rate of an in-progress session " + id);
+                            return false; // cannot edit in-progress session
+                        }
+                        double energyRead = rs.getDouble("energy_added_kwh");
+                        energyAdded = (rs.wasNull() || energyRead < 0) ? 0 : energyRead;
+                        double costRead = rs.getDouble("session_cost");
+                        oldCost = (rs.wasNull() || costRead < 0) ? 0 : costRead;
+                    } else {
+                        return false; // not found
+                    }
+                }
+            }
+
+            // Calculate the new cost
+            double newCost = (newRate >= 0 && energyAdded > 0) ? (energyAdded * newRate) : -1;
+
+            // Update the session rate and cost in charging_sessions
+            try (PreparedStatement updSession = connection.prepareStatement(
+                    "UPDATE " + TABLE_CHARGING + " SET electricity_rate = ?, session_cost = ? WHERE id = ?;")) {
+                updSession.setDouble(1, newRate);
+                updSession.setDouble(2, newCost);
+                updSession.setLong(3, id);
+                updSession.executeUpdate();
+            }
+
+            // Adjust the daily rollup if there's a non-zero change
+            long dayBasis = endTime > 0 ? endTime : startTime;
+            if (dayBasis > 0) {
+                double delta = (newCost >= 0 ? newCost : 0) - oldCost;
+                if (delta != 0) {
+                    long day = (dayBasis / 86_400_000L) * 86_400_000L;
+                    try (PreparedStatement updDaily = connection.prepareStatement(
+                            "UPDATE " + TABLE_CHARGING_DAILY + " SET cost = GREATEST(cost + ?, 0) WHERE day_epoch = ?;")) {
+                        updDaily.setDouble(1, delta);
+                        updDaily.setLong(2, day);
+                        updDaily.executeUpdate();
+                    }
+                }
+            }
+            logger.info("Updated charging session " + id + " to rate " + newRate + ", calculated cost " + newCost);
+            return true;
+        } catch (Exception e) {
+            logger.error("updateChargingSessionRate failed for " + id, e);
+            return false;
+        }
+    }
+
+    /**
      * Get SOC statistics.
      */
     public JSONObject getSocStats(int hoursBack) {

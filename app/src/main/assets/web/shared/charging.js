@@ -686,11 +686,7 @@ var CHARGING = {
         if (list) list.classList.add('hidden');
         if (detail) { detail.classList.remove('hidden'); detail.classList.add('active'); }
 
-        // Find the row we already have for the header; fetch full + samples.
-        var row = null;
-        for (var i = 0; i < this.sessions.length; i++) {
-            if (this.sessions[i].id === id) { row = this.sessions[i]; break; }
-        }
+        var row = this._getSession(id);
         if (row) this._fillDetailHeader(row);
 
         fetch('/api/charging/' + id).then(function (r) { return r.json(); })
@@ -742,7 +738,8 @@ var CHARGING = {
         this._setText('detailPeakPower', (s.peakPower != null && s.peakPower > 0) ? s.peakPower.toFixed(1) + ' kW' : '--');
         this._setText('detailRangeGained', (s.rangeGained != null && s.rangeGained > 0) ? this._dist(s.rangeGained) : '--');
         this._setText('detailOdometer', (s.startOdometerKm != null && s.startOdometerKm > 0) ? this._dist(s.startOdometerKm) : '--');
-        this._setText('detailCost', (s.cost != null && s.cost > 0) ? this._money(s.cost) : '--');
+        this._setText('detailCost', (s.cost != null && s.cost >= 0) ? this._money(s.cost) : '--');
+        this._setText('detailCostRate', (s.electricityRate != null && s.electricityRate >= 0) ? '(' + this._money(s.electricityRate) + this._t('charge.per_kwh', '/kWh') + ')' : '');
         this._setText('detailType', this._typeLabel(s));
         this._setText('detailTimeToFull', (s.timeToFullMin != null && s.timeToFullMin > 0)
             ? this._fmtDuration(s.timeToFullMin) : '--');
@@ -847,6 +844,59 @@ var CHARGING = {
               self._toast(self._t('charge.save_failed', 'Could not save charging settings'), 'error');
               self.showApplyNeeded();
           });
+    },
+
+    editCost: function () {
+        var self = this;
+        if (this.currentSessionId == null) return;
+        
+        var s = this._getSession(this.currentSessionId);
+        if (!s) return;
+        
+        if (s.inProgress === true) {
+            this._toast(this._t('charge.cannot_edit_in_progress_cost', 'Cannot edit cost of an in-progress session'), 'error');
+            return;
+        }
+
+        var oldRateVal = (s.electricityRate != null && s.electricityRate >= 0) ? s.electricityRate.toString() : '';
+        var msg = this._t('charge.edit_rate_prompt', 'Enter electricity rate per kWh (leave empty to reset):');
+        var input = window.prompt(msg, oldRateVal);
+        if (input === null) return;
+        
+        var newRate = parseFloat(input.trim());
+        if (input.trim() === '') {
+            newRate = -1;
+        } else if (isNaN(newRate) || newRate < 0) {
+            this._toast(this._t('charge.invalid_rate', 'Please enter a valid non-negative number'), 'error');
+            return;
+        }
+
+        var currentRate = (s.electricityRate != null && s.electricityRate >= 0) ? s.electricityRate : -1;
+        if (newRate === currentRate) return;
+
+        var showError = function () {
+            self._toast(self._t('charge.rate_update_failed', 'Could not update electricity rate'), 'error');
+        };
+        
+        fetch('/api/charging/' + this.currentSessionId + '/rate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rate: newRate })
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (d && d.success) {
+                self._toast(self._t('charge.rate_updated', 'Electricity rate updated'));
+                s.electricityRate = newRate >= 0 ? newRate : null;
+                s.cost = (newRate >= 0 && s.energyAdded != null && s.energyAdded > 0) ? (s.energyAdded * newRate) : null;
+                self._renderSessionCards();
+                self._fillDetailHeader(s);
+                self.loadSummary();
+            } else {
+                showError();
+            }
+        })
+        .catch(showError);
     },
 
     deleteCurrent: function () {
@@ -1854,6 +1904,13 @@ var CHARGING = {
     },
 
     // ==================== FORMAT / DOM HELPERS ====================
+
+    _getSession: function (id) {
+        for (var i = 0; i < this.sessions.length; i++) {
+            if (this.sessions[i] && this.sessions[i].id === id) return this.sessions[i];
+        }
+        return null;
+    },
 
     _money: function (v) {
         if (v == null) return '--';

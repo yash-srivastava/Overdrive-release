@@ -404,6 +404,11 @@
   },
   "charge": {
     "title": "Charging",
+    "cannot_edit_in_progress_cost": "Cannot edit cost of an in-progress session",
+    "edit_rate_prompt": "Enter electricity rate per kWh (leave empty to reset):",
+    "invalid_rate": "Please enter a valid non-negative number",
+    "rate_updated": "Electricity rate updated",
+    "rate_update_failed": "Could not update electricity rate",
     "kicker": "Energy",
     "card_title": "Charging",
     "open": "Charging details",

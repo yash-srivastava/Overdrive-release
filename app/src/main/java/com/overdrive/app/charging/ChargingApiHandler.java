@@ -32,8 +32,8 @@ public class ChargingApiHandler {
 
     private static final Pattern SESSION_ID_PATTERN = Pattern.compile("^/api/charging/(\\d+)$");
     private static final Pattern SESSION_SAMPLES_PATTERN = Pattern.compile("^/api/charging/(\\d+)/samples$");
-    // POST fallback for per-session delete (the in-app WebView can drop DELETE).
     private static final Pattern SESSION_DELETE_PATTERN = Pattern.compile("^/api/charging/(\\d+)/delete$");
+    private static final Pattern SESSION_RATE_PATTERN = Pattern.compile("^/api/charging/(\\d+)/rate$");
 
     private final ChargingSessionManager manager;
 
@@ -85,6 +85,13 @@ public class ChargingApiHandler {
             if (delMatcher.matches() && "POST".equals(method)) {
                 long id = Long.parseLong(delMatcher.group(1));
                 return handleDeleteSession(id);
+            }
+
+            // POST /api/charging/{id}/rate — update rate
+            Matcher rateMatcher = SESSION_RATE_PATTERN.matcher(path);
+            if (rateMatcher.matches() && "POST".equals(method)) {
+                long id = Long.parseLong(rateMatcher.group(1));
+                return handleUpdateSessionRate(id, body);
             }
 
             // GET/DELETE /api/charging/{id}
@@ -220,12 +227,32 @@ public class ChargingApiHandler {
         try {
             boolean ok = db().deleteChargingSession(id);
             if (!ok) return errorResponse("Failed to delete session", 500);
-            JSONObject response = new JSONObject();
-            response.put("success", true);
-            return response;
+            return successResponse();
         } catch (Exception e) {
             logger.error("Error deleting charging session " + id, e);
             return errorResponse("Failed to delete session", 500);
+        }
+    }
+
+    /** POST /api/charging/{id}/rate — update electricity rate of a completed session. */
+    private JSONObject handleUpdateSessionRate(long id, String body) {
+        try {
+            JSONObject bodyJson;
+            try {
+                bodyJson = new JSONObject(body != null ? body : "{}");
+            } catch (org.json.JSONException je) {
+                return errorResponse("Invalid JSON payload", 400);
+            }
+            if (!bodyJson.has("rate")) {
+                return errorResponse("Missing 'rate' parameter", 400);
+            }
+            double rate = bodyJson.getDouble("rate");
+            boolean ok = db().updateChargingSessionRate(id, rate);
+            if (!ok) return errorResponse("Failed to update session rate (session may be in progress or not found)", 500);
+            return successResponse();
+        } catch (Exception e) {
+            logger.error("Error updating rate for session " + id, e);
+            return errorResponse("Failed to update rate: " + e.getMessage(), 500);
         }
     }
 
@@ -471,6 +498,14 @@ public class ChargingApiHandler {
         } catch (NumberFormatException e) {
             return defaultValue;
         }
+    }
+
+    private JSONObject successResponse() {
+        JSONObject response = new JSONObject();
+        try {
+            response.put("success", true);
+        } catch (Exception ignored) {}
+        return response;
     }
 
     private JSONObject errorResponse(String message, int status) {
