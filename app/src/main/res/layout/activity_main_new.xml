@@ -39,7 +39,7 @@
         <!--  treats this view's id (`navigationRail`) the same way it      -->
         <!--  treated NavigationRailView.                                    -->
         <!-- ============================================================== -->
-        <androidx.core.widget.NestedScrollView
+        <com.overdrive.app.ui.widget.SwipeExpandableRailScrollView
             android:id="@+id/navigationRailScroll"
             android:layout_width="80dp"
             android:layout_height="match_parent"
@@ -55,6 +55,18 @@
                 android:gravity="center_horizontal"
                 android:orientation="vertical"
                 android:paddingBottom="16dp">
+
+                <!-- Accessible alternative to the horizontal expand/collapse swipe. -->
+                <ImageButton
+                    android:id="@+id/railExpandButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="4dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/rail_expand"
+                    android:padding="12dp"
+                    android:src="@drawable/ic_chevron_right"
+                    app:tint="?attr/colorOnSurfaceVariant" />
 
                 <!-- Rail header (language button) was here. The language
                      affordance moved to the toolbar end-cluster so it sits
@@ -147,7 +159,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />
             </LinearLayout>
-        </androidx.core.widget.NestedScrollView>
+        </com.overdrive.app.ui.widget.SwipeExpandableRailScrollView>
 
         <!-- ============================================================== -->
         <!--  Main stage                                                     -->

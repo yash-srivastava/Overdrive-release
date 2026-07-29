@@ -624,6 +624,8 @@
     <string name="rail_integrations">Integrations</string>
     <string name="rail_diagnostics">Diagnostics</string>
     <string name="rail_settings">Settings</string>
+    <string name="rail_expand">Show navigation labels</string>
+    <string name="rail_collapse">Hide navigation labels</string>
     <!-- Settings sub-rail -->
     <string name="settings_section_appearance">Appearance</string>
     <string name="settings_section_recording">Recording</string>

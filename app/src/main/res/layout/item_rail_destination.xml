@@ -17,7 +17,8 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:gravity="center_horizontal"
+    android:minHeight="56dp"
+    android:gravity="center"
     android:orientation="vertical"
     android:paddingVertical="6dp"
     android:clickable="true"
@@ -48,6 +49,7 @@
         android:gravity="center_horizontal"
         android:maxLines="1"
         android:ellipsize="end"
-        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-        android:textColor="@color/rail_item_label_tint" />
+        android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
+        android:textColor="@color/rail_item_label_tint"
+        android:visibility="gone" />
 </LinearLayout>
