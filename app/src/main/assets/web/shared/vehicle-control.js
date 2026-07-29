@@ -2324,7 +2324,8 @@ var VC = {
             lockStatus.textContent = locked === true ? BYD.i18n.t('vehicle.locked') : (locked === false ? BYD.i18n.t('vehicle.unlocked') : BYD.i18n.t('common.unknown'));
             var dot = lockStatus.previousElementSibling;
             if (dot) {
-                dot.className = 'dot ' + (locked === true ? 'green' : (locked === false ? 'amber' : 'grey'));
+                dot.className = 'dot compact-status-pill__dot ' +
+                    (locked === true ? 'green' : (locked === false ? 'amber' : 'grey'));
             }
         }
     },
@@ -2497,10 +2498,10 @@ var VC = {
         if (!pillEl) return;
         var dot = pillEl.querySelector('.dot');
         if (this.vehicleState.cloudConfigured) {
-            if (dot) dot.className = 'dot green';
+            if (dot) dot.className = 'dot compact-status-pill__dot green';
             if (textEl) textEl.textContent = BYD.i18n.t('vehicle.cloud_connected');
         } else {
-            if (dot) dot.className = 'dot red';
+            if (dot) dot.className = 'dot compact-status-pill__dot red';
             if (textEl) textEl.textContent = BYD.i18n.t('vehicle.cloud_not_configured');
         }
     },

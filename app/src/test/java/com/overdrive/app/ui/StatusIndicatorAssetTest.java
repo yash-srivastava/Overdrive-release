@@ -49,6 +49,21 @@ public class StatusIndicatorAssetTest {
         assertFalse(ruleFor(performance, ".monitoring-status").contains("gap:"));
     }
 
+    @Test
+    public void vehicleStateUpdatesPreserveTheSharedDotClass() throws IOException {
+        String vehicleScript =
+                readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
+
+        assertTrue(vehicleScript.contains(
+                "'dot compact-status-pill__dot ' +"));
+        assertTrue(vehicleScript.contains(
+                "dot.className = 'dot compact-status-pill__dot green'"));
+        assertTrue(vehicleScript.contains(
+                "dot.className = 'dot compact-status-pill__dot red'"));
+        assertFalse(vehicleScript.contains("dot.className = 'dot green'"));
+        assertFalse(vehicleScript.contains("dot.className = 'dot red'"));
+    }
+
     private static String ruleFor(String css, String selector) {
         int start = css.indexOf(selector);
         if (start < 0) return "";
