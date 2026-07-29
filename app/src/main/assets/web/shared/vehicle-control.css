@@ -659,6 +659,37 @@
 .vc-tile.active { border-color: #00D4AA; background: rgba(0,212,170,.10); color: #00D4AA; }
 /* Disable highlight stays readable: outline grey, not greyed-out invisible. */
 .vc-tile:disabled, .vc-tile[disabled] { color: var(--vc-text-muted); border-color: var(--vc-border-faint); background: var(--vc-tile-bg-disabled); cursor: not-allowed; }
+/* Cloud-only controls stay tappable so they can explain how to connect an
+   account, but carry an explicit cloud marker. A dashed outline means the
+   capability is currently unavailable; local SDK controls remain unchanged. */
+.vc-tile[data-requires-cloud="true"] { position: relative; }
+.vc-tile[data-requires-cloud="true"]::after {
+    /* Draw the cloud from CSS primitives. Android 7 otherwise forces U+2601
+       through its blue colour-emoji font and ignores the state colour. */
+    content: '';
+    position: absolute; top: 7px; right: 6px;
+    width: 9px; height: 4px;
+    border-radius: 5px;
+    background: currentColor;
+    box-shadow:
+        -3px 1px 0 -1px currentColor,
+        3px 1px 0 -1px currentColor,
+        0 -3px 0 -1px currentColor;
+    color: var(--vc-text-muted);
+    pointer-events: none;
+}
+[dir="rtl"] .vc-tile[data-requires-cloud="true"]::after {
+    right: auto; left: 5px;
+}
+.vc-tile[data-cloud-state="connected"]::after { color: #00D4AA; }
+.vc-tile[data-cloud-state="checking"]::after { color: #F59E0B; }
+.vc-tile[data-cloud-state="not_configured"],
+.vc-tile[data-cloud-state="unavailable"] {
+    border-style: dashed;
+    background: var(--vc-tile-bg-disabled);
+}
+.vc-tile[data-cloud-state="not_configured"]::after { color: var(--vc-text-muted); }
+.vc-tile[data-cloud-state="unavailable"]::after { color: #EF4444; }
 .vc-tile.heat:hover { border-color: rgba(239,68,68,.3); color: #EF4444; }
 .vc-tile.heat.on1 { border-color: #EF4444AA; background: rgba(239,68,68,.12); color: #EF4444AA; box-shadow: 0 0 12px rgba(239,68,68,.2); }
 .vc-tile.heat.on2 { border-color: #EF4444; background: rgba(239,68,68,.12); color: #EF4444; box-shadow: 0 0 12px rgba(239,68,68,.2); }

@@ -456,6 +456,7 @@ public class VehicleControlApiHandler {
         // The OTA layer reports SDK semantics (1=UNLOCK, 2=LOCK) which we
         // also invert on output.
         JSONObject doors = new JSONObject();
+        int sdkOverall = -1;
         if (data.doorLockStatus != null && data.doorLockStatus.length >= 7) {
             doors.put("rf", data.doorLockStatus[0]);
             doors.put("lf", data.doorLockStatus[1]);
@@ -464,6 +465,11 @@ public class VehicleControlApiHandler {
             doors.put("trunk", data.doorLockStatus[4]);
             doors.put("hood", data.doorLockStatus[5]);
             doors.put("overall", data.doorLockStatus[6]);
+            if (data.doorLockStatus[6] == 1 || data.doorLockStatus[6] == 2) {
+                sdkOverall = data.doorLockStatus[6];
+                doors.put("source", "sdk");
+                doors.put("scope", "vehicle");
+            }
         }
 
         // Track which source authoritatively set LF so we can derive `overall`
@@ -516,7 +522,10 @@ public class VehicleControlApiHandler {
                 if (rr != -1) doors.put("rr", rr);
                 if (cs.isAnyUnlocked()) cloudOverall = 2;
                 else if (cs.isAllLocked()) cloudOverall = 1;
-                if (cloudOverall != -1) doors.put("overall", cloudOverall);
+                if (cloudOverall != -1) {
+                    doors.put("overall", cloudOverall);
+                    doors.put("scope", "vehicle");
+                }
                 doors.put("source", "cloud");
             }
         } catch (Exception e) {
@@ -527,17 +536,26 @@ public class VehicleControlApiHandler {
         // last so it overrides both cloud and SDK.
         if (otaLf != -1) {
             doors.put("lf", otaLf);
-            // If cloud was unavailable, we still want a meaningful `overall`
-            // when at least the LF state is known — surveillance arming uses
-            // overall, and the LF door is the dominant signal in practice.
+            // If cloud was unavailable, an OTA reading describes the driver
+            // door only. Keep publishing it as `overall` for compatibility
+            // with the surveillance lock gate, but label the scope honestly
+            // so presentation layers never call it whole-vehicle state.
             if (!cloudAvailable) {
-                doors.put("overall", otaLf);
-            } else if (otaLf != cloudOverall && cloudOverall != -1) {
-                // Cloud is fresh AND disagrees with OTA LF (cloud might have
-                // RF/LR/RR contradicting LF). We stick with cloud's overall
-                // because it sees all 4 doors; otaLf overlays only the LF cell.
+                if (sdkOverall == -1) {
+                    doors.put("overall", otaLf);
+                    doors.put("scope", "driver_door");
+                    doors.put("source", "ota");
+                } else {
+                    doors.put("scope", "vehicle");
+                    doors.put("source", "sdk+ota");
+                }
             }
-            doors.put("source", cloudAvailable ? "ota+cloud" : "ota");
+            if (cloudAvailable) {
+                // Cloud sees all four doors, so its overall state remains the
+                // whole-vehicle answer even when the faster OTA LF cell differs.
+                doors.put("scope", "vehicle");
+                doors.put("source", "ota+cloud");
+            }
         }
         response.put("doors", doors);
 

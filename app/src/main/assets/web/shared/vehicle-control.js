@@ -23,6 +23,8 @@ var VC = {
     // State
     vehicleState: {
         locked: null,
+        lockScope: 'unknown',
+        lockSource: null,
         trunkOpen: false,
         doors: { lf: 1, rf: 1, lr: 1, rr: 1, trunk: -1, hood: -1 },
         windows: { lf: 0, rf: 0, lr: 0, rr: 0, sunroof: 0, sunshade: 0 },
@@ -32,6 +34,7 @@ var VC = {
         soc: 0,
         rangeKm: 0,
         cloudConfigured: false,
+        cloudState: 'checking',
         acOn: false,
         acTemp: 22,
         acFan: 3,
@@ -40,6 +43,7 @@ var VC = {
     },
 
     pollInterval: null,
+    cloudStatusInterval: null,
     _toastTimer: null,
     stateGlows: {},  // persistent glow lights keyed by position name
     _3dViewActive: false,
@@ -80,7 +84,15 @@ var VC = {
         // (for example, Seagull is sold as Dolphin Mini in Brazil). Refresh
         // the already-built picker when the user changes the web locale.
         if (BYD.i18n && typeof BYD.i18n.onChange === 'function') {
-            BYD.i18n.onChange(function() { self.refreshModelPickerNames(); });
+            BYD.i18n.onChange(function() {
+                self.refreshModelPickerNames();
+                // These labels are live state, not static translated copy.
+                // Re-render after hydration so the i18n pass can never reset
+                // them to the HTML's initial "Checking" / "Unknown" text.
+                self.updateHUD();
+                self.updateCloudIndicator();
+                self.updateCloudControlAvailability();
+            });
         }
         // Default: Aurora White (converted to linear so it matches the rest
         // of the colour pipeline; see applyColor() for the rationale).
@@ -89,7 +101,7 @@ var VC = {
         this.initColorPicker();
         this.bindControls();
         this.startStateSync();
-        this.checkCloudStatus();
+        this.startCloudStatusSync();
         this.requestCloudLockRefresh();
         this.startCloudLockSync();
         this.animate();
@@ -1348,7 +1360,10 @@ var VC = {
         // Security tab — has-active if locked (null = unknown, don't show)
         var secTab = tabs[0];
         if (secTab) {
-            if (this.vehicleState.locked === true) secTab.classList.add('has-active');
+            if (this.vehicleState.locked === true
+                    && this.vehicleState.lockScope === 'vehicle') {
+                secTab.classList.add('has-active');
+            }
             else secTab.classList.remove('has-active');
         }
 
@@ -1446,6 +1461,7 @@ var VC = {
         // optimistically; the server message resolves cloud-required prompt
         // automatically when not connected (per memory: tap-to-discover).
         this.bindBtn('btnBatteryHeat', function() {
+            if (!self.requireCloud()) return;
             var current = !!(self.vehicleState && self.vehicleState.batteryHeat);
             var next = !current;
             self.setPending('btnBatteryHeat', true);
@@ -2085,6 +2101,7 @@ var VC = {
             if (!data.success) return;
 
             var wasLocked = self.vehicleState.locked;
+            var wasLockScope = self.vehicleState.lockScope;
 
             // Doors (lock status: 1=locked, 2=unlocked)
             if (data.doors) {
@@ -2095,15 +2112,27 @@ var VC = {
                     trunk: d.trunk || -1, hood: d.hood || -1
                 };
                 var overall = (d.overall !== undefined && d.overall !== null) ? d.overall : -1;
+                var reportedScope = d.scope
+                    || (d.source === 'ota' ? 'driver_door' : 'vehicle');
                 if (overall === 1) {
                     self.vehicleState.locked = true;
+                    self.vehicleState.lockScope = reportedScope;
+                    self.vehicleState.lockSource = d.source || null;
                 } else if (overall === 2) {
                     self.vehicleState.locked = false;
+                    self.vehicleState.lockScope = reportedScope;
+                    self.vehicleState.lockSource = d.source || null;
                 } else {
-                    // Unknown from CAN bus — keep last known state if we had one
+                    // Unknown from all vehicle sources — keep the last known
+                    // state if we had one.
                     // Only set to null if we never received a valid state
-                    if (wasLocked === null) self.vehicleState.locked = null;
-                    // else keep wasLocked (persist last known)
+                    if (wasLocked === null) {
+                        self.vehicleState.locked = null;
+                        self.vehicleState.lockScope = 'unknown';
+                        self.vehicleState.lockSource = null;
+                    } else {
+                        self.vehicleState.lockScope = wasLockScope;
+                    }
                 }
             }
 
@@ -2178,14 +2207,36 @@ var VC = {
         });
     },
 
+    startCloudStatusSync: function() {
+        var self = this;
+        this.updateCloudIndicator();
+        this.updateCloudControlAvailability();
+        this.checkCloudStatus();
+        if (this.cloudStatusInterval) clearInterval(this.cloudStatusInterval);
+        // Keep the badge and capability markers current if credentials are
+        // connected or removed from Settings while this page remains open.
+        this.cloudStatusInterval = setInterval(function() {
+            self.checkCloudStatus();
+        }, 30 * 1000);
+    },
+
     checkCloudStatus: function() {
         var self = this;
         fetch('/api/vehicle/cloud-status').then(function(resp) {
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
             return resp.json();
         }).then(function(data) {
-            self.vehicleState.cloudConfigured = data.configured && data.verified;
+            self.vehicleState.cloudConfigured = !!(data.configured && data.verified);
+            self.vehicleState.cloudState = self.vehicleState.cloudConfigured
+                ? 'connected'
+                : 'not_configured';
             self.updateCloudIndicator();
+            self.updateCloudControlAvailability();
         }).catch(function(e) {
+            self.vehicleState.cloudConfigured = false;
+            self.vehicleState.cloudState = 'unavailable';
+            self.updateCloudIndicator();
+            self.updateCloudControlAvailability();
             console.warn('[VC] Cloud status error:', e);
         });
     },
@@ -2213,20 +2264,24 @@ var VC = {
             if (!data || !data.success || !data.status) return;
             var s = data.status;
 
-            // Prefer cloud lock state when CAN bus didn't give us a valid one.
-            // CAN bus sets self.vehicleState.locked = true/false; null = no
-            // valid reading yet. We only override null — if CAN said locked
-            // or unlocked, trust it (it's a few hundred ms fresh vs MQTT's
-            // potentially-minutes-old snapshot).
-            var canIsAuthoritative = self.vehicleState.locked === true || self.vehicleState.locked === false;
-            if (!canIsAuthoritative) {
+            // A full local vehicle reading is authoritative. The Atto's OTA
+            // path exposes only the driver door, however, so a fresh full-car
+            // cloud snapshot may replace that partial reading.
+            var localIsAuthoritative =
+                    (self.vehicleState.locked === true || self.vehicleState.locked === false)
+                    && self.vehicleState.lockScope === 'vehicle';
+            if (!localIsAuthoritative) {
                 if (s.lockState === 'locked') {
                     self.vehicleState.locked = true;
+                    self.vehicleState.lockScope = 'vehicle';
+                    self.vehicleState.lockSource = 'cloud';
                     self.updateHUD();
                     self.updateDoorIndicators();
                     self.updateTabIndicators();
                 } else if (s.lockState === 'unlocked') {
                     self.vehicleState.locked = false;
+                    self.vehicleState.lockScope = 'vehicle';
+                    self.vehicleState.lockSource = 'cloud';
                     self.updateHUD();
                     self.updateDoorIndicators();
                     self.updateTabIndicators();
@@ -2240,7 +2295,7 @@ var VC = {
             var isStale = s.lockState === 'unknown'
                     || s.lastMessageAge === -1
                     || (typeof s.lastMessageAge === 'number' && s.lastMessageAge > self.STALE_RESPONSE_AGE_S);
-            if (!_isFollowup && isStale && !canIsAuthoritative) {
+            if (!_isFollowup && isStale && !localIsAuthoritative) {
                 setTimeout(function() { self.requestCloudLockRefresh(true); }, self.FOLLOWUP_DELAY_MS);
             }
         }).catch(function(e) {
@@ -2266,6 +2321,18 @@ var VC = {
         var dismissBtn = document.getElementById('cloudModalDismiss');
         if (dismissBtn) {
             dismissBtn.addEventListener('click', function() { self.hideCloudModal(); });
+        }
+        var statusPill = document.getElementById('cloudStatus');
+        if (statusPill) {
+            statusPill.setAttribute('role', 'button');
+            statusPill.setAttribute('tabindex', '0');
+            var explainCloud = function() {
+                if (!self.vehicleState.cloudConfigured) self.showCloudModal();
+            };
+            statusPill.addEventListener('click', explainCloud);
+            statusPill.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' || e.key === ' ') explainCloud();
+            });
         }
         // Also dismiss on overlay click (outside the modal card)
         var overlay = document.getElementById('cloudModal');
@@ -2299,6 +2366,13 @@ var VC = {
 
     // ==================== UI UPDATES ====================
 
+    translatedText: function(key, fallback) {
+        var value = BYD.i18n && typeof BYD.i18n.t === 'function'
+            ? BYD.i18n.t(key)
+            : null;
+        return value && value !== key ? value : fallback;
+    },
+
     updateHUD: function() {
         var socEl = document.getElementById('socValue');
         if (socEl) socEl.textContent = Math.round(this.vehicleState.soc) + '%';
@@ -2309,22 +2383,44 @@ var VC = {
         var rangeEl = document.getElementById('rangeValue');
         if (rangeEl) rangeEl.textContent = BYD.units.dist(this.vehicleState.rangeKm);
 
-        this.updateLockUI(this.vehicleState.locked);
+        this.updateLockUI(this.vehicleState.locked, this.vehicleState.lockScope);
     },
 
-    updateLockUI: function(locked) {
+    updateLockUI: function(locked, scope) {
         var lockBtn = document.getElementById('btnLock');
         var unlockBtn = document.getElementById('btnUnlock');
         var lockStatus = document.getElementById('lockStatus');
+        var wholeVehicleKnown = scope === 'vehicle';
 
-        // locked can be true, false, or null (unknown)
-        if (lockBtn) { if (locked === true) lockBtn.classList.add('on'); else lockBtn.classList.remove('on'); }
-        if (unlockBtn) { if (locked === false) unlockBtn.classList.add('on'); else unlockBtn.classList.remove('on'); }
+        // Do not present a driver-door-only reading as whole-car state.
+        if (lockBtn) {
+            if (locked === true && wholeVehicleKnown) lockBtn.classList.add('on');
+            else lockBtn.classList.remove('on');
+        }
+        if (unlockBtn) {
+            if (locked === false && wholeVehicleKnown) unlockBtn.classList.add('on');
+            else unlockBtn.classList.remove('on');
+        }
         if (lockStatus) {
-            lockStatus.textContent = locked === true ? BYD.i18n.t('vehicle.locked') : (locked === false ? BYD.i18n.t('vehicle.unlocked') : BYD.i18n.t('common.unknown'));
+            var label;
+            if (locked !== true && locked !== false) {
+                label = this.translatedText('common.unknown', 'Unknown');
+            } else if (scope === 'driver_door') {
+                label = locked
+                    ? this.translatedText('vehicle.driver_door_locked', 'Driver door locked')
+                    : this.translatedText('vehicle.driver_door_unlocked', 'Driver door unlocked');
+            } else {
+                label = locked
+                    ? this.translatedText('vehicle.locked', 'Locked')
+                    : this.translatedText('vehicle.unlocked', 'Unlocked');
+            }
+            lockStatus.textContent = label;
             var dot = lockStatus.previousElementSibling;
             if (dot) {
-                dot.className = 'dot ' + (locked === true ? 'green' : (locked === false ? 'amber' : 'grey'));
+                dot.className = 'dot ' +
+                    (locked === null || locked === undefined
+                        ? 'grey'
+                        : (wholeVehicleKnown && locked === true ? 'green' : 'amber'));
             }
         }
     },
@@ -2496,12 +2592,40 @@ var VC = {
         var pillEl = document.getElementById('cloudStatus');
         if (!pillEl) return;
         var dot = pillEl.querySelector('.dot');
-        if (this.vehicleState.cloudConfigured) {
+        var state = this.vehicleState.cloudState || 'checking';
+        pillEl.setAttribute('data-cloud-state', state);
+        if (state === 'connected') {
             if (dot) dot.className = 'dot green';
-            if (textEl) textEl.textContent = BYD.i18n.t('vehicle.cloud_connected');
-        } else {
+            if (textEl) {
+                textEl.textContent = this.translatedText(
+                    'vehicle.cloud_connected', 'BYD account connected');
+            }
+        } else if (state === 'not_configured') {
+            if (dot) dot.className = 'dot grey';
+            if (textEl) {
+                textEl.textContent = this.translatedText(
+                    'vehicle.cloud_not_configured', 'BYD account not connected');
+            }
+        } else if (state === 'unavailable') {
             if (dot) dot.className = 'dot red';
-            if (textEl) textEl.textContent = BYD.i18n.t('vehicle.cloud_not_configured');
+            if (textEl) {
+                textEl.textContent = this.translatedText(
+                    'vehicle.cloud_unavailable', 'Cloud status unavailable');
+            }
+        } else {
+            if (dot) dot.className = 'dot amber';
+            if (textEl) {
+                textEl.textContent = this.translatedText(
+                    'vehicle.checking', 'Checking...');
+            }
+        }
+    },
+
+    updateCloudControlAvailability: function() {
+        var state = this.vehicleState.cloudState || 'checking';
+        var controls = document.querySelectorAll('[data-requires-cloud="true"]');
+        for (var i = 0; i < controls.length; i++) {
+            controls[i].setAttribute('data-cloud-state', state);
         }
     },
 
