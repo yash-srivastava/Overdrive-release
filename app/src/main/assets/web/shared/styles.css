@@ -447,6 +447,29 @@ input, select { font-family: inherit; }
     animation: none;
 }
 
+/* Compact status pills (for example Live, vehicle lock, and monitoring).
+   Android System WebView 58 does not support flex `gap`, so the dot owns the
+   spacing. Keep that compatibility detail here instead of reimplementing it
+   in every page-specific pill. */
+.compact-status-pill {
+    display: -webkit-inline-flex;
+    display: inline-flex;
+    -webkit-align-items: center;
+    align-items: center;
+}
+
+.compact-status-pill > .compact-status-pill__dot {
+    display: inline-block;
+    -webkit-flex: 0 0 auto;
+    flex: 0 0 auto;
+    margin-right: 6px;
+}
+
+[dir="rtl"] .compact-status-pill > .compact-status-pill__dot {
+    margin-right: 0;
+    margin-left: 6px;
+}
+
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }

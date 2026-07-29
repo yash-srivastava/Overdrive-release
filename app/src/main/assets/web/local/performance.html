@@ -27,7 +27,7 @@
         ];
     </script>
     <script src="../shared/app-tabs.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=18">
+    <link rel="stylesheet" href="../shared/styles.css?v=19">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
     <style>
@@ -274,7 +274,6 @@
         .monitoring-status {
             display: flex;
             align-items: center;
-            gap: 8px;
             padding: 8px 16px;
             background: var(--bg-elevated);
             border-radius: var(--radius-full);
@@ -526,8 +525,8 @@
             <header class="page-header">
                 <h1 class="page-title" data-i18n="performance.page_title">Performance Monitor</h1>
                 <div class="header-actions">
-                    <div class="monitoring-status">
-                        <span class="monitoring-dot" id="monitoringDot"></span>
+                    <div class="monitoring-status compact-status-pill">
+                        <span class="monitoring-dot compact-status-pill__dot" id="monitoringDot"></span>
                         <span id="monitoringText" data-i18n="performance.monitoring">Monitoring</span>
                     </div>
                     <div class="header-badge">

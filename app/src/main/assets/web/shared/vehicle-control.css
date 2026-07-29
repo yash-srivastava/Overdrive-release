@@ -133,7 +133,7 @@
     border-radius: 20px; padding: 5px 12px; font-size: 11px; font-weight: 500; color: var(--vc-text-primary);
     white-space: nowrap; -webkit-flex-shrink: 0; flex-shrink: 0;
 }
-.vc-pill .dot { width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; }
+.vc-pill .dot { width: 6px; height: 6px; border-radius: 50%; }
 .dot.green { background: #22C55E; box-shadow: 0 0 5px #22C55E; }
 .dot.red { background: #EF4444; box-shadow: 0 0 5px #EF4444; }
 .dot.amber { background: #F59E0B; box-shadow: 0 0 5px #F59E0B; }

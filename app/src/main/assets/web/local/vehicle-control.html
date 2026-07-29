@@ -12,7 +12,7 @@
     <meta name="theme-color" content="#00876C">
     <script src="../shared/theme.js?v=5"></script>
     <script src="../shared/app-shell.js?v=2"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=18">
+    <link rel="stylesheet" href="../shared/styles.css?v=19">
     <link rel="stylesheet" href="../shared/vehicle-control.css?v=15">
     <!-- Web fonts loaded async + non-blocking. WebView falls back to system sans-serif if offline. -->
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" media="print" onload="this.media='all'">
@@ -45,11 +45,11 @@
 
                     <!-- Floating status — row 1: connection state pills only -->
                     <div class="vc-status-bar">
-                        <div class="vc-pill">
-                            <span class="dot green"></span><span id="lockStatus" data-i18n="vehicle.locked">Locked</span>
+                        <div class="vc-pill compact-status-pill">
+                            <span class="dot green compact-status-pill__dot"></span><span id="lockStatus" data-i18n="vehicle.locked">Locked</span>
                         </div>
-                        <div class="vc-pill" id="cloudStatus">
-                            <span class="dot amber"></span><span id="cloudStatusText" data-i18n="vehicle.checking">Checking...</span>
+                        <div class="vc-pill compact-status-pill" id="cloudStatus">
+                            <span class="dot amber compact-status-pill__dot"></span><span id="cloudStatusText" data-i18n="vehicle.checking">Checking...</span>
                         </div>
                     </div>
                     <!-- Floating status — row 2: vehicle appearance controls.

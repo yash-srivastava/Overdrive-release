@@ -12,7 +12,7 @@
     <meta name="theme-color" content="#00876C">
     <script src="../shared/theme.js?v=5"></script>
     <script src="../shared/app-shell.js?v=2"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=18">
+    <link rel="stylesheet" href="../shared/styles.css?v=19">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="../shared/leaflet.css" />
@@ -77,8 +77,8 @@
                             <!-- Top Bar -->
                             <div class="camera-top-bar">
                                 <div class="top-bar-left">
-                                    <div class="connection-status" id="connectionStatus">
-                                        <span class="conn-dot"></span>
+                                    <div class="connection-status compact-status-pill" id="connectionStatus">
+                                        <span class="conn-dot compact-status-pill__dot"></span>
                                         <span class="status-text" data-i18n="pip.select_camera">Select Camera</span>
                                     </div>
                                     <div class="decoder-chip" id="decoderChip" style="display:none;">GPU</div>
@@ -300,7 +300,6 @@
         .connection-status {
             display: inline-flex;
             align-items: center;
-            gap: 10px;
             padding: 8px 16px;
             background: var(--lv-pill-bg);
             backdrop-filter: blur(20px);
