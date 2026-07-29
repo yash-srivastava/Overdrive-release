@@ -94,6 +94,7 @@ class MainActivity : AppCompatActivity() {
     private var navigationRailExpanded = false
     private var navigationRailAnimator: ValueAnimator? = null
     private var railItems: List<RailItem> = emptyList()
+    private var railActionItems: List<RailActionItem> = emptyList()
     private lateinit var tvCurrentUrl: TextView
     private lateinit var urlBar: View
     private lateinit var statusIndicator: View
@@ -1407,6 +1408,28 @@ class MainActivity : AppCompatActivity() {
         )
         railItems = items
 
+        val languageClick = View.OnClickListener {
+            com.overdrive.app.ui.dialog.LanguagePickerDialog.show(this) {
+                recreate()
+            }
+        }
+        val helpClick = View.OnClickListener { startOnboardingReplay() }
+        val actions = listOf(
+            RailActionItem(
+                R.id.railLanguageButton,
+                R.drawable.ic_language,
+                R.string.settings_language_label,
+                languageClick
+            ),
+            RailActionItem(
+                R.id.railHelpButton,
+                R.drawable.ic_help,
+                R.string.onboarding_help_cd,
+                helpClick
+            )
+        )
+        railActionItems = actions
+
         // Bind icon + label and click handler per row.
         items.forEach { item ->
             val row = navigationRail.findViewById<View>(item.rowId) ?: return@forEach
@@ -1424,6 +1447,21 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+
+        actions.forEach { item ->
+            val row = navigationRail.findViewById<View>(item.rowId) ?: return@forEach
+            row.findViewById<ImageView>(R.id.railItemIcon)?.setImageResource(item.iconRes)
+            row.findViewById<TextView>(R.id.railItemLabel)?.setText(item.labelRes)
+            val label = getString(item.labelRes)
+            row.contentDescription = label
+            TooltipCompat.setTooltipText(row, label)
+            row.setOnClickListener(item.onClick)
+        }
+
+        // Portrait keeps these actions in the toolbar. Landscape renders
+        // them as full rail rows after the destination list.
+        findViewById<View>(R.id.toolbarLanguageButton)?.setOnClickListener(languageClick)
+        findViewById<View>(R.id.toolbarHelpButton)?.setOnClickListener(helpClick)
 
         val expandButton = navigationRail.findViewById<ImageButton>(R.id.railExpandButton)
         expandButton?.setOnClickListener {
@@ -1466,24 +1504,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Language picker — moved to the toolbar end-cluster so it's
-        // reachable from the top-right at every screen size. Falls back
-        // to the legacy rail-header button if a downstream layout ever
-        // restores it; the dialog itself is the same.
-        val languageClick = View.OnClickListener {
-            com.overdrive.app.ui.dialog.LanguagePickerDialog.show(this) {
-                recreate()
-            }
-        }
-        findViewById<View>(R.id.toolbarLanguageButton)?.setOnClickListener(languageClick)
-        navigationRail.findViewById<View>(R.id.railLanguageButton)?.setOnClickListener(languageClick)
-
-        // Onboarding replay "?" — opens the guide's chapter menu (parked-gated inside
-        // the host). Present in the portrait toolbar AND the landscape rail header; wire
-        // both null-safely since only one exists per orientation.
-        val helpClick = View.OnClickListener { startOnboardingReplay() }
-        findViewById<View>(R.id.toolbarHelpButton)?.setOnClickListener(helpClick)
-        navigationRail.findViewById<View>(R.id.railHelpButton)?.setOnClickListener(helpClick)
     }
 
     private data class RailItem(
@@ -1496,6 +1516,13 @@ class MainActivity : AppCompatActivity() {
         // NavController destination (destinationId == 0) and are skipped by
         // the selection-sync matcher.
         val launchActivity: Class<*>? = null
+    )
+
+    private data class RailActionItem(
+        val rowId: Int,
+        val iconRes: Int,
+        val labelRes: Int,
+        val onClick: View.OnClickListener
     )
 
     /**
@@ -1550,44 +1577,49 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyRailItemLayout(expanded: Boolean) {
+        railItems.forEach { item ->
+            applyRailRowLayout(item.rowId, item.labelRes, expanded)
+        }
+        railActionItems.forEach { item ->
+            applyRailRowLayout(item.rowId, item.labelRes, expanded)
+        }
+    }
+
+    private fun applyRailRowLayout(rowId: Int, labelRes: Int, expanded: Boolean) {
+        val row = navigationRail.findViewById<LinearLayout>(rowId) ?: return
+        val label = row.findViewById<TextView>(R.id.railItemLabel) ?: return
         val horizontalPadding = if (expanded) dp(12) else 0
         val verticalPadding = dp(6)
-        railItems.forEach { item ->
-            val row = navigationRail.findViewById<LinearLayout>(item.rowId)
-                ?: return@forEach
-            val label = row.findViewById<TextView>(R.id.railItemLabel)
-                ?: return@forEach
 
-            row.orientation =
-                if (expanded) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
-            row.gravity =
-                if (expanded) Gravity.CENTER_VERTICAL else Gravity.CENTER
-            row.minimumHeight = dp(56)
-            row.setPadding(
-                horizontalPadding,
-                verticalPadding,
-                horizontalPadding,
-                verticalPadding
-            )
+        row.orientation =
+            if (expanded) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+        row.gravity =
+            if (expanded) Gravity.CENTER_VERTICAL else Gravity.CENTER
+        row.minimumHeight = dp(56)
+        row.setPadding(
+            horizontalPadding,
+            verticalPadding,
+            horizontalPadding,
+            verticalPadding
+        )
 
-            val labelParams = label.layoutParams as LinearLayout.LayoutParams
-            labelParams.width =
-                if (expanded) 0 else ViewGroup.LayoutParams.WRAP_CONTENT
-            labelParams.weight = if (expanded) 1f else 0f
-            labelParams.marginStart = if (expanded) dp(12) else 0
-            labelParams.topMargin = if (expanded) 0 else dp(4)
-            label.layoutParams = labelParams
-            label.gravity =
-                if (expanded) Gravity.START or Gravity.CENTER_VERTICAL
-                else Gravity.CENTER_HORIZONTAL
-            label.visibility = if (expanded) View.VISIBLE else View.GONE
+        val labelParams = label.layoutParams as LinearLayout.LayoutParams
+        labelParams.width =
+            if (expanded) 0 else ViewGroup.LayoutParams.WRAP_CONTENT
+        labelParams.weight = if (expanded) 1f else 0f
+        labelParams.marginStart = if (expanded) dp(12) else 0
+        labelParams.topMargin = if (expanded) 0 else dp(4)
+        label.layoutParams = labelParams
+        label.gravity =
+            if (expanded) Gravity.START or Gravity.CENTER_VERTICAL
+            else Gravity.CENTER_HORIZONTAL
+        label.visibility = if (expanded) View.VISIBLE else View.GONE
 
-            // Compact rows still announce and tooltip their destination even though
-            // the visual label is intentionally absent.
-            val text = getString(item.labelRes)
-            row.contentDescription = text
-            TooltipCompat.setTooltipText(row, if (expanded) null else text)
-        }
+        // Compact rows still announce and tooltip their destination or action
+        // even though the visual label is intentionally absent.
+        val text = getString(labelRes)
+        row.contentDescription = text
+        TooltipCompat.setTooltipText(row, if (expanded) null else text)
     }
 
     private fun updateRailExpandButton(expanded: Boolean) {
