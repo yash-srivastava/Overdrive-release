@@ -1377,6 +1377,15 @@ class RecordingLibraryFragment : Fragment() {
         if (::recordingAdapter.isInitialized) recordingAdapter.setActiveRecording(path)
     }
 
+    /** Actions shared by the row overflow and the landscape detail pane. */
+    fun shareRecording(recording: RecordingFile) {
+        shareSingleRecording(recording)
+    }
+
+    fun requestDeleteRecording(recording: RecordingFile) {
+        confirmDelete(recording)
+    }
+
     /**
      * Per-tile share — invokes the system chooser with a single video URI
      * vended through FileProvider so external apps (Telegram, Mail,

@@ -13,6 +13,7 @@ import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.fragment.app.Fragment
@@ -146,6 +147,9 @@ class RecordingsFragment : Fragment() {
     // -------- Playlist for inline player prev/next --------
     private var currentPlaylist: List<RecordingFile> = emptyList()
     private var currentInlineIndex: Int = -1
+    private var activeInlinePath: String? = null
+    private var selectedInlineRecording: RecordingFile? = null
+    private var initialPreviewScheduled: Boolean = false
 
     /**
      * Whether the inline player is currently maximized (chrome hidden +
@@ -252,6 +256,7 @@ class RecordingsFragment : Fragment() {
         setupPlaceSearch(view)
         setupResetButton(view)
         setupFilterToggle(view)
+        setupPreviewActions(view)
 
         updateDateHeader(view)
         renderActiveFilterAffordances(view)
@@ -352,11 +357,23 @@ class RecordingsFragment : Fragment() {
         }
         lib.onListChanged = { list ->
             currentPlaylist = list
-            val currentPath = currentInlineIndex
-                .takeIf { it in list.indices }
-                ?.let { list[it].path }
-            if (currentPath == null && currentInlineIndex >= 0) {
-                currentInlineIndex = -1
+            activeInlinePath?.let { path ->
+                currentInlineIndex = list.indexOfFirst { it.path == path }
+                if (currentInlineIndex >= 0) {
+                    val active = list[currentInlineIndex]
+                    bindPreviewDetails(active)
+                    lib.setActiveRecording(path)
+                }
+            }
+            if (isLandscape && activeInlinePath == null && list.isNotEmpty() && !initialPreviewScheduled) {
+                initialPreviewScheduled = true
+                val first = list.first()
+                mainHandler.post {
+                    if (isAdded && view != null && activeInlinePath == null &&
+                        !childFragmentManager.isStateSaved) {
+                        showInlinePreview(first, startPaused = true)
+                    }
+                }
             }
         }
         // Library content changed (delete / batch-delete) — re-scan to
@@ -483,9 +500,12 @@ class RecordingsFragment : Fragment() {
      * `layout-land/fragment_recordings.xml`, so this is also a structural
      * safeguard against accidental portrait invocation.
      */
-    private fun showInlinePreview(recording: RecordingFile) {
+    private fun showInlinePreview(recording: RecordingFile, startPaused: Boolean = false) {
         val view = view ?: return
         if (view.findViewById<View>(R.id.previewContainer) == null) return
+
+        activeInlinePath = recording.path
+        bindPreviewDetails(recording)
 
         // Keep currentInlineIndex as an index into the descending currentPlaylist
         // (the on-screen list order) — onListChanged relies on that to track the
@@ -508,6 +528,8 @@ class RecordingsFragment : Fragment() {
                     RecordingUiText.headline(requireContext(), recording)
                 )
                 putBoolean(VideoPlayerFragment.ARG_INLINE, true)
+                putBoolean(VideoPlayerFragment.ARG_COMPACT_INLINE, true)
+                putBoolean(VideoPlayerFragment.ARG_START_PAUSED, startPaused)
                 putStringArray(VideoPlayerFragment.ARG_PLAYLIST_PATHS, paths)
                 putStringArray(VideoPlayerFragment.ARG_PLAYLIST_TITLES, titles)
                 putInt(
@@ -537,6 +559,10 @@ class RecordingsFragment : Fragment() {
         val player = childFragmentManager
             .findFragmentByTag(TAG_INLINE_PLAYER) as? VideoPlayerFragment
             ?: return
+        activeInlinePath = player.arguments?.getString(VideoPlayerFragment.ARG_VIDEO_PATH)
+        activeInlinePath
+            ?.let { path -> currentPlaylist.firstOrNull { it.path == path } }
+            ?.let(::bindPreviewDetails)
         player.isFullscreen = playerFullscreen
         player.onFullscreenToggle = { wantFullscreen ->
             setPlayerFullscreen(wantFullscreen)
@@ -547,9 +573,93 @@ class RecordingsFragment : Fragment() {
     }
 
     private fun onInlinePlayerClipChanged(path: String) {
+        activeInlinePath = path
         val index = currentPlaylist.indexOfFirst { it.path == path }
-        if (index >= 0) currentInlineIndex = index
+        if (index >= 0) {
+            currentInlineIndex = index
+            bindPreviewDetails(currentPlaylist[index])
+        }
         libraryFragment?.setActiveRecording(path)
+    }
+
+    /** Bind the persistent event context around the inline player. */
+    private fun bindPreviewDetails(recording: RecordingFile) {
+        val root = view ?: return
+        selectedInlineRecording = recording
+        root.findViewById<View>(R.id.previewPlaceholder)?.visibility = View.GONE
+        root.findViewById<View>(R.id.previewContent)?.visibility = View.VISIBLE
+
+        root.findViewById<TextView>(R.id.tvPreviewTitle)?.text =
+            RecordingUiText.headline(requireContext(), recording)
+        root.findViewById<TextView>(R.id.tvPreviewFilename)?.text = recording.name
+        root.findViewById<TextView>(R.id.tvPreviewTypeBadge)?.text = when (recording.type) {
+            RecordingFile.RecordingType.NORMAL -> getString(R.string.recording_lib_type_normal)
+            RecordingFile.RecordingType.SENTRY -> getString(R.string.recording_lib_type_event)
+            RecordingFile.RecordingType.PROXIMITY -> getString(R.string.recording_lib_type_proximity)
+            RecordingFile.RecordingType.OEM_DASHCAM -> getString(R.string.recording_lib_type_oem)
+            RecordingFile.RecordingType.REPLAY -> getString(R.string.recording_lib_type_replay)
+        }
+
+        val severity = recording.peakSeverity?.uppercase(Locale.ROOT)
+        root.findViewById<TextView>(R.id.tvPreviewSeverityBadge)?.apply {
+            visibility = if (severity == null) View.GONE else View.VISIBLE
+            text = severity ?: ""
+            setBackgroundColor(
+                when (severity) {
+                    "CRITICAL" -> 0xCCEF4444.toInt()
+                    "ALERT" -> 0xCCF59E0B.toInt()
+                    else -> 0xCC475569.toInt()
+                }
+            )
+        }
+        root.findViewById<TextView>(R.id.tvPreviewDetectedValue)?.text =
+            RecordingUiText.actorAndDistance(requireContext(), recording)
+                ?: getString(R.string.recording_preview_no_detection)
+        root.findViewById<TextView>(R.id.tvPreviewSeverityValue)?.text = when {
+            severity != null -> severity.lowercase(Locale.ROOT).replaceFirstChar { it.titlecase(Locale.ROOT) }
+            recording.type == RecordingFile.RecordingType.SENTRY ||
+                recording.type == RecordingFile.RecordingType.PROXIMITY ->
+                getString(R.string.recording_preview_notice)
+            else -> getString(R.string.recording_preview_standard)
+        }
+        root.findViewById<TextView>(R.id.tvPreviewRecordedValue)?.text =
+            SimpleDateFormat("MMM d, yyyy  h:mm a", Locale.getDefault())
+                .format(Date(recording.timestamp))
+        root.findViewById<TextView>(R.id.tvPreviewDurationValue)?.text =
+            recording.formattedDuration.takeIf { recording.durationMs > 0 } ?: getString(R.string.player_time_zero)
+        root.findViewById<TextView>(R.id.tvPreviewStorageValue)?.text = when (recording.storageType?.uppercase(Locale.ROOT)) {
+            "INTERNAL" -> getString(R.string.recording_preview_storage_internal)
+            "SD_CARD" -> getString(R.string.recording_preview_storage_sd)
+            "USB" -> getString(R.string.recording_preview_storage_usb)
+            else -> getString(R.string.recording_preview_storage_unknown)
+        }
+        root.findViewById<TextView>(R.id.tvPreviewSizeValue)?.text = recording.formattedSize
+    }
+
+    private fun setupPreviewActions(root: View) {
+        root.findViewById<View>(R.id.btnPreviewMore)?.setOnClickListener { anchor ->
+            val recording = selectedInlineRecording ?: return@setOnClickListener
+            val shareTitle = getString(R.string.action_share)
+            val deleteTitle = getString(R.string.action_delete)
+            PopupMenu(requireContext(), anchor).apply {
+                menu.add(shareTitle).setIcon(R.drawable.ic_share)
+                menu.add(deleteTitle).setIcon(R.drawable.ic_delete)
+                setOnMenuItemClickListener { item ->
+                    when (item.title?.toString()) {
+                        shareTitle -> {
+                            libraryFragment?.shareRecording(recording)
+                            true
+                        }
+                        deleteTitle -> {
+                            libraryFragment?.requestDeleteRecording(recording)
+                            true
+                        }
+                        else -> false
+                    }
+                }
+                show()
+            }
+        }
     }
 
     /**
@@ -597,6 +707,10 @@ class RecordingsFragment : Fragment() {
         val previewCard = rootView.findViewById<com.google.android.material.card.MaterialCardView>(
             R.id.previewCard
         )
+        val previewHeader = rootView.findViewById<View>(R.id.previewContentHeader)
+        val previewInsights = rootView.findViewById<View>(R.id.previewInsights)
+        val previewDetails = rootView.findViewById<View>(R.id.previewDetails)
+        val previewContent = rootView.findViewById<View>(R.id.previewContent)
         // The chrome views only exist on the landscape layout; portrait
         // would have already short-circuited in [setPlayerFullscreen].
         if (header == null || filterStrip == null || library == null) return
@@ -652,8 +766,15 @@ class RecordingsFragment : Fragment() {
                 resources.getDimensionPixelSize(R.dimen.page_padding_bottom)
             twoPane.setPadding(pad, twoPane.paddingTop, pad, padBottom)
         }
+        previewContent?.let {
+            val pad = if (fullscreen) 0 else (8 * resources.displayMetrics.density).toInt()
+            it.setPadding(pad, pad, pad, pad)
+        }
         previewCard?.radius = if (fullscreen) 0f else
             resources.getDimension(R.dimen.card_radius_hero)
+        previewHeader?.visibility = if (fullscreen) View.GONE else View.VISIBLE
+        previewInsights?.visibility = if (fullscreen) View.GONE else View.VISIBLE
+        previewDetails?.visibility = if (fullscreen) View.GONE else View.VISIBLE
     }
 
     // -----------------------------------------------------------------

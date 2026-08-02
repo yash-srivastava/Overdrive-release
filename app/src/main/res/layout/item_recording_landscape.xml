@@ -17,7 +17,7 @@
     app:cardBackgroundColor="?attr/colorSurfaceContainer"
     app:cardCornerRadius="14dp"
     app:cardElevation="0dp"
-    app:strokeColor="?attr/colorOutlineVariant"
+    app:strokeColor="@color/recording_card_stroke"
     app:strokeWidth="1dp">
 
     <FrameLayout

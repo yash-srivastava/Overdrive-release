@@ -47,6 +47,10 @@ class VideoPlayerFragment : Fragment() {
          *     host. Errors silently no-op instead of popping.
          */
         const val ARG_INLINE = "inline"
+        /** Use reduced chrome when the host renders the title and details. */
+        const val ARG_COMPACT_INLINE = "compact_inline"
+        /** Open on frame zero with visible controls instead of autoplaying. */
+        const val ARG_START_PAUSED = "start_paused"
         /** Optional: parallel arrays defining a playlist for prev/next. */
         const val ARG_PLAYLIST_PATHS = "playlist_paths"
         const val ARG_PLAYLIST_TITLES = "playlist_titles"
@@ -68,6 +72,7 @@ class VideoPlayerFragment : Fragment() {
     }
 
     private var inlineMode: Boolean = false
+    private var compactInlineMode: Boolean = false
     private var playlistPaths: Array<String> = emptyArray()
     private var playlistTitles: Array<String> = emptyArray()
     private var playlistIndex: Int = -1
@@ -137,6 +142,7 @@ class VideoPlayerFragment : Fragment() {
         set(value) {
             field = value
             refreshFullscreenButton()
+            refreshInlineChrome()
         }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -230,6 +236,7 @@ class VideoPlayerFragment : Fragment() {
         bottomControls = view.findViewById(R.id.bottomControls)
 
         inlineMode = arguments?.getBoolean(ARG_INLINE, false) ?: false
+        compactInlineMode = arguments?.getBoolean(ARG_COMPACT_INLINE, false) ?: false
 
         // Optional playlist for prev/next.
         playlistPaths = arguments?.getStringArray(ARG_PLAYLIST_PATHS) ?: emptyArray()
@@ -253,13 +260,17 @@ class VideoPlayerFragment : Fragment() {
         if (inlineMode) {
             btnBack.visibility = View.GONE
         }
+        refreshInlineChrome()
 
         // Read playhead + playing intent stashed across config changes
         // (rotation, dark mode, etc). Don't apply yet — loadVideo calls
         // setVideoURI which resets the resume policy. Apply right after
         // the URI is set, while the prepare is still in flight.
         val restorePositionMs = savedInstanceState?.getInt(STATE_POSITION_MS, 0) ?: 0
-        val restoreWasPlaying = savedInstanceState?.getBoolean(STATE_WAS_PLAYING, true) ?: true
+        val startPaused = arguments?.getBoolean(ARG_START_PAUSED, false) ?: false
+        val restoreWasPlaying = savedInstanceState
+            ?.getBoolean(STATE_WAS_PLAYING, !startPaused)
+            ?: !startPaused
 
         loadVideo(initialPath, initialTitle)
 
@@ -307,6 +318,20 @@ class VideoPlayerFragment : Fragment() {
             btn.setImageResource(R.drawable.ic_fullscreen)
             btn.contentDescription = getString(R.string.cd_player_maximize)
         }
+    }
+
+    /**
+     * The landscape host already provides a headline, filename, severity and
+     * metadata around the player. Keep the embedded overlay compact so those
+     * labels are not duplicated. Fullscreen restores the complete player
+     * chrome because the host context is hidden in that state.
+     */
+    private fun refreshInlineChrome() {
+        if (!::tvTitle.isInitialized) return
+        val showFullChrome = !compactInlineMode || isFullscreen
+        tvTitle.visibility = if (showFullChrome) View.VISIBLE else View.GONE
+        tvMeta.visibility = if (showFullChrome) View.VISIBLE else View.GONE
+        quadrantBar?.visibility = if (showFullChrome) View.VISIBLE else View.GONE
     }
 
     private fun updatePrevNextVisibility() {
@@ -645,7 +670,9 @@ class VideoPlayerFragment : Fragment() {
         // bottom controls. quadrantBar joining this group is intentional:
         // the user shouldn't see "switch camera" handles floating over a
         // playing-but-controls-hidden video.
-        val chrome = listOfNotNull(topBar, quadrantBar, bottomControls)
+        val activeQuadrantBar = quadrantBar?.takeIf { !compactInlineMode || isFullscreen }
+        if (activeQuadrantBar == null) quadrantBar?.visibility = View.GONE
+        val chrome = listOfNotNull(topBar, activeQuadrantBar, bottomControls)
         if (visible) {
             for (v in chrome) {
                 v.animate().cancel()

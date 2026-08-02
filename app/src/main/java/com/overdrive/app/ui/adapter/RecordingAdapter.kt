@@ -17,7 +17,6 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.card.MaterialCardView
-import com.google.android.material.color.MaterialColors
 import com.overdrive.app.ui.model.RecordingFile
 import com.overdrive.app.R
 import com.overdrive.app.ui.util.RecordingUiText
@@ -297,16 +296,14 @@ class RecordingAdapter(
             val active = !selectMode && recording.path == activeRecordingPath
             activeIndicator?.visibility = if (active) View.VISIBLE else View.GONE
             card?.let { recordingCard ->
+                // Keep selection styling resource-driven. The previous implementation
+                // performed a strict MaterialColors lookup of android:colorAccent on
+                // the first tap. Theme.Material3 does not guarantee that legacy
+                // framework attribute, so the lookup could throw and take down the
+                // whole app before the player was even mounted.
+                recordingCard.isSelected = active
                 val density = recordingCard.resources.displayMetrics.density
                 recordingCard.strokeWidth = ((if (active) 2 else 1) * density).toInt()
-                val colorAttr = if (active) {
-                    android.R.attr.colorAccent
-                } else {
-                    android.R.attr.textColorSecondary
-                }
-                recordingCard.setStrokeColor(
-                    MaterialColors.getColor(recordingCard, colorAttr)
-                )
             }
         }
 

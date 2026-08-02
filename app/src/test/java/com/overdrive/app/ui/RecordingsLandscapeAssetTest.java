@@ -54,6 +54,39 @@ public class RecordingsLandscapeAssetTest {
         assertTrue(row.contains("android:layout_width=\"56dp\""));
     }
 
+    @Test
+    public void selectedRecordingPaneKeepsPlayerAndContextTogether() throws IOException {
+        String page = readRepositoryFile(
+                "app/src/main/res/layout-land/fragment_recordings.xml");
+        String host = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/ui/fragment/RecordingsFragment.kt");
+
+        assertTrue(page.contains("android:id=\"@+id/previewContent\""));
+        assertTrue(page.contains("android:id=\"@+id/previewContainer\""));
+        assertTrue(page.contains("android:id=\"@+id/tvPreviewDetectedValue\""));
+        assertTrue(page.contains("android:id=\"@+id/tvPreviewSeverityValue\""));
+        assertTrue(page.contains("android:id=\"@+id/previewDetails\""));
+        assertTrue(host.contains("putBoolean(VideoPlayerFragment.ARG_COMPACT_INLINE, true)"));
+        assertTrue(host.contains("showInlinePreview(first, startPaused = true)"));
+    }
+
+    @Test
+    public void selectingARowDoesNotRequireLegacyThemeColorAccent() throws IOException {
+        String row = readRepositoryFile(
+                "app/src/main/res/layout/item_recording_landscape.xml");
+        String stroke = readRepositoryFile(
+                "app/src/main/res/color/recording_card_stroke.xml");
+        String adapter = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/ui/adapter/RecordingAdapter.kt");
+
+        assertTrue(row.contains("app:strokeColor=\"@color/recording_card_stroke\""));
+        assertTrue(stroke.contains("android:state_selected=\"true\""));
+        assertTrue(stroke.contains("?attr/colorPrimary"));
+        assertFalse(adapter.contains("android.R.attr.colorAccent"));
+        assertFalse(adapter.contains("MaterialColors.getColor(recordingCard"));
+        assertTrue(adapter.contains("recordingCard.isSelected = active"));
+    }
+
     private static String readRepositoryFile(String relativePath) throws IOException {
         Path current = Paths.get(System.getProperty("user.dir"))
                 .toAbsolutePath().normalize();

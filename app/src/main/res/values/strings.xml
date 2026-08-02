@@ -1003,6 +1003,19 @@
     <!-- Landscape recordings preview placeholder (right pane). -->
     <string name="recordings_preview_placeholder_title">Select a recording</string>
     <string name="recordings_preview_placeholder_body">Tap any item on the left to play it.</string>
+    <string name="recording_preview_detected">Detected</string>
+    <string name="recording_preview_no_detection">No detection</string>
+    <string name="recording_preview_severity">Severity</string>
+    <string name="recording_preview_notice">Notice</string>
+    <string name="recording_preview_standard">Standard</string>
+    <string name="recording_preview_recorded">Recorded</string>
+    <string name="recording_preview_duration">Duration</string>
+    <string name="recording_preview_storage">Storage</string>
+    <string name="recording_preview_file_size">File size</string>
+    <string name="recording_preview_storage_internal">Internal</string>
+    <string name="recording_preview_storage_sd">SD card</string>
+    <string name="recording_preview_storage_usb">USB</string>
+    <string name="recording_preview_storage_unknown">Unknown</string>
     <string name="recording_headline_activity">Activity detected</string>
     <string name="recording_headline_motion">Motion detected</string>
     <string name="recording_headline_dashcam">Dashcam recording</string>
