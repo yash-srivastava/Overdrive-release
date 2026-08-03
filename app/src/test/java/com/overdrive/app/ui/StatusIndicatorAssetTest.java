@@ -18,10 +18,12 @@ public class StatusIndicatorAssetTest {
         String styles = readRepositoryFile("app/src/main/assets/web/shared/styles.css");
 
         assertTrue(styles.contains(".compact-status-pill > .compact-status-pill__dot"));
-        // Scoped: "margin-right: 6px" also matches unrelated rules in this sheet.
+        // Scoped: the shared 8px icon/label rhythm must not regress to a cramped value.
         assertTrue(ruleFor(styles, ".compact-status-pill > .compact-status-pill__dot")
-                .contains("margin-right: 6px"));
+                .contains("margin-right: 8px"));
         assertTrue(styles.contains("[dir=\"rtl\"] .compact-status-pill"));
+        assertTrue(styles.contains(".app-chip > * + *"));
+        assertTrue(styles.contains("--app-chip-gap: 8px"));
     }
 
     @Test

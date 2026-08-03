@@ -20,7 +20,7 @@ public class ChargingSessionQualityAssetTest {
         assertTrue(html.contains("calibration-badge"));
         assertTrue(html.contains("detailQualityWarning"));
         assertTrue(html.contains("margin: 10px 0 14px"));
-        assertTrue(html.contains("charging.js?v=33"));
+        assertTrue(html.contains("charging.js?v=34"));
         assertTrue(js.contains("s.powerDataQuality === 'poisoned'"));
         assertTrue(js.contains("BYD.utils.alertDialog"));
         assertTrue(js.contains("quality-info-button"));

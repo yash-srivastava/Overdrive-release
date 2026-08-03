@@ -981,10 +981,13 @@
 
     <!-- Recordings page (header + segmented control + page actions) -->
     <string name="recordings_title">Recordings</string>
+    <string name="recordings_title_in_car">In-Car Recordings</string>
     <string name="recordings_segment_dashcam">Dashcam</string>
     <string name="recordings_segment_replays">Replays</string>
     <string name="recordings_segment_surveillance">Surveillance</string>
     <string name="recordings_action_settings">Settings</string>
+    <string name="recordings_action_filters">Filters</string>
+    <string name="recordings_action_filters_count">Filters · %1$d</string>
     <!-- Hero subtitle: "%1$d today · %2$d total · %3$s" where %3$s is a pre-formatted size like "42 GB". -->
     <string name="recordings_summary_format">%1$d today · %2$d total · %3$s</string>
     <!-- Header text when the daemon's recordings index is down. The counters
@@ -1000,6 +1003,48 @@
     <!-- Landscape recordings preview placeholder (right pane). -->
     <string name="recordings_preview_placeholder_title">Select a recording</string>
     <string name="recordings_preview_placeholder_body">Tap any item on the left to play it.</string>
+    <string name="recording_headline_activity">Activity detected</string>
+    <string name="recording_headline_motion">Motion detected</string>
+    <string name="recording_headline_dashcam">Dashcam recording</string>
+    <string name="recording_headline_forward_camera">Forward-camera recording</string>
+    <string name="recording_headline_replay">Instant replay</string>
+    <plurals name="recording_headline_person">
+        <item quantity="one">Person detected</item>
+        <item quantity="other">%1$d people detected</item>
+    </plurals>
+    <plurals name="recording_headline_vehicle">
+        <item quantity="one">Vehicle detected</item>
+        <item quantity="other">%1$d vehicles detected</item>
+    </plurals>
+    <plurals name="recording_headline_bike">
+        <item quantity="one">Bike detected</item>
+        <item quantity="other">%1$d bikes detected</item>
+    </plurals>
+    <plurals name="recording_headline_animal">
+        <item quantity="one">Animal detected</item>
+        <item quantity="other">%1$d animals detected</item>
+    </plurals>
+    <plurals name="recording_actor_person">
+        <item quantity="one">%1$d person</item>
+        <item quantity="other">%1$d people</item>
+    </plurals>
+    <plurals name="recording_actor_vehicle">
+        <item quantity="one">%1$d vehicle</item>
+        <item quantity="other">%1$d vehicles</item>
+    </plurals>
+    <plurals name="recording_actor_bike">
+        <item quantity="one">%1$d bike</item>
+        <item quantity="other">%1$d bikes</item>
+    </plurals>
+    <plurals name="recording_actor_animal">
+        <item quantity="one">%1$d animal</item>
+        <item quantity="other">%1$d animals</item>
+    </plurals>
+    <string name="recording_distance_very_close">Very close</string>
+    <string name="recording_distance_close">Close</string>
+    <string name="recording_distance_mid">Mid-range</string>
+    <string name="recording_distance_far">Far</string>
+    <string name="cd_recording_more_actions">More recording actions</string>
 
     <!-- Diagnostics page -->
     <string name="diagnostics_section_adb_console">ADB Console</string>
@@ -1088,6 +1133,31 @@
     <string name="dashboard_chip_recording_idle">Idle</string>
     <string name="dashboard_vehicle_tap_to_set">Tap to set</string>
     <string name="dashboard_vehicle_summary">%1$.1f kWh · %2$s</string>
+    <string name="dashboard_vehicle_soc_metric">SOC %1$.0f%%</string>
+    <string name="dashboard_vehicle_soh_metric">SOH %1$.0f%%</string>
+    <string name="dashboard_vehicle_soh_metric_estimated">SOH %1$.0f%% est.</string>
+    <string name="dashboard_vehicle_capacity_metric">%1$.1f kWh</string>
+    <string name="dashboard_vehicle_soc_value">%1$.0f%%</string>
+    <string name="dashboard_vehicle_art_description">White vehicle profile</string>
+    <string name="dashboard_state_of_charge">State of charge</string>
+    <string name="dashboard_soc_pending">--%</string>
+    <string name="dashboard_range_pending">-- km</string>
+    <string name="dashboard_soh_pending">SOH --</string>
+    <string name="dashboard_vehicle_range_km">%1$.0f km</string>
+    <string name="dashboard_vehicle_range_miles">%1$.0f mi</string>
+    <string name="dashboard_vehicle_soh_value">SOH %1$.0f%%</string>
+    <string name="dashboard_charge_completion">%1$s &#183; Full at %2$s</string>
+    <string name="dashboard_charge_completion_calculated">~%1$s &#183; Full at %2$s</string>
+    <string name="dashboard_charge_target_completion">%1$s &#183; %2$d%% at %3$s</string>
+    <string name="dashboard_charge_target_completion_calculated">~%1$s &#183; %2$d%% at %3$s</string>
+    <string name="dashboard_charge_complete">Charge complete</string>
+    <string name="dashboard_charge_waiting">Waiting to charge</string>
+    <string name="dashboard_charge_duration_hours">%1$dh %2$02dm</string>
+    <string name="dashboard_charge_duration_minutes">%1$dm</string>
+    <string name="dashboard_vehicle_telemetry_pending">Waiting for vehicle telemetry</string>
+    <string name="dashboard_vehicle_telemetry_linked">Telemetry linked</string>
+    <string name="dashboard_live_camera">Live camera</string>
+    <string name="dashboard_open_view">Open view</string>
     <string name="vehicle_dialog_title">Set battery capacity</string>
     <string name="vehicle_dialog_capacity_label">Capacity</string>
     <string name="vehicle_dialog_capacity_suffix">kWh</string>
@@ -1116,6 +1186,8 @@
     <string name="dashboard_action_live">Live</string>
     <string name="dashboard_action_live_subtitle">Open camera view</string>
     <string name="dashboard_action_recordings">Recordings</string>
+    <string name="dashboard_action_charging">Charging</string>
+    <string name="dashboard_quick_actions">Quick actions</string>
     <string name="dashboard_action_settings">Settings</string>
     <string name="dashboard_action_settings_subtitle">Preferences and about</string>
 

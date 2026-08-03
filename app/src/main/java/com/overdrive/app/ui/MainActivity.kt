@@ -1359,6 +1359,10 @@ class MainActivity : AppCompatActivity() {
         // Brand version + device id used to live in the drawer header; in the
         // rail-based shell they're surfaced on the Dashboard card instead.
     }
+
+    fun setWebPageTitle(title: String) {
+        if (::toolbar.isInitialized) toolbar.title = title
+    }
     
     private fun setupNavigation(savedInstanceState: Bundle?) {
         setSupportActionBar(toolbar)

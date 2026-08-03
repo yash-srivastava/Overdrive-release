@@ -1,6 +1,7 @@
 package com.overdrive.app.ui.fragment
 
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -785,15 +786,19 @@ class RecordingLibraryFragment : Fragment() {
     // -----------------------------------------------------------------
 
     private fun setupRecordingsList() {
+        val embeddedLandscape =
+            arguments?.getBoolean(ARG_HIDE_INTERNAL_FILTERS, false) == true &&
+                resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         recordingAdapter = RecordingAdapter(
             onPlay = { recording -> playRecording(recording) },
             onDelete = { recording -> confirmDelete(recording) },
             onSelectionChanged = { count -> onSelectionChanged(count) },
-            onShare = { recording -> shareSingleRecording(recording) }
+            onShare = { recording -> shareSingleRecording(recording) },
+            landscapeRows = embeddedLandscape
         )
 
         recyclerRecordings.apply {
-            layoutManager = GridLayoutManager(context, 2)
+            layoutManager = GridLayoutManager(context, if (embeddedLandscape) 1 else 2)
             adapter = recordingAdapter
             setHasFixedSize(true)
         }
@@ -1318,6 +1323,7 @@ class RecordingLibraryFragment : Fragment() {
     // -----------------------------------------------------------------
 
     private fun playRecording(recording: RecordingFile) {
+        recordingAdapter.setActiveRecording(recording.path)
         onPlayRecording?.let {
             it(recording)
             return
@@ -1364,6 +1370,11 @@ class RecordingLibraryFragment : Fragment() {
                 Toast.makeText(context, getString(R.string.toast_cannot_play_video, e2.message ?: ""), Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    /** Keep the event row highlight in sync with inline player navigation. */
+    fun setActiveRecording(path: String?) {
+        if (::recordingAdapter.isInitialized) recordingAdapter.setActiveRecording(path)
     }
 
     /**

@@ -321,10 +321,15 @@ public final class LauncherApiHandler {
             o.put("active", active);
 
             double kw = 0;
+            boolean full = false;
             try {
                 com.overdrive.app.monitor.ChargingStateData cs =
                         com.overdrive.app.monitor.VehicleDataMonitor.getInstance().getChargingState();
-                if (cs != null) kw = cs.chargingPowerKW;
+                if (cs != null) {
+                    kw = cs.chargingPowerKW;
+                    full = cs.status
+                            == com.overdrive.app.monitor.ChargingStateData.ChargingStatus.FINISHED;
+                }
             } catch (Throwable ignored) {}
             o.put("kw", round1(kw));
 
@@ -336,17 +341,26 @@ public final class LauncherApiHandler {
             } catch (Throwable ignored) {}
             o.put("targetPct", targetPct);
 
-            // etaMin: time-to-full of the open charging session, else null.
+            // etaMin: the same direct-vehicle-first live resolver used by the
+            // dashboard and Charging Stats (never a stale open-session latch).
             Object etaMin = JSONObject.NULL;
+            Object etaSource = JSONObject.NULL;
+            Object completionEpochMs = JSONObject.NULL;
+            Object completionTargetPercent = JSONObject.NULL;
             try {
-                com.overdrive.app.monitor.SocHistoryDatabase db =
-                        com.overdrive.app.monitor.SocHistoryDatabase.getInstance();
-                if (db != null && db.getOpenChargingSessionStart() > 0) {
-                    int ttf = db.getOpenChargingSessionTimeToFullMin();
-                    if (ttf > 0) etaMin = ttf;
+                com.overdrive.app.charging.ChargingCompletionEstimate eta =
+                        com.overdrive.app.charging.ChargingCompletionEstimate.resolveLive(active, full);
+                if (eta.isAvailable()) {
+                    etaMin = eta.minutes;
+                    etaSource = eta.source;
+                    completionEpochMs = eta.completionEpochMs;
+                    completionTargetPercent = eta.targetPercent;
                 }
             } catch (Throwable ignored) {}
             o.put("etaMin", etaMin);
+            o.put("etaSource", etaSource);
+            o.put("completionEpochMs", completionEpochMs);
+            o.put("completionTargetPercent", completionTargetPercent);
 
             // lossPct: no charge-loss accounting source exists in core → null.
             o.put("lossPct", JSONObject.NULL);

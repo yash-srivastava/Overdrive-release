@@ -16,7 +16,8 @@
 var CHARGING = {
     // ---- State ----
     currentOffset: 0,
-    currentDays: 30,
+    // Must match the initially active range button in charging.html.
+    currentDays: 7,
     // Custom date range (epoch-ms). When _rangeFrom != null the session list +
     // period summary query by range instead of currentDays. _rangeFrom/_rangeTo
     // null = use currentDays (0 = all time).
@@ -29,7 +30,9 @@ var CHARGING = {
     _calToKey: null,          // "YYYY-MM-DD" selected To, or null
     pageSize: 20,
     sessions: [],
+    sortOrder: 'recent',
     currentSessionId: null,
+    _currentDetailSession: null,
     samplesCache: null,       // samples for the open detail session
     socHistoryCache: null,    // SoC-over-time series
     summaryCache: null,
@@ -62,6 +65,7 @@ var CHARGING = {
     // each canvas element (canvas._chgHoverSpec / _chgHoverIdx), so no shared
     // field here — multiple detail charts hover independently.
     socHours: 168,            // SoC chart window in hours (period selector; default 7d)
+    _liveRefreshTimer: null,
     // Canvas palette — dark defaults, replaced by _refreshPalette() reading the
     // --chart-* CSS variables on theme flip (same pattern as trips.js).
     colors: {
@@ -95,6 +99,7 @@ var CHARGING = {
             // SOH/cost/energy charts stayed blank until a reload landed ON Stats.
             // Repaint when Stats becomes active. Defer a tick so layout settles.
             var id = (ev && ev.detail) ? ev.detail.id : null;
+            self._syncTabPresentation(id);
             if (id === 'stats') {
                 setTimeout(function () {
                     if (self.summaryCache) self._renderSummaryCharts(self.summaryCache);
@@ -103,6 +108,24 @@ var CHARGING = {
                         if (c) self.renderSocOverTime(c, self.socHistoryCache);
                     }
                 }, 0);
+            }
+        });
+
+        // The BYD head unit can switch the shared tab content without
+        // delivering the document-level CustomEvent above. Observe the tab
+        // click as a compatibility path so presentation outside the WebView's
+        // tab body (notably the native toolbar) still follows the active tab.
+        document.addEventListener('click', function (ev) {
+            var tab = ev.target;
+            while (tab && tab !== document &&
+                    !(tab.classList && tab.classList.contains('bottom-tab'))) {
+                tab = tab.parentNode;
+            }
+            if (tab && tab !== document) {
+                var tabId = tab.getAttribute('data-tab-target');
+                if (tabId) {
+                    setTimeout(function () { self._syncTabPresentation(tabId); }, 0);
+                }
             }
         });
 
@@ -125,7 +148,34 @@ var CHARGING = {
         });
 
         this._showSkeleton();
+        setTimeout(function () { self._syncTabPresentation(); }, 0);
         this.bootstrap();
+        // Keep the completion countdown live while this long-lived WebView is
+        // visible. The native shell preserves the page between tab switches,
+        // so relying on page load alone leaves the ETA frozen indefinitely.
+        if (!this._liveRefreshTimer) {
+            this._liveRefreshTimer = setInterval(function () {
+                if (document.visibilityState !== 'hidden' && !self._writing) {
+                    self.loadSummary();
+                }
+            }, 15000);
+        }
+    },
+
+    _syncTabPresentation: function (activeId) {
+        var id = activeId;
+        if (!id) {
+            var active = document.querySelector('.bottom-tab.is-active');
+            if (active) id = active.getAttribute('data-tab-target');
+        }
+        var title = this._t('charge.title', 'Charging');
+        if (id === 'stats') title = this._t('charge.tab_stats', 'Stats');
+        else if (id === 'settings') title = this._t('charge.tab_settings', 'Settings');
+        this._setText('chargingPageTitle', title);
+        this._setText('chargingMobileTitle', title);
+        if (window.AndroidBridge && typeof AndroidBridge.setPageTitle === 'function') {
+            try { AndroidBridge.setPageTitle(title); } catch (e) { /* standalone web */ }
+        }
     },
 
     _refreshPalette: function () {
@@ -135,6 +185,8 @@ var CHARGING = {
                 var v = (s.getPropertyValue(name) || '').trim();
                 return v || fallback;
             };
+            this.colors.brand      = pick('--brand-primary',     this.colors.brand);
+            this.colors.brandRgba  = this._rgba(this.colors.brand, 0.22);
             this.colors.text       = pick('--chart-text',        this.colors.text);
             this.colors.textStrong = pick('--chart-text-strong', this.colors.textStrong);
             this.colors.grid       = pick('--chart-grid',        this.colors.grid);
@@ -162,6 +214,13 @@ var CHARGING = {
     _repaintAll: function () {
         var self = this;
         var tryPaint = function (fn) { try { fn(); } catch (e) {} };
+        tryPaint(function () {
+            if (self.summaryCache) {
+                var live = self.summaryCache.live || {};
+                var soc = live.socPercent != null && live.socPercent >= 0 ? live.socPercent : 0;
+                self.renderCircleGauge('socCircleCanvas', soc, self.colors.brand);
+            }
+        });
         tryPaint(function () {
             if (self.socHistoryCache) {
                 var c = document.getElementById('socChart');
@@ -303,23 +362,38 @@ var CHARGING = {
 
         // Hero gauges.
         var live = s.live || {};
-        var soc = (live.socPercent !== undefined && live.socPercent !== null) ? live.socPercent : 0;
+        var hasSoc = live.socPercent !== undefined && live.socPercent !== null && live.socPercent >= 0;
+        var soc = hasSoc ? live.socPercent : 0;
         this.renderCircleGauge('socCircleCanvas', soc, this.colors.brand);
-        this._setText('socCircleValue', soc > 0 ? Math.round(soc) + '%' : '--');
+        this._setText('socCircleValue', hasSoc ? Math.round(soc) + '%' : '--');
+        var hasRange = live.rangeKm !== undefined && live.rangeKm !== null && live.rangeKm >= 0;
+        this._setText('socRangeValue', hasRange ? this._dist(live.rangeKm) : '--');
+        var hasSoh = live.sohPercent !== undefined && live.sohPercent !== null
+            && live.sohPercent > 0 && live.sohPercent <= 100;
+        this._setText('socSohValue', hasSoh ? 'SOH ' + Math.round(live.sohPercent) + '%' : 'SOH --');
 
         var isCharging = live.charging === true;
         var liveKwh = (live.sessionKwh != null && live.sessionKwh > 0) ? live.sessionKwh : 0;
+        var completion = (window.BYD && BYD.core && BYD.core.formatChargingCompletion)
+            ? BYD.core.formatChargingCompletion(live) : null;
+        this._showCard('completionHeroCard', !!completion);
+        this._setText('completionHeroValue', completion ? completion.primary : '--');
+        this._setText('completionHeroSub', completion ? completion.secondary : '');
 
-        // Energy hero. While a charge is in progress, show the LIVE session
-        // energy (period rollup only counts COMPLETED sessions, so it would read
-        // "--" mid-charge — exactly the "Added this period stays empty" report).
+        // Average-power hero. Prefer trustworthy live BMS power while charging;
+        // otherwise derive a duration-weighted average from the real sessions in
+        // the selected period. Never present the SOC-rate fallback as measured.
         var energy = s.periodEnergyKwh || 0;
-        if (isCharging && liveKwh > 0) {
-            this._setText('kwhHeroValue', liveKwh.toFixed(1));
-            this._setText('kwhHeroLabel', this._t('charge.hero_energy_live', 'Added this session'));
+        var periodPower = this._periodAveragePower(live);
+        this._setText('kwhHeroLabel', this._t('charge.hero_avg_power', 'Average power'));
+        this._setText('kwhHeroValue', periodPower.value > 0 ? periodPower.value.toFixed(1) : '--');
+        this._setText('kwhHeroUnit', 'kW');
+        if (periodPower.live) {
+            this._setText('kwhHeroSub', this._t('charge.power_live', 'Live measured power'));
+        } else if (periodPower.value > 0) {
+            this._setText('kwhHeroSub', this._t('charge.power_period', 'Across the selected period'));
         } else {
-            this._setText('kwhHeroValue', energy > 0 ? energy.toFixed(1) : '--');
-            this._setText('kwhHeroLabel', this._t('charge.hero_energy', 'Added this period'));
+            this._setText('kwhHeroSub', this._t('charge.power_waiting', 'Available after a recorded charge'));
         }
 
         // Cost hero. A flat "cost per kWh" (just the configured rate) carried no
@@ -387,6 +461,8 @@ var CHARGING = {
         this._showCard('monthlyCostCard', hasCost);
         this._showCard('efficiencyCard', hasEfficiency);
         this._showCard('lifetimeCard', hasSessions);
+        this._showCard('statsLowerGrid', hasEfficiency || hasSessions);
+        this._showCard('statsTrendGrid', hasSohTrend || hasCost);
 
         // Stats-tab empty state: nothing session-derived to show yet. Tailor the
         // hint to whether recording is even enabled. NOTE: a charge in progress
@@ -403,6 +479,32 @@ var CHARGING = {
         }
 
         this._renderSummaryCharts(s);
+    },
+
+    _periodAveragePower: function (live) {
+        if (live && live.charging === true && live.isEstimated !== true && live.powerKw > 0.15) {
+            return { value: live.powerKw, live: true };
+        }
+
+        var totalEnergy = 0;
+        var totalHours = 0;
+        var fallbackTotal = 0;
+        var fallbackCount = 0;
+        var rows = this.sessions || [];
+        for (var i = 0; i < rows.length; i++) {
+            var session = rows[i];
+            if (!session || session.inProgress === true) continue;
+            if (session.energyAdded > 0 && session.durationMinutes > 0) {
+                totalEnergy += session.energyAdded;
+                totalHours += session.durationMinutes / 60;
+            } else if (session.avgPower > 0) {
+                fallbackTotal += session.avgPower;
+                fallbackCount++;
+            }
+        }
+        if (totalEnergy > 0 && totalHours > 0) return { value: totalEnergy / totalHours, live: false };
+        if (fallbackCount > 0) return { value: fallbackTotal / fallbackCount, live: false };
+        return { value: 0, live: false };
     },
 
     _showCard: function (id, show) {
@@ -450,10 +552,16 @@ var CHARGING = {
         if (!grid) return;
         grid.innerHTML = '';
         var self = this;
-        for (var i = 0; i < this.sessions.length; i++) {
+        var displayedSessions = this.sessions.slice(0);
+        displayedSessions.sort(function (a, b) {
+            var at = a && a.startTime ? a.startTime : 0;
+            var bt = b && b.startTime ? b.startTime : 0;
+            return self.sortOrder === 'oldest' ? at - bt : bt - at;
+        });
+        for (var i = 0; i < displayedSessions.length; i++) {
             (function (s) {
                 var card = document.createElement('article');
-                card.className = 'session-card';
+                card.className = 'session-card app-surface-card app-surface-card--interactive';
                 card.setAttribute('role', 'button');
                 card.setAttribute('tabindex', '0');
 
@@ -473,57 +581,74 @@ var CHARGING = {
                     : '';
                 var dur = (s.durationMinutes != null) ? self._fmtDuration(s.durationMinutes) : '';
                 var costStr = (s.cost != null && s.cost > 0) ? self._money(s.cost) : '';
+                var rangeStr = (s.rangeGained != null && s.rangeGained > 0) ? self._dist(s.rangeGained) : '--';
                 // Odometer at charge start (unit-aware), only when captured (>0).
                 var odoStr = (s.startOdometerKm != null && s.startOdometerKm > 0) ? self._dist(s.startOdometerKm) : '';
                 var locStr = self._locationLabel(s);   // place name, else coords, else ''
                 var inProgress = s.inProgress === true;
 
-                // Time range: "start → end" (clock times), or "start → now" while
-                // charging. Shown in the meta row alongside duration.
-                var startClock = self._fmtClock(s.startTime);
-                var endClock = inProgress
-                    ? self._t('charge.now', 'now')
-                    : (s.endTime && s.endTime > s.startTime ? self._fmtClock(s.endTime) : '');
-                var timeRange = startClock + (endClock ? ' → ' + endClock : '');
-
-                // Always show the power chip in the pill (peak for finished, live
-                // for in-progress) — the user wants kW visible regardless of state.
                 var powerChip = peakStr;
+                var socFill = (s.endSoc != null && s.endSoc > 0) ? Math.max(0, Math.min(100, s.endSoc)) : 0;
+                var contextValue = '--';
+                var contextLabel = self._t('charge.summary_cost', 'Cost');
+                var contextIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7a3 3 0 0 1 3-3h11v16H7a3 3 0 0 1-3-3V7z"/><path d="M4 8h14M14 12h7v5h-7a2.5 2.5 0 0 1 0-5z"/></svg>';
+                if (locStr) {
+                    contextValue = locStr;
+                    contextLabel = self._t('charge.detail_location', 'Location');
+                    contextIcon = self._pinIcon();
+                } else if (costStr) {
+                    contextValue = costStr;
+                } else if (odoStr) {
+                    contextValue = odoStr;
+                    contextLabel = self._t('charge.detail_odometer', 'Odometer');
+                    contextIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17a8 8 0 1 1 16 0"/><path d="m12 13 4-4"/><path d="M7 17h10"/></svg>';
+                }
+
+                card.setAttribute('aria-label', typeLabel + ', ' + energy);
                 card.innerHTML =
-                    '<div class="session-card-top">' +
-                        '<span class="session-type session-type-' + kind + '">' +
-                            self._typeIcon(kind) + '<span>' + typeLabel + '</span>' +
-                            (powerChip ? '<span class="session-type-peak">' + powerChip + '</span>' : '') +
-                        '</span>' +
-                        (inProgress
-                            ? '<span class="session-live"><span class="session-live-dot"></span>' + self._esc(self._t('charge.in_progress', 'Charging now')) + '</span>'
-                            : '<span class="session-date">' + self._fmtDate(s.startTime) + '</span>') +
+                    '<div class="session-primary">' +
+                        '<div class="session-kind-row">' +
+                            '<span class="session-type session-type-' + kind + ' app-chip">' +
+                                '<span class="session-type-dot"></span><span>' + self._esc(typeLabel) + '</span>' +
+                            '</span>' +
+                            (powerChip ? '<span class="session-power-chip app-chip">' + self._esc(powerChip) + '</span>' : '') +
+                        '</div>' +
+                        '<div class="session-energy-row">' +
+                            '<div class="session-energy">' + self._esc(energy) + '</div>' +
+                            (inProgress
+                                ? '<span class="session-live app-chip compact-status-pill"><span class="session-live-dot app-chip__dot compact-status-pill__dot"></span><span>' + self._esc(self._t('charge.in_progress', 'Charging now')) + '</span></span>'
+                                : '') +
+                        '</div>' +
+                        '<div class="session-soc-row">' +
+                            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="16" height="12" rx="2"/><path d="M21 10v4"/></svg>' +
+                            '<span>' + self._esc(socRange || '--') + '</span>' +
+                            '<span class="session-soc-track"><span class="session-soc-fill" style="width:' + socFill + '%"></span></span>' +
+                        '</div>' +
+                        (calibration ? '<div class="calibration-badge">LFP CALIBRATION</div>' : '') +
+                        (poisoned ? '<div class="quality-warning">' + self._qualityWarningContent(
+                            self._t('charge.quality_warning_short', 'Contradictory power and charging energy hidden.')) + '</div>' : '') +
                     '</div>' +
-                    // Headline figures: energy added + cost, side by side and prominent.
-                    '<div class="session-figures">' +
-                        '<div class="session-energy">' + energy + '</div>' +
-                        (costStr ? '<div class="session-cost">' + costStr + '</div>' : '') +
+                    '<div class="session-metric session-metric--start">' +
+                        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>' +
+                        '<div class="session-metric-copy"><div class="session-metric-value">' + self._esc(self._fmtDate(s.startTime) || '--') + '</div><div class="session-metric-label">' + self._esc(self._t('charge.start_time', 'Start time')) + '</div></div>' +
                     '</div>' +
-                    (calibration ? '<div class="calibration-badge">LFP CALIBRATION</div>' : '') +
-                    (poisoned ? '<div class="quality-warning">' + self._qualityWarningContent(
-                        self._t('charge.quality_warning_short', 'Contradictory power and charging energy hidden.')) + '</div>' : '') +
-                    // Location chip (pin + place / coords) — only when known.
-                    (locStr
-                        ? '<div class="session-loc">' + self._pinIcon() + '<span>' + self._esc(locStr) + '</span></div>'
-                        : '') +
-                    '<div class="session-meta">' +
-                        (socRange ? '<span>' + socRange + '</span>' : '') +
-                        (timeRange ? '<span>' + self._esc(timeRange) + '</span>' : '') +
-                        (dur ? '<span>' + dur + '</span>' : '') +
-                        (odoStr ? '<span>' + self._t('charge.odometer_short', 'ODO') + ' ' + odoStr + '</span>' : '') +
-                        // Which tariff priced this charge. Only when a named
-                        // tariff owns it — a session on the global rate shows
-                        // nothing, exactly as before.
-                        (s.tariffLabel ? '<span>⚡ ' + self._esc(s.tariffLabel) + '</span>' : '') +
+                    '<div class="session-metric session-metric--duration">' +
+                        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>' +
+                        '<div class="session-metric-copy"><div class="session-metric-value">' + self._esc(dur || '--') + '</div><div class="session-metric-label">' + self._esc(self._t('charge.duration', 'Duration')) + '</div></div>' +
                     '</div>' +
-                    '<button class="session-delete-btn" title="' + self._t('charge.delete_session_title', 'Delete session') + '">' +
-                        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>' +
-                    '</button>';
+                    '<div class="session-metric session-metric--range">' +
+                        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17a8 8 0 1 1 16 0"/><path d="m12 13 4-4"/><path d="M7 17h10"/></svg>' +
+                        '<div class="session-metric-copy"><div class="session-metric-value">' + self._esc(rangeStr) + '</div><div class="session-metric-label">' + self._esc(self._t('charge.summary_range_gained', 'Range added')) + '</div></div>' +
+                    '</div>' +
+                    '<div class="session-metric session-metric--context">' + contextIcon +
+                        '<div class="session-metric-copy"><div class="session-metric-value">' + self._esc(contextValue) + '</div><div class="session-metric-label">' + self._esc(contextLabel) + '</div></div>' +
+                    '</div>' +
+                    '<div class="session-actions">' +
+                        '<svg class="session-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>' +
+                        '<button class="session-delete-btn" title="' + self._esc(self._t('charge.delete_session_title', 'Delete session')) + '">' +
+                            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>' +
+                        '</button>' +
+                    '</div>';
 
                 card.addEventListener('click', function () { self.showDetail(s.id); });
                 card.addEventListener('keydown', function (e) {
@@ -539,17 +664,25 @@ var CHARGING = {
                     self.deleteSession(s.id);
                 });
                 grid.appendChild(card);
-            })(this.sessions[i]);
+            })(displayedSessions[i]);
         }
+    },
+
+    sortSessions: function (order) {
+        this.sortOrder = order === 'oldest' ? 'oldest' : 'recent';
+        this._renderSessionCards();
     },
 
     quickFilter: function (days, btn) {
         this.currentDays = days;          // 0 = all time
         this._rangeFrom = null;           // leaving custom-range mode
         this._rangeTo = null;
-        var btns = document.querySelectorAll('#sessionFilters .filter-tab');
-        for (var i = 0; i < btns.length; i++) btns[i].classList.remove('active');
-        if (btn) btn.classList.add('active');
+        var btns = document.querySelectorAll('.charge-period-control .filter-tab[data-days]');
+        for (var i = 0; i < btns.length; i++) {
+            var buttonDays = parseInt(btns[i].getAttribute('data-days'), 10);
+            if (buttonDays === days) btns[i].classList.add('active');
+            else btns[i].classList.remove('active');
+        }
         var row = document.getElementById('chargeRangeRow');
         if (row) row.classList.remove('open');
         this.currentOffset = 0;
@@ -720,6 +853,7 @@ var CHARGING = {
         var detail = document.getElementById('chargingDetail');
         if (list) list.classList.add('hidden');
         if (detail) { detail.classList.remove('hidden'); detail.classList.add('active'); }
+        if (document.body) document.body.classList.add('charging-detail-open');
 
         // Find the row we already have for the header; fetch full + samples.
         var row = null;
@@ -745,7 +879,9 @@ var CHARGING = {
         var detail = document.getElementById('chargingDetail');
         if (detail) { detail.classList.add('hidden'); detail.classList.remove('active'); }
         if (list) list.classList.remove('hidden');
+        if (document.body) document.body.classList.remove('charging-detail-open');
         this.currentSessionId = null;
+        this._currentDetailSession = null;
         this.samplesCache = null;
         this._clearDetailHoverState();
     },
@@ -789,6 +925,7 @@ var CHARGING = {
 
     _fillDetailHeader: function (s) {
         var inProgress = s.inProgress === true;
+        this._currentDetailSession = s;
         this._setText('detailTitle', this._typeLabel(s) + ' · ' + this._fmtDate(s.startTime));
         var sub = [];
         if (inProgress) sub.push(this._t('charge.in_progress', 'Charging now'));
@@ -815,10 +952,39 @@ var CHARGING = {
                 self.showQualityInfo(e);
             });
         }
+        var livePill = document.getElementById('detailLivePill');
+        if (livePill) livePill.style.display = inProgress ? 'inline-flex' : 'none';
+
+        var duration = (s.durationMinutes != null) ? this._fmtDuration(s.durationMinutes) : '--';
+        this._setText('detailDuration', duration);
+        this._setText('detailChartDuration', duration);
+        this._setText('detailTimeLabel', inProgress
+            ? this._t('charge.detail_time_so_far', 'Time so far')
+            : this._t('charge.detail_duration', 'Duration'));
+        this._setText('detailStartedAt', this._t('charge.detail_started', 'Started') + ' ' + this._fmtDate(s.startTime));
+
+        var hasStartSoc = s.startSoc != null;
+        var hasEndSoc = s.endSoc != null && s.endSoc >= 0;
+        var socText = hasStartSoc ? Math.round(s.startSoc) + '%' : '--';
+        if (hasStartSoc && hasEndSoc) socText += ' → ' + Math.round(s.endSoc) + '%';
+        this._setText('detailSocValue', socText);
+        this._setText('detailChartSoc', socText);
+        var socCaption = inProgress
+            ? this._t('charge.detail_start_now', 'Start → Now')
+            : this._t('charge.detail_start_end', 'Start → End');
+        this._setText('detailSocCaption', socCaption);
+        this._setText('detailChartSocLabel', socCaption);
+        var socFill = document.getElementById('detailSocFill');
+        if (socFill) {
+            var fillPct = hasEndSoc ? Math.max(0, Math.min(100, s.endSoc)) : 0;
+            socFill.style.width = fillPct + '%';
+        }
+
         this._setText('detailEnergy', (!poisoned && s.energyAdded && s.energyAdded > 0) ? '+' + s.energyAdded.toFixed(1) + ' kWh' : '--');
         this._setText('detailAvgPower', (!poisoned && s.avgPower != null && s.avgPower > 0) ? s.avgPower.toFixed(1) + ' kW' : '--');
         var displayedPeak = this._displayPeakKw(s);
         this._setText('detailPeakPower', displayedPeak > 0 ? displayedPeak.toFixed(1) + ' kW' : '--');
+        this._setText('detailChartPeak', displayedPeak > 0 ? displayedPeak.toFixed(1) + ' kW' : '--');
         this._setText('detailRangeGained', (s.rangeGained != null && s.rangeGained > 0) ? this._dist(s.rangeGained) : '--');
         this._setText('detailOdometer', (s.startOdometerKm != null && s.startOdometerKm > 0) ? this._dist(s.startOdometerKm) : '--');
         this._setText('detailCost', (s.cost != null && s.cost > 0) ? this._money(s.cost) : '--');
@@ -834,14 +1000,17 @@ var CHARGING = {
         // (including every session recorded before tariffs existed) hide the tile
         // rather than showing a bare rate with no source.
         var tariffStat = document.getElementById('detailTariffStat');
+        var metricFiller = document.getElementById('detailMetricFiller');
         if (tariffStat) {
             if (s.tariffLabel) {
                 var rateTxt = (s.electricityRate != null && s.electricityRate > 0)
                     ? ' · ' + this._money(s.electricityRate) + '/kWh' : '';
                 this._setText('detailTariff', s.tariffLabel + rateTxt);
                 tariffStat.style.display = '';
+                if (metricFiller) metricFiller.style.display = 'none';
             } else {
                 tariffStat.style.display = 'none';
+                if (metricFiller) metricFiller.style.display = '';
             }
         }
 
@@ -864,6 +1033,34 @@ var CHARGING = {
                 locRow.style.display = 'none';
             }
         }
+
+        // Seed the chart footer from session aggregates; detailed samples refine
+        // the temperature values as soon as the curve request completes.
+        this._fillDetailSampleSummary([]);
+    },
+
+    _fillDetailSampleSummary: function (samples) {
+        var s = this._currentDetailSession || {};
+        var high = (s.tempHigh != null) ? s.tempHigh : null;
+        var low = (s.tempLow != null) ? s.tempLow : null;
+        var avg = (s.tempAvg != null) ? s.tempAvg : null;
+        var avgTotal = 0, avgCount = 0;
+
+        for (var i = 0; samples && i < samples.length; i++) {
+            var sample = samples[i];
+            if (!sample) continue;
+            var sampleAvg = (sample.temp != null) ? sample.temp : null;
+            var sampleHigh = (sample.tempHigh != null) ? sample.tempHigh : sampleAvg;
+            var sampleLow = (sample.tempLow != null) ? sample.tempLow : sampleAvg;
+            if (sampleHigh != null && (high == null || sampleHigh > high)) high = sampleHigh;
+            if (sampleLow != null && (low == null || sampleLow < low)) low = sampleLow;
+            if (sampleAvg != null) { avgTotal += sampleAvg; avgCount++; }
+        }
+        if (avgCount > 0) avg = avgTotal / avgCount;
+
+        this._setText('detailTempHigh', high != null ? high.toFixed(1) + '°C' : '--');
+        this._setText('detailTempLow', low != null ? low.toFixed(1) + '°C' : '--');
+        this._setText('detailTempAvg', avg != null ? avg.toFixed(1) + '°C' : '--');
     },
 
     // Open the session's location in the system maps app. Uses window.open so
@@ -883,6 +1080,8 @@ var CHARGING = {
         var power = document.getElementById('detailPowerChart');
         var temp = document.getElementById('detailTempChart');
         var hasSamples = samples && samples.length > 1;
+
+        this._fillDetailSampleSummary(samples || []);
 
         var note = document.getElementById('detailNoSamples');
         if (note) note.style.display = hasSamples ? 'none' : '';
@@ -1019,7 +1218,11 @@ var CHARGING = {
         var canvas = document.getElementById(canvasId);
         if (!canvas) return;
         var dpr = window.devicePixelRatio || 1;
-        var size = 120;
+        // On the Chrome 58 head-unit WebView, a hidden canvas can report its
+        // DPR-expanded backing width as clientWidth on a later poll. Keep the
+        // logical CSS size stable so the ring cannot grow beyond its bezel.
+        var logicalSize = parseInt(canvas.getAttribute('data-css-size'), 10);
+        var size = logicalSize || canvas.clientWidth || parseInt(canvas.getAttribute('width'), 10) || 84;
         canvas.width = size * dpr;
         canvas.height = size * dpr;
         canvas.style.width = size + 'px';
@@ -1028,7 +1231,9 @@ var CHARGING = {
         if (!ctx) return;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-        var cx = size / 2, cy = size / 2, radius = 48, lineWidth = 8;
+        var cx = size / 2, cy = size / 2;
+        var lineWidth = Math.max(7, Math.round(size * 0.075));
+        var radius = (size / 2) - lineWidth - 2;
         ctx.beginPath();
         ctx.arc(cx, cy, radius, 0, Math.PI * 2);
         ctx.strokeStyle = this.colors.arcTrack;
@@ -1043,14 +1248,18 @@ var CHARGING = {
             ctx.strokeStyle = color;
             ctx.lineWidth = lineWidth;
             ctx.lineCap = 'round';
+            ctx.shadowColor = this._rgba(color, 0.26);
+            ctx.shadowBlur = Math.max(4, Math.round(size * 0.05));
             ctx.stroke();
+            ctx.shadowBlur = 0;
         }
     },
 
     // SoC over time, with charging regions shaded. history: [{t,soc,charging}].
     renderSocOverTime: function (canvas, history) {
         if (!canvas || !history || !history.length) { return; }
-        var dims = this._setupCanvas(canvas, 200);
+        var chartHeight = canvas.clientWidth > 900 ? 260 : 200;
+        var dims = this._setupCanvas(canvas, chartHeight);
         var ctx = dims.ctx, w = dims.w, h = dims.h;
         var pad = { l: 34, r: 12, t: 12, b: 22 };
         var plotW = w - pad.l - pad.r, plotH = h - pad.t - pad.b;
@@ -1340,12 +1549,15 @@ var CHARGING = {
             var hi = (s.tempHigh != null) ? s.tempHigh : avg;
             var lo = (s.tempLow != null) ? s.tempLow : avg;
             if (avg == null && hi == null && lo == null) continue;
+            if (hi == null) hi = (avg != null) ? avg : lo;
+            if (lo == null) lo = (avg != null) ? avg : hi;
+            if (avg == null) avg = (hi + lo) / 2;
             pts.push({ t: s.t, avg: avg, hi: hi, lo: lo });
         }
         if (pts.length < 2) { this._clearCanvas(canvas.id); return; }
-        var dims = this._setupCanvas(canvas, 180);
+        var dims = this._setupCanvas(canvas, 210);
         var ctx = dims.ctx, w = dims.w, h = dims.h;
-        var pad = { l: 36, r: 12, t: 12, b: 22 };
+        var pad = { l: 36, r: 12, t: 18, b: 22 };
         var plotW = w - pad.l - pad.r, plotH = h - pad.t - pad.b;
 
         var minV = 1e9, maxV = -1e9;
@@ -1373,11 +1585,31 @@ var CHARGING = {
             for (var u = 1; u < pts.length; u++) ctx.lineTo(x(pts[u].t), y(pts[u].hi));
             for (var d = pts.length - 1; d >= 0; d--) ctx.lineTo(x(pts[d].t), y(pts[d].lo));
             ctx.closePath();
-            ctx.fillStyle = this._rgba(this.colors.amber, 0.16);
+            ctx.fillStyle = this._rgba(this.colors.amber, 0.11);
             ctx.fill();
         }
 
-        // Average line.
+        // The reference view treats the band boundaries as first-class series:
+        // high = amber, low = blue, average = muted dashed.
+        ctx.beginPath();
+        for (var hLine = 0; hLine < pts.length; hLine++) {
+            var hx = x(pts[hLine].t), hy = y(pts[hLine].hi);
+            if (hLine === 0) ctx.moveTo(hx, hy); else ctx.lineTo(hx, hy);
+        }
+        ctx.strokeStyle = this.colors.amber;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.beginPath();
+        for (var lLine = 0; lLine < pts.length; lLine++) {
+            var lx = x(pts[lLine].t), ly = y(pts[lLine].lo);
+            if (lLine === 0) ctx.moveTo(lx, ly); else ctx.lineTo(lx, ly);
+        }
+        ctx.strokeStyle = this.colors.brand;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        if (this._supportsLineDash(ctx)) ctx.setLineDash([3, 4]);
         ctx.beginPath();
         var drewA = false;
         for (var k = 0; k < pts.length; k++) {
@@ -1385,9 +1617,12 @@ var CHARGING = {
             var px = x(pts[k].t), py = y(pts[k].avg);
             if (!drewA) { ctx.moveTo(px, py); drewA = true; } else ctx.lineTo(px, py);
         }
-        ctx.strokeStyle = this.colors.amber;
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = this._rgba(this.colors.textMuted, 0.82);
+        ctx.lineWidth = 1.4;
         ctx.stroke();
+        if (this._supportsLineDash(ctx)) ctx.setLineDash([]);
+
+        this._drawTempLegend(ctx, pad.l, pad.t - 2, plotW);
 
         this._drawClockAxis(ctx, t0, pts[pts.length - 1].t, pad, plotW, plotH);
 
@@ -1399,13 +1634,14 @@ var CHARGING = {
                 if (p.avg == null) return;
                 var py = y(p.avg);
                 c.beginPath(); c.arc(px, py, 3.5, 0, Math.PI * 2);
-                c.fillStyle = selfT.colors.amber; c.fill();
+                c.fillStyle = selfT.colors.textMuted; c.fill();
                 c.lineWidth = 2; c.strokeStyle = selfT.colors.dotStroke; c.stroke();
             },
             lines: function (p) {
                 var L = [];
-                if (p.avg != null) L.push(Math.round(p.avg) + '° avg');
-                if (p.hi != null && p.lo != null && p.hi !== p.lo) L.push(Math.round(p.lo) + '–' + Math.round(p.hi) + '°');
+                if (p.hi != null) L.push(p.hi.toFixed(1) + '° high');
+                if (p.lo != null) L.push(p.lo.toFixed(1) + '° low');
+                if (p.avg != null) L.push(p.avg.toFixed(1) + '° avg');
                 L.push(selfT._fmtClock(p.t));
                 return L;
             }
@@ -1640,6 +1876,36 @@ var CHARGING = {
         if (this._supportsLineDash(ctx)) ctx.setLineDash([]);
         ctx.fillStyle = this.colors.textMuted;
         ctx.fillText(label2, x2 + swatch + gapTxt, y);
+        ctx.restore();
+    },
+
+    _drawTempLegend: function (ctx, plotLeft, y, plotW) {
+        ctx.save();
+        ctx.font = '10px Inter, sans-serif';
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'left';
+        var labels = [
+            this._t('charge.detail_high', 'High'),
+            this._t('charge.detail_low', 'Low'),
+            this._t('charge.detail_avg', 'Avg')
+        ];
+        var colors = [this.colors.amber, this.colors.brand, this.colors.textMuted];
+        var swatch = 14, textGap = 4, itemGap = 11, totalW = 0;
+        for (var i = 0; i < labels.length; i++) {
+            totalW += swatch + textGap + ctx.measureText(labels[i]).width;
+            if (i < labels.length - 1) totalW += itemGap;
+        }
+        var x = Math.max(plotLeft, plotLeft + plotW - totalW);
+        for (var j = 0; j < labels.length; j++) {
+            ctx.strokeStyle = colors[j];
+            ctx.lineWidth = (j === 2) ? 1.4 : 2;
+            if (j === 2 && this._supportsLineDash(ctx)) ctx.setLineDash([3, 4]);
+            ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + swatch, y); ctx.stroke();
+            if (this._supportsLineDash(ctx)) ctx.setLineDash([]);
+            ctx.fillStyle = this.colors.textMuted;
+            ctx.fillText(labels[j], x + swatch + textGap, y);
+            x += swatch + textGap + ctx.measureText(labels[j]).width + itemGap;
+        }
         ctx.restore();
     },
 

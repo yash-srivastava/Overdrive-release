@@ -123,6 +123,9 @@ class VideoPlayerFragment : Fragment() {
             if (view != null) refreshFullscreenButton()
         }
 
+    /** Notifies an inline host when prev/next or auto-advance changes clips. */
+    var onPlaylistItemChanged: ((String) -> Unit)? = null
+
     /**
      * Current maximize state. The host is the source of truth for the
      * actual layout; this just mirrors what was last requested so the icon
@@ -337,6 +340,7 @@ class VideoPlayerFragment : Fragment() {
             putString(ARG_VIDEO_TITLE, title)
             putInt(ARG_PLAYLIST_INDEX, newIndex)
         }
+        onPlaylistItemChanged?.invoke(path)
         updatePrevNextVisibility()
         // Make sure the controls are visible during a transition so the user
         // can chain another prev/next quickly.

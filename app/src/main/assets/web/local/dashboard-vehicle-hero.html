@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Dashboard vehicle</title>
+    <style>
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            background: transparent;
+        }
+
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* app-shell owns the canonical selected-model and sprite-cache flow.
+           Its navigation markup is needed only to initialise that flow here. */
+        #app-shell-mount,
+        #sidebar {
+            display: none !important;
+        }
+
+        #dashboardVehicleCanvas {
+            display: block;
+            /* Keep one stable camera frame while the native navigation rail
+               expands or collapses. The canvas may shrink on narrower hosts,
+               but it never grows past this bounded cockpit presentation. */
+            width: 400px;
+            height: 168px;
+            max-width: 96%;
+            max-height: 88%;
+            pointer-events: none;
+        }
+    </style>
+    <script src="../shared/app-shell.js?v=2"></script>
+</head>
+<body>
+    <div id="app-shell-mount"></div>
+    <canvas id="dashboardVehicleCanvas" aria-hidden="true"></canvas>
+    <script>
+        (function () {
+            'use strict';
+            var mounted = false;
+            var attempts = 0;
+
+            function notifyBridge(method, value) {
+                try {
+                    if (window.DashboardHeroBridge
+                            && typeof window.DashboardHeroBridge[method] === 'function') {
+                        window.DashboardHeroBridge[method](value || '');
+                    }
+                } catch (e) {}
+            }
+
+            function mountVehicle() {
+                if (mounted) return;
+                var shell = window.OverdriveAppShell;
+                var canvas = document.getElementById('dashboardVehicleCanvas');
+                if (!canvas || !shell || typeof shell.mountVehicleCanvas !== 'function') {
+                    attempts++;
+                    if (attempts < 100) setTimeout(mountVehicle, 100);
+                    else notifyBridge('onVehicleHeroFailed', 'renderer-unavailable');
+                    return;
+                }
+
+                mounted = true;
+                shell.mountVehicleCanvas(canvas, {
+                    view: 'three-quarter',
+                    onReady: function (result) {
+                        notifyBridge('onVehicleHeroReady', result && result.source);
+                    }
+                });
+            }
+
+            document.addEventListener('app-shell:ready', mountVehicle);
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', mountVehicle);
+            } else {
+                setTimeout(mountVehicle, 0);
+            }
+        }());
+    </script>
+</body>
+</html>

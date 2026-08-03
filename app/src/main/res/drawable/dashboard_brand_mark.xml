@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Compact native rendering of the official OverDrive OD glyph. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="36dp"
+    android:height="16dp"
+    android:viewportWidth="72"
+    android:viewportHeight="32">
+
+    <path
+        android:fillColor="?attr/colorPrimary"
+        android:fillType="evenOdd"
+        android:pathData="M14,4H27C34,4 39,9 39,16C39,23 34,28 27,28H14C7,28 2,23 2,16C2,9 7,4 14,4ZM14,10C10,10 8,12.5 8,16C8,19.5 10,22 14,22H27C31,22 33,19.5 33,16C33,12.5 31,10 27,10Z" />
+
+    <path
+        android:fillColor="?attr/colorPrimary"
+        android:pathData="M20.5,12.5A3.5,3.5 0,1 1,20.5,19.5A3.5,3.5 0,1 1,20.5,12.5" />
+
+    <path
+        android:fillColor="?attr/colorPrimary"
+        android:pathData="M43,4H60C67,4 72,9 72,16C72,23 67,28 60,28H49V22H60C64,22 66,19.5 66,16C66,12.5 64,10 60,10H43Z" />
+</vector>

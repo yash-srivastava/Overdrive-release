@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A restrained status atmosphere; DashboardFragment applies live health to
+     the card edge and status dot rather than flooding the card. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:type="radial"
+        android:centerX="0.88"
+        android:centerY="0.42"
+        android:gradientRadius="300dp"
+        android:startColor="@color/dashboard_hero_glow"
+        android:endColor="@android:color/transparent" />
+</shape>

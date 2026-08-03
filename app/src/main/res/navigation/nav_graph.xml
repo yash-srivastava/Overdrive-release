@@ -31,7 +31,12 @@
         android:id="@+id/recordingsFragment"
         android:name="com.overdrive.app.ui.fragment.RecordingsFragment"
         android:label="@string/rail_recordings"
-        tools:layout="@layout/fragment_recordings" />
+        tools:layout="@layout/fragment_recordings">
+        <argument
+            android:name="today_only"
+            app:argType="boolean"
+            android:defaultValue="false" />
+    </fragment>
 
     <!-- Surveillance settings (web) — kept reachable from Recordings → Settings ↗ button -->
     <fragment

@@ -177,11 +177,15 @@
                             <span class="ic_status_dot dot-idle" id="dashChargeDot"></span>
                             <span id="dashChargeState" data-i18n="charge.state_idle">Idle</span>
                         </div>
-                        <div class="dash-metric-grid dash-metric-grid--4">
+                        <div class="dash-metric-grid dash-metric-grid--4" id="dashChargeMetricGrid">
                             <div class="dash-metric"><span data-i18n="charge.metric_soc">SoC</span><strong id="dashChargeSoc">--</strong></div>
                             <div class="dash-metric"><span data-i18n="charge.metric_power">Power</span><strong id="dashChargePower">--</strong></div>
                             <div class="dash-metric"><span data-i18n="charge.metric_session">Session</span><strong id="dashChargeKwh">--</strong></div>
-                            <div class="dash-metric"><span data-i18n="charge.metric_ttf">Time to full</span><strong id="dashChargeTtf">--</strong></div>
+                            <div class="dash-metric dash-completion-metric" id="dashChargeCompletionMetric" style="display:none;">
+                                <span data-i18n="charge.metric_ttf">Time to full</span>
+                                <strong id="dashChargeTtf">--</strong>
+                                <small id="dashChargeTtfMeta"></small>
+                            </div>
                         </div>
                         <div class="dash-action-row">
                             <button class="dash-primary-btn" type="button" onclick="location.href='charging.html'">
@@ -648,6 +652,10 @@
             grid-template-columns: repeat(4, minmax(0, 1fr));
         }
 
+        .dash-metric-grid--4:not(.has-completion) {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
         .dash-metric {
             min-height: 76px;
             padding: 13px;
@@ -677,12 +685,24 @@
             line-height: 1.1;
         }
 
+        .dash-completion-metric small {
+            display: block;
+            margin-top: 5px;
+            overflow: hidden;
+            color: var(--text-muted);
+            font-size: 10px;
+            font-weight: 600;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         @media (max-width: 980px) {
             .dash-grid,
             .dash-metric-grid {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
             }
-            .dash-metric-grid--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .dash-metric-grid--4,
+            .dash-metric-grid--4:not(.has-completion) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .dash-info-card { grid-column: auto; }
         }
 
@@ -897,11 +917,14 @@
                     // it too) — it read a fabricated ~7 kW vs the real 6.1.
                     setText('dashChargePower', (c.charging && c.powerKw > 0 && !c.isEstimated) ? c.powerKw.toFixed(1) + ' kW' : '--');
                     setText('dashChargeKwh', (c.sessionKwh && c.sessionKwh > 0) ? c.sessionKwh.toFixed(1) + ' kWh' : '--');
-                    if (c.charging && c.timeToFullMin && c.timeToFullMin > 0) {
-                        setText('dashChargeTtf', Math.floor(c.timeToFullMin / 60) + 'h ' + (c.timeToFullMin % 60) + 'm');
-                    } else {
-                        setText('dashChargeTtf', '--');
-                    }
+                    var completion = BYD.core && BYD.core.formatChargingCompletion
+                        ? BYD.core.formatChargingCompletion(c) : null;
+                    var completionMetric = document.getElementById('dashChargeCompletionMetric');
+                    if (completionMetric) completionMetric.style.display = completion ? '' : 'none';
+                    var completionGrid = document.getElementById('dashChargeMetricGrid');
+                    if (completionGrid) completionGrid.classList.toggle('has-completion', !!completion);
+                    setText('dashChargeTtf', completion ? completion.primary : '--');
+                    setText('dashChargeTtfMeta', completion ? completion.secondary : '');
                 }
             },
             openDirections: function() {

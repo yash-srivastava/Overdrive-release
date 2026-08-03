@@ -932,6 +932,50 @@ BYD.core = {
     },
 
     /**
+     * Turn the canonical daemon charging block into shared display text.
+     * Calculated values are the only ones prefixed with "~"; vehicle values
+     * mirror the countdown shown by the driver's display.
+     */
+    formatChargingCompletion(charging) {
+        if (!charging || charging.fault) return null;
+        var t = function (key, fallback) {
+            return (BYD.i18n && BYD.i18n.t && BYD.i18n.t(key)) || fallback;
+        };
+        if (charging.full) {
+            return { state: 'complete', primary: t('charge.completion_complete', 'Complete'), secondary: '' };
+        }
+        if (charging.plugged && !charging.charging) {
+            return { state: 'waiting', primary: t('charge.completion_waiting', 'Waiting'), secondary: '' };
+        }
+        var mins = Number(charging.timeToFullMin);
+        if (!charging.charging || !isFinite(mins) || mins <= 0) return null;
+        mins = Math.max(1, Math.round(mins));
+        var hours = Math.floor(mins / 60);
+        var rem = mins % 60;
+        var duration = hours > 0 ? (hours + 'h ' + (rem < 10 ? '0' : '') + rem + 'm') : (rem + 'm');
+        if (charging.timeToFullSource === 'calculated') duration = '~' + duration;
+
+        var completedAt = Number(charging.completionEpochMs);
+        if (!isFinite(completedAt) || completedAt <= 0) completedAt = Date.now() + mins * 60000;
+        var clock = '';
+        try {
+            clock = new Date(completedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        } catch (e) {
+            var d = new Date(completedAt);
+            clock = d.getHours() + ':' + (d.getMinutes() < 10 ? '0' : '') + d.getMinutes();
+        }
+        return {
+            state: 'charging',
+            primary: duration,
+            secondary: (Number(charging.completionTargetPercent) > 0
+                    && Number(charging.completionTargetPercent) < 100
+                ? Math.round(Number(charging.completionTargetPercent)) + '% '
+                    + t('charge.completion_at', 'at')
+                : t('charge.completion_full_at', 'Full at')) + ' ' + clock
+        };
+    },
+
+    /**
      * Update EV battery and charging status - White rims with flow animation
      */
     updateEvStatus(status) {
@@ -1056,6 +1100,23 @@ BYD.core = {
         else            evCard.classList.remove('charging');
         if (window.OverdriveAppShell && window.OverdriveAppShell.setCharging) {
             window.OverdriveAppShell.setCharging(isCharging, powerKW);
+        }
+
+        // Shared sidebar completion row. It is absent when idle/faulted, says
+        // Waiting while plugged but not drawing power, Complete when full, and
+        // shows countdown + local completion clock while actively charging.
+        const completionRow = document.getElementById('evCompletionRow');
+        const completionPrimary = document.getElementById('evCompletionPrimary');
+        const completionSecondary = document.getElementById('evCompletionSecondary');
+        if (completionRow) {
+            const completion = this.formatChargingCompletion(status.charging);
+            completionRow.style.display = completion ? '' : 'none';
+            completionRow.setAttribute('data-state', completion ? completion.state : 'idle');
+            if (completionPrimary) completionPrimary.textContent = completion ? completion.primary : '';
+            if (completionSecondary) {
+                completionSecondary.textContent = completion ? completion.secondary : '';
+                completionSecondary.style.display = completion && completion.secondary ? '' : 'none';
+            }
         }
 
         // SOH display

@@ -16,6 +16,9 @@
     <color name="brand_secondary">#00658F</color>
     <color name="brand_cyan">@color/brand_primary</color>
     <color name="brand_cyan_glow">#3300876C</color>
+    <color name="dashboard_hero_glow">#3378F3CC</color>
+    <color name="dashboard_vehicle_stage_line_soft">#2E00876C</color>
+    <color name="dashboard_vehicle_stage_line_focus">#7000876C</color>
 
     <!-- Backgrounds — M3 light surface stack -->
     <color name="bg_base">#F7FAF7</color>

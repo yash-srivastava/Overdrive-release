@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A quiet, perspective vehicle stage. Every stroke fades at its edges so
+     the model remains the focal point instead of sitting inside hard rings. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="420dp"
+    android:height="164dp"
+    android:viewportWidth="420"
+    android:viewportHeight="164">
+
+    <!-- Horizon: strongest near the vehicle, absent at the card edges. -->
+    <path
+        android:pathData="M20,122 L400,122"
+        android:fillColor="@android:color/transparent"
+        android:strokeLineCap="round"
+        android:strokeWidth="1.15">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="20"
+                android:startY="122"
+                android:endX="400"
+                android:endY="122">
+                <item android:color="@android:color/transparent" android:offset="0" />
+                <item android:color="@color/dashboard_vehicle_stage_line_soft" android:offset="0.25" />
+                <item android:color="@color/dashboard_vehicle_stage_line_focus" android:offset="0.5" />
+                <item android:color="@color/dashboard_vehicle_stage_line_soft" android:offset="0.75" />
+                <item android:color="@android:color/transparent" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Perspective rails converge behind the vehicle and dissolve outward. -->
+    <path
+        android:pathData="M204,110 L32,154"
+        android:fillColor="@android:color/transparent"
+        android:strokeLineCap="round"
+        android:strokeWidth="1">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="204"
+                android:startY="110"
+                android:endX="32"
+                android:endY="154">
+                <item android:color="@color/dashboard_vehicle_stage_line_focus" android:offset="0" />
+                <item android:color="@color/dashboard_vehicle_stage_line_soft" android:offset="0.46" />
+                <item android:color="@android:color/transparent" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M216,110 L388,154"
+        android:fillColor="@android:color/transparent"
+        android:strokeLineCap="round"
+        android:strokeWidth="1">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="216"
+                android:startY="110"
+                android:endX="388"
+                android:endY="154">
+                <item android:color="@color/dashboard_vehicle_stage_line_focus" android:offset="0" />
+                <item android:color="@color/dashboard_vehicle_stage_line_soft" android:offset="0.46" />
+                <item android:color="@android:color/transparent" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- A low platform edge gives the vehicle weight without forming a ring. -->
+    <path
+        android:pathData="M72,151 L348,151"
+        android:fillColor="@android:color/transparent"
+        android:strokeLineCap="round"
+        android:strokeWidth="1.25">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="72"
+                android:startY="151"
+                android:endX="348"
+                android:endY="151">
+                <item android:color="@android:color/transparent" android:offset="0" />
+                <item android:color="@color/dashboard_vehicle_stage_line_soft" android:offset="0.22" />
+                <item android:color="@color/dashboard_vehicle_stage_line_focus" android:offset="0.5" />
+                <item android:color="@color/dashboard_vehicle_stage_line_soft" android:offset="0.78" />
+                <item android:color="@android:color/transparent" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

@@ -1142,18 +1142,13 @@ public class HttpServer {
                         if (sessionKwh > 0) charging.put("sessionKwh", sessionKwh);
                     }
                 } catch (Exception ignored) {}
-                // Time-to-full from the BYD rest-time fields, if available.
+                // Canonical direct-vehicle-first completion estimate. The same
+                // resolver also feeds /api/charging/summary, eliminating the old
+                // live-vs-latched discrepancy between dashboard and Charging Stats.
                 try {
-                    com.overdrive.app.byd.BydDataCollector col = com.overdrive.app.byd.BydDataCollector.getInstance();
-                    if (col != null && col.isInitialized()) {
-                        com.overdrive.app.byd.BydVehicleData vd = col.getData();
-                        int UNAVAIL = com.overdrive.app.byd.BydVehicleData.UNAVAILABLE;
-                        if (vd != null && (vd.chargingRestTimeHours != UNAVAIL || vd.chargingRestTimeMinutes != UNAVAIL)) {
-                            int ttf = (vd.chargingRestTimeHours != UNAVAIL ? vd.chargingRestTimeHours * 60 : 0)
-                                    + (vd.chargingRestTimeMinutes != UNAVAIL ? vd.chargingRestTimeMinutes : 0);
-                            if (ttf > 0) charging.put("timeToFullMin", ttf);
-                        }
-                    }
+                    com.overdrive.app.charging.ChargingCompletionEstimate
+                            .resolveLive(isChargingFused, isFull)
+                            .putInto(charging);
                 } catch (Exception ignored) {}
 
                 status.put("charging", charging);

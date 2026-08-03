@@ -1149,6 +1149,17 @@ class WebViewFragment : Fragment() {
             }
         }
 
+        /** Keep the native MaterialToolbar aligned with an active web tab. */
+        @android.webkit.JavascriptInterface
+        fun setPageTitle(title: String) {
+            val normalized = title.trim().take(80)
+            if (normalized.isEmpty()) return
+            val host = activity as? com.overdrive.app.ui.MainActivity ?: return
+            host.runOnUiThread {
+                if (isAdded) host.setWebPageTitle(normalized)
+            }
+        }
+
         /**
          * Arm/disarm the NATIVE blind-spot lane to match the just-saved
          * blindspot.enabled (or debugPreview) flag, without waiting for the next

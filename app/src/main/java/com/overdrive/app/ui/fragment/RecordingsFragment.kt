@@ -29,6 +29,7 @@ import com.google.android.material.datepicker.MaterialDatePicker
 import com.overdrive.app.R
 import com.overdrive.app.ui.model.RecordingFile
 import com.overdrive.app.ui.util.RecordingScanner
+import com.overdrive.app.ui.util.RecordingUiText
 import com.overdrive.app.ui.util.RecordingsApiClient
 import java.lang.ref.WeakReference
 import java.text.SimpleDateFormat
@@ -138,6 +139,8 @@ class RecordingsFragment : Fragment() {
      * recording that wasn't captured today.
      */
     private var dateNarrowed: Boolean = false
+    /** Fresh dashboard shortcut may move to the segment containing today's clips. */
+    private var autoSelectTodaySource: Boolean = false
     private val dayHeaderFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
 
     // -------- Playlist for inline player prev/next --------
@@ -150,6 +153,9 @@ class RecordingsFragment : Fragment() {
      * with an active inline player; portrait has no inline pane.
      */
     private var playerFullscreen: Boolean = false
+
+    /** Advanced chip rows stay collapsed on the in-car landscape by default. */
+    private var filtersExpanded: Boolean = false
 
     /**
      * Back-press hook installed only while the player is maximized. Pressing
@@ -210,6 +216,7 @@ class RecordingsFragment : Fragment() {
             }
             dateNarrowed = state.getBoolean(KEY_DATE_NARROWED, false)
             playerFullscreen = state.getBoolean(KEY_PLAYER_FULLSCREEN, false)
+            filtersExpanded = state.getBoolean(KEY_FILTERS_EXPANDED, false)
             placeContainsQuery = state.getString(KEY_PLACE_CONTAINS, "") ?: ""
         }
 
@@ -218,6 +225,10 @@ class RecordingsFragment : Fragment() {
         // we at least land on the right segment. Only honored on fresh creation
         // (no saved state) so a rotation can't override the user's later choice.
         if (savedInstanceState == null) {
+            if (arguments?.getBoolean(ARG_TODAY_ONLY, false) == true) {
+                narrowToToday()
+                autoSelectTodaySource = true
+            }
             when (arguments?.getString("filter")) {
                 // Sentry clips live in the Surveillance segment; proximity clips
                 // are recorded by the dashcam encoder and live in the DASHCAM
@@ -240,6 +251,7 @@ class RecordingsFragment : Fragment() {
         setupChipFilters(view)
         setupPlaceSearch(view)
         setupResetButton(view)
+        setupFilterToggle(view)
 
         updateDateHeader(view)
         renderActiveFilterAffordances(view)
@@ -292,6 +304,7 @@ class RecordingsFragment : Fragment() {
         outState.putInt(KEY_DATE_D, selectedDay)
         outState.putBoolean(KEY_DATE_NARROWED, dateNarrowed)
         outState.putBoolean(KEY_PLAYER_FULLSCREEN, playerFullscreen)
+        outState.putBoolean(KEY_FILTERS_EXPANDED, filtersExpanded)
         outState.putString(KEY_PLACE_CONTAINS, placeContainsQuery)
     }
 
@@ -483,13 +496,17 @@ class RecordingsFragment : Fragment() {
         // the NEWER clip while the library RecyclerView stays newest-first.
         val ordered = currentPlaylist.asReversed()
         val paths = ordered.map { it.path }.toTypedArray()
-        val titles = ordered.map { it.name }.toTypedArray()
+        val titles = ordered.map { RecordingUiText.headline(requireContext(), it) }.toTypedArray()
         val playerIndex = ordered.indexOfFirst { it.path == recording.path }
+        libraryFragment?.setActiveRecording(recording.path)
 
         val player = VideoPlayerFragment().apply {
             arguments = Bundle().apply {
                 putString(VideoPlayerFragment.ARG_VIDEO_PATH, recording.path)
-                putString(VideoPlayerFragment.ARG_VIDEO_TITLE, recording.name)
+                putString(
+                    VideoPlayerFragment.ARG_VIDEO_TITLE,
+                    RecordingUiText.headline(requireContext(), recording)
+                )
                 putBoolean(VideoPlayerFragment.ARG_INLINE, true)
                 putStringArray(VideoPlayerFragment.ARG_PLAYLIST_PATHS, paths)
                 putStringArray(VideoPlayerFragment.ARG_PLAYLIST_TITLES, titles)
@@ -502,6 +519,7 @@ class RecordingsFragment : Fragment() {
             onFullscreenToggle = { wantFullscreen ->
                 setPlayerFullscreen(wantFullscreen)
             }
+            onPlaylistItemChanged = ::onInlinePlayerClipChanged
         }
         childFragmentManager.commit {
             setCustomAnimations(R.anim.fade_in, R.anim.fade_out)
@@ -523,8 +541,15 @@ class RecordingsFragment : Fragment() {
         player.onFullscreenToggle = { wantFullscreen ->
             setPlayerFullscreen(wantFullscreen)
         }
+        player.onPlaylistItemChanged = ::onInlinePlayerClipChanged
         // Re-apply the host-side layout to whatever state we restored into.
         view?.let { applyFullscreenLayout(it, playerFullscreen, animate = false) }
+    }
+
+    private fun onInlinePlayerClipChanged(path: String) {
+        val index = currentPlaylist.indexOfFirst { it.path == path }
+        if (index >= 0) currentInlineIndex = index
+        libraryFragment?.setActiveRecording(path)
     }
 
     /**
@@ -645,6 +670,10 @@ class RecordingsFragment : Fragment() {
         applyChipRowVisibility(view)
         group.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (!isChecked) return@addOnButtonCheckedListener
+            // A manual segment choice wins over the dashboard shortcut's
+            // one-shot automatic selection. Programmatic selection clears
+            // this flag before calling group.check as well.
+            autoSelectTodaySource = false
             currentSource = when (checkedId) {
                 R.id.segmentSurveillance -> Source.SURVEILLANCE
                 R.id.segmentReplays -> Source.REPLAYS
@@ -682,12 +711,32 @@ class RecordingsFragment : Fragment() {
         // is meaningless, so hide all three (place/storage/date still apply
         // and live outside these rows).
         val isReplays = currentSource == Source.REPLAYS
+        val showAdvanced = !isLandscape || filtersExpanded
+        view.findViewById<View>(R.id.rowPrimaryFilters)?.visibility =
+            if (showAdvanced && !isReplays) View.VISIBLE else View.GONE
         view.findViewById<View>(R.id.rowTypeFilter)?.visibility =
-            if (isDashcam) View.VISIBLE else View.GONE
+            if (showAdvanced && isDashcam) View.VISIBLE else View.GONE
         view.findViewById<View>(R.id.rowWhatFilter)?.visibility =
-            if (isDashcam || isReplays) View.GONE else View.VISIBLE
+            if (showAdvanced && !isDashcam && !isReplays) View.VISIBLE else View.GONE
         view.findViewById<View>(R.id.rowSeverityFilter)?.visibility =
-            if (isDashcam || isReplays) View.GONE else View.VISIBLE
+            if (showAdvanced && !isDashcam && !isReplays) View.VISIBLE else View.GONE
+        view.findViewById<View>(R.id.rowStorageFilter)?.visibility =
+            if (showAdvanced) View.VISIBLE else View.GONE
+        if (!showAdvanced) {
+            view.findViewById<View>(R.id.rowPlaceFilter)?.visibility = View.GONE
+        } else {
+            renderPlaceChips(view)
+        }
+    }
+
+    private fun setupFilterToggle(view: View) {
+        val button = view.findViewById<MaterialButton>(R.id.btnFilterToggle) ?: return
+        button.setOnClickListener {
+            filtersExpanded = !filtersExpanded
+            applyChipRowVisibility(view)
+            renderActiveFilterAffordances(view)
+        }
+        applyChipRowVisibility(view)
     }
 
     private fun setupSettingsAction(view: View) {
@@ -944,6 +993,25 @@ class RecordingsFragment : Fragment() {
         // can wipe the search without manually backspacing every char.
         view.findViewById<ImageButton>(R.id.btnClearPlaceSearch)?.visibility =
             if (searchActive) View.VISIBLE else View.GONE
+        val activeCount = activeFilterCount()
+        view.findViewById<MaterialButton>(R.id.btnFilterToggle)?.let { button ->
+            button.text = if (activeCount > 0) {
+                getString(R.string.recordings_action_filters_count, activeCount)
+            } else {
+                getString(R.string.recordings_action_filters)
+            }
+            button.isSelected = activeCount > 0
+        }
+    }
+
+    private fun activeFilterCount(): Int {
+        val segmentCount = when (currentSource) {
+            Source.DASHCAM -> dashcamTypes.size
+            Source.REPLAYS -> 0
+            Source.SURVEILLANCE -> actorClassFilter.size + severityFilter.size
+        }
+        return segmentCount + placeFilter.size + storageFilter.size +
+            if (placeContainsQuery.isNotEmpty()) 1 else 0
     }
 
     private fun onFiltersChanged(view: View) {
@@ -954,6 +1022,14 @@ class RecordingsFragment : Fragment() {
     // -----------------------------------------------------------------
     // Date handling
     // -----------------------------------------------------------------
+
+    /** Select today's local calendar date for a fresh dashboard deep link. */
+    private fun narrowToToday() {
+        val today = Calendar.getInstance()
+        calendar.set(today.get(Calendar.YEAR), today.get(Calendar.MONTH), 1)
+        selectedDay = today.get(Calendar.DAY_OF_MONTH)
+        dateNarrowed = true
+    }
 
     private fun showDatePicker() {
         val constraints = CalendarConstraints.Builder()
@@ -1101,8 +1177,11 @@ class RecordingsFragment : Fragment() {
                 postCountsToUi(
                     viewRef = viewRef,
                     dashcamCount = 0,
+                    dashcamToday = 0,
                     replaysCount = 0,
+                    replaysToday = 0,
                     surveillanceCount = 0,
+                    surveillanceToday = 0,
                     totalCount = 0,
                     totalToday = 0,
                     totalBytes = 0,
@@ -1141,8 +1220,11 @@ class RecordingsFragment : Fragment() {
                 postCountsToUi(
                     viewRef = viewRef,
                     dashcamCount = dashcamStats.total.toLong(),
+                    dashcamToday = dashcamStats.today.toLong(),
                     replaysCount = replayStats.total.toLong(),
+                    replaysToday = replayStats.today.toLong(),
                     surveillanceCount = surveillanceStats.total.toLong(),
+                    surveillanceToday = surveillanceStats.today.toLong(),
                     totalCount = totalCount.toLong(),
                     totalToday = totalToday.toLong(),
                     totalBytes = totalBytes,
@@ -1181,8 +1263,11 @@ class RecordingsFragment : Fragment() {
             postCountsToUi(
                 viewRef = viewRef,
                 dashcamCount = dashcamCount,
+                dashcamToday = stats.normalToday + stats.proximityToday,
                 replaysCount = replaysCount,
+                replaysToday = stats.replayToday,
                 surveillanceCount = surveillanceCount,
+                surveillanceToday = stats.sentryToday,
                 totalCount = stats.totalCount,
                 totalToday = stats.totalToday,
                 totalBytes = stats.totalSize,
@@ -1205,6 +1290,38 @@ class RecordingsFragment : Fragment() {
     }
 
     /**
+     * A dashboard tile reports today's count across all recording sources. On
+     * entry, choose the segment with the largest matching count so tapping a
+     * non-zero tile cannot land on an empty default Dashcam list while today's
+     * clips are actually under Surveillance or Replays.
+     */
+    private fun selectTodaySourceIfNeeded(
+        view: View,
+        dashcamToday: Long,
+        replaysToday: Long,
+        surveillanceToday: Long,
+        warming: Boolean,
+        indexDown: Boolean
+    ) {
+        if (!autoSelectTodaySource || warming || indexDown) return
+        autoSelectTodaySource = false
+
+        val target = listOf(
+            Source.DASHCAM to dashcamToday,
+            Source.REPLAYS to replaysToday,
+            Source.SURVEILLANCE to surveillanceToday
+        ).maxByOrNull { it.second }?.takeIf { it.second > 0 }?.first ?: return
+        if (target == currentSource) return
+
+        val targetId = when (target) {
+            Source.DASHCAM -> R.id.segmentDashcam
+            Source.REPLAYS -> R.id.segmentReplays
+            Source.SURVEILLANCE -> R.id.segmentSurveillance
+        }
+        view.findViewById<MaterialButtonToggleGroup>(R.id.segmentedSource)?.check(targetId)
+    }
+
+    /**
      * Single UI-post path used by both the API-backed and FS-fallback
      * branches of [refreshCounts]. Mirrors the original pendingPosts /
      * stale-place-cleanup contract so cancellation in onDestroyView keeps
@@ -1213,8 +1330,11 @@ class RecordingsFragment : Fragment() {
     private fun postCountsToUi(
         viewRef: WeakReference<View?>,
         dashcamCount: Long,
+        dashcamToday: Long,
         replaysCount: Long,
+        replaysToday: Long,
         surveillanceCount: Long,
+        surveillanceToday: Long,
         totalCount: Long,
         totalToday: Long,
         totalBytes: Long,
@@ -1233,6 +1353,15 @@ class RecordingsFragment : Fragment() {
                 val v = viewRef.get() ?: return
                 val activeCtx = v.context ?: return
                 val sizeText = Formatter.formatShortFileSize(activeCtx, totalBytes)
+
+                selectTodaySourceIfNeeded(
+                    view = v,
+                    dashcamToday = dashcamToday,
+                    replaysToday = replaysToday,
+                    surveillanceToday = surveillanceToday,
+                    warming = warming,
+                    indexDown = indexDown
+                )
 
                 val baseSummary = activeCtx.getString(
                     R.string.recordings_summary_format,
@@ -1374,7 +1503,7 @@ class RecordingsFragment : Fragment() {
     private fun renderPlaceChips(view: View) {
         val row = view.findViewById<View>(R.id.rowPlaceFilter) ?: return
         val group = view.findViewById<ChipGroup>(R.id.chipGroupPlace) ?: return
-        if (availablePlaces.isEmpty()) {
+        if (availablePlaces.isEmpty() || (isLandscape && !filtersExpanded)) {
             row.visibility = View.GONE
             group.removeAllViews()
             return
@@ -1477,6 +1606,7 @@ class RecordingsFragment : Fragment() {
     private data class DirStats(val total: Int, val today: Int, val bytes: Long)
 
     companion object {
+        const val ARG_TODAY_ONLY = "today_only"
         private const val KEY_SOURCE = "recordings_source"
         private const val KEY_ACTORS = "recordings_actor_classes"
         private const val KEY_SEVERITY = "recordings_severity"
@@ -1488,6 +1618,7 @@ class RecordingsFragment : Fragment() {
         private const val KEY_DATE_D = "recordings_date_day"
         private const val KEY_DATE_NARROWED = "recordings_date_narrowed"
         private const val KEY_PLAYER_FULLSCREEN = "recordings_player_fullscreen"
+        private const val KEY_FILTERS_EXPANDED = "recordings_filters_expanded"
         private const val KEY_PLACE_CONTAINS = "recordings_place_contains"
         private const val TAG_INLINE_PLAYER = "inline_player"
         /** Cap on chips to avoid sprawl after a long road trip. */

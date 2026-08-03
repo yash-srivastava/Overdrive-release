@@ -4,6 +4,7 @@ import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.monitor.BatterySocData;
 import com.overdrive.app.monitor.ChargingDetector;
 import com.overdrive.app.monitor.ChargingStateData;
+import com.overdrive.app.monitor.DrivingRangeData;
 import com.overdrive.app.monitor.SocHistoryDatabase;
 import com.overdrive.app.monitor.VehicleDataMonitor;
 
@@ -326,8 +327,7 @@ public class ChargingApiHandler {
         try {
             boolean charging = false, plugged = false, full = false, fault = false;
             boolean isEstimated = false;
-            double powerKw = 0, socPct = -1;
-            int timeToFullMin = -1;
+            double powerKw = 0, socPct = -1, rangeKm = -1, sohPct = -1;
             try {
                 charging = ChargingDetector.getInstance().isCharging();
             } catch (Exception ignored) {}
@@ -351,7 +351,23 @@ public class ChargingApiHandler {
                     BatterySocData soc = vm.getBatterySoc();
                     if (soc != null) socPct = soc.socPercent;
                 } catch (Exception ignored) {}
+                try {
+                    DrivingRangeData range = vm.getDrivingRange();
+                    if (range != null && range.isValidRange()) rangeKm = range.elecRangeKm;
+                } catch (Exception ignored) {}
             }
+
+            // The Stats hero mirrors the native Dashboard vehicle gauge. Read
+            // the same central SohEstimator headline value so every consumer
+            // agrees and no capacity arithmetic is duplicated in the web UI.
+            try {
+                com.overdrive.app.abrp.SohEstimator soh =
+                        SocHistoryDatabase.getInstance().getSohEstimator();
+                if (soh != null) {
+                    double resolved = soh.getDisplaySoh();
+                    if (resolved > 0 && resolved <= 100) sohPct = resolved;
+                }
+            } catch (Throwable ignored) {}
 
             // Energy added so far in the CURRENT (open) session — the dashboard
             // "Session" + stats "Added this session" metric. Integrates the power
@@ -363,7 +379,6 @@ public class ChargingApiHandler {
             try {
                 long openStart = db().getOpenChargingSessionStart();
                 if (openStart > 0) {
-                    timeToFullMin = db().getOpenChargingSessionTimeToFullMin();
                     sessionKwh = db().getOpenChargingSessionEnergyKwh();
                 }
             } catch (Exception ignored) {}
@@ -378,8 +393,14 @@ public class ChargingApiHandler {
             // suppress the estimated value the same way index.html does.
             live.put("isEstimated", isEstimated);
             live.put("socPercent", socPct >= 0 ? socPct : JSONObject.NULL);
+            live.put("rangeKm", rangeKm >= 0 ? rangeKm : JSONObject.NULL);
+            live.put("sohPercent", sohPct > 0
+                    ? Math.round(sohPct * 10.0) / 10.0
+                    : JSONObject.NULL);
             live.put("sessionKwh", sessionKwh > 0 ? sessionKwh : JSONObject.NULL);
-            live.put("timeToFullMin", timeToFullMin > 0 ? timeToFullMin : JSONObject.NULL);
+            // One live resolver feeds this endpoint and /status, so the dashboard,
+            // sidebar and Charging Stats cannot show conflicting countdowns.
+            ChargingCompletionEstimate.resolveLive(charging, full).putInto(live);
         } catch (Exception e) {
             logger.debug("buildLiveBlock failed: " + e.getMessage());
         }

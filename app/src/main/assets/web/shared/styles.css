@@ -447,10 +447,11 @@ input, select { font-family: inherit; }
     animation: none;
 }
 
-/* Compact status pills (for example Live, vehicle lock, and monitoring).
-   Android System WebView 58 does not support flex `gap`, so the dot owns the
-   spacing. Keep that compatibility detail here instead of reimplementing it
-   in every page-specific pill. */
+/* Shared compact chips and status pills.
+   Keep icon/label geometry here so badges across pages do not slowly drift to
+   different heights, padding, or cramped icon spacing. Android System WebView
+   58 does not support flex `gap`, so sibling margins provide the spacing. */
+.app-chip,
 .compact-status-pill {
     display: -webkit-inline-flex;
     display: inline-flex;
@@ -458,18 +459,71 @@ input, select { font-family: inherit; }
     align-items: center;
 }
 
+.app-chip {
+    --app-chip-gap: 8px;
+    min-height: 30px;
+    padding: 0 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-full);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.app-chip > * + * {
+    margin-left: 8px;
+    margin-left: var(--app-chip-gap, 8px);
+}
+
+[dir="rtl"] .app-chip > * + * {
+    margin-left: 0;
+    margin-right: 8px;
+    margin-right: var(--app-chip-gap, 8px);
+}
+
+.app-chip svg,
+.app-chip__icon {
+    width: 14px;
+    height: 14px;
+    -webkit-flex: 0 0 auto;
+    flex: 0 0 auto;
+}
+
+.app-chip__dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    -webkit-flex: 0 0 auto;
+    flex: 0 0 auto;
+    background: currentColor;
+}
+
 .compact-status-pill > .compact-status-pill__dot {
     display: inline-block;
     -webkit-flex: 0 0 auto;
     flex: 0 0 auto;
-    margin-right: 6px;
-    margin-right: var(--compact-status-pill-dot-gap, 6px);
+    margin-right: 8px;
+    margin-right: var(--compact-status-pill-dot-gap, 8px);
 }
 
 [dir="rtl"] .compact-status-pill > .compact-status-pill__dot {
     margin-right: 0;
-    margin-left: 6px;
-    margin-left: var(--compact-status-pill-dot-gap, 6px);
+    margin-left: 8px;
+    margin-left: var(--compact-status-pill-dot-gap, 8px);
+}
+
+/* .app-chip already spaces every adjacent child. Avoid doubling that spacing
+   when a status dot also carries the legacy compact-status-pill hook. */
+.app-chip.compact-status-pill > .compact-status-pill__dot {
+    margin-right: 0;
+}
+
+[dir="rtl"] .app-chip.compact-status-pill > .compact-status-pill__dot {
+    margin-left: 0;
 }
 
 @keyframes pulse {
@@ -564,6 +618,24 @@ input, select { font-family: inherit; }
     overflow: hidden;
     position: relative;
     z-index: 0;
+}
+
+/* Shared shell for feature-specific cards that cannot use .card's spacing or
+   overflow rules. Keep page-local CSS focused on layout and content. */
+.app-surface-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+}
+
+.app-surface-card--interactive {
+    transition: background .2s, border-color .2s, transform .2s;
+}
+
+.app-surface-card--interactive:hover,
+.app-surface-card--interactive:focus {
+    background: var(--bg-elevated);
+    border-color: rgba(0, 212, 170, .5);
 }
 
 .card + .card { margin-top: 24px; }
@@ -3282,6 +3354,53 @@ select.md-input ~ .md-label {
 
 .ev-card.charging .ev-power-val {
     color: var(--brand-primary);
+}
+
+.ev-completion-row {
+    display: flex;
+    align-items: center;
+    margin-top: 10px;
+    padding: 9px 10px;
+    border: 1px solid rgba(0, 212, 170, 0.18);
+    border-radius: var(--radius-sm);
+    background: rgba(0, 212, 170, 0.07);
+}
+
+.ev-completion-row > svg {
+    width: 17px;
+    height: 17px;
+    flex: 0 0 auto;
+    margin-right: 9px;
+    color: var(--brand-primary);
+}
+
+.ev-completion-copy {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    justify-content: space-between;
+    align-items: baseline;
+}
+
+.ev-completion-primary {
+    color: var(--text-primary);
+    font: 700 12px 'JetBrains Mono', monospace;
+}
+
+.ev-completion-secondary {
+    margin-left: 8px;
+    color: var(--text-muted);
+    font-size: 10px;
+    white-space: nowrap;
+}
+
+.ev-completion-row[data-state="complete"] {
+    border-color: rgba(0, 212, 170, 0.28);
+}
+
+.ev-completion-row[data-state="waiting"] {
+    border-color: var(--border-subtle);
+    background: var(--bg-elevated);
 }
 
 /* Personalized Range Row */
