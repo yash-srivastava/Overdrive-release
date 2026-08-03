@@ -1,6 +1,7 @@
 package com.overdrive.app
 
 import android.app.Application
+import android.content.Intent
 import android.util.Log
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
@@ -25,9 +26,15 @@ class OverdriveApplication : Application() {
         super.onCreate()
 
         // Track only this app's Activity/Window roots for the authenticated
-        // Remote Overdrive Dev View. The controller is dormant until the
-        // shell-daemon bridge is explicitly started for a confirmed session.
+        // Remote Overdrive Dev View. Capture and input stay dormant until an
+        // expiring HTTP session sends a command over the shell-authenticated
+        // private Unix socket.
         RemoteDevViewController.install(this)
+        try {
+            startService(Intent(this, com.overdrive.app.remote.RemoteDevViewBridgeService::class.java))
+        } catch (error: Throwable) {
+            Log.w("OverdriveApplication", "Remote dev-view bridge unavailable: ${error.message}")
+        }
 
         // Apply the user-picked locale before any Activity/Fragment is created.
         // Auto-mode (or unset) writes an empty list so AppCompat falls back to

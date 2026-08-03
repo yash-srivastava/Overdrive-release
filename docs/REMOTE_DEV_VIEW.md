@@ -20,10 +20,10 @@ uncover, or otherwise alter the physical head-unit display.
 - Frames use authenticated `POST` requests so the capability is never placed in
   a URL. Responses are marked `no-store`; frames are held in memory and are not
   written to app, shared, or daemon storage.
-- The shell daemon reaches the Android app process through an exported service
-  protected by the signature-level `android.permission.DUMP` permission. The
-  service also requires a daemon-generated in-memory secret and listens only on
-  `127.0.0.1:19881`.
+- The bridge service is private (`exported=false`) and started by Overdrive
+  itself. The shell daemon reaches it over an abstract Unix-domain socket; the
+  bridge checks Linux peer credentials and rejects every UID except shell
+  (2000). There is no network-listening IPC port or shared on-disk secret.
 - Input is dispatched only to Overdrive-owned view roots in the app process.
   There is no `adb input`, accessibility injection, system-window capture, or
   interaction with `AccAnimation`, SurfaceFlinger, or BYD power services.

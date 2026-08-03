@@ -36,23 +36,22 @@ public class RemoteDevViewAssetTest {
     }
 
     @Test
-    public void bridgeIsShellProtectedAndLoopbackOnly() throws Exception {
+    public void bridgeIsPrivateAndAuthenticatesKernelPeerUid() throws Exception {
         String manifest = read("src/main/AndroidManifest.xml");
         String service = read(
             "src/main/java/com/overdrive/app/remote/RemoteDevViewBridgeService.kt");
 
         assertTrue(manifest.contains("com.overdrive.app.remote.RemoteDevViewBridgeService"));
-        assertTrue(manifest.contains("android:permission=\"android.permission.DUMP\""));
-        assertTrue(service.contains("const val HOST = \"127.0.0.1\""));
-        assertTrue(service.contains("MessageDigest.isEqual"));
+        assertTrue(service.contains("LocalServerSocket(SOCKET_NAME)"));
+        assertTrue(service.contains("client.peerCredentials.uid"));
+        assertTrue(service.contains("peerUid != SHELL_UID"));
 
         String client = read(
             "src/main/java/com/overdrive/app/server/RemoteDevViewBridgeClient.java");
-        assertTrue(client.contains("createPackageContext("));
-        assertTrue(client.contains("\"com.android.shell\""));
-        assertTrue(client.contains("new ProcessBuilder("));
-        assertTrue(client.contains("\"/system/bin/am\""));
+        assertTrue(client.contains("new LocalSocket()"));
+        assertTrue(client.contains("LocalSocketAddress.Namespace.ABSTRACT"));
         assertFalse(client.contains("Runtime.getRuntime().exec"));
+        assertFalse(client.contains("new ProcessBuilder("));
     }
 
     @Test

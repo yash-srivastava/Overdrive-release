@@ -2,35 +2,29 @@ package com.overdrive.app.remote
 
 import android.app.Service
 import android.content.Intent
+import android.net.LocalServerSocket
+import android.net.LocalSocket
 import android.os.IBinder
-import android.os.SystemClock
 import android.util.Log
 import com.overdrive.app.ui.MainActivity
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.io.InputStream
-import java.net.InetAddress
-import java.net.ServerSocket
-import java.net.Socket
-import java.net.SocketTimeoutException
 import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /**
- * DUMP-permission-protected, loopback-only bridge into Overdrive's UI process.
- * The shell camera daemon supplies a fresh in-memory secret every time it starts
- * the bridge. Nothing is persisted and no frame is written to storage.
+ * Private app service exposing an abstract Unix-domain socket to the shell
+ * camera daemon. Every accepted connection is authenticated with kernel peer
+ * credentials (uid 2000); nothing is persisted and no frame touches storage.
  */
 class RemoteDevViewBridgeService : Service() {
     private val worker: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "remote-dev-view-bridge").apply { isDaemon = true }
     }
-    @Volatile private var secret: String? = null
-    @Volatile private var serverSocket: ServerSocket? = null
-    @Volatile private var lastAuthorizedAtElapsedMs = 0L
+    @Volatile private var serverSocket: LocalServerSocket? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -38,23 +32,13 @@ class RemoteDevViewBridgeService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val supplied = intent?.getStringExtra(EXTRA_BRIDGE_SECRET)
-        if (supplied.isNullOrBlank() || supplied.length < 32) {
-            Log.w(TAG, "Rejected bridge start without a valid ephemeral secret")
-            stopSelf(startId)
-            return START_NOT_STICKY
-        }
-        secret = supplied
-        lastAuthorizedAtElapsedMs = SystemClock.elapsedRealtime()
         ensureListening()
-        if (intent.getBooleanExtra(EXTRA_LAUNCH_ACTIVITY, false)) launchOverdrive()
         return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        secret = null
         try { serverSocket?.close() } catch (_: Exception) {}
         worker.shutdownNow()
         super.onDestroy()
@@ -62,25 +46,13 @@ class RemoteDevViewBridgeService : Service() {
 
     @Synchronized
     private fun ensureListening() {
-        if (serverSocket?.isClosed == false) return
+        if (serverSocket != null) return
         worker.execute {
             try {
-                val server = ServerSocket(PORT, 4, InetAddress.getByName(HOST))
-                server.reuseAddress = true
-                server.soTimeout = ACCEPT_POLL_MS
+                val server = LocalServerSocket(SOCKET_NAME)
                 serverSocket = server
-                while (!server.isClosed) {
-                    if (SystemClock.elapsedRealtime() - lastAuthorizedAtElapsedMs > BRIDGE_IDLE_MS) {
-                        stopSelf()
-                        break
-                    }
-                    val socket = try {
-                        server.accept()
-                    } catch (_: SocketTimeoutException) {
-                        continue
-                    } catch (_: Exception) {
-                        break
-                    }
+                while (serverSocket === server) {
+                    val socket = try { server.accept() } catch (_: Exception) { break }
                     handleClient(socket)
                 }
             } catch (error: Throwable) {
@@ -91,61 +63,63 @@ class RemoteDevViewBridgeService : Service() {
         }
     }
 
-    private fun handleClient(socket: Socket) {
+    private fun handleClient(socket: LocalSocket) {
         socket.use { client ->
             client.soTimeout = SOCKET_TIMEOUT_MS
             val response = JSONObject()
             var payload: ByteArray? = null
             try {
+                val peerUid = client.peerCredentials.uid
+                if (peerUid != SHELL_UID) {
+                    response.put("success", false)
+                    response.put("error", "Unauthorized bridge peer")
+                    writeResponse(client, response, null)
+                    return
+                }
                 val line = readLineLimited(client.getInputStream(), MAX_REQUEST_BYTES)
                 val request = JSONObject(line)
-                if (!secretMatches(request.optString("secret", ""))) {
-                    response.put("success", false)
-                    response.put("error", "Unauthorized bridge request")
-                } else {
-                    lastAuthorizedAtElapsedMs = SystemClock.elapsedRealtime()
-                    when (request.optString("command", "")) {
-                        "status" -> putInputResult(response, RemoteDevViewController.status())
-                        "capture" -> {
-                            val capture = RemoteDevViewController.capture(
-                                request.optInt("maxWidth", DEFAULT_MAX_WIDTH)
-                                    .coerceIn(MIN_WIDTH, MAX_WIDTH),
-                                request.optInt("quality", DEFAULT_QUALITY)
-                                    .coerceIn(MIN_QUALITY, MAX_QUALITY),
-                            )
-                            response.put("success", capture.jpeg != null)
-                            response.put("pixelCopyCode", capture.resultCode)
-                            response.put("pixelCopyResult", capture.resultName)
-                            response.put("width", capture.width)
-                            response.put("height", capture.height)
-                            response.put("activity", capture.activityName ?: JSONObject.NULL)
-                            if (capture.detail != null) response.put("detail", capture.detail)
-                            payload = capture.jpeg
-                        }
-                        "touch" -> putInputResult(
-                            response,
-                            RemoteDevViewController.dispatchTouch(
-                                request.optString("phase", ""),
-                                request.optDouble("x", Double.NaN),
-                                request.optDouble("y", Double.NaN),
-                            ),
+                when (request.optString("command", "")) {
+                    "launch" -> {
+                        launchOverdrive()
+                        response.put("success", true)
+                        response.put("launchRequested", true)
+                    }
+                    "status" -> putInputResult(response, RemoteDevViewController.status())
+                    "capture" -> {
+                        val capture = RemoteDevViewController.capture(
+                            request.optInt("maxWidth", DEFAULT_MAX_WIDTH)
+                                .coerceIn(MIN_WIDTH, MAX_WIDTH),
+                            request.optInt("quality", DEFAULT_QUALITY)
+                                .coerceIn(MIN_QUALITY, MAX_QUALITY),
                         )
-                        "key" -> putInputResult(
-                            response,
-                            RemoteDevViewController.dispatchKey(request.optString("key", "")),
-                        )
-                        "text" -> putInputResult(
-                            response,
-                            RemoteDevViewController.dispatchText(request.optString("text", "")),
-                        )
-                        "shutdown" -> {
-                            response.put("success", true)
-                            response.put("stopping", true)
-                        }
-                        else -> {
-                            response.put("success", false)
-                            response.put("error", "Unknown bridge command")
-                        }
+                        response.put("success", capture.jpeg != null)
+                        response.put("pixelCopyCode", capture.resultCode)
+                        response.put("pixelCopyResult", capture.resultName)
+                        response.put("width", capture.width)
+                        response.put("height", capture.height)
+                        response.put("activity", capture.activityName ?: JSONObject.NULL)
+                        if (capture.detail != null) response.put("detail", capture.detail)
+                        payload = capture.jpeg
+                    }
+                    "touch" -> putInputResult(
+                        response,
+                        RemoteDevViewController.dispatchTouch(
+                            request.optString("phase", ""),
+                            request.optDouble("x", Double.NaN),
+                            request.optDouble("y", Double.NaN),
+                        ),
+                    )
+                    "key" -> putInputResult(
+                        response,
+                        RemoteDevViewController.dispatchKey(request.optString("key", "")),
+                    )
+                    "text" -> putInputResult(
+                        response,
+                        RemoteDevViewController.dispatchText(request.optString("text", "")),
+                    )
+                    else -> {
+                        response.put("success", false)
+                        response.put("error", "Unknown bridge command")
                     }
                 }
             } catch (error: Throwable) {
@@ -153,23 +127,22 @@ class RemoteDevViewBridgeService : Service() {
                 response.put("error", error.message ?: error.javaClass.simpleName)
             }
 
-            try {
-                val bytes = payload ?: ByteArray(0)
-                response.put("payloadBytes", bytes.size)
-                val metadata = response.toString().toByteArray(StandardCharsets.UTF_8)
-                val output = DataOutputStream(client.getOutputStream())
-                output.writeInt(metadata.size)
-                output.write(metadata)
-                if (bytes.isNotEmpty()) output.write(bytes)
-                output.flush()
-            } catch (error: Throwable) {
-                Log.w(TAG, "Unable to return bridge response", error)
-            }
+            writeResponse(client, response, payload)
+        }
+    }
 
-            if (response.optBoolean("stopping", false)) {
-                secret = null
-                stopSelf()
-            }
+    private fun writeResponse(client: LocalSocket, response: JSONObject, payload: ByteArray?) {
+        try {
+            val bytes = payload ?: ByteArray(0)
+            response.put("payloadBytes", bytes.size)
+            val metadata = response.toString().toByteArray(StandardCharsets.UTF_8)
+            val output = DataOutputStream(client.outputStream)
+            output.writeInt(metadata.size)
+            output.write(metadata)
+            if (bytes.isNotEmpty()) output.write(bytes)
+            output.flush()
+        } catch (error: Throwable) {
+            Log.w(TAG, "Unable to return bridge response", error)
         }
     }
 
@@ -185,14 +158,6 @@ class RemoteDevViewBridgeService : Service() {
         } catch (error: Throwable) {
             Log.w(TAG, "Unable to launch MainActivity for developer view", error)
         }
-    }
-
-    private fun secretMatches(candidate: String): Boolean {
-        val expected = secret ?: return false
-        return MessageDigest.isEqual(
-            expected.toByteArray(StandardCharsets.UTF_8),
-            candidate.toByteArray(StandardCharsets.UTF_8),
-        )
     }
 
     private fun putInputResult(target: JSONObject, result: RemoteDevViewController.InputResult) {
@@ -215,16 +180,11 @@ class RemoteDevViewBridgeService : Service() {
     }
 
     companion object {
-        const val ACTION_START = "com.overdrive.app.remote.START_DEV_VIEW_BRIDGE"
-        const val EXTRA_BRIDGE_SECRET = "bridge_secret"
-        const val EXTRA_LAUNCH_ACTIVITY = "launch_activity"
-        const val HOST = "127.0.0.1"
-        const val PORT = 19881
+        const val SOCKET_NAME = "overdrive_remote_dev_view_v1"
 
         private const val TAG = "RemoteDevViewBridge"
+        private const val SHELL_UID = 2000
         private const val SOCKET_TIMEOUT_MS = 8_000
-        private const val ACCEPT_POLL_MS = 30_000
-        private const val BRIDGE_IDLE_MS = 6 * 60 * 1000L
         private const val MAX_REQUEST_BYTES = 16 * 1024
         private const val MIN_WIDTH = 320
         private const val MAX_WIDTH = 1920

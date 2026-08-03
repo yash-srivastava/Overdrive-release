@@ -1,11 +1,8 @@
 package com.overdrive.app.server;
 
-import android.content.ComponentName;
-import android.content.Context;
-import android.content.Intent;
+import android.net.LocalSocket;
+import android.net.LocalSocketAddress;
 
-import com.overdrive.app.daemon.DaemonBootstrap;
-import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.remote.RemoteDevViewBridgeService;
 
 import org.json.JSONObject;
@@ -13,20 +10,13 @@ import org.json.JSONObject;
 import java.io.DataInputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
-import java.net.InetSocketAddress;
-import java.net.Socket;
 import java.nio.charset.StandardCharsets;
-import java.security.SecureRandom;
-import java.util.concurrent.TimeUnit;
 
 /** Shell-daemon client for the protected app-process developer-view bridge. */
 final class RemoteDevViewBridgeClient {
-    private static final int CONNECT_TIMEOUT_MS = 1_500;
     private static final int READ_TIMEOUT_MS = 9_000;
     private static final int MAX_METADATA_BYTES = 64 * 1024;
     private static final int MAX_PAYLOAD_BYTES = 8 * 1024 * 1024;
-    private static final String SERVICE_CLASS =
-        "com.overdrive.app.remote.RemoteDevViewBridgeService";
 
     static final class Response {
         final JSONObject metadata;
@@ -38,92 +28,21 @@ final class RemoteDevViewBridgeClient {
         }
     }
 
-    private final String bridgeSecret = randomHex(32);
-
     boolean start(boolean launchActivity) {
-        try {
-            Context daemonContext = DaemonBootstrap.getContext();
-            if (daemonContext == null) return false;
-            // DaemonBootstrap's package context identifies as com.overdrive.app,
-            // but this app_process is uid 2000. ActivityManager rejects that
-            // package/uid mismatch before it even checks the component's DUMP
-            // permission. Prefer a real com.android.shell package context so
-            // the Binder caller identity and attributed package agree and the
-            // ephemeral bridge secret stays inside the Binder parcel.
-            Intent intent = new Intent(RemoteDevViewBridgeService.ACTION_START);
-            intent.setComponent(new ComponentName(DaemonBootstrap.getPackageName(), SERVICE_CLASS));
-            intent.putExtra(RemoteDevViewBridgeService.EXTRA_BRIDGE_SECRET, bridgeSecret);
-            intent.putExtra(RemoteDevViewBridgeService.EXTRA_LAUNCH_ACTIVITY, launchActivity);
-            try {
-                Context context = daemonContext.createPackageContext(
-                    "com.android.shell", Context.CONTEXT_IGNORE_SECURITY);
-                if ("com.android.shell".equals(context.getPackageName())
-                        && context.startService(intent) != null) {
-                    return true;
-                }
-            } catch (Throwable error) {
-                logStartFailure("Binder start", error);
-            }
-
-            // Some BYD builds return the Overdrive package context from
-            // createPackageContext(com.android.shell), leaving ActivityManager
-            // to reject the package/uid mismatch. Use am as a narrow fallback.
-            // ProcessBuilder passes each value as a literal argument (no shell
-            // interpolation). The only peers able to inspect this shell-uid
-            // process are shell-equivalent principals that already hold DUMP
-            // and can start/inspect the protected service directly.
-            return startWithActivityManagerCommand(launchActivity);
-        } catch (Throwable error) {
-            logStartFailure("Bridge start", error);
-            return false;
-        }
-    }
-
-    private boolean startWithActivityManagerCommand(boolean launchActivity) {
-        Process process = null;
-        try {
-            process = new ProcessBuilder(
-                "/system/bin/am",
-                "startservice",
-                "-n", DaemonBootstrap.getPackageName() + "/" + SERVICE_CLASS,
-                "-a", RemoteDevViewBridgeService.ACTION_START,
-                "--es", RemoteDevViewBridgeService.EXTRA_BRIDGE_SECRET, bridgeSecret,
-                "--ez", RemoteDevViewBridgeService.EXTRA_LAUNCH_ACTIVITY,
-                Boolean.toString(launchActivity))
-                .redirectErrorStream(true)
-                .start();
-            if (!process.waitFor(5, TimeUnit.SECONDS)) {
-                process.destroy();
-                return false;
-            }
-            return process.exitValue() == 0;
-        } catch (Throwable error) {
-            logStartFailure("am startservice", error);
-            return false;
-        } finally {
-            if (process != null) {
-                try { process.getInputStream().close(); } catch (Exception ignored) {}
-                try { process.getOutputStream().close(); } catch (Exception ignored) {}
-                try { process.getErrorStream().close(); } catch (Exception ignored) {}
-            }
-        }
-    }
-
-    private static void logStartFailure(String stage, Throwable error) {
-        try {
-            CameraDaemon.log("RemoteDevView: " + stage + " failed: "
-                + error.getClass().getSimpleName() + ": " + error.getMessage());
-        } catch (Throwable ignored) {}
+        JSONObject request = new JSONObject();
+        try { request.put("command", launchActivity ? "launch" : "status"); }
+        catch (Exception ignored) {}
+        Response response = send(request);
+        return response != null && response.metadata.optBoolean("success", false);
     }
 
     Response send(JSONObject request) {
-        Socket socket = null;
+        LocalSocket socket = null;
         try {
-            request.put("secret", bridgeSecret);
-            socket = new Socket();
-            socket.connect(new InetSocketAddress(
-                RemoteDevViewBridgeService.HOST,
-                RemoteDevViewBridgeService.PORT), CONNECT_TIMEOUT_MS);
+            socket = new LocalSocket();
+            socket.connect(new LocalSocketAddress(
+                RemoteDevViewBridgeService.SOCKET_NAME,
+                LocalSocketAddress.Namespace.ABSTRACT));
             socket.setSoTimeout(READ_TIMEOUT_MS);
 
             PrintWriter writer = new PrintWriter(
@@ -163,21 +82,7 @@ final class RemoteDevViewBridgeClient {
     }
 
     void shutdown() {
-        JSONObject request = new JSONObject();
-        try { request.put("command", "shutdown"); } catch (Exception ignored) {}
-        send(request);
-    }
-
-    private static String randomHex(int byteCount) {
-        byte[] bytes = new byte[byteCount];
-        new SecureRandom().nextBytes(bytes);
-        char[] alphabet = "0123456789abcdef".toCharArray();
-        char[] result = new char[bytes.length * 2];
-        for (int i = 0; i < bytes.length; i++) {
-            int value = bytes[i] & 0xff;
-            result[i * 2] = alphabet[value >>> 4];
-            result[i * 2 + 1] = alphabet[value & 0x0f];
-        }
-        return new String(result);
+        // The private bridge remains dormant for later sessions; the HTTP
+        // capability is the revocation boundary.
     }
 }
