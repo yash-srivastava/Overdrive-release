@@ -2,6 +2,7 @@ package com.overdrive.app.server;
 
 import android.net.LocalSocket;
 import android.net.LocalSocketAddress;
+import android.util.Log;
 
 import com.overdrive.app.remote.RemoteDevViewBridgeService;
 
@@ -14,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 
 /** Shell-daemon client for the protected app-process developer-view bridge. */
 final class RemoteDevViewBridgeClient {
+    private static final String TAG = "RemoteDevViewClient";
     private static final int READ_TIMEOUT_MS = 9_000;
     private static final int MAX_METADATA_BYTES = 64 * 1024;
     private static final int MAX_PAYLOAD_BYTES = 8 * 1024 * 1024;
@@ -61,6 +63,7 @@ final class RemoteDevViewBridgeClient {
             if (payloadLength > 0) input.readFully(payload);
             return new Response(metadata, payload);
         } catch (Throwable error) {
+            Log.w(TAG, "App-process bridge request failed", error);
             return null;
         } finally {
             try { if (socket != null) socket.close(); } catch (Exception ignored) {}
