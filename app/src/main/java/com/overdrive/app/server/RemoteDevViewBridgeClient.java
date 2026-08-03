@@ -17,6 +17,7 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.util.concurrent.TimeUnit;
 
 /** Shell-daemon client for the protected app-process developer-view bridge. */
 final class RemoteDevViewBridgeClient {
@@ -46,24 +47,73 @@ final class RemoteDevViewBridgeClient {
             // DaemonBootstrap's package context identifies as com.overdrive.app,
             // but this app_process is uid 2000. ActivityManager rejects that
             // package/uid mismatch before it even checks the component's DUMP
-            // permission. Use a real com.android.shell package context so the
-            // Binder caller identity and attributed package agree. This also
-            // keeps the ephemeral bridge secret out of command-line arguments.
-            Context context = daemonContext.createPackageContext(
-                "com.android.shell", Context.CONTEXT_IGNORE_SECURITY);
-            if (!"com.android.shell".equals(context.getPackageName())) return false;
+            // permission. Prefer a real com.android.shell package context so
+            // the Binder caller identity and attributed package agree and the
+            // ephemeral bridge secret stays inside the Binder parcel.
             Intent intent = new Intent(RemoteDevViewBridgeService.ACTION_START);
             intent.setComponent(new ComponentName(DaemonBootstrap.getPackageName(), SERVICE_CLASS));
             intent.putExtra(RemoteDevViewBridgeService.EXTRA_BRIDGE_SECRET, bridgeSecret);
             intent.putExtra(RemoteDevViewBridgeService.EXTRA_LAUNCH_ACTIVITY, launchActivity);
-            return context.startService(intent) != null;
-        } catch (Throwable error) {
             try {
-                CameraDaemon.log("RemoteDevView: bridge start failed: "
-                    + error.getClass().getSimpleName() + ": " + error.getMessage());
-            } catch (Throwable ignored) {}
+                Context context = daemonContext.createPackageContext(
+                    "com.android.shell", Context.CONTEXT_IGNORE_SECURITY);
+                if ("com.android.shell".equals(context.getPackageName())
+                        && context.startService(intent) != null) {
+                    return true;
+                }
+            } catch (Throwable error) {
+                logStartFailure("Binder start", error);
+            }
+
+            // Some BYD builds return the Overdrive package context from
+            // createPackageContext(com.android.shell), leaving ActivityManager
+            // to reject the package/uid mismatch. Use am as a narrow fallback.
+            // ProcessBuilder passes each value as a literal argument (no shell
+            // interpolation). The only peers able to inspect this shell-uid
+            // process are shell-equivalent principals that already hold DUMP
+            // and can start/inspect the protected service directly.
+            return startWithActivityManagerCommand(launchActivity);
+        } catch (Throwable error) {
+            logStartFailure("Bridge start", error);
             return false;
         }
+    }
+
+    private boolean startWithActivityManagerCommand(boolean launchActivity) {
+        Process process = null;
+        try {
+            process = new ProcessBuilder(
+                "/system/bin/am",
+                "startservice",
+                "-n", DaemonBootstrap.getPackageName() + "/" + SERVICE_CLASS,
+                "-a", RemoteDevViewBridgeService.ACTION_START,
+                "--es", RemoteDevViewBridgeService.EXTRA_BRIDGE_SECRET, bridgeSecret,
+                "--ez", RemoteDevViewBridgeService.EXTRA_LAUNCH_ACTIVITY,
+                Boolean.toString(launchActivity))
+                .redirectErrorStream(true)
+                .start();
+            if (!process.waitFor(5, TimeUnit.SECONDS)) {
+                process.destroy();
+                return false;
+            }
+            return process.exitValue() == 0;
+        } catch (Throwable error) {
+            logStartFailure("am startservice", error);
+            return false;
+        } finally {
+            if (process != null) {
+                try { process.getInputStream().close(); } catch (Exception ignored) {}
+                try { process.getOutputStream().close(); } catch (Exception ignored) {}
+                try { process.getErrorStream().close(); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    private static void logStartFailure(String stage, Throwable error) {
+        try {
+            CameraDaemon.log("RemoteDevView: " + stage + " failed: "
+                + error.getClass().getSimpleName() + ": " + error.getMessage());
+        } catch (Throwable ignored) {}
     }
 
     Response send(JSONObject request) {

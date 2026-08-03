@@ -50,6 +50,8 @@ public class RemoteDevViewAssetTest {
             "src/main/java/com/overdrive/app/server/RemoteDevViewBridgeClient.java");
         assertTrue(client.contains("createPackageContext("));
         assertTrue(client.contains("\"com.android.shell\""));
+        assertTrue(client.contains("new ProcessBuilder("));
+        assertTrue(client.contains("\"/system/bin/am\""));
         assertFalse(client.contains("Runtime.getRuntime().exec"));
     }
 
