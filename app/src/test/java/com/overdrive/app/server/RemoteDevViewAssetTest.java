@@ -46,6 +46,7 @@ public class RemoteDevViewAssetTest {
         assertTrue(manifest.contains("com.overdrive.app.remote.RemoteDevViewBridgeService"));
         assertTrue(manifest.contains("android:exported=\"false\""));
         assertTrue(service.contains("InetAddress.getLoopbackAddress()"));
+        assertTrue(service.contains("const val PORT = 19881"));
         assertTrue(service.contains("rememberNonce(authenticated.nonce"));
         assertTrue(auth.contains("HmacSHA256"));
         assertTrue(auth.contains("MessageDigest.isEqual"));

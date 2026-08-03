@@ -68,6 +68,7 @@ public class TelegramBotDaemon {
     //   19880 — Telegram bot IPC (this daemon)
     // Was previously 19878 which collides with BydEventDaemon — whichever
     // daemon started second silently failed to bind. Moved to 19880.
+    //   19881 - Remote Overdrive Dev View app-process bridge (loopback only)
     private static final int IPC_PORT = 19880;
     
     // Singleton lock (same pattern as CameraDaemon / AccSentryDaemon)

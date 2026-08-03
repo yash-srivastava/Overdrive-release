@@ -196,7 +196,7 @@ class RemoteDevViewBridgeService : Service() {
     }
 
     companion object {
-        const val PORT = 19878
+        const val PORT = 19881
 
         private const val TAG = "RemoteDevViewBridge"
         private const val BACKLOG = 4
