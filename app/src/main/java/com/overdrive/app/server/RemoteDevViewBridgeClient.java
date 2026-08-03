@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 
 import com.overdrive.app.daemon.DaemonBootstrap;
+import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.remote.RemoteDevViewBridgeService;
 
 import org.json.JSONObject;
@@ -40,14 +41,27 @@ final class RemoteDevViewBridgeClient {
 
     boolean start(boolean launchActivity) {
         try {
-            Context context = DaemonBootstrap.getContext();
-            if (context == null) return false;
+            Context daemonContext = DaemonBootstrap.getContext();
+            if (daemonContext == null) return false;
+            // DaemonBootstrap's package context identifies as com.overdrive.app,
+            // but this app_process is uid 2000. ActivityManager rejects that
+            // package/uid mismatch before it even checks the component's DUMP
+            // permission. Use a real com.android.shell package context so the
+            // Binder caller identity and attributed package agree. This also
+            // keeps the ephemeral bridge secret out of command-line arguments.
+            Context context = daemonContext.createPackageContext(
+                "com.android.shell", Context.CONTEXT_IGNORE_SECURITY);
+            if (!"com.android.shell".equals(context.getPackageName())) return false;
             Intent intent = new Intent(RemoteDevViewBridgeService.ACTION_START);
-            intent.setComponent(new ComponentName(context.getPackageName(), SERVICE_CLASS));
+            intent.setComponent(new ComponentName(DaemonBootstrap.getPackageName(), SERVICE_CLASS));
             intent.putExtra(RemoteDevViewBridgeService.EXTRA_BRIDGE_SECRET, bridgeSecret);
             intent.putExtra(RemoteDevViewBridgeService.EXTRA_LAUNCH_ACTIVITY, launchActivity);
             return context.startService(intent) != null;
         } catch (Throwable error) {
+            try {
+                CameraDaemon.log("RemoteDevView: bridge start failed: "
+                    + error.getClass().getSimpleName() + ": " + error.getMessage());
+            } catch (Throwable ignored) {}
             return false;
         }
     }

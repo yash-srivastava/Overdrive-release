@@ -45,6 +45,12 @@ public class RemoteDevViewAssetTest {
         assertTrue(manifest.contains("android:permission=\"android.permission.DUMP\""));
         assertTrue(service.contains("const val HOST = \"127.0.0.1\""));
         assertTrue(service.contains("MessageDigest.isEqual"));
+
+        String client = read(
+            "src/main/java/com/overdrive/app/server/RemoteDevViewBridgeClient.java");
+        assertTrue(client.contains("createPackageContext("));
+        assertTrue(client.contains("\"com.android.shell\""));
+        assertFalse(client.contains("Runtime.getRuntime().exec"));
     }
 
     @Test
