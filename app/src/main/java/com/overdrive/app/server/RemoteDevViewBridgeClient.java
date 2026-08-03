@@ -1,9 +1,8 @@
 package com.overdrive.app.server;
 
-import android.net.LocalSocket;
-import android.net.LocalSocketAddress;
 import android.util.Log;
 
+import com.overdrive.app.remote.RemoteDevViewBridgeAuth;
 import com.overdrive.app.remote.RemoteDevViewBridgeService;
 
 import org.json.JSONObject;
@@ -11,6 +10,9 @@ import org.json.JSONObject;
 import java.io.DataInputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 
 /** Shell-daemon client for the protected app-process developer-view bridge. */
@@ -39,17 +41,16 @@ final class RemoteDevViewBridgeClient {
     }
 
     Response send(JSONObject request) {
-        LocalSocket socket = null;
+        Socket socket = null;
         try {
-            socket = new LocalSocket();
-            socket.connect(new LocalSocketAddress(
-                RemoteDevViewBridgeService.SOCKET_NAME,
-                LocalSocketAddress.Namespace.ABSTRACT));
+            socket = new Socket();
+            socket.connect(new InetSocketAddress(
+                InetAddress.getLoopbackAddress(), RemoteDevViewBridgeService.PORT), 1_000);
             socket.setSoTimeout(READ_TIMEOUT_MS);
 
             PrintWriter writer = new PrintWriter(
                 new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
-            writer.println(request.toString());
+            writer.println(RemoteDevViewBridgeAuth.sign(request));
 
             DataInputStream input = new DataInputStream(socket.getInputStream());
             int metadataLength = input.readInt();

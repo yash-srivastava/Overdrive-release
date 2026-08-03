@@ -2,8 +2,6 @@ package com.overdrive.app.remote
 
 import android.app.Service
 import android.content.Intent
-import android.net.LocalServerSocket
-import android.net.LocalSocket
 import android.os.IBinder
 import android.util.Log
 import com.overdrive.app.ui.MainActivity
@@ -11,20 +9,28 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.io.InputStream
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.ServerSocket
+import java.net.Socket
 import java.nio.charset.StandardCharsets
+import java.util.LinkedHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /**
- * Private app service exposing an abstract Unix-domain socket to the shell
- * camera daemon. Every accepted connection is authenticated with kernel peer
- * credentials (uid 2000); nothing is persisted and no frame touches storage.
+ * Private app service exposing an authenticated loopback socket to the shell
+ * camera daemon. BYD's SELinux policy blocks shell -> app Unix-domain socket
+ * connections, so each request is instead HMAC-authenticated with the existing
+ * device secret, time-bounded, and replay-protected. Nothing is persisted and
+ * no frame touches storage.
  */
 class RemoteDevViewBridgeService : Service() {
     private val worker: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "remote-dev-view-bridge").apply { isDaemon = true }
     }
-    @Volatile private var serverSocket: LocalServerSocket? = null
+    @Volatile private var serverSocket: ServerSocket? = null
+    private val usedNonces = LinkedHashMap<String, Long>()
 
     override fun onCreate() {
         super.onCreate()
@@ -49,7 +55,10 @@ class RemoteDevViewBridgeService : Service() {
         if (serverSocket != null) return
         worker.execute {
             try {
-                val server = LocalServerSocket(SOCKET_NAME)
+                val server = ServerSocket().apply {
+                    reuseAddress = true
+                    bind(InetSocketAddress(InetAddress.getLoopbackAddress(), PORT), BACKLOG)
+                }
                 serverSocket = server
                 while (serverSocket === server) {
                     val socket = try { server.accept() } catch (_: Exception) { break }
@@ -63,21 +72,16 @@ class RemoteDevViewBridgeService : Service() {
         }
     }
 
-    private fun handleClient(socket: LocalSocket) {
+    private fun handleClient(socket: Socket) {
         socket.use { client ->
             client.soTimeout = SOCKET_TIMEOUT_MS
             val response = JSONObject()
             var payload: ByteArray? = null
             try {
-                val peerUid = client.peerCredentials.uid
-                if (peerUid != SHELL_UID) {
-                    response.put("success", false)
-                    response.put("error", "Unauthorized bridge peer")
-                    writeResponse(client, response, null)
-                    return
-                }
                 val line = readLineLimited(client.getInputStream(), MAX_REQUEST_BYTES)
-                val request = JSONObject(line)
+                val authenticated = RemoteDevViewBridgeAuth.verify(line)
+                rememberNonce(authenticated.nonce, authenticated.timestampMs)
+                val request = authenticated.request
                 when (request.optString("command", "")) {
                     "launch" -> {
                         launchOverdrive()
@@ -131,7 +135,7 @@ class RemoteDevViewBridgeService : Service() {
         }
     }
 
-    private fun writeResponse(client: LocalSocket, response: JSONObject, payload: ByteArray?) {
+    private fun writeResponse(client: Socket, response: JSONObject, payload: ByteArray?) {
         try {
             val bytes = payload ?: ByteArray(0)
             response.put("payloadBytes", bytes.size)
@@ -179,11 +183,23 @@ class RemoteDevViewBridgeService : Service() {
         return output.toString(StandardCharsets.UTF_8.name())
     }
 
+    @Synchronized
+    private fun rememberNonce(nonce: String, timestampMs: Long) {
+        val cutoff = System.currentTimeMillis() - RemoteDevViewBridgeAuth.MAX_CLOCK_SKEW_MS
+        val iterator = usedNonces.entries.iterator()
+        while (iterator.hasNext()) {
+            if (iterator.next().value < cutoff) iterator.remove()
+        }
+        if (usedNonces.put(nonce, timestampMs) != null) {
+            throw SecurityException("Bridge request was already used")
+        }
+    }
+
     companion object {
-        const val SOCKET_NAME = "overdrive_remote_dev_view_v1"
+        const val PORT = 19878
 
         private const val TAG = "RemoteDevViewBridge"
-        private const val SHELL_UID = 2000
+        private const val BACKLOG = 4
         private const val SOCKET_TIMEOUT_MS = 8_000
         private const val MAX_REQUEST_BYTES = 16 * 1024
         private const val MIN_WIDTH = 320

@@ -21,9 +21,12 @@ uncover, or otherwise alter the physical head-unit display.
   a URL. Responses are marked `no-store`; frames are held in memory and are not
   written to app, shared, or daemon storage.
 - The bridge service is private (`exported=false`) and started by Overdrive
-  itself. The shell daemon reaches it over an abstract Unix-domain socket; the
-  bridge checks Linux peer credentials and rejects every UID except shell
-  (2000). There is no network-listening IPC port or shared on-disk secret.
+  itself. The BYD firmware blocks shell-to-app Unix sockets with SELinux, so the
+  daemon reaches it on a loopback-only TCP port. Every request is signed with
+  HMAC-SHA256 using Overdrive's existing device authentication secret and is
+  rejected when its timestamp is stale or its random nonce has already been
+  used. The bridge is not reachable from another device or network interface,
+  and it creates no additional on-disk secret.
 - Input is dispatched only to Overdrive-owned view roots in the app process.
   There is no `adb input`, accessibility injection, system-window capture, or
   interaction with `AccAnimation`, SurfaceFlinger, or BYD power services.

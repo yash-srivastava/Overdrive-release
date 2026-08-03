@@ -36,20 +36,25 @@ public class RemoteDevViewAssetTest {
     }
 
     @Test
-    public void bridgeIsPrivateAndAuthenticatesKernelPeerUid() throws Exception {
+    public void bridgeIsPrivateLoopbackAuthenticatedAndReplayBounded() throws Exception {
         String manifest = read("src/main/AndroidManifest.xml");
         String service = read(
             "src/main/java/com/overdrive/app/remote/RemoteDevViewBridgeService.kt");
+        String auth = read(
+            "src/main/java/com/overdrive/app/remote/RemoteDevViewBridgeAuth.java");
 
         assertTrue(manifest.contains("com.overdrive.app.remote.RemoteDevViewBridgeService"));
-        assertTrue(service.contains("LocalServerSocket(SOCKET_NAME)"));
-        assertTrue(service.contains("client.peerCredentials.uid"));
-        assertTrue(service.contains("peerUid != SHELL_UID"));
+        assertTrue(manifest.contains("android:exported=\"false\""));
+        assertTrue(service.contains("InetAddress.getLoopbackAddress()"));
+        assertTrue(service.contains("rememberNonce(authenticated.nonce"));
+        assertTrue(auth.contains("HmacSHA256"));
+        assertTrue(auth.contains("MessageDigest.isEqual"));
+        assertTrue(auth.contains("MAX_CLOCK_SKEW_MS"));
 
         String client = read(
             "src/main/java/com/overdrive/app/server/RemoteDevViewBridgeClient.java");
-        assertTrue(client.contains("new LocalSocket()"));
-        assertTrue(client.contains("LocalSocketAddress.Namespace.ABSTRACT"));
+        assertTrue(client.contains("InetAddress.getLoopbackAddress()"));
+        assertTrue(client.contains("RemoteDevViewBridgeAuth.sign(request)"));
         assertFalse(client.contains("Runtime.getRuntime().exec"));
         assertFalse(client.contains("new ProcessBuilder("));
     }

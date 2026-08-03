@@ -249,6 +249,11 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
         return runOnUiThread {
             val activity = readyActivity()
                 ?: return@runOnUiThread InputResult(false, false, null, "No Overdrive activity is ready")
+            if (keyCode == KeyEvent.KEYCODE_BACK) {
+                @Suppress("DEPRECATION")
+                activity.onBackPressed()
+                return@runOnUiThread InputResult(true, true, activity.javaClass.name)
+            }
             val root = topInputRoot(activity.window.decorView)
             val now = SystemClock.uptimeMillis()
             val down = KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0)
