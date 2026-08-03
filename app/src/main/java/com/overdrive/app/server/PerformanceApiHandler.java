@@ -666,8 +666,11 @@ public class PerformanceApiHandler {
                 JSONObject response = new JSONObject();
                 response.put("success", true);
                 response.put("message", Messages.get("messages.soh_reset_complete"));
-                if (sohEst.hasEstimate()) {
-                    response.put("newSoh", sohEst.getCurrentSoh());
+                com.overdrive.app.abrp.SohEstimator.ResolvedSoh resolvedSoh =
+                    sohEst.getResolvedSoh();
+                if (resolvedSoh.getPercent() > 0) {
+                    response.put("newSoh", resolvedSoh.getPercent());
+                    response.put("newSohSource", resolvedSoh.getSource());
                     response.put("nominalCapacityKwh", sohEst.getNominalCapacityKwh());
                 }
                 HttpResponse.sendJson(out, response.toString());

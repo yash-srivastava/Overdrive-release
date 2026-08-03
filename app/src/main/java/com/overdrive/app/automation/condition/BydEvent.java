@@ -370,9 +370,21 @@ public class BydEvent {
             Automations.update(CHARGE_GUN, connected ? "connected" : "disconnected");
         }
         // ── Battery health + auxiliary batteries (percent) ──
-        // sohPercent is a double with NaN = unavailable (not the int sentinel).
-        if (!Double.isNaN(data.sohPercent) && data.sohPercent >= 0) {
-            Automations.update(BATTERY_SOH, (int) Math.round(data.sohPercent));
+        // Use the same canonical OEM-first resolver as every UI/API/integration. During
+        // the first collector build the new snapshot is not published until after this
+        // callback, so fall back to this build's validated OEM field for that one tick.
+        double canonicalSoh = -1;
+        try {
+            com.overdrive.app.abrp.SohEstimator estimator =
+                com.overdrive.app.monitor.SocHistoryDatabase.getInstance().getSohEstimator();
+            if (estimator != null) canonicalSoh = estimator.getDisplaySoh();
+        } catch (Throwable ignored) {}
+        if (canonicalSoh <= 0 && !Double.isNaN(data.sohPercent)
+                && data.sohPercent > 0 && data.sohPercent <= 100) {
+            canonicalSoh = data.sohPercent;
+        }
+        if (canonicalSoh > 0) {
+            Automations.update(BATTERY_SOH, (int) Math.round(canonicalSoh));
         }
         // Key-fob battery is a 2-state ENUM (0=low, 1=normal), NOT a percent — publish
         // low/normal so a "key battery low" trigger is meaningful. Any other value is

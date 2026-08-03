@@ -1158,6 +1158,8 @@ class DashboardFragment : Fragment() {
                 summaryCapacity.visibility = View.VISIBLE
 
                 val sohText = when {
+                    finalDisplaySoh > 0 && finalDisplaySource == "oem" ->
+                        String.format("%.1f%% (vehicle)", finalDisplaySoh)
                     finalDisplaySoh > 0 && finalDisplaySource == "live" ->
                         String.format("%.1f%% (live)", finalDisplaySoh)
                     finalDisplaySoh > 0 && finalDisplaySource == "calibration" ->

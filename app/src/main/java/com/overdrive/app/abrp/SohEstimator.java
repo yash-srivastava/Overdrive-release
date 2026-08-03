@@ -1634,89 +1634,85 @@ public class SohEstimator {
 
     // ==================== GETTERS ====================
 
-    public double getCurrentSoh() { return currentSoh; }
+    /** One immutable result from the canonical SOH priority chain. */
+    public static final class ResolvedSoh {
+        private final double percent;
+        private final String source;
+        private final double oemPercent;
+
+        ResolvedSoh(double percent, String source, double oemPercent) {
+            this.percent = percent;
+            this.source = source;
+            this.oemPercent = oemPercent;
+        }
+
+        public double getPercent() { return percent; }
+        public String getSource() { return source; }
+        public double getOemPercent() { return oemPercent; }
+    }
 
     /**
-     * Headline-displayed SoH percent — same priority chain as
-     * {@link #getStatus()}'s {@code displaySoh} field. Returns the highest-
-     * priority real value across all available sources, so chip / dashboard
-     * / battery-health UIs read a consistent number with the detail card.
+     * Pure, unit-testable SOH resolver used by every public presentation.
      *
-     * <p>Priority order:
-     * <ul>
-     *   <li>PHEV: frame_anchor &gt; capacity_ah (when not disabled) &gt;
-     *       live &gt; calibration</li>
-     *   <li>BEV: live &gt; calibration &gt; capacity_ah (final fallback,
-     *       when not disabled)</li>
-     * </ul>
-     *
-     * <p>Returns {@code -1} when no source has a real value yet.
-     *
-     * <p>This method intentionally mirrors the JSON priority chain in
-     * {@link #getStatus()} — keep them in sync. PHEV gating is read from
-     * {@link com.overdrive.app.byd.BydDataCollector}; the lookup is best-
-     * effort, falling back to BEV behaviour when the collector isn't ready.
+     * <p>The vehicle/BMS health index is authoritative on both BEV and PHEV. It is the
+     * same slowly-changing battery-health value exposed to diagnostic tools and does not
+     * depend on instantaneous SOC, remaining-energy quantisation, temperature, or the
+     * configured nominal capacity. Capacity-derived estimates remain useful fallbacks on
+     * vehicles that do not expose the OEM index, but must never override it.
      */
-    public double getDisplaySoh() {
-        // Look up PHEV status *outside* autoDetectLock — BydDataCollector has
-        // its own internal locking and isPhevPublic() can ultimately call back
-        // into other subsystems. Acquiring autoDetectLock around an external
-        // call invites deadlock if those subsystems ever need this estimator.
+    static ResolvedSoh resolveDisplaySoh(boolean phev, double oemSoh, double frameSoh,
+                                         double currentSoh, double calibrationSoh) {
+        double validOem = isValidSohPercent(oemSoh) ? oemSoh : -1;
+        if (validOem > 0) return new ResolvedSoh(validOem, "oem", validOem);
+        if (phev && isValidSohPercent(frameSoh)) {
+            return new ResolvedSoh(frameSoh, "frame_anchor", -1);
+        }
+        if (phev && isValidSohPercent(calibrationSoh)) {
+            return new ResolvedSoh(calibrationSoh, "calibration", -1);
+        }
+        if (isValidSohPercent(currentSoh)) {
+            return new ResolvedSoh(currentSoh, "live", -1);
+        }
+        if (isValidSohPercent(calibrationSoh)) {
+            return new ResolvedSoh(calibrationSoh, "calibration", -1);
+        }
+        return new ResolvedSoh(-1, "unavailable", -1);
+    }
+
+    private static boolean isValidSohPercent(double value) {
+        return !Double.isNaN(value) && value > 0 && value <= MAX_SOH;
+    }
+
+    public ResolvedSoh getResolvedSoh() {
+        // Collector calls stay outside autoDetectLock: its own locks can call back into
+        // estimator consumers, so nesting them would invite a cross-subsystem deadlock.
         boolean phev = false;
         try {
             com.overdrive.app.byd.BydDataCollector col =
                 com.overdrive.app.byd.BydDataCollector.getInstance();
             if (col != null && col.isInitialized()) phev = col.isPhevPublic();
         } catch (Throwable ignored) {}
+        double oemSoh = readOemSohPercent();
 
-        // Snapshot all six fields under autoDetectLock so the priority chain
-        // sees a mutually consistent view. The fields aren't volatile (writers
-        // hold this same lock), so without acquiring here a cross-thread reader
-        // could see torn or stale values — e.g. currentSoh from before init
-        // while capacityAhSoh has already been written by the auto-detect path.
         double frameSoh, curSoh, calSoh;
         synchronized (autoDetectLock) {
             frameSoh = getFrameAnchorSohLocked();
             curSoh = currentSoh;
             calSoh = calibrationSoh;
         }
-
-        // Keep this chain in sync with the displaySoh logic in getStatus().
-        // PHEV: OEM index > frame_anchor (never fed) > calibration > 100% default.
-        // BEV: live (currentSoh) > calibration > unavailable — unchanged.
-        //
-        // OEM FIRST ON PHEV. Everything else on the PHEV chain is unusable in practice:
-        // the live energy formula is deliberately gated OFF for PHEV (the DM-i BMS
-        // remainKwh is half/stale/frame-ambiguous — see the seed path), the frame anchor
-        // is never fed, and calibration needs a ≥25% charge session at 15-35°C. So PHEV
-        // SOH sat pinned at the 100% seed forever: a healthy pack and a badly degraded
-        // one both read exactly 100.0%, which is worse than a rough number because it
-        // looks like a measurement. The vehicle's OWN health index
-        // (STATISTIC_BATTERY_HEALTHY_INDEX, already a 0..100 percent and already
-        // validated at the collector) is a real reading and needs no capacity/frame
-        // assumptions at all, so on PHEV it outranks the computed chain.
-        //
-        // NOTE: this signal was historically unobservable — the collector read it through
-        // a wrapper Class the HAL doesn't match, so the feature-ID path returned nothing
-        // (see BydDeviceHelper.callGet). With that fixed the value should now arrive; it
-        // is used only when actually present and in range, so a trim that never reports
-        // it degrades to exactly the previous behaviour.
-        double oemSoh = readOemSohPercent();
-        if (phev && oemSoh > 0) return oemSoh;
-        if (phev && frameSoh > 0) return frameSoh;
-        if (phev && calSoh > 0) return calSoh;
-        if (curSoh > 0) return curSoh;
-        if (calSoh > 0) return calSoh;
-        return -1;
+        return resolveDisplaySoh(phev, oemSoh, frameSoh, curSoh, calSoh);
     }
+
+    /** Canonical SOH percent for UI, APIs, history, automations and integrations. */
+    public double getDisplaySoh() { return getResolvedSoh().percent; }
 
     /**
      * The vehicle's OWN state-of-health index, as reported by the OEM
      * ({@code STATISTIC_BATTERY_HEALTHY_INDEX}) and surfaced on the snapshot as
      * {@code sohPercent}. Already a plain 0..100 percent — the collector validates the
      * range before publishing — so it needs no scaling, no nominal capacity, and no
-     * usable-vs-gross frame assumption. That is exactly why it is preferable on PHEV,
-     * where every capacity-derived route is untrustworthy.
+     * usable-vs-gross frame assumption. It is authoritative for both BEV and PHEV;
+     * capacity-derived values are fallbacks only when this index is unavailable.
      *
      * @return the OEM percent in (0,100], or -1 when the trim doesn't report it.
      */
@@ -1769,7 +1765,8 @@ public class SohEstimator {
         // on the health card agrees with the SOH percent shown right beside it —
         // previously this used currentSoh (live median) while the percent used
         // getDisplaySoh, so the card could read "100% / 20.0 kWh of 21.5" (=93%).
-        double s = hasDisplaySoh() ? getDisplaySoh() : currentSoh;
+        double displaySoh = getDisplaySoh();
+        double s = displaySoh > 0 ? displaySoh : currentSoh;
         if (s <= 0) return -1;
         return (s / 100.0) * nominalCapacityKwh;
     }
@@ -1836,18 +1833,18 @@ public class SohEstimator {
 
     public org.json.JSONObject getStatus() {
         org.json.JSONObject status = new org.json.JSONObject();
-        // Read the OEM health index BEFORE taking autoDetectLock below. It reaches into
-        // BydDataCollector, which has its own locking and can call back into other
-        // subsystems — doing that while holding autoDetectLock is the deadlock pattern this
-        // class warns about in getDisplaySoh(). Hoisted here so the value is just a local by
-        // the time the locked section needs it.
-        final double oemSohSnapshot = readOemSohPercent();
+        final ResolvedSoh resolvedSoh = getResolvedSoh();
         try {
-            status.put("soh", currentSoh > 0 ? Math.round(currentSoh * 10) / 10.0 : -1);
+            // `soh` is the legacy headline field, so keep it canonical too. The moving
+            // capacity/SOC estimate remains available explicitly for diagnostics.
+            status.put("soh", resolvedSoh.percent > 0
+                ? Math.round(resolvedSoh.percent * 10) / 10.0 : -1);
+            status.put("estimatedSoh", currentSoh > 0
+                ? Math.round(currentSoh * 10) / 10.0 : -1);
             status.put("nominalCapacityKwh", nominalCapacityKwh);
             double estCap = getEstimatedCapacityKwh();
             status.put("estimatedCapacityKwh", estCap > 0 ? Math.round(estCap * 10) / 10.0 : -1);
-            status.put("hasEstimate", hasEstimate());
+            status.put("hasEstimate", resolvedSoh.percent > 0);
             status.put("nominalSource", nominalSource);
 
             org.json.JSONObject calibration = new org.json.JSONObject();
@@ -1891,70 +1888,12 @@ public class SohEstimator {
                     && peakRemainKwhSamples >= PEAK_REMAIN_KWH_REQUIRED_SAMPLES);
             status.put("frameAnchor", frameAnchor);
 
-            // Display fallback chain.
-            //
-            // BEV: live > calibration > unavailable. frame_anchor is never
-            // computed for BEV (early-returns on !isPhev).
-            //
-            // PHEV: frame_anchor > calibration > live(=100% default) > unavailable.
-            // The capacity-Ah anchor has been retired as a PHEV SOH source (see
-            // the displaySoh block below and SocHistoryDatabase feed site). The
-            // frame anchor is retained in the chain but is currently never fed
-            // (no live caller of observePeakAtFullCharge), so in practice PHEV
-            // resolves to calibration when a real charge session exists, else the
-            // honest 100% seeded default.
-            boolean phev = false;
-            try {
-                com.overdrive.app.byd.BydDataCollector col =
-                    com.overdrive.app.byd.BydDataCollector.getInstance();
-                if (col != null && col.isInitialized()) phev = col.isPhevPublic();
-            } catch (Throwable ignored) {}
-
-            // Keep this in sync with getDisplaySoh().
-            // PHEV: frame_anchor (retained, currently never fed) > calibration
-            //   > 100% default (currentSoh, seeded and never lowered by the
-            //   gated-off live formula). The capacity-Ah anchor is retired: on
-            //   DM-i firmware getBatteryCapacity() is a STATIC nameplate Ah, not
-            //   a live coulomb count, so it reported phantom degradation (e.g.
-            //   76% on a healthy ~7k-km pack) and no cell-count fix can make a
-            //   constant track health. A real ≥25% charge-session calibration is
-            //   the only trusted PHEV signal below 100%.
-            // BEV: live > calibration > unavailable — unchanged.
-            double displaySoh;
-            String displaySource;
-            // OEM index first on PHEV — kept in sync with getDisplaySoh(). See that method
-            // for why: every capacity-derived PHEV route is gated off or unreachable, so the
-            // chain otherwise pins at the 100% seed and a degraded pack reads as healthy.
-            // Snapshot taken before the lock (see top of method).
-            double oemSoh = oemSohSnapshot;
-            boolean preferOem = phev && oemSoh > 0;
-            boolean preferFrameAnchor = phev && frameSoh > 0;
-            boolean preferCalibration = phev && calibrationSoh > 0;
-            if (preferOem) {
-                displaySoh = oemSoh;
-                displaySource = "oem";
-            } else if (preferFrameAnchor) {
-                displaySoh = frameSoh;
-                displaySource = "frame_anchor";
-            } else if (preferCalibration) {
-                displaySoh = calibrationSoh;
-                displaySource = "calibration";
-            } else if (currentSoh > 0) {
-                displaySoh = currentSoh;
-                displaySource = "live";
-            } else if (calibrationSoh > 0) {
-                displaySoh = calibrationSoh;
-                displaySource = "calibration";
-            } else {
-                displaySoh = -1;
-                displaySource = "unavailable";
-            }
-            status.put("displaySoh", displaySoh > 0 ? Math.round(displaySoh * 10) / 10.0 : -1);
-            status.put("displaySource", displaySource);
-            // Surface the OEM index itself (-1 when the trim doesn't report it) so
-            // /api/performance/soh answers "is there a real vehicle-reported SOH here?"
-            // without needing a logcat capture. This is the value the PHEV chain prefers.
-            status.put("oemSoh", oemSoh > 0 ? Math.round(oemSoh * 10) / 10.0 : -1);
+            // The detail API consumes the exact same resolver as every headline surface.
+            status.put("displaySoh", resolvedSoh.percent > 0
+                ? Math.round(resolvedSoh.percent * 10) / 10.0 : -1);
+            status.put("displaySource", resolvedSoh.source);
+            status.put("oemSoh", resolvedSoh.oemPercent > 0
+                ? Math.round(resolvedSoh.oemPercent * 10) / 10.0 : -1);
 
             // Read fresh — model can change without touching SOH state.
             try {

@@ -654,9 +654,8 @@ public class MqttConnectionManager {
             }
 
             // soh — use the DISPLAYED (capped, anchored) value so MQTT agrees with
-            // the dashboard/health card. getCurrentSoh is the internal live median
-            // and can differ from the headline; getDisplaySoh is the single number
-            // every surface shows.
+            // the dashboard/health card. The internal live median can differ from
+            // the headline; getDisplaySoh is the single number every surface shows.
             if (sohEstimator != null && sohEstimator.hasDisplaySoh()) {
                 payload.put("soh", sohEstimator.getDisplaySoh());
             }

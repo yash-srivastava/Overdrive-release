@@ -62,7 +62,6 @@ var CHARGING = {
     // each canvas element (canvas._chgHoverSpec / _chgHoverIdx), so no shared
     // field here — multiple detail charts hover independently.
     socHours: 168,            // SoC chart window in hours (period selector; default 7d)
-
     // Canvas palette — dark defaults, replaced by _refreshPalette() reading the
     // --chart-* CSS variables on theme flip (same pattern as trips.js).
     colors: {
@@ -460,19 +459,15 @@ var CHARGING = {
 
                 var kind = self._typeKind(s);
                 var typeLabel = self._typeLabel(s);
-                // Power chip: the session PEAK power — the SAME value _typeKind
-                // classifies on, so the chip number can never contradict the AC
-                // fast/slow (or DC) label. (Previously showed the live instantaneous
-                // draw while charging, which diverged from the peak-based tier: a
-                // 6.5 kW live reading under an 11 kW peak rendered "6.5 kW · AC fast",
-                // and a live spike under a low peak the reverse.) The stale-estimate
-                // concern that motivated the live reading is now handled server-side —
-                // peakPower is overwritten with the real sample-measured max for
-                // in-progress sessions and estimated placeholders no longer seed it.
-                // 1-decimal so a 6.1 kW charge doesn't round to a misleading "6"/"7".
-                var chipKw = (s.peakPower != null && s.peakPower > 0) ? s.peakPower : 0;
+                // Normally this is the session peak. Explicit-AC rows with an
+                // impossible DC-sized legacy peak are filtered through the same
+                // verdict used by the type chip, so the number cannot contradict
+                // the AC label. Keep one decimal so 6.1 kW is not rounded to 6/7.
+                var chipKw = self._displayPeakKw(s);
                 var peakStr = chipKw > 0 ? chipKw.toFixed(1) + ' kW' : '';
-                var energy = (s.energyAdded && s.energyAdded > 0) ? '+' + s.energyAdded.toFixed(1) + ' kWh' : '--';
+                var poisoned = s.powerDataQuality === 'poisoned';
+                var calibration = s.calibration && s.calibration.qualified === true;
+                var energy = (!poisoned && s.energyAdded && s.energyAdded > 0) ? '+' + s.energyAdded.toFixed(1) + ' kWh' : '--';
                 var socRange = (s.startSoc != null && s.endSoc != null && s.endSoc > 0)
                     ? Math.round(s.startSoc) + '% → ' + Math.round(s.endSoc) + '%'
                     : '';
@@ -509,6 +504,9 @@ var CHARGING = {
                         '<div class="session-energy">' + energy + '</div>' +
                         (costStr ? '<div class="session-cost">' + costStr + '</div>' : '') +
                     '</div>' +
+                    (calibration ? '<div class="calibration-badge">LFP CALIBRATION</div>' : '') +
+                    (poisoned ? '<div class="quality-warning">' + self._qualityWarningContent(
+                        self._t('charge.quality_warning_short', 'Contradictory power and charging energy hidden.')) + '</div>' : '') +
                     // Location chip (pin + place / coords) — only when known.
                     (locStr
                         ? '<div class="session-loc">' + self._pinIcon() + '<span>' + self._esc(locStr) + '</span></div>'
@@ -532,6 +530,10 @@ var CHARGING = {
                     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); self.showDetail(s.id); }
                 });
                 var delBtn = card.querySelector('.session-delete-btn');
+                var qualityInfoBtn = card.querySelector('.quality-info-button');
+                if (qualityInfoBtn) qualityInfoBtn.addEventListener('click', function (e) {
+                    self.showQualityInfo(e);
+                });
                 if (delBtn) delBtn.addEventListener('click', function (e) {
                     e.stopPropagation();
                     self.deleteSession(s.id);
@@ -758,6 +760,33 @@ var CHARGING = {
         }
     },
 
+    _qualityWarningContent: function (message) {
+        var label = this._t('charge.quality_info_open', 'Why was this charging data excluded?');
+        return '<span class="quality-warning-text">' + this._esc(message) + '</span>' +
+            '<button type="button" class="quality-info-button" aria-label="' + this._esc(label) +
+                '" title="' + this._esc(label) + '">' +
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">' +
+                    '<circle cx="12" cy="12" r="9"></circle>' +
+                    '<line x1="12" y1="11" x2="12" y2="16"></line>' +
+                    '<circle cx="12" cy="8" r="0.7" fill="currentColor" stroke="none"></circle>' +
+                '</svg>' +
+            '</button>';
+    },
+
+    showQualityInfo: function (event) {
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+        var title = this._t('charge.quality_info_title', 'Why was this data excluded?');
+        var body = this._t('charge.quality_info_body',
+            'OverDrive identified an explicit AC session whose stored peak power is at least 25 kW, which contradicts that connection type and matches a known legacy telemetry fault. The original session, samples, cost and totals remain unchanged. OverDrive only hides that session\'s charging energy, average power and peak power from the affected displays so the invalid readings are not presented as evidence.\n\nThe LFP calibration badge is separate: it requires a completed 10% or lower to 99% or higher SOC span and an LFP battery declared by the configured physical vehicle model. It does not make the hidden power readings valid.');
+        if (window.BYD && BYD.utils && typeof BYD.utils.alertDialog === 'function') {
+            return BYD.utils.alertDialog({ title: title, body: body });
+        }
+        window.alert(title + '\n\n' + body);
+    },
+
     _fillDetailHeader: function (s) {
         var inProgress = s.inProgress === true;
         this._setText('detailTitle', this._typeLabel(s) + ' · ' + this._fmtDate(s.startTime));
@@ -770,9 +799,26 @@ var CHARGING = {
         if (s.durationMinutes != null) sub.push(this._fmtDuration(s.durationMinutes));
         this._setText('detailSubtitle', sub.join('  ·  '));
 
-        this._setText('detailEnergy', (s.energyAdded && s.energyAdded > 0) ? '+' + s.energyAdded.toFixed(1) + ' kWh' : '--');
-        this._setText('detailAvgPower', (s.avgPower != null && s.avgPower > 0) ? s.avgPower.toFixed(1) + ' kW' : '--');
-        this._setText('detailPeakPower', (s.peakPower != null && s.peakPower > 0) ? s.peakPower.toFixed(1) + ' kW' : '--');
+        var poisoned = s.powerDataQuality === 'poisoned';
+        var calibration = s.calibration && s.calibration.qualified === true;
+        var qualityWarning = document.getElementById('detailQualityWarning');
+        if (qualityWarning) {
+            var warningText = (calibration ? 'LFP calibration. ' : '') +
+                (poisoned ? 'Contradictory power and charging energy are hidden because this session contains invalid legacy power data.' : '');
+            qualityWarning.innerHTML = poisoned
+                ? this._qualityWarningContent(warningText)
+                : '<span class="quality-warning-text">' + this._esc(warningText) + '</span>';
+            qualityWarning.style.display = (calibration || poisoned) ? '' : 'none';
+            var detailInfoBtn = qualityWarning.querySelector('.quality-info-button');
+            var self = this;
+            if (detailInfoBtn) detailInfoBtn.addEventListener('click', function (e) {
+                self.showQualityInfo(e);
+            });
+        }
+        this._setText('detailEnergy', (!poisoned && s.energyAdded && s.energyAdded > 0) ? '+' + s.energyAdded.toFixed(1) + ' kWh' : '--');
+        this._setText('detailAvgPower', (!poisoned && s.avgPower != null && s.avgPower > 0) ? s.avgPower.toFixed(1) + ' kW' : '--');
+        var displayedPeak = this._displayPeakKw(s);
+        this._setText('detailPeakPower', displayedPeak > 0 ? displayedPeak.toFixed(1) + ' kW' : '--');
         this._setText('detailRangeGained', (s.rangeGained != null && s.rangeGained > 0) ? this._dist(s.rangeGained) : '--');
         this._setText('detailOdometer', (s.startOdometerKm != null && s.startOdometerKm > 0) ? this._dist(s.startOdometerKm) : '--');
         this._setText('detailCost', (s.cost != null && s.cost > 0) ? this._money(s.cost) : '--');
@@ -2425,9 +2471,21 @@ var CHARGING = {
     // well below a genuine DC session's sustained rate, so a real DC charge that
     // momentarily reads low at the very start isn't misdemoted once it ramps.
     DC_MIN_PEAK_KW: 15,
+    _displayPeakKw: function (s) {
+        if (!s) return 0;
+        var peak = (s.peakPower != null && s.peakPower > 0) ? s.peakPower : 0;
+        // This chip and the detail field are PEAK power, never live or average.
+        // A DC-sized value contradicting an explicit AC verdict is poisoned
+        // history, so its true peak is unknown and must be omitted rather than
+        // relabeling another measurement as peak.
+        if (s.powerDataQuality === 'poisoned') return 0;
+        return peak;
+    },
+
     _typeKind: function (s) {
         if (!s) return 'unk';
         var peak = (s.peakPower != null && s.peakPower > 0) ? s.peakPower : 0;
+        var live = (s.livePowerKw != null && s.livePowerKw > 0) ? s.livePowerKw : 0;
         // A TRUE isDc flag is already peak-guarded: the backend's deriveIsDc only
         // returns 1 when the gun says DC *and* the peak cleared DC_MIN_PEAK_KW, and
         // it is the same call that selects dcRate. Re-testing the peak here was a
@@ -2436,8 +2494,17 @@ var CHARGING = {
         // while pricing used the in-memory running max) — so a session in the
         // 15..25 kW band could be priced DC yet fall through to the power-only split
         // and render "AC fast". Trust the flag; the guard lives in one place.
-        if (s.isDc === true || peak >= this.DC_KW) return 'dc';
-        if (s.isDc === false) return peak >= this.AC_FAST_KW ? 'fast' : 'slow';
+        // An explicit AC verdict must also win over a corrupted peak sample.
+        // Power-only DC inference is for UNKNOWN gun state, never a way to overrule gun==2.
+        if (s.isDc === true) return 'dc';
+        if (s.isDc === false) {
+            // A peak at/above the DC boundary is physically incompatible with the
+            // explicit AC gun verdict. It can be legacy poison from a bad counter
+            // sample, so classify an open session from validated live power instead.
+            // Completed sessions have no live value and safely fall back to AC slow.
+            var acPower = s.powerDataQuality === 'poisoned' ? live : peak;
+            return acPower >= this.AC_FAST_KW ? 'fast' : 'slow';
+        }
         // Unknown gun state (isDc null: legacy/partial rows, AC_DC/V2L, or a
         // peak-downgraded misread) — bucket by power so they still classify sensibly.
         if (peak >= this.DC_KW) return 'dc';

@@ -1,7 +1,15 @@
 {
-  "version": 7,
+  "version": 9,
   "default": "seal",
   "baseUrl": "https://github.com/yash-srivastava/Overdrive-release/releases/download/models-v1/",
+  "batteryChemistryDefinitions": {
+    "blade": {
+      "chemistry": "lfp",
+      "authority": "BYD",
+      "sourceUrl": "https://media.byd.com/section/technology/blade-battery/?lang=eng",
+      "verifiedOn": "2026-08-02"
+    }
+  },
   "paintPresets": [
     {
       "name": "Aurora White",
@@ -36,6 +44,15 @@
       "sizeBytes": 1653240,
       "sha256": "1030260cb7dc6b4483cc4f5fd2feb4746870234a87ee3ccf7f3d71e7bd0178fe",
       "bundled": true,
+      "batteryChemistry": "lfp",
+      "batteryChemistryEvidence": {
+        "authority": "BYD",
+        "technology": "blade",
+        "nominalKwh": 82.5,
+        "configuration": "European Design and Excellence-AWD 82.5 kWh",
+        "sourceUrl": "https://media.byd.com/byd-seal-arrives-in-europe-setting-the-standard-in-breakthrough-technology-and-stunning-design/?lang=eng",
+        "verifiedOn": "2026-08-02"
+      },
       "nominalKwh": 82.5
     },
     {
@@ -45,6 +62,15 @@
       "sizeBytes": 1808308,
       "sha256": "e41eebdbc2ceaa0d196e7f09348bb11f1bd8c9430fd04abc830cfb40321de9fd",
       "bundled": false,
+      "batteryChemistry": "lfp",
+      "batteryChemistryEvidence": {
+        "authority": "BYD",
+        "technology": "blade",
+        "nominalKwh": 71.8,
+        "configuration": "European Comfort 71.8 kWh",
+        "sourceUrl": "https://www.byd.com/content/dam/byd-site/hu/pdfs/seal-u/BYD_SEAL_U_arlista_20250101.pdf",
+        "verifiedOn": "2026-08-02"
+      },
       "nominalKwh": 71.8
     },
     {
@@ -55,6 +81,15 @@
       "sha256": "23a2b08e382a5c81fdda2c24df60173bd0a8a0d13713e434491d7eb2b182743b",
       "bundled": false,
       "phev": true,
+      "batteryChemistry": "lfp",
+      "batteryChemistryEvidence": {
+        "authority": "BYD",
+        "technology": "blade",
+        "nominalKwh": 18.3,
+        "configuration": "European Boost and Design 18.3 kWh",
+        "sourceUrl": "https://www.byd.com/material/byd-site/si/pdfs/2026-04/Seal_U_Dmi-0226-BPS-SLO.pdf",
+        "verifiedOn": "2026-08-02"
+      },
       "nominalKwh": 18.3
     },
     {
@@ -64,6 +99,15 @@
       "sizeBytes": 1327816,
       "sha256": "94eb27928e410848e22aa92e6cf45fcc1329e941b74602f81c8f4de799abcdb6",
       "bundled": false,
+      "batteryChemistry": "lfp",
+      "batteryChemistryEvidence": {
+        "authority": "BYD",
+        "technology": "blade",
+        "nominalKwh": 44.9,
+        "configuration": "European Active and Boost 44.9 kWh",
+        "sourceUrl": "https://www.byd.com/content/dam/byd-site/pl/pdfs/dolphin/Dolphin-0524-BPS-PL-V1-web.pdf",
+        "verifiedOn": "2026-08-02"
+      },
       "nominalKwh": 44.9
     },
     {
@@ -73,6 +117,15 @@
       "sizeBytes": 1642648,
       "sha256": "6e08a0223fb2a4c229a8ed323b6d748930491b583cb595b38a0e372314c028a1",
       "bundled": false,
+      "batteryChemistry": "lfp",
+      "batteryChemistryEvidence": {
+        "authority": "BYD",
+        "technology": "blade",
+        "nominalKwh": 60.48,
+        "configuration": "European 60.48 kWh",
+        "sourceUrl": "https://www.byd.com/content/dam/byd-site/eu/product/atto3/BYD%20ATTO%203%20Leaflet.pdf",
+        "verifiedOn": "2026-08-02"
+      },
       "nominalKwh": 60.48
     },
     {
@@ -82,6 +135,15 @@
       "sizeBytes": 1548304,
       "sha256": "844c1cead90c69a72b12cfed0d8824ba1c1e3540c67888a8e57d3329d7310185",
       "bundled": false,
+      "batteryChemistry": "lfp",
+      "batteryChemistryEvidence": {
+        "authority": "BYD",
+        "technology": "blade",
+        "nominalKwh": 85.4,
+        "configuration": "European AWD 85.4 kWh (85.44 kWh nominal metadata)",
+        "sourceUrl": "https://www.byd.com/content/dam/byd-site/de/product/han/BYD%20HAN%20.pdf",
+        "verifiedOn": "2026-08-02"
+      },
       "nominalKwh": 85.44
     },
     {
@@ -91,6 +153,15 @@
       "sizeBytes": 1629596,
       "sha256": "b1b387ba4c7fef171ef2a3b51b1bc51de3c85a8df532df565828f31836a3013c",
       "bundled": false,
+      "batteryChemistry": "lfp",
+      "batteryChemistryEvidence": {
+        "authority": "BYD",
+        "technology": "blade",
+        "nominalKwh": 108.8,
+        "configuration": "European Flagship AWD 108.8 kWh",
+        "sourceUrl": "https://media.byd.com/all-new-pure-electric-suv-byd-tang-advances-sustainable-goals-at-uefa-euro-2024tm/?lang=eng",
+        "verifiedOn": "2026-08-02"
+      },
       "nominalKwh": 108.8
     },
     {
@@ -100,6 +171,15 @@
       "sizeBytes": 1856336,
       "sha256": "0d89df8d36ec33cd5b8b6041e662b0d0b1c7cdc47cab87cbb2277f16ab95ae13",
       "bundled": false,
+      "batteryChemistry": "lfp",
+      "batteryChemistryEvidence": {
+        "authority": "BYD",
+        "technology": "blade",
+        "nominalKwh": 71.8,
+        "configuration": "Singapore 71.8 kWh",
+        "sourceUrl": "https://www.byd.com/material/byd-site/sg/2025-m6/BYD-M6-SPEC-SHEET.pdf",
+        "verifiedOn": "2026-08-02"
+      },
       "nominalKwh": 71.8
     },
     {
@@ -109,6 +189,15 @@
       "sizeBytes": 2558920,
       "sha256": "effb9cafb7a6246dd972575fd1f8ffea9a8e7b4942df02863d4343de70fe4a44",
       "bundled": false,
+      "batteryChemistry": "lfp",
+      "batteryChemistryEvidence": {
+        "authority": "BYD",
+        "technology": "blade",
+        "nominalKwh": 30.08,
+        "configuration": "DOLPHIN SURF / SEAGULL Active 30.08 kWh",
+        "sourceUrl": "https://www.byd.com/content/dam/byd-site/za/product/dolphin-surf/Dolphin%20Surf%20Spec.pdf",
+        "verifiedOn": "2026-08-02"
+      },
       "nominalKwh": 30.08
     },
     {
@@ -119,6 +208,15 @@
       "sha256": "f2728598afcaaafc09899a36bd3f06900644935b14ec373a825b03bc6b13799b",
       "bundled": false,
       "phev": true,
+      "batteryChemistry": "lfp",
+      "batteryChemistryEvidence": {
+        "authority": "BYD",
+        "technology": "blade",
+        "nominalKwh": 18.3,
+        "configuration": "SEAL 5 DM-i / Destroyer 05 export configuration 18.3 kWh",
+        "sourceUrl": "https://media.byd.com/byd-launches-seal-5-dm-i-offering-long-range-super-dm-hybrid-tech-and-low-running-costs/?lang=eng",
+        "verifiedOn": "2026-08-02"
+      },
       "nominalKwh": 18.3
     }
   ]

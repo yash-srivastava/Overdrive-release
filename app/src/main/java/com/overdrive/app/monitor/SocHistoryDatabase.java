@@ -828,35 +828,19 @@ public class SocHistoryDatabase {
                 }
             }
             
-            // SOH from SohEstimator (via AbrpTelemetryService)
+            // SOH from the canonical resolver. The persisted soh_percent property is the
+            // moving capacity estimate, not a presentation fallback.
             double sohPercent = -999;
             try {
                 com.overdrive.app.abrp.SohEstimator sohEst = getSohEstimator();
-                if (sohEst != null && sohEst.hasDisplaySoh()) {
-                    // Displayed (capped, anchored) SOH so stored history agrees with
-                    // every live surface.
-                    sohPercent = sohEst.getDisplaySoh();
+                if (sohEst != null) {
+                    double resolvedSoh = sohEst.getDisplaySoh();
+                    if (resolvedSoh > 0) sohPercent = resolvedSoh;
+                }
+                if (sohPercent > 0) {
                     logger.debug("SOH from estimator: " + String.format("%.1f", sohPercent) + "%");
                 } else {
-                    // Fallback: read from persisted file
-                    logger.info("SOH estimator " + (sohEst == null ? "is null" : "has no estimate") + ", trying persisted file fallback");
-                    java.io.File sohFile = new java.io.File("/data/local/tmp/abrp_soh_estimate.properties");
-                    if (sohFile.exists()) {
-                        java.util.Properties props = new java.util.Properties();
-                        try (java.io.FileInputStream fis = new java.io.FileInputStream(sohFile)) {
-                            props.load(fis);
-                        }
-                        String sohStr = props.getProperty("soh_percent");
-                        if (sohStr != null) {
-                            double soh = Double.parseDouble(sohStr);
-                            if (soh > 0 && soh <= 100) {
-                                sohPercent = soh;
-                                logger.info("SOH from persisted file fallback: " + soh + "%");
-                            }
-                        }
-                    } else {
-                        logger.info("SOH persisted file not found at /data/local/tmp/abrp_soh_estimate.properties");
-                    }
+                    logger.info("Canonical SOH unavailable; history sample omits SOH");
                 }
             } catch (Exception e) {
                 logger.debug("Failed to get SOH: " + e.getMessage());
@@ -2528,7 +2512,7 @@ public class SocHistoryDatabase {
             double soh = -999;
             try {
                 com.overdrive.app.abrp.SohEstimator est = getSohEstimator();
-                if (est != null && est.hasEstimate()) soh = est.getDisplaySoh();
+                if (est != null) soh = est.getDisplaySoh();
             } catch (Exception ignored) {}
 
             // Read current row (if any), accumulate, then MERGE the new totals.
@@ -2971,6 +2955,26 @@ public class SocHistoryDatabase {
                 double samplePeak = peakSampleKw(start);
                 if (samplePeak > 0) o.put("peakPower", samplePeak);
             } catch (Exception ignored) {}
+        }
+        // Read-only evidence metadata. This is intentionally added after live
+        // enrichment and never written back to charging_sessions, so historical
+        // rows/costs/samples/rollups remain byte-for-byte unchanged.
+        try {
+            com.overdrive.app.byd.BydDataCollector collector =
+                    com.overdrive.app.byd.BydDataCollector.getInstance();
+            boolean isPhev = collector != null && collector.isInitialized()
+                    && collector.isPhevPublic();
+            com.overdrive.app.byd.BydVehicleData snapshot = collector != null
+                    ? collector.getData() : null;
+            double highCellVoltage = snapshot != null
+                    ? snapshot.highCellVoltage : Double.NaN;
+            String declaredChemistry =
+                    com.overdrive.app.server.ModelsApiHandler.batteryChemistryForSelectedModel();
+            com.overdrive.app.battery.ChargingSessionQuality.enrich(
+                    o, isPhev, highCellVoltage, declaredChemistry);
+        } catch (Throwable ignored) {
+            com.overdrive.app.battery.ChargingSessionQuality.enrich(
+                    o, false, Double.NaN, "unknown");
         }
         return o;
     }
@@ -3774,39 +3778,13 @@ public class SocHistoryDatabase {
             }
             
             com.overdrive.app.abrp.SohEstimator sohEst = getSohEstimator();
-            if (sohEst != null && sohEst.hasDisplaySoh()) {
-                // Headline display chain (frame_anchor > capacity_ah > live >
-                // calibration on PHEV) — keeps the battery-health card and
-                // the SoH detail card in lockstep instead of showing two
-                // different numbers on PHEV trims where capacity_ah outranks
-                // the live formula.
-                current.put("soh", Math.round(sohEst.getDisplaySoh() * 10) / 10.0);
+            double canonicalSoh = sohEst != null ? sohEst.getDisplaySoh() : -1;
+            if (canonicalSoh > 0) {
+                current.put("soh", Math.round(canonicalSoh * 10) / 10.0);
                 current.put("estimatedCapacityKwh", Math.round(sohEst.getEstimatedCapacityKwh() * 10) / 10.0);
                 current.put("nominalCapacityKwh", sohEst.getNominalCapacityKwh());
             } else {
-                // Fallback: read persisted SOH from file if estimator reference not wired yet
-                logger.info("SOH estimator " + (sohEst == null ? "is null" : "has no estimate") + " for health report, trying persisted file fallback");
-                try {
-                    java.io.File sohFile = new java.io.File("/data/local/tmp/abrp_soh_estimate.properties");
-                    if (sohFile.exists()) {
-                        java.util.Properties props = new java.util.Properties();
-                        try (java.io.FileInputStream fis = new java.io.FileInputStream(sohFile)) {
-                            props.load(fis);
-                        }
-                        String sohStr = props.getProperty("soh_percent");
-                        if (sohStr != null) {
-                            double soh = Double.parseDouble(sohStr);
-                            if (soh > 0 && soh <= 100) {
-                                current.put("soh", Math.round(soh * 10) / 10.0);
-                                logger.info("SOH from persisted file fallback (health report): " + soh + "%");
-                            }
-                        }
-                    } else {
-                        logger.info("SOH persisted file not found for health report");
-                    }
-                } catch (Exception e) {
-                    logger.debug("Failed to read persisted SOH for health report: " + e.getMessage());
-                }
+                logger.info("Canonical SOH unavailable for health report");
             }
             
             double remainingKwh = monitor.getBatteryRemainPowerKwh();

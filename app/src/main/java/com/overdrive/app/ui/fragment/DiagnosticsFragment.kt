@@ -470,50 +470,30 @@ class DiagnosticsFragment : Fragment() {
 
     // ============== Battery tile ==============
 
-    /**
-     * Reads the persisted SOH estimate from /data/local/tmp/abrp_soh_estimate.properties
-     * (same source MainActivity.showBatteryHealthDialog uses). Property keys:
-     *   - "soh_percent"  → float, 0..100
-     * If the file doesn't exist or can't be parsed, the tile shows
-     * "Pending data" + neutral dot — never a fake number.
-     */
+    /** Reads only the daemon's canonical OEM-first SOH value. */
     private fun refreshBatteryTile() {
         val executor = batteryExecutor ?: Executors.newSingleThreadExecutor()
             .also { batteryExecutor = it }
 
         executor.execute {
             var sohPercent: Double? = null
-            try {
-                val sohFile = File("/data/local/tmp/abrp_soh_estimate.properties")
-                if (sohFile.exists() && sohFile.canRead()) {
-                    val props = java.util.Properties()
-                    java.io.FileInputStream(sohFile).use { props.load(it) }
-                    val v = props.getProperty("soh_percent")?.toDoubleOrNull()
-                    // Accept up to 110% — BYD packs are factory over-provisioned
-                    // 102-104% so a near-new pack legitimately reads >100%.
-                    // Matches SohEstimator.applyWeightedSoh's accept band.
-                    if (v != null && v >= 60.0 && v <= 110.0) {
-                        sohPercent = v
-                    }
-                }
-            } catch (_: Throwable) {
-                // Stay null — UI will show "Pending data".
-            }
-
-            // Frame mismatch is derived state — only the daemon knows. Best-
-            // effort fetch with tight timeouts; a daemon outage just means the
-            // pill stays hidden, not that the tile breaks.
             var frameMismatch = false
             try {
                 val conn = com.overdrive.app.util.DaemonHttpClient.open(
                     "/api/performance/soh", "GET", 1500, 2000)
                 if (conn.responseCode == 200) {
                     val body = conn.inputStream.bufferedReader().use { it.readText() }
-                    val frame = org.json.JSONObject(body).optJSONObject("frameAnchor")
+                    val json = org.json.JSONObject(body)
+                    val source = json.optString("displaySource", "unavailable")
+                    val value = json.optDouble("displaySoh", -1.0)
+                    if (source != "unavailable" && value > 0.0 && value <= 100.0) {
+                        sohPercent = value
+                    }
+                    val frame = json.optJSONObject("frameAnchor")
                     if (frame != null) frameMismatch = frame.optBoolean("mismatch", false)
                 }
                 conn.disconnect()
-            } catch (_: Throwable) { /* leave false */ }
+            } catch (_: Throwable) { /* pending data; never fall back to raw estimator state */ }
 
             val finalSoh = sohPercent
             val finalMismatch = frameMismatch

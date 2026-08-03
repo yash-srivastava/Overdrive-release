@@ -370,10 +370,9 @@ public class AbrpTelemetryService {
                 payload.put("odometer", raw > 1_000_000 ? raw / 10.0 : (double) raw);
             }
 
-            // soh — displayed (capped, anchored) value so ABRP agrees with the UI.
-            if (sohEstimator.hasDisplaySoh()) {
-                payload.put("soh", sohEstimator.getDisplaySoh());
-            }
+            // Canonical OEM-first value so ABRP agrees with every app surface.
+            double canonicalSoh = sohEstimator.getDisplaySoh();
+            if (canonicalSoh > 0) payload.put("soh", canonicalSoh);
 
             // capacity payload uses the synthesized helper (UI-friendly), but
             // SOH is fed from RAW vd.remainKwh only — getBatteryRemainPowerKwh

@@ -1,5 +1,6 @@
 package com.overdrive.app.server;
 
+import com.overdrive.app.battery.BatteryChemistryMetadata;
 import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.config.VehicleModelSelection;
 import com.overdrive.app.daemon.CameraDaemon;
@@ -432,6 +433,28 @@ public class ModelsApiHandler {
             return m.optDouble("nominalKwh", 0);
         } catch (Throwable t) {
             return 0;
+        }
+    }
+
+    /**
+     * Manufacturer-sourced battery chemistry for the resolved physical vehicle
+     * model. A bare manifest label is insufficient: the resolver also verifies
+     * official-BYD provenance and the represented nominal-capacity scope. The
+     * renderer's cosmetic default is ignored by
+     * {@link UnifiedConfigManager#getSelectedVehicleModelId()}, so an unconfigured
+     * install returns {@code unknown} rather than assuming its battery is LFP.
+     */
+    public static String batteryChemistryForSelectedModel() {
+        try {
+            String modelId = UnifiedConfigManager.getSelectedVehicleModelId();
+            if (modelId == null || modelId.isEmpty()) return "unknown";
+            JSONObject manifest = readManifest();
+            if (manifest == null) return "unknown";
+            JSONObject model = findModel(manifest, modelId);
+            if (model == null) return "unknown";
+            return BatteryChemistryMetadata.resolve(manifest, model);
+        } catch (Throwable ignored) {
+            return "unknown";
         }
     }
 

@@ -1719,9 +1719,10 @@ public class BydDataCollector {
             // PHEV ONLY. Pass raw SOC% + the SOC→energy scale (nominal × SOH); the
             // estimator FREEZES the scale at session start so socE moves only with
             // SOC, not with mid-charge SohEstimator revisions. On BEV we pass
-            // socScaleKwh = NaN so the estimator's socE stays NaN and behaves EXACTLY
-            // as before (remain-first): the BEV's remainKwh is verified full-scale and
-            // finer-grained than the 1%-quantised SOC, so the BEV fix must not regress.
+            // socScaleKwh = NaN so the estimator's socE stays NaN. DC and unknown
+            // connector states remain remain-first; confirmed AC cross-checks that
+            // field against the session-capacity counter because the Atto 3 exposes
+            // a cycling non-energy value through remainKwh.
             // Only PHEV — whose hardware energy counters freeze/lie during charge —
             // needs the SOC-derived source.
             double socPctForEst = built.socPercent;
@@ -1753,7 +1754,7 @@ public class BydDataCollector {
                 built.chargingCapacityKwh,
                 built.remainKwh,
                 socPctForEst, socScaleKwh,
-                fusedCharging, inPark);
+                fusedCharging, inPark, built.chargingGunState);
         } catch (Exception e) {
             logger.info("ChargingPowerEstimator.sample failed: " + e.getMessage());
         }
@@ -5666,9 +5667,8 @@ public class BydDataCollector {
     private void collectStatisticExtended(BydVehicleData.Builder b) {
         if (statisticDevice == null) return;
 
-        // OEM SOH. Read for the b.sohPercent display fallback and — on PHEV, where every
-        // capacity-derived route is gated off — as the value SohEstimator's display chain
-        // prefers.
+        // OEM SOH. This direct battery-health index is SohEstimator's authoritative
+        // source on every drivetrain; capacity-derived routes are fallbacks only.
         //
         // 0 IS REJECTED THROUGHOUT, not just filtered at the far end. A battery is never 0%
         // healthy, so a 0 from this index means "no reading", and it is the value every failure
@@ -5726,7 +5726,7 @@ public class BydDataCollector {
             // HAL populates only the field for the width it was asked for. A Double-first probe
             // that won here would hand back an object whose intValue is still 0 — and 0 passes
             // the 0..100 range check, so this tier would report a healthy pack as "SOH 0%" and
-            // (because the PHEV display chain prefers any OEM value > 0) it would then be
+            // (because the canonical display chain prefers a valid OEM value) it would then be
             // rejected as absent rather than corrected. Ask for the width we extract.
             if (!isPlausibleOemSohPercent(sohValue)) {
                 try {
@@ -5745,7 +5745,7 @@ public class BydDataCollector {
 
             // Log the outcome once so a single device capture answers "does the OEM index
             // actually report on this trim?" — which is the open question behind preferring
-            // it for PHEV SOH. Without this the value's absence is indistinguishable from a
+            // it for canonical SOH. Without this the value's absence is indistinguishable from a
             // read bug.
             if (!loggedOemSohOutcome) {
                 loggedOemSohOutcome = true;
@@ -6748,7 +6748,7 @@ public class BydDataCollector {
     private volatile boolean loggedClusterChargePowerScale = false;
 
     // One-shot: whether the OEM battery-health index reports at all on this trim. The
-    // PHEV SOH path prefers that value, so "absent" vs "present" has to be visible in a
+    // Canonical SOH path prefers that value, so "absent" vs "present" has to be visible in a
     // single log capture rather than inferred from a missing number.
     private volatile boolean loggedOemSohOutcome = false;
 

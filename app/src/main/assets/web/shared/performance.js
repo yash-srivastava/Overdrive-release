@@ -2619,7 +2619,9 @@ BYD.performance = {
                 ('0' + cd.getDate()).slice(-2);
         }
 
-        if (!nominalSet) {
+        // The direct OEM health index is already a complete percentage and does not
+        // require a configured nominal pack size. Calculated sources still do.
+        if (!nominalSet && displaySource !== 'oem') {
             if (percentEl) {
                 percentEl.style.display = '';
                 percentEl.textContent = BYD.i18n.t('soh.set_battery_capacity_prompt') || '—';
@@ -2627,7 +2629,7 @@ BYD.performance = {
             if (fallbackEl) { fallbackEl.hidden = true; fallbackEl.textContent = ''; }
         } else if (displaySoh > 0 && displaySource !== 'unavailable') {
             // Any priority-chain source with a real value renders the same
-            // way: show the percent. Sources we currently emit on PHEV are
+            // way: show the percent. Sources include 'oem' (direct vehicle index),
             // 'frame_anchor' (peak-charge), 'capacity_ah' (BMS coulomb),
             // 'live' (derived formula), 'calibration' (charge-session anchor).
             // Source-specific captions handled below — calibration shows the
@@ -2699,7 +2701,7 @@ BYD.performance = {
         // Hint
         var hint = document.getElementById('sohDetailHint');
         if (hint) {
-            if (!nominalSet) {
+            if (!nominalSet && displaySource !== 'oem') {
                 hint.style.display = 'block';
                 hint.textContent = BYD.i18n.t('soh.set_battery_capacity_prompt');
             } else if (!data.hasEstimate) {

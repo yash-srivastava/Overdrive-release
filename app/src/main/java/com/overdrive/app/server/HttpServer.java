@@ -1219,32 +1219,12 @@ public class HttpServer {
             
             com.overdrive.app.monitor.SocHistoryDatabase socDb = com.overdrive.app.monitor.SocHistoryDatabase.getInstance();
             com.overdrive.app.abrp.SohEstimator sohEst = socDb != null ? socDb.getSohEstimator() : null;
-            if (sohEst != null && sohEst.hasDisplaySoh()) {
-                // Headline chain (frame_anchor > capacity_ah > live >
-                // calibration on PHEV) — keeps the left-nav chip in sync
-                // with the detail card / battery-health card.
-                soh.put("percent", Math.round(sohEst.getDisplaySoh() * 10) / 10.0);
+            double canonicalSoh = sohEst != null ? sohEst.getDisplaySoh() : -1;
+            if (canonicalSoh > 0) {
+                soh.put("percent", Math.round(canonicalSoh * 10) / 10.0);
                 soh.put("estimatedCapacityKwh", Math.round(sohEst.getEstimatedCapacityKwh() * 10) / 10.0);
                 soh.put("nominalCapacityKwh", sohEst.getNominalCapacityKwh());
                 hasSoh = true;
-            } else {
-                // Fallback: read from persisted file
-                java.io.File sohFile = new java.io.File("/data/local/tmp/abrp_soh_estimate.properties");
-                if (sohFile.exists()) {
-                    java.util.Properties props = new java.util.Properties();
-                    try (java.io.FileInputStream fis = new java.io.FileInputStream(sohFile)) {
-                        props.load(fis);
-                    }
-                    String sohStr = props.getProperty("soh_percent");
-                    if (sohStr != null) {
-                        double sohVal = Double.parseDouble(sohStr);
-                        // Reject out-of-range values (e.g. 101 from bogus BMS sentinels)
-                        if (sohVal > 0 && sohVal <= 100) {
-                            soh.put("percent", Math.round(sohVal * 10) / 10.0);
-                            hasSoh = true;
-                        }
-                    }
-                }
             }
             
             if (hasSoh) status.put("soh", soh);

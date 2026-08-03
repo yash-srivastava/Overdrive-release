@@ -483,6 +483,29 @@
             border: 1px solid rgba(231,76,60,0.4); background: rgba(231,76,60,0.08);
             color: #e74c3c; font-weight: 600; cursor: pointer;
         }
+        .calibration-badge {
+            display: inline-flex; align-items: center; margin-top: 10px; padding: 4px 9px;
+            border-radius: var(--radius-full); border: 1px solid rgba(0,212,170,.4);
+            background: rgba(0,212,170,.12); color: #00D4AA; font-size: 11px; font-weight: 700;
+        }
+        .quality-warning {
+            display: flex; align-items: center; margin: 10px 0 14px;
+            padding: 10px 12px; border-radius: var(--radius-md);
+            border: 1px solid rgba(245,158,11,.35); background: rgba(245,158,11,.10);
+            color: #F59E0B; font-size: 12px; line-height: 1.45;
+        }
+        .quality-warning-text { flex: 1; min-width: 0; }
+        .quality-info-button {
+            display: inline-flex; align-items: center; justify-content: center;
+            flex: 0 0 auto; width: 28px; height: 28px; margin-left: 10px;
+            padding: 0; border-radius: var(--radius-full);
+            border: 1px solid rgba(245,158,11,.45);
+            background: rgba(245,158,11,.10); color: #F59E0B; cursor: pointer;
+        }
+        .quality-info-button:hover, .quality-info-button:focus-visible {
+            background: rgba(245,158,11,.20); outline: none;
+        }
+        .quality-info-button svg { width: 16px; height: 16px; }
     </style>
 </head>
 <body>
@@ -844,6 +867,7 @@
                     </div>
                     <h2 id="detailTitle" style="margin:0 0 4px;font-size:20px;">--</h2>
                     <div id="detailSubtitle" style="color:var(--text-muted);font-size:13px;margin-bottom:18px;"></div>
+                    <div id="detailQualityWarning" class="quality-warning" style="display:none;"></div>
 
                     <div class="ch-card">
                         <div class="ch-stat-grid">
@@ -907,7 +931,7 @@
 
     <script src="../shared/core.js?v=15"></script>
     <script src="../shared/update-flow.js"></script>
-    <script src="../shared/charging.js?v=28"></script>
+    <script src="../shared/charging.js?v=33"></script>
     <script>
         function toggleSidebar() {
             var sb = document.getElementById('sidebar');

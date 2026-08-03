@@ -2986,7 +2986,8 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Shows a styled dialog with SOH status details and a reset button.
-     * Reads directly from the persisted properties file (no HTTP/auth needed).
+     * The headline value always comes from the daemon's canonical OEM-first resolver.
+     * The properties file contains only estimator internals and must not be displayed.
      */
     private fun showBatteryHealthDialog() {
         val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
@@ -2994,14 +2995,14 @@ class MainActivity : AppCompatActivity() {
         executor.execute {
             var sohPercent = "--"
             var source = "--"
-            var method = "live"
+            var method = "--"
             var nominalKwh = "--"
             var samples = "--"
             var lastUpdated = "--"
             var hasEstimate = false
 
-            // Vehicle section state. Populated from /api/performance/soh status JSON
-            // when available; falls back to legacy properties-file values otherwise.
+            // Vehicle section state. Populated from /api/performance/soh status JSON.
+            // Non-SOH estimator metadata can still fall back to the properties file.
             var modelId: String? = null
             var nominalKwhValue = 0.0
             var nominalSourceVal = "unset"
@@ -3020,12 +3021,6 @@ class MainActivity : AppCompatActivity() {
                     val props = java.util.Properties()
                     java.io.FileInputStream(sohFile).use { props.load(it) }
 
-                    val soh = props.getProperty("soh_percent")?.toDoubleOrNull()
-                    if (soh != null && soh > 0 && soh <= 110) {
-                        sohPercent = String.format("%.1f%%", soh)
-                        hasEstimate = true
-                    }
-
                     // Shape B: live formula + calibration anchor (separate, not blended).
                     val cal = props.getProperty("calibration_soh")?.toDoubleOrNull()
                     samples = if (cal != null && cal > 0) String.format("calib %.1f%%", cal) else "—"
@@ -3042,25 +3037,39 @@ class MainActivity : AppCompatActivity() {
                             .format(java.util.Date(ts))
                     }
 
-                    source = props.getProperty("nominal_source") ?: "unset"
-                    nominalSourceVal = source
+                    nominalSourceVal = props.getProperty("nominal_source") ?: "unset"
                 }
             } catch (e: Exception) {
                 android.util.Log.w("MainActivity", "SOH file read failed: ${e.message}")
             }
 
-            // Fetch full SOH status (modelId, calibration anchor, estimated capacity) —
-            // properties file alone doesn't carry modelId or live calibration shape.
+            // Fetch the canonical SOH plus model/capacity diagnostics. A daemon outage
+            // leaves the headline unavailable rather than exposing the moving raw estimate.
             try {
                 val conn = com.overdrive.app.util.DaemonHttpClient.open(
                     "/api/performance/soh", "GET", 2000, 3000)
                 if (conn.responseCode == 200) {
                     val body = conn.inputStream.bufferedReader().use { it.readText() }
                     val json = org.json.JSONObject(body)
+                    val canonicalSoh = json.optDouble("displaySoh", -1.0)
+                    val canonicalSource = json.optString("displaySource", "unavailable")
+                    if (canonicalSoh > 0.0 && canonicalSoh <= 100.0 &&
+                        canonicalSource != "unavailable") {
+                        sohPercent = String.format("%.1f%%", canonicalSoh)
+                        hasEstimate = true
+                        source = canonicalSource
+                        method = if (canonicalSource == "oem") "vehicle-reported" else "estimated"
+                        lastUpdated = java.text.SimpleDateFormat(
+                            "yyyy-MM-dd HH:mm", java.util.Locale.getDefault()
+                        ).format(java.util.Date())
+                    }
                     if (!json.isNull("modelId")) {
                         modelId = json.optString("modelId", "").ifEmpty { null }
                     }
                     nominalKwhValue = json.optDouble("nominalCapacityKwh", nominalKwhValue)
+                    if (nominalKwhValue > 0.0) {
+                        nominalKwh = String.format("%.1f kWh", nominalKwhValue)
+                    }
                     nominalSourceVal = json.optString("nominalSource", nominalSourceVal)
                     val est = json.optDouble("estimatedCapacityKwh", -1.0)
                     if (est > 0) estimatedKwhValue = est
@@ -3078,7 +3087,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 conn.disconnect()
-            } catch (_: Throwable) { /* keep legacy file fallback values */ }
+            } catch (_: Throwable) { /* keep non-SOH metadata fallbacks only */ }
 
             val finalSoh = sohPercent
             val finalSource = source

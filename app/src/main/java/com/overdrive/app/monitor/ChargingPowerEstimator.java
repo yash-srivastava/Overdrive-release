@@ -13,15 +13,17 @@ import java.util.ArrayDeque;
  *
  * <p>Mechanism: differentiate a monotonic charge-energy counter over a sliding
  * window — {@code ΔkWh × 3_600_000 / Δms = kW}. We feed it two counters: remaining
- * pack energy ({@code remainKwh}, PREFERRED) and the cumulative session
- * charge-energy counter ({@code chargingCapacityKwh}, fallback only); both rise
- * only while charging, so their positive time-derivative is charging power.
- * {@code remainKwh} is preferred because it is verified full-scale and SOC-tracking
- * on real hardware, whereas {@code getChargingCapacity()} is an unvalidated HAL
- * counter that on at least the Seal trim rises at ~half the true energy rate
- * (the BYD half-scale getter pattern) — differentiating it produced the
- * "charging power stuck at ~half" bug, so it is now used only when remain yields
- * no delta. Power is the slope across the WHOLE window (total ΔkWh / total Δt),
+ * pack energy ({@code remainKwh}) and the cumulative session charge-energy counter
+ * ({@code chargingCapacityKwh}); both rise only while charging, so their positive
+ * time-derivative is charging power. {@code remainKwh} remains preferred on DC and
+ * unknown connector states because it is verified full-scale on the Seal, whereas
+ * {@code getChargingCapacity()} rises at ~half the true rate there. A confirmed AC
+ * connector is cross-checked, however: the Atto 3 exposes a cycling/jumping value as
+ * {@code remainKwh} (1.5→6.6 kWh in one poll while the session counter rose smoothly),
+ * which otherwise generated a false 155.5 kW peak and poisoned session energy/cost.
+ * When both AC counters are present, a gross disagreement latches the smooth session
+ * counter for the rest of that charge; an impossible AC slope is never published.
+ * Power is the slope across the WHOLE window (total ΔkWh / total Δt),
  * NOT a per-interval derivative: at the ~90 s parked cadence a single interval's
  * rise is only 1-2 counter quanta, so per-interval division amplified the ±½-quantum
  * error to ±50% and beat against the poll cadence — the periodic "8 → 3.3 → 8"
@@ -121,6 +123,30 @@ public final class ChargingPowerEstimator {
     /** Physical plausibility band for the derived power (kW). */
     private static final double MIN_KW = 0.1;
     private static final double MAX_KW = 350.0;
+    /** BYD gun state values used without importing the collector model. */
+    private static final int GUN_DISCONNECTED = 1;
+    private static final int GUN_AC = 2;
+    private static final int GUN_V2L = 5;
+    /**
+     * Upper bound for an explicit AC connector. BYD's highest supported AC input is 22 kW;
+     * 25 kW leaves measurement headroom and matches the UI's DC-only power threshold.
+     */
+    private static final double AC_MAX_COUNTER_KW = 25.0;
+    /**
+     * The session-capacity counter is known to be half-scale on one Seal firmware, so a 2:1
+     * disagreement is legitimate. A remain slope more than 4x the simultaneous capacity slope
+     * is not that known scale ambiguity; on the Atto 3 it is the cycling-field failure.
+     */
+    private static final double AC_MAX_REMAIN_TO_CAP_RATIO = 4.0;
+    /**
+     * Give two present counters time to produce their first slopes before trusting either one.
+     * During this bounded warm-up the UI receives the existing estimated placeholder, which is
+     * deliberately excluded from the persisted CPS/cost curve.
+     */
+    private static final long AC_COUNTER_COMPARE_WAIT_MS = 5 * 60_000L;
+    private static final int AC_SOURCE_UNDECIDED = 0;
+    private static final int AC_SOURCE_REMAIN = 1;
+    private static final int AC_SOURCE_CAPACITY = 2;
     /**
      * EMA weight on the prior estimate when smoothing a fresh reading. Kept
      * modest: the ramp-up interval is now excluded structurally (see
@@ -173,6 +199,10 @@ public final class ChargingPowerEstimator {
      * socE a pure function of SOC. Reset to NaN on charge-stop.
      */
     private double frozenSocScaleKwh = Double.NaN;
+    /** Latched counter choice for a confirmed-AC charge; reset at the charging boundary. */
+    private int acCounterSource = AC_SOURCE_UNDECIDED;
+    /** First time both raw AC counters were simultaneously present, or 0 before comparison. */
+    private long acCounterCompareStartMs = 0L;
 
     private ChargingPowerEstimator() {}
 
@@ -184,9 +214,9 @@ public final class ChargingPowerEstimator {
      */
     public void sample(long nowMs, double capacityKwh, double remainKwh,
                        double socPercent, double socScaleKwh,
-                       boolean fusedCharging, boolean inPark) {
+                       boolean fusedCharging, boolean inPark, int chargingGunState) {
         synchronized (lock) {
-            if (!fusedCharging || !inPark) {
+            if (!fusedCharging || !inPark || chargingGunState == GUN_V2L) {
                 // Not a plug-in charge (or moving): drop everything so a later
                 // genuine charge starts from a clean window and no stale delta
                 // survives as a phantom reading.
@@ -258,18 +288,98 @@ public final class ChargingPowerEstimator {
             //      for ~48 min). SOC still ticks, so its derivative is the only truthful
             //      power. externalChargingPower is worse still — it reports the EVSE's
             //      RATED capacity (a flat 7.13 kW), not the ~1.7 kW actually drawn.
-            //   2. remainKwh — the BEV primary (verified full-scale on the Seal:
-            //      85.1 kWh @ 79% ≈ 108.8 nominal), a good rate source when not frozen.
-            //   3. chargingCapacityKwh — unvalidated HAL counter, last resort.
-            // We prefer whichever produced a delta this cycle, highest priority first.
-            // (socE is NaN on BEV, so BEV selection is remain → cap, unchanged.)
+            //   2. BEV counter selection. DC/unknown stays remain-first (verified full-scale on
+            //      the Seal). Confirmed AC cross-checks remain against chargingCapacityKwh and
+            //      latches capacity only when remain is physically impossible or >4x the
+            //      simultaneous capacity slope (the Atto 3 cycling-field signature).
+            //   3. chargingCapacityKwh — legacy last resort outside confirmed AC.
             String usedSrc;
             double derived;
             // Liveness travels WITH the selected source (see socMoved/remMoved/capMoved above).
             boolean movedThisCycle;
-            if (!Double.isNaN(socE))      { derived = socE; usedSrc = "socE";   movedThisCycle = socMoved; }
-            else if (!Double.isNaN(rem))  { derived = rem;  usedSrc = "remain"; movedThisCycle = remMoved; }
-            else                          { derived = cap;  usedSrc = "cap";    movedThisCycle = capMoved; }
+            boolean resetSmoothing = false;
+            if (chargingGunState == GUN_DISCONNECTED) {
+                // The BMS can announce CHARGING a few seconds before the gun byte catches up.
+                // Do not persist a counter slope while the connector still explicitly says
+                // disconnected; keep accumulating so the first connected sample has history.
+                derived = Double.NaN;
+                usedSrc = "awaiting-connected-gun";
+                movedThisCycle = false;
+                invalidateEstimate();
+            } else if (!Double.isNaN(socE)) {
+                derived = socE;
+                usedSrc = "socE";
+                movedThisCycle = socMoved;
+            } else if (chargingGunState == GUN_AC) {
+                boolean remPlausible = isPlausibleAcSlope(rem);
+                boolean capPlausible = isPlausibleAcSlope(cap);
+                boolean remImpossible = isPositiveFinite(rem) && rem > AC_MAX_COUNTER_KW;
+                boolean capImpossible = isPositiveFinite(cap) && cap > AC_MAX_COUNTER_KW;
+                boolean rawRemainPresent = isPositiveFinite(remainKwh);
+                boolean rawCapacityPresent = isPositiveFinite(capacityKwh);
+
+                if (acCounterSource == AC_SOURCE_REMAIN && !remPlausible && capPlausible) {
+                    // A source trusted earlier in the session has now produced an impossible AC
+                    // slope. Fail closed and latch the simultaneously-live session counter.
+                    acCounterSource = AC_SOURCE_CAPACITY;
+                    resetSmoothing = true;
+                }
+
+                if (acCounterSource == AC_SOURCE_UNDECIDED) {
+                    if (remImpossible && capPlausible) {
+                        acCounterSource = AC_SOURCE_CAPACITY;
+                        resetSmoothing = true;
+                    } else if (capImpossible && remPlausible) {
+                        acCounterSource = AC_SOURCE_REMAIN;
+                        resetSmoothing = true;
+                    } else if (remPlausible && capPlausible) {
+                        acCounterSource = rem > cap * AC_MAX_REMAIN_TO_CAP_RATIO
+                                ? AC_SOURCE_CAPACITY : AC_SOURCE_REMAIN;
+                        resetSmoothing = true;
+                    } else if (rawRemainPresent && rawCapacityPresent
+                            && (remPlausible || capPlausible)) {
+                        // Both counters exist but only one has accumulated enough movement for a
+                        // slope. Wait briefly for a fair comparison instead of letting the first
+                        // coarse quantum poison the peak/cost curve.
+                        if (acCounterCompareStartMs == 0L) acCounterCompareStartMs = nowMs;
+                        if (nowMs - acCounterCompareStartMs >= AC_COUNTER_COMPARE_WAIT_MS) {
+                            acCounterSource = remPlausible
+                                    ? AC_SOURCE_REMAIN : AC_SOURCE_CAPACITY;
+                            resetSmoothing = true;
+                        }
+                    } else if (remPlausible && !rawCapacityPresent) {
+                        acCounterSource = AC_SOURCE_REMAIN;
+                        resetSmoothing = true;
+                    } else if (capPlausible && !rawRemainPresent) {
+                        acCounterSource = AC_SOURCE_CAPACITY;
+                        resetSmoothing = true;
+                    }
+                }
+
+                if (acCounterSource == AC_SOURCE_REMAIN) {
+                    derived = remPlausible ? rem : Double.NaN;
+                    usedSrc = "remain(ac-validated)";
+                    movedThisCycle = remPlausible && remMoved;
+                } else if (acCounterSource == AC_SOURCE_CAPACITY) {
+                    derived = capPlausible ? cap : Double.NaN;
+                    usedSrc = "cap(ac-validated)";
+                    movedThisCycle = capPlausible && capMoved;
+                } else {
+                    derived = Double.NaN;
+                    usedSrc = "awaiting-ac-counter-crosscheck";
+                    movedThisCycle = false;
+                    invalidateEstimate();
+                }
+            } else if (!Double.isNaN(rem)) {
+                // DC, AC_DC and unavailable/legacy gun states retain the proven Seal behaviour.
+                derived = rem;
+                usedSrc = "remain";
+                movedThisCycle = remMoved;
+            } else {
+                derived = cap;
+                usedSrc = "cap";
+                movedThisCycle = capMoved;
+            }
             // Recorded even when NO source produced a usable slope this cycle, provided the
             // SELECTED source's counter moved — e.g. a session-reset/backwards step, which proves
             // the HAL is alive but yields no rate. Confining it to the derive block would drop that
@@ -281,6 +391,9 @@ public final class ChargingPowerEstimator {
             // counter cannot vouch for a frozen one).
             if (movedThisCycle) lastDeriveMs = nowMs;
             if (!Double.isNaN(derived)) {
+                // Never blend the rejected AC counter into the source that replaced it. A source
+                // decision is a trust boundary, not a normal EMA update.
+                if (resetSmoothing) estimateKw = Double.NaN;
                 estimateKw = (estimateKw > MIN_KW)
                     ? estimateKw * SMOOTH_PRIOR + derived * (1.0 - SMOOTH_PRIOR)
                     : derived;
@@ -494,6 +607,19 @@ public final class ChargingPowerEstimator {
         }
     }
 
+    private static boolean isPositiveFinite(double value) {
+        return !Double.isNaN(value) && !Double.isInfinite(value) && value > 0;
+    }
+
+    private static boolean isPlausibleAcSlope(double kw) {
+        return isPositiveFinite(kw) && kw >= MIN_KW && kw <= AC_MAX_COUNTER_KW;
+    }
+
+    private void invalidateEstimate() {
+        estimateKw = Double.NaN;
+        lastDeriveMs = 0L;
+    }
+
     private void reset() {
         socRing.clear();
         capRing.clear();
@@ -501,5 +627,7 @@ public final class ChargingPowerEstimator {
         estimateKw = Double.NaN;
         lastDeriveMs = 0L;
         frozenSocScaleKwh = Double.NaN;  // next session re-freezes its own scale
+        acCounterSource = AC_SOURCE_UNDECIDED;
+        acCounterCompareStartMs = 0L;
     }
 }
