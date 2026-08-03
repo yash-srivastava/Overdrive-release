@@ -514,6 +514,10 @@ public class HttpServer {
                 if (!serveStaticFile(out, "local/performance.html")) {
                     HttpResponse.sendError(out, 404, "performance.html not found");
                 }
+            } else if (path.equals("/remote-dev-view.html") || path.equals("/remote-dev-view")) {
+                if (!serveStaticFile(out, "local/remote-dev-view.html")) {
+                    HttpResponse.sendError(out, 404, "remote-dev-view.html not found");
+                }
             } else if (path.equals("/abrp.html") || path.equals("/abrp")) {
                 if (!serveStaticFile(out, "local/abrp.html")) {
                     HttpResponse.sendError(out, 404, "abrp.html not found");
@@ -959,6 +963,12 @@ public class HttpServer {
         // Performance API
         if (path.startsWith("/api/performance")) {
             return PerformanceApiHandler.handle(method, path, body, out);
+        }
+
+        // Authenticated, explicitly confirmed app-window capture/control.
+        // Deliberately absent from AUTOMATION_ALLOWED_PREFIXES.
+        if (path.startsWith("/api/dev-view/")) {
+            return RemoteDevViewApiHandler.handle(method, path, body, out);
         }
         
         // External Storage API (SD card and CDR cleanup)

@@ -542,6 +542,16 @@
             android:foregroundServiceType="mediaPlayback"
             android:exported="true" />
 
+        <!-- Authenticated Remote Overdrive Dev View bridge. The CameraDaemon
+             runs as shell and is the only external caller. android.permission.DUMP
+             is signature-level and held by shell/system, preventing ordinary apps
+             from starting this exported component. The service then requires a
+             fresh in-memory secret and binds its data socket to 127.0.0.1 only. -->
+        <service
+            android:name="com.overdrive.app.remote.RemoteDevViewBridgeService"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+
         <!-- Vehicle Actuator Service - runs BYD SDK writes (mirror fold, HUD) in the REAL
              app process (UID 10xxx, real Context), as a SECOND attempt after the daemon's
              own write, in case this HAL only honours the call from a normal app process.

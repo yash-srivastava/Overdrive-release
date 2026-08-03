@@ -9,6 +9,7 @@ import com.overdrive.app.config.ConfigManager
 import com.overdrive.app.logging.LogCleaner
 import com.overdrive.app.logging.LogConfig
 import com.overdrive.app.logging.LogManager
+import com.overdrive.app.remote.RemoteDevViewController
 import com.overdrive.app.server.LocaleManager
 import com.overdrive.app.services.DaemonKeepaliveService
 // import com.overdrive.app.shell.PrivilegedShellSetup
@@ -22,6 +23,11 @@ class OverdriveApplication : Application() {
     
     override fun onCreate() {
         super.onCreate()
+
+        // Track only this app's Activity/Window roots for the authenticated
+        // Remote Overdrive Dev View. The controller is dormant until the
+        // shell-daemon bridge is explicitly started for a confirmed session.
+        RemoteDevViewController.install(this)
 
         // Apply the user-picked locale before any Activity/Fragment is created.
         // Auto-mode (or unset) writes an empty list so AppCompat falls back to

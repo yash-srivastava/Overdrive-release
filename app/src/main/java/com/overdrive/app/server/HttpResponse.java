@@ -2,6 +2,8 @@ package com.overdrive.app.server;
 
 import org.json.JSONObject;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
 /**
  * HTTP Response utilities - shared by all handlers.
@@ -45,6 +47,35 @@ public class HttpResponse {
     
     public static void sendJsonSuccess(OutputStream out) throws Exception {
         sendJson(out, "{\"success\":true}");
+    }
+
+    /** Send sensitive transient bytes with mandatory no-store semantics. */
+    public static void sendBinaryNoStore(OutputStream out, String contentType, byte[] body,
+                                         Map<String, String> extraHeaders) throws Exception {
+        StringBuilder headers = new StringBuilder();
+        headers.append("HTTP/1.1 200 OK\r\n")
+               .append("Content-Type: ").append(safeHeader(contentType)).append("\r\n")
+               .append("Content-Length: ").append(body.length).append("\r\n")
+               .append("Cache-Control: no-store, no-cache, must-revalidate, private\r\n")
+               .append("Pragma: no-cache\r\n")
+               .append("X-Content-Type-Options: nosniff\r\n");
+        if (extraHeaders != null) {
+            for (Map.Entry<String, String> entry : extraHeaders.entrySet()) {
+                headers.append(safeHeader(entry.getKey())).append(": ")
+                       .append(safeHeader(entry.getValue())).append("\r\n");
+            }
+            headers.append("Access-Control-Expose-Headers: X-Overdrive-Width, X-Overdrive-Height, ")
+                   .append("X-Overdrive-PixelCopy-Code, X-Overdrive-PixelCopy-Result, ")
+                   .append("X-Overdrive-Activity\r\n");
+        }
+        headers.append("Connection: close\r\n\r\n");
+        out.write(headers.toString().getBytes(StandardCharsets.UTF_8));
+        out.write(body);
+        out.flush();
+    }
+
+    private static String safeHeader(String value) {
+        return value == null ? "" : value.replace("\r", "").replace("\n", "");
     }
 
     /**

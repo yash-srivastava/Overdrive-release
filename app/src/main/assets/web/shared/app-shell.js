@@ -73,6 +73,7 @@
         // page that exists on web; the native diagnostics fragment is native.
         { divider: true, label: 'Diagnostics', i18n: 'nav.diagnostics_group' },
         { href: 'performance.html',                       i18n: 'nav.performance',    label: 'Performance',    svg: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>' },
+        { href: 'remote-dev-view.html',                   label: 'Remote Dev View',  svg: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="m9 8 2 2-2 2M13 12h2"/>' },
 
         // ===== Settings ===== — surveillance + recording + notifications
         // are settings sub-destinations under SettingsFragment on native.

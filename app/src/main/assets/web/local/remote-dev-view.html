@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Remote Overdrive Dev View</title>
+    <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
+    <script src="../shared/theme.js?v=5"></script>
+    <script src="../shared/app-shell.js?v=3"></script>
+    <link rel="stylesheet" href="../shared/styles.css?v=20">
+    <style>
+        .dev-view-page { max-width: 1500px; margin: 0 auto; padding: 24px; }
+        .dev-view-header { margin-bottom: 20px; }
+        .dev-view-header h1 { margin: 0 0 8px; color: var(--text-primary); }
+        .dev-view-header p { margin: 0; color: var(--text-secondary); line-height: 1.5; }
+        .dev-view-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; }
+        .dev-card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 18px; }
+        .warning-card { border-color: rgba(245, 158, 11, .55); background: rgba(245, 158, 11, .08); margin-bottom: 18px; }
+        .warning-card strong { color: var(--warning); }
+        .warning-card p { color: var(--text-secondary); margin: 8px 0 0; line-height: 1.5; }
+        .confirm-row { display: flex; align-items: flex-start; gap: 10px; margin: 16px 0; color: var(--text-primary); line-height: 1.4; }
+        .confirm-row input { margin-top: 3px; width: 18px; height: 18px; }
+        .button-row { display: flex; flex-wrap: wrap; gap: 10px; }
+        .dev-button { appearance: none; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-elevated); color: var(--text-primary); padding: 10px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+        .dev-button.primary { border-color: var(--brand-primary); background: var(--brand-primary); color: #fff; }
+        .dev-button.danger { border-color: var(--danger); color: var(--danger); }
+        .dev-button:disabled { opacity: .45; cursor: default; }
+        .frame-shell { min-height: 360px; display: flex; align-items: center; justify-content: center; background: #050608; border-radius: 12px; overflow: hidden; position: relative; }
+        #remoteFrame { display: none; width: 100%; height: auto; user-select: none; -webkit-user-drag: none; touch-action: none; cursor: crosshair; }
+        .frame-placeholder { color: #9097a5; text-align: center; padding: 40px; line-height: 1.5; }
+        .frame-status { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 12px; color: var(--text-secondary); font: 12px/1.4 'JetBrains Mono', monospace; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; background: #777; }
+        .status-dot.live { background: #22c55e; box-shadow: 0 0 8px rgba(34, 197, 94, .7); }
+        .control-stack { display: flex; flex-direction: column; gap: 14px; }
+        .control-stack h2 { margin: 0 0 10px; font-size: 16px; color: var(--text-primary); }
+        .control-note { color: var(--text-secondary); font-size: 13px; line-height: 1.45; margin: 0; }
+        .text-send { display: flex; gap: 8px; }
+        .text-send input { min-width: 0; flex: 1; border: 1px solid var(--border-subtle); border-radius: 9px; background: var(--bg-primary); color: var(--text-primary); padding: 10px; }
+        .dpad { display: grid; grid-template-columns: repeat(3, 48px); grid-template-rows: repeat(3, 42px); gap: 5px; justify-content: center; }
+        .dpad .dev-button { padding: 0; }
+        .dpad-up { grid-column: 2; } .dpad-left { grid-column: 1; grid-row: 2; }
+        .dpad-center { grid-column: 2; grid-row: 2; } .dpad-right { grid-column: 3; grid-row: 2; }
+        .dpad-down { grid-column: 2; grid-row: 3; }
+        #message { min-height: 20px; margin-top: 10px; color: var(--text-secondary); font-size: 13px; }
+        #message.error { color: var(--danger); }
+        @media (max-width: 980px) {
+            .dev-view-grid { grid-template-columns: 1fr; }
+            .dev-view-page { padding: 16px; }
+            .frame-shell { min-height: 240px; }
+        }
+    </style>
+</head>
+<body>
+<div class="app-layout">
+    <div id="app-shell-mount"></div>
+    <main class="main-content">
+        <div class="dev-view-page">
+            <header class="dev-view-header">
+                <h1>Remote Overdrive Dev View</h1>
+                <p>Inspect and operate Overdrive's live Android window when BYD's ACC-off cover makes whole-display capture black.</p>
+            </header>
+
+            <section id="startCard" class="dev-card warning-card">
+                <strong>This is a real, interactive app session.</strong>
+                <p>Touches and keys act inside Overdrive exactly as local input would. They can reach vehicle-control screens. The physical head-unit display is not turned on or uncovered by this feature; frames come from Overdrive's window underneath the OEM layer.</p>
+                <label class="confirm-row">
+                    <input id="confirmStart" type="checkbox">
+                    <span>I understand that remote input operates the live Overdrive app and will use it only while the vehicle is safely parked.</span>
+                </label>
+                <div class="button-row">
+                    <button id="startButton" class="dev-button primary" disabled>Start developer view</button>
+                </div>
+                <div id="message" role="status" aria-live="polite"></div>
+            </section>
+
+            <div class="dev-view-grid">
+                <section class="dev-card">
+                    <div class="frame-shell">
+                        <div id="framePlaceholder" class="frame-placeholder">Start a confirmed session to launch Overdrive and request its first app-window frame.</div>
+                        <img id="remoteFrame" alt="Live Overdrive app window">
+                    </div>
+                    <div class="frame-status">
+                        <span><span id="liveDot" class="status-dot"></span><span id="connectionState">Stopped</span></span>
+                        <span id="frameDimensions">--</span>
+                        <span id="pixelCopyState">PixelCopy --</span>
+                        <span id="activityState">Activity --</span>
+                    </div>
+                </section>
+
+                <aside class="control-stack">
+                    <section class="dev-card">
+                        <h2>Session</h2>
+                        <div class="button-row">
+                            <button id="refreshButton" class="dev-button" disabled>Refresh</button>
+                            <button id="stopButton" class="dev-button danger" disabled>End session</button>
+                        </div>
+                    </section>
+                    <section class="dev-card">
+                        <h2>Keys</h2>
+                        <div class="button-row">
+                            <button class="dev-button key-button" data-key="back" disabled>Back</button>
+                            <button class="dev-button key-button" data-key="enter" disabled>Enter</button>
+                            <button class="dev-button key-button" data-key="tab" disabled>Tab</button>
+                            <button class="dev-button key-button" data-key="escape" disabled>Esc</button>
+                        </div>
+                        <div class="dpad" style="margin-top:12px">
+                            <button class="dev-button key-button dpad-up" data-key="dpad_up" disabled>↑</button>
+                            <button class="dev-button key-button dpad-left" data-key="dpad_left" disabled>←</button>
+                            <button class="dev-button key-button dpad-center" data-key="dpad_center" disabled>●</button>
+                            <button class="dev-button key-button dpad-right" data-key="dpad_right" disabled>→</button>
+                            <button class="dev-button key-button dpad-down" data-key="dpad_down" disabled>↓</button>
+                        </div>
+                    </section>
+                    <section class="dev-card">
+                        <h2>Text input</h2>
+                        <div class="text-send">
+                            <input id="textInput" type="text" maxlength="256" placeholder="Type into focused field" disabled>
+                            <button id="textButton" class="dev-button" disabled>Send</button>
+                        </div>
+                    </section>
+                    <section class="dev-card">
+                        <h2>Pointer</h2>
+                        <p class="control-note">Click or drag directly on the frame. Touch coordinates are normalized to the captured app window and remain inside Overdrive's process.</p>
+                    </section>
+                </aside>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script src="../shared/auth.js"></script>
+<script src="../shared/remote-dev-view.js?v=1"></script>
+</body>
+</html>
