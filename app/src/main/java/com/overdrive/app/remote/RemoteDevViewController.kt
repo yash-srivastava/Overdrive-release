@@ -2,6 +2,8 @@ package com.overdrive.app.remote
 
 import android.app.Activity
 import android.app.Application
+import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.os.Bundle
@@ -16,6 +18,7 @@ import android.view.MotionEvent
 import android.view.PixelCopy
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import com.overdrive.app.DeterrentActivity
 import java.io.ByteArrayOutputStream
 import java.lang.ref.WeakReference
 import java.util.concurrent.CountDownLatch
@@ -26,10 +29,14 @@ import kotlin.math.roundToInt
 /**
  * App-process half of Remote Overdrive Dev View.
  *
- * PixelCopy is deliberately performed against the currently resumed Overdrive
+ * PixelCopy is deliberately performed against the last interactive Overdrive
  * Activity's Window, before SurfaceFlinger combines it with BYD's opaque
- * AccAnimation layer. Input is dispatched only into app-owned view roots; this
- * class never uses global input injection and cannot address another package.
+ * AccAnimation layer. The transparent [DeterrentActivity] may temporarily take
+ * foreground to protect the physical screen; it is never selected as the
+ * developer-view target, so that safety activity can keep running while the
+ * underlying MainActivity remains stable here. Input is dispatched only into
+ * roots owned by the selected Activity; this class never uses global input
+ * injection and cannot address another package.
  */
 object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     private const val TAG = "RemoteDevView"
@@ -54,7 +61,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     override fun onActivityCreated(activity: Activity, state: Bundle?) = trackIfEmpty(activity)
     override fun onActivityStarted(activity: Activity) = trackIfEmpty(activity)
     override fun onActivityResumed(activity: Activity) {
-        currentActivity = WeakReference(activity)
+        if (isRemoteTarget(activity)) currentActivity = WeakReference(activity)
     }
     override fun onActivityPaused(activity: Activity) = Unit
     override fun onActivityStopped(activity: Activity) = Unit
@@ -64,8 +71,12 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     }
 
     private fun trackIfEmpty(activity: Activity) {
-        if (currentActivity.get() == null) currentActivity = WeakReference(activity)
+        if (currentActivity.get() == null && isRemoteTarget(activity)) {
+            currentActivity = WeakReference(activity)
+        }
     }
+
+    private fun isRemoteTarget(activity: Activity): Boolean = activity !is DeterrentActivity
 
     data class CaptureResult(
         val resultCode: Int,
@@ -203,12 +214,12 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
             val screenY = decorLocation[1] + normalizedY * decor.height
 
             val target = if (action == MotionEvent.ACTION_DOWN) {
-                findTopRootAt(screenX, screenY, decor).also {
+                findTopRootAt(screenX, screenY, decor, activity).also {
                     touchRoot = WeakReference(it)
                     touchDownTime = SystemClock.uptimeMillis()
                 }
             } else {
-                touchRoot.get() ?: findTopRootAt(screenX, screenY, decor)
+                touchRoot.get() ?: findTopRootAt(screenX, screenY, decor, activity)
             }
             val rootLocation = IntArray(2).also { target.getLocationOnScreen(it) }
             val eventTime = SystemClock.uptimeMillis()
@@ -254,7 +265,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
                 activity.onBackPressed()
                 return@runOnUiThread InputResult(true, true, activity.javaClass.name)
             }
-            val root = topInputRoot(activity.window.decorView)
+            val root = topInputRoot(activity.window.decorView, activity)
             val now = SystemClock.uptimeMillis()
             val down = KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0)
             val up = KeyEvent(now, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, keyCode, 0)
@@ -271,7 +282,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
         return runOnUiThread {
             val activity = readyActivity()
                 ?: return@runOnUiThread InputResult(false, false, null, "No Overdrive activity is ready")
-            val root = topInputRoot(activity.window.decorView)
+            val root = topInputRoot(activity.window.decorView, activity)
             val focused = root.findFocus()
             var handled = false
             if (focused != null) {
@@ -311,8 +322,13 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
         return result.get()
     }
 
-    private fun findTopRootAt(screenX: Double, screenY: Double, fallback: View): View {
-        val roots = appOwnedRoots()
+    private fun findTopRootAt(
+        screenX: Double,
+        screenY: Double,
+        fallback: View,
+        activity: Activity,
+    ): View {
+        val roots = activityOwnedRoots(activity)
         for (index in roots.indices.reversed()) {
             val root = roots[index]
             if (!root.isShown || root.width <= 0 || root.height <= 0) continue
@@ -328,8 +344,8 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
         return fallback
     }
 
-    private fun topInputRoot(fallback: View): View {
-        val roots = appOwnedRoots()
+    private fun topInputRoot(fallback: View, activity: Activity): View {
+        val roots = activityOwnedRoots(activity)
         return roots.asReversed().firstOrNull { it.isShown && it.hasWindowFocus() }
             ?: roots.asReversed().firstOrNull { it.isShown }
             ?: fallback
@@ -355,6 +371,27 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
         }
     }
 
+    /**
+     * Keep dialogs and app-owned service overlays, but exclude roots belonging
+     * to another Activity. In particular, DeterrentActivity's foreground,
+     * touch-swallowing root must continue protecting the physical screen
+     * without swallowing input dispatched directly to MainActivity here.
+     */
+    private fun activityOwnedRoots(activity: Activity): List<View> = appOwnedRoots().filter { root ->
+        val owner = contextActivity(root.context)
+        owner == null || owner === activity
+    }
+
+    private fun contextActivity(context: Context): Activity? {
+        var current: Context? = context
+        val seen = HashSet<Context>()
+        while (current != null && seen.add(current)) {
+            if (current is Activity) return current
+            current = if (current is ContextWrapper) current.baseContext else null
+        }
+        return null
+    }
+
     private fun drawAppOwnedOverlayRoots(
         bitmap: Bitmap,
         activity: Activity,
@@ -366,7 +403,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
         val scaleX = bitmap.width.toFloat() / sourceWidth
         val scaleY = bitmap.height.toFloat() / sourceHeight
         val canvas = Canvas(bitmap)
-        appOwnedRoots().forEach { root ->
+        activityOwnedRoots(activity).forEach { root ->
             if (root === activityRoot || !root.isShown || root.width <= 0 || root.height <= 0) return@forEach
             val location = IntArray(2).also { root.getLocationOnScreen(it) }
             canvas.save()

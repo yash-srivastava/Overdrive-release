@@ -4,10 +4,12 @@ Remote Overdrive Dev View captures and controls Overdrive's own Android window.
 Its primary use is development while a BYD is ACC-off and the OEM's opaque
 `AccAnimation` layer makes whole-display capture tools return black.
 
-Open the authenticated web dashboard, choose **Diagnostics → Remote Dev View**,
-read the warning, and explicitly start a session. Starting a session launches
+Open the authenticated web dashboard, choose **Remote Dev View**, acknowledge
+the compact parked-use notice, and start a session. Starting a session launches
 Overdrive normally. It does not bypass the PIN screen and does not turn on,
-uncover, or otherwise alter the physical head-unit display.
+uncover, or otherwise alter the physical head-unit display. The viewer can be
+expanded to browser fullscreen; Back, Refresh, End, and Exit remain available
+in a small overlay while direct touch control continues on the frame.
 
 ## Security boundary
 
@@ -33,11 +35,17 @@ uncover, or otherwise alter the physical head-unit display.
 
 ## Capture and input behavior
 
-The active Overdrive Activity window is captured with
+The last interactive Overdrive Activity window is captured with
 `PixelCopy.request(activity.window, ...)`. App-owned dialog and popup roots are
 then drawn over that frame on a best-effort basis. Pointer coordinates are
 normalized to the captured window, and the page also exposes a small allowlist
 of navigation keys plus focused-field text input.
+
+`DeterrentActivity` is intentionally not selected as the remote target. It can
+continue running in the foreground to block physical input while its warning is
+active, while Remote Dev View keeps capturing and dispatching directly to the
+underlying interactive Overdrive Activity. The deterrent, its daemon-owned
+surface, its deadline, and its power behavior are not disabled or modified.
 
 This gives the remote session the same practical reach as a person interacting
 with Overdrive locally, including screens that can issue vehicle commands.

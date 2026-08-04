@@ -16,6 +16,12 @@
     var startButton = document.getElementById('startButton');
     var stopButton = document.getElementById('stopButton');
     var refreshButton = document.getElementById('refreshButton');
+    var fullscreenButton = document.getElementById('fullscreenButton');
+    var fullscreenBackButton = document.getElementById('fullscreenBackButton');
+    var fullscreenRefreshButton = document.getElementById('fullscreenRefreshButton');
+    var fullscreenStopButton = document.getElementById('fullscreenStopButton');
+    var fullscreenExitButton = document.getElementById('fullscreenExitButton');
+    var viewerCard = document.getElementById('viewerCard');
     var image = document.getElementById('remoteFrame');
     var placeholder = document.getElementById('framePlaceholder');
     var message = document.getElementById('message');
@@ -37,6 +43,10 @@
         startButton.disabled = running || !confirmStart.checked;
         stopButton.disabled = !running;
         refreshButton.disabled = !running;
+        fullscreenButton.disabled = !running;
+        fullscreenBackButton.disabled = !running;
+        fullscreenRefreshButton.disabled = !running;
+        fullscreenStopButton.disabled = !running;
         textInput.disabled = !running;
         textButton.disabled = !running;
         var keyButtons = document.querySelectorAll('.key-button');
@@ -44,10 +54,66 @@
         liveDot.className = running ? 'status-dot live' : 'status-dot';
         connectionState.textContent = running ? 'Connected' : 'Stopped';
         if (!running) {
+            exitFullscreen();
             fetchingFrame = false;
             if (pollTimer) window.clearTimeout(pollTimer);
             pollTimer = null;
         }
+    }
+
+    function nativeFullscreenElement() {
+        return document.fullscreenElement || document.webkitFullscreenElement || null;
+    }
+
+    function isFullscreen() {
+        return nativeFullscreenElement() === viewerCard ||
+            document.body.classList.contains('dev-view-focus');
+    }
+
+    function syncFullscreenState() {
+        var active = isFullscreen();
+        fullscreenButton.textContent = active ? 'Exit fullscreen' : 'Fullscreen';
+        fullscreenButton.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+
+    function enableFullscreenFallback() {
+        document.body.classList.add('dev-view-focus');
+        syncFullscreenState();
+    }
+
+    function enterFullscreen() {
+        if (!session || isFullscreen()) return;
+        var request = viewerCard.requestFullscreen || viewerCard.webkitRequestFullscreen;
+        if (!request) {
+            enableFullscreenFallback();
+            return;
+        }
+        try {
+            var result = request.call(viewerCard);
+            if (result && typeof result.catch === 'function') {
+                result.catch(enableFullscreenFallback);
+            }
+        } catch (error) {
+            enableFullscreenFallback();
+        }
+    }
+
+    function exitFullscreen() {
+        document.body.classList.remove('dev-view-focus');
+        var active = nativeFullscreenElement();
+        var exit = document.exitFullscreen || document.webkitExitFullscreen;
+        if (active === viewerCard && exit) {
+            try {
+                var result = exit.call(document);
+                if (result && typeof result.catch === 'function') result.catch(function () {});
+            } catch (error) {}
+        }
+        syncFullscreenState();
+    }
+
+    function toggleFullscreen() {
+        if (isFullscreen()) exitFullscreen();
+        else enterFullscreen();
     }
 
     function jsonRequest(path, method, payload) {
@@ -256,7 +322,17 @@
     });
     startButton.addEventListener('click', startSession);
     stopButton.addEventListener('click', function () { endSession(false); });
+    fullscreenStopButton.addEventListener('click', function () { endSession(false); });
+    fullscreenButton.addEventListener('click', toggleFullscreen);
+    fullscreenExitButton.addEventListener('click', exitFullscreen);
+    fullscreenBackButton.addEventListener('click', function () {
+        sendInput({ type: 'key', key: 'back' });
+    });
     refreshButton.addEventListener('click', function () {
+        forceRefresh = true;
+        if (!fetchingFrame) requestFrame();
+    });
+    fullscreenRefreshButton.addEventListener('click', function () {
         forceRefresh = true;
         if (!fetchingFrame) requestFrame();
     });
@@ -280,10 +356,18 @@
     document.addEventListener('visibilitychange', function () {
         if (!document.hidden && session && !fetchingFrame) requestFrame();
     });
+    document.addEventListener('fullscreenchange', syncFullscreenState);
+    document.addEventListener('webkitfullscreenchange', syncFullscreenState);
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && document.body.classList.contains('dev-view-focus')) {
+            exitFullscreen();
+        }
+    });
     window.addEventListener('beforeunload', function () {
         if (session) endSession(true);
     });
 
     bindPointer();
     setRunning(false);
+    syncFullscreenState();
 })();

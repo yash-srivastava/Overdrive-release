@@ -13,13 +13,14 @@ import java.nio.file.Paths;
 public class RemoteDevViewAssetTest {
 
     @Test
-    public void pageRequiresExplicitConfirmationAndWarnsAboutRealInput() throws Exception {
+    public void pageRequiresCompactExplicitConfirmationForRealInput() throws Exception {
         String html = read("src/main/assets/web/local/remote-dev-view.html");
 
         assertTrue(html.contains("id=\"confirmStart\""));
-        assertTrue(html.contains("remote input operates the live Overdrive app"));
-        assertTrue(html.contains("physical head-unit display is not turned on or uncovered"));
+        assertTrue(html.contains("Remote input operates the real Overdrive app"));
+        assertTrue(html.contains("Use only while parked"));
         assertTrue(html.contains("id=\"startButton\" class=\"dev-button primary\" disabled"));
+        assertFalse(html.contains("warning-card"));
     }
 
     @Test
@@ -36,7 +37,32 @@ public class RemoteDevViewAssetTest {
         assertTrue(script.contains("body: JSON.stringify({ session: token"));
         assertFalse(script.contains("/api/dev-view/frame?"));
         assertFalse(script.contains("localStorage.setItem"));
-        assertTrue(html.contains("remote-dev-view.js?v=2"));
+        assertTrue(html.contains("remote-dev-view.js?v=3"));
+    }
+
+    @Test
+    public void viewerOffersFullscreenWithAnInFrameEscapePath() throws Exception {
+        String html = read("src/main/assets/web/local/remote-dev-view.html");
+        String script = read("src/main/assets/web/shared/remote-dev-view.js");
+
+        assertTrue(html.contains("id=\"viewerCard\""));
+        assertTrue(html.contains("id=\"fullscreenButton\""));
+        assertTrue(html.contains("id=\"fullscreenExitButton\""));
+        assertTrue(script.contains("viewerCard.requestFullscreen"));
+        assertTrue(script.contains("webkitRequestFullscreen"));
+        assertTrue(script.contains("dev-view-focus"));
+        assertTrue(script.contains("fullscreenStopButton"));
+    }
+
+    @Test
+    public void deterrentActivityCannotReplaceOrConsumeTheRemoteTarget() throws Exception {
+        String controller = read(
+            "src/main/java/com/overdrive/app/remote/RemoteDevViewController.kt");
+
+        assertTrue(controller.contains("activity !is DeterrentActivity"));
+        assertTrue(controller.contains("if (isRemoteTarget(activity))"));
+        assertTrue(controller.contains("activityOwnedRoots(activity)"));
+        assertTrue(controller.contains("owner == null || owner === activity"));
     }
 
     @Test
