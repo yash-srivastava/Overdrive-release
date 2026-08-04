@@ -52,6 +52,8 @@ stale work. Capture remains single-flight, but input is handled by independent
 bridge workers instead of waiting behind PixelCopy. The app retries short-lived
 PixelCopy source/window races internally, while the browser keeps the last good
 frame through transient failures instead of blanking it or moving the page. If
+the stream has produced a good frame, later transient failure metadata is also
+discarded so the successful dimensions and PixelCopy state stay visible. If
 WebSocket setup fails, the browser falls back to sequential authenticated POST
 requests. The Screenshot button performs a separate native-size, lossless PNG
 capture and downloads it locally; it does not reduce the streaming frame rate

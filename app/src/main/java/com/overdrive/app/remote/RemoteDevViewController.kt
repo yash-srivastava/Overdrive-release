@@ -44,8 +44,8 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     private const val TAG = "RemoteDevView"
     private const val UI_TIMEOUT_SECONDS = 6L
     private const val MAX_TEXT_LENGTH = 256
-    private const val PIXEL_COPY_RETRY_COUNT = 4
-    private const val PIXEL_COPY_RETRY_DELAY_MS = 40L
+    private const val PIXEL_COPY_RETRY_COUNT = 8
+    private const val PIXEL_COPY_RETRY_DELAY_MS = 60L
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var installed = false

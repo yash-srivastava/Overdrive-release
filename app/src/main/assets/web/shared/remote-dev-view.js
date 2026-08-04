@@ -273,6 +273,15 @@
         }
         if (data.type !== 'frame') return;
 
+        if (!data.success) {
+            consecutiveFrameFailures += 1;
+            if (!currentObjectUrl) {
+                connectionState.textContent = 'Waiting for a stable frame';
+                placeholder.textContent = 'Waiting for a stable app frame...';
+            }
+            return;
+        }
+
         if (data.width && data.height) {
             dimensions.textContent = data.width + ' × ' + data.height;
         }
@@ -280,17 +289,8 @@
             (data.pixelCopyResult || '--') + ' (' +
             (typeof data.pixelCopyCode === 'number' ? data.pixelCopyCode : '--') + ')';
         activityState.textContent = 'Activity ' + shortActivity(data.activity);
-
-        if (data.success) {
-            consecutiveFrameFailures = 0;
-            setMessage('', false);
-        } else {
-            consecutiveFrameFailures += 1;
-            connectionState.textContent = currentObjectUrl
-                ? 'Live - holding last frame'
-                : 'Waiting for a stable frame';
-            if (!currentObjectUrl) placeholder.textContent = 'Waiting for a stable app frame...';
-        }
+        consecutiveFrameFailures = 0;
+        setMessage('', false);
     }
 
     function renderFrame(blob) {

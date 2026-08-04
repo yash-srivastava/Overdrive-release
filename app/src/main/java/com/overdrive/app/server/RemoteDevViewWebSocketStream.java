@@ -113,6 +113,7 @@ final class RemoteDevViewWebSocketStream {
             AtomicBoolean running,
             BlockingQueue<StreamFrame> latest,
             AtomicLong sequence) {
+        boolean hasSuccessfulFrame = false;
         while (running.get() && !client.isClosed()
                 && RemoteDevViewApiHandler.validateStreamSession(session)) {
             long started = System.nanoTime();
@@ -123,12 +124,18 @@ final class RemoteDevViewWebSocketStream {
             JSONObject metadata = streamMetadata(
                 response, sequence.incrementAndGet(), captureMs);
             byte[] jpeg = response == null ? new byte[0] : response.payload;
+            boolean successful = metadata.optBoolean("success", false) && jpeg.length > 0;
 
-            // Capacity one: replace an unsent old frame with this newer one.
-            latest.poll();
-            latest.offer(new StreamFrame(metadata, jpeg));
+            if (successful || !hasSuccessfulFrame) {
+                // Capacity one: replace an unsent old frame with this newer
+                // one. Once a good frame exists, transient PixelCopy races do
+                // not replace it or its successful metadata with an error.
+                latest.poll();
+                latest.offer(new StreamFrame(metadata, jpeg));
+            }
+            if (successful) hasSuccessfulFrame = true;
 
-            if (!metadata.optBoolean("success", false)) {
+            if (!successful) {
                 try { Thread.sleep(ERROR_RETRY_MS); }
                 catch (InterruptedException error) {
                     Thread.currentThread().interrupt();

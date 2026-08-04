@@ -62,10 +62,12 @@ public class RemoteDevViewAssetTest {
         assertTrue(script.contains("['overdrive-dev-view', token]"));
         assertFalse(script.contains("session=' + encodeURIComponent"));
         assertTrue(script.contains("pendingFrameBlob = blob"));
-        assertTrue(script.contains("holding last frame"));
+        assertTrue(script.contains("if (!data.success)"));
+        assertTrue(script.contains("if (!currentObjectUrl)"));
         assertFalse(script.contains("data.pixelCopyResult || 'Capture failed'"));
         assertTrue(stream.contains("new ArrayBlockingQueue<>(1)"));
         assertTrue(stream.contains("latest.poll()"));
+        assertTrue(stream.contains("successful || !hasSuccessfulFrame"));
         assertTrue(server.contains("RemoteDevViewWebSocketStream"));
         assertTrue(server.contains(".sessionFromProtocols(websocketProtocolHeader)"));
         assertTrue(server.contains("requestLine.startsWith(\"GET /ws\")"));
@@ -122,7 +124,8 @@ public class RemoteDevViewAssetTest {
         assertTrue(controller.contains("if (isRemoteTarget(activity))"));
         assertTrue(controller.contains("activityOwnedRoots(activity)"));
         assertTrue(controller.contains("owner == null || owner === activity"));
-        assertTrue(controller.contains("PIXEL_COPY_RETRY_COUNT = 4"));
+        assertTrue(controller.contains("PIXEL_COPY_RETRY_COUNT = 8"));
+        assertTrue(controller.contains("PIXEL_COPY_RETRY_DELAY_MS = 60L"));
         assertTrue(controller.contains("catch (error: IllegalArgumentException)"));
         assertTrue(controller.contains("getDeclaredMethod(\"getWindowViews\")"));
         assertTrue(controller.contains("captureLock = ReentrantLock(true)"));
