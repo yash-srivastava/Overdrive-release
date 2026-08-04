@@ -113,6 +113,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     }
 
     /** Blocks the bridge worker, never the main thread. */
+    @Synchronized
     fun capture(maxWidth: Int, quality: Int): CaptureResult {
         val activity = currentActivity.get()
         if (activity == null || activity.isFinishing || activity.isDestroyed) {

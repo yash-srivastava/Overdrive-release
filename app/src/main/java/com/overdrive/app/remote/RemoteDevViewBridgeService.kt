@@ -26,8 +26,11 @@ import java.util.concurrent.Executors
  * no frame touches storage.
  */
 class RemoteDevViewBridgeService : Service() {
-    private val worker: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "remote-dev-view-bridge").apply { isDaemon = true }
+    private val listener: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "remote-dev-view-listener").apply { isDaemon = true }
+    }
+    private val clients: ExecutorService = Executors.newFixedThreadPool(CLIENT_THREADS) { runnable ->
+        Thread(runnable, "remote-dev-view-client").apply { isDaemon = true }
     }
     @Volatile private var serverSocket: ServerSocket? = null
     private val usedNonces = LinkedHashMap<String, Long>()
@@ -46,14 +49,15 @@ class RemoteDevViewBridgeService : Service() {
 
     override fun onDestroy() {
         try { serverSocket?.close() } catch (_: Exception) {}
-        worker.shutdownNow()
+        listener.shutdownNow()
+        clients.shutdownNow()
         super.onDestroy()
     }
 
     @Synchronized
     private fun ensureListening() {
         if (serverSocket != null) return
-        worker.execute {
+        listener.execute {
             try {
                 val server = ServerSocket().apply {
                     reuseAddress = true
@@ -62,7 +66,7 @@ class RemoteDevViewBridgeService : Service() {
                 serverSocket = server
                 while (serverSocket === server) {
                     val socket = try { server.accept() } catch (_: Exception) { break }
-                    handleClient(socket)
+                    clients.execute { handleClient(socket) }
                 }
             } catch (error: Throwable) {
                 Log.e(TAG, "Bridge listener stopped", error)
@@ -199,7 +203,8 @@ class RemoteDevViewBridgeService : Service() {
         const val PORT = 19881
 
         private const val TAG = "RemoteDevViewBridge"
-        private const val BACKLOG = 4
+        private const val BACKLOG = 8
+        private const val CLIENT_THREADS = 4
         private const val SOCKET_TIMEOUT_MS = 8_000
         private const val MAX_REQUEST_BYTES = 16 * 1024
         private const val MIN_WIDTH = 320

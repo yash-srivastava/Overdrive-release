@@ -261,7 +261,11 @@ public class HttpServer {
             // All other requests still log.
             if (!(requestLine.contains("/api/stream/turn")
                     || requestLine.contains("/api/bs/status")
-                    || requestLine.startsWith("GET /status"))) {
+                    || requestLine.startsWith("GET /status")
+                    // WebSocket URLs carry the dashboard JWT because browser
+                    // WebSockets cannot set Authorization. Never write it to
+                    // the daemon log (applies to camera and Remote Dev View).
+                    || requestLine.startsWith("GET /ws"))) {
                 CameraDaemon.log("HTTP: " + requestLine);
             }
 
@@ -270,6 +274,7 @@ public class HttpServer {
             int contentLength = 0;
             String websocketKey = null;
             String upgradeHeader = null;
+            String websocketProtocolHeader = null;
             String rangeHeader = null;
             // Conditional GET — if the client (Chrome WebView's HTTP cache)
             // sends If-None-Match matching our ETag, we return 304 instead of
@@ -296,6 +301,8 @@ public class HttpServer {
                     websocketKey = line.substring(18).trim();
                 } else if (lower.startsWith("upgrade:")) {
                     upgradeHeader = line.substring(8).trim();
+                } else if (lower.startsWith("sec-websocket-protocol:")) {
+                    websocketProtocolHeader = line.substring(23).trim();
                 } else if (lower.startsWith("range:")) {
                     rangeHeader = line.substring(6).trim();
                 } else if (lower.startsWith("if-none-match:")) {
@@ -409,7 +416,10 @@ public class HttpServer {
             // WebSocket clients can't set arbitrary headers — cookies may be dropped
             // through tunnels' SameSite policies).
             String wsPathOnly = path.contains("?") ? path.substring(0, path.indexOf("?")) : path;
-            if (wsPathOnly.equals("/ws") && websocketKey != null && "websocket".equalsIgnoreCase(upgradeHeader)) {
+            if ((wsPathOnly.equals("/ws")
+                    || wsPathOnly.equals(RemoteDevViewWebSocketStream.PATH))
+                    && websocketKey != null
+                    && "websocket".equalsIgnoreCase(upgradeHeader)) {
                 // Promote ?token= query param into a synthetic Authorization header
                 // so AuthMiddleware's existing Bearer-token path handles it.
                 String wsAuthHeader = authHeader;
@@ -429,7 +439,20 @@ public class HttpServer {
                     client.close();
                     return;
                 }
-                handleWebSocketUpgrade(client, websocketKey);
+                if (wsPathOnly.equals(RemoteDevViewWebSocketStream.PATH)) {
+                    String devViewSession = RemoteDevViewWebSocketStream
+                        .sessionFromProtocols(websocketProtocolHeader);
+                    if (devViewSession == null
+                            || !RemoteDevViewApiHandler.validateStreamSession(devViewSession)) {
+                        HttpResponse.sendError(out, 403,
+                            "Developer-view session is invalid or expired");
+                        client.close();
+                        return;
+                    }
+                    RemoteDevViewWebSocketStream.handle(client, websocketKey, devViewSession);
+                } else {
+                    handleWebSocketUpgrade(client, websocketKey);
+                }
                 return;
             }
 

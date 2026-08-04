@@ -12,6 +12,13 @@
     var pollTimer = null;
     var lastMoveAt = 0;
     var consecutiveFrameFailures = 0;
+    var frameSocket = null;
+    var reconnectTimer = null;
+    var reconnectAttempts = 0;
+    var pollingFallback = false;
+    var renderingFrame = false;
+    var pendingFrameBlob = null;
+    var frameTimes = [];
 
     var confirmStart = document.getElementById('confirmStart');
     var startButton = document.getElementById('startButton');
@@ -56,8 +63,13 @@
         connectionState.textContent = running ? 'Connected' : 'Stopped';
         if (!running) {
             exitFullscreen();
+            closeFrameStream();
             fetchingFrame = false;
             consecutiveFrameFailures = 0;
+            pollingFallback = false;
+            renderingFrame = false;
+            pendingFrameBlob = null;
+            frameTimes = [];
             if (pollTimer) window.clearTimeout(pollTimer);
             pollTimer = null;
         }
@@ -146,7 +158,7 @@
                 setMessage(data.activityReady
                     ? 'Session ready. The physical display has not been changed.'
                     : 'Bridge ready; waiting for the Overdrive activity to render.', false);
-                requestFrame();
+                openFrameStream();
             })
             .catch(function (error) {
                 session = null;
@@ -155,14 +167,188 @@
             });
     }
 
-    function scheduleFrame(delay) {
+    function closeFrameStream() {
+        if (reconnectTimer) window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+        var socket = frameSocket;
+        frameSocket = null;
+        if (!socket) return;
+        socket.onopen = null;
+        socket.onmessage = null;
+        socket.onerror = null;
+        socket.onclose = null;
+        try { socket.close(1000, 'stream stopped'); } catch (error) {}
+    }
+
+    function streamUrl() {
+        var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        var url = protocol + '//' + window.location.host + '/ws/dev-view';
+        var jwt = BYDAuth.getToken();
+        if (jwt) url += '?token=' + encodeURIComponent(jwt);
+        return url;
+    }
+
+    function openFrameStream() {
+        if (stopped || !session || document.hidden) return;
+        if (typeof WebSocket === 'undefined' || !BYDAuth.getToken()) {
+            startPollingFallback('Live stream is unavailable; using compatibility mode.');
+            return;
+        }
+
+        closeFrameStream();
+        pollingFallback = false;
+        if (pollTimer) window.clearTimeout(pollTimer);
+        pollTimer = null;
+        var token = session;
+        var socket;
+        try {
+            // The JWT authenticates the WebSocket upgrade. The memory-only
+            // developer capability travels as a subprotocol, never in the URL.
+            socket = new WebSocket(streamUrl(), ['overdrive-dev-view', token]);
+        } catch (error) {
+            startPollingFallback('Live stream could not start; using compatibility mode.');
+            return;
+        }
+        frameSocket = socket;
+        socket.binaryType = 'blob';
+
+        socket.onopen = function () {
+            if (socket !== frameSocket || token !== session) return;
+            reconnectAttempts = 0;
+            connectionState.textContent = 'Live stream';
+            setMessage('', false);
+        };
+
+        socket.onmessage = function (event) {
+            if (socket !== frameSocket || token !== session) return;
+            if (typeof event.data === 'string') {
+                handleStreamMetadata(event.data);
+                return;
+            }
+            var blob = event.data instanceof Blob
+                ? event.data
+                : new Blob([event.data], { type: 'image/jpeg' });
+            renderFrame(blob);
+        };
+
+        socket.onerror = function () {
+            if (socket === frameSocket) connectionState.textContent = 'Stream reconnecting';
+        };
+
+        socket.onclose = function (event) {
+            if (socket !== frameSocket) return;
+            frameSocket = null;
+            if (stopped || token !== session || document.hidden) return;
+            if (event && event.code === 1008) {
+                session = null;
+                setRunning(false);
+                setMessage('Developer-view session expired.', true);
+                return;
+            }
+            reconnectAttempts += 1;
+            if (reconnectAttempts <= 3) {
+                connectionState.textContent = 'Stream reconnecting';
+                reconnectTimer = window.setTimeout(openFrameStream,
+                    Math.min(1500, reconnectAttempts * 350));
+            } else {
+                startPollingFallback('Live stream disconnected; using compatibility mode.');
+            }
+        };
+    }
+
+    function handleStreamMetadata(text) {
+        var data;
+        try { data = JSON.parse(text); } catch (error) { return; }
+        if (data.type === 'ready') {
+            connectionState.textContent = 'Live stream';
+            return;
+        }
+        if (data.type !== 'frame') return;
+
+        if (data.width && data.height) {
+            dimensions.textContent = data.width + ' × ' + data.height;
+        }
+        pixelCopyState.textContent = 'PixelCopy ' +
+            (data.pixelCopyResult || '--') + ' (' +
+            (typeof data.pixelCopyCode === 'number' ? data.pixelCopyCode : '--') + ')';
+        activityState.textContent = 'Activity ' + shortActivity(data.activity);
+
+        if (data.success) {
+            consecutiveFrameFailures = 0;
+            setMessage('', false);
+        } else {
+            consecutiveFrameFailures += 1;
+            if (!currentObjectUrl || consecutiveFrameFailures >= 3) {
+                setMessage((data.detail || data.error || data.pixelCopyResult || 'Capture failed') +
+                    ' — retrying.', true);
+            }
+        }
+    }
+
+    function renderFrame(blob) {
+        if (!blob || !blob.size) return;
+        if (renderingFrame) {
+            // Browser decode/display can lag behind the producer. Keep only
+            // the newest waiting frame so controls never show a stale backlog.
+            pendingFrameBlob = blob;
+            return;
+        }
+        renderingFrame = true;
+        var nextUrl = URL.createObjectURL(blob);
+        image.onload = function () {
+            if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
+            currentObjectUrl = nextUrl;
+            image.onload = null;
+            image.onerror = null;
+            renderingFrame = false;
+            image.style.display = 'block';
+            placeholder.style.display = 'none';
+            noteDisplayedFrame();
+            if (pendingFrameBlob) {
+                var newest = pendingFrameBlob;
+                pendingFrameBlob = null;
+                renderFrame(newest);
+            }
+        };
+        image.onerror = function () {
+            URL.revokeObjectURL(nextUrl);
+            image.onload = null;
+            image.onerror = null;
+            renderingFrame = false;
+        };
+        image.src = nextUrl;
+    }
+
+    function noteDisplayedFrame() {
+        var now = Date.now();
+        frameTimes.push(now);
+        if (frameTimes.length > 12) frameTimes.shift();
+        if (frameTimes.length >= 2) {
+            var elapsed = frameTimes[frameTimes.length - 1] - frameTimes[0];
+            if (elapsed > 0) {
+                var fps = (frameTimes.length - 1) * 1000 / elapsed;
+                connectionState.textContent = 'Live · ' + fps.toFixed(1) + ' fps';
+            }
+        }
+    }
+
+    function startPollingFallback(reason) {
         if (stopped || !session) return;
+        closeFrameStream();
+        pollingFallback = true;
+        connectionState.textContent = 'Connected · compatibility';
+        if (reason) setMessage(reason, false);
+        requestFrame();
+    }
+
+    function scheduleFrame(delay) {
+        if (stopped || !session || !pollingFallback) return;
         if (pollTimer) window.clearTimeout(pollTimer);
         pollTimer = window.setTimeout(requestFrame, delay);
     }
 
     function requestFrame() {
-        if (stopped || !session || fetchingFrame || document.hidden) return;
+        if (stopped || !session || !pollingFallback || fetchingFrame || document.hidden) return;
         fetchingFrame = true;
         var frameFailed = false;
         var token = session;
@@ -189,15 +375,7 @@
             return response.blob();
         }).then(function (blob) {
             if (!blob || token !== session) return;
-            var nextUrl = URL.createObjectURL(blob);
-            image.onload = function () {
-                if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
-                currentObjectUrl = nextUrl;
-                image.onload = null;
-            };
-            image.src = nextUrl;
-            image.style.display = 'block';
-            placeholder.style.display = 'none';
+            renderFrame(blob);
             consecutiveFrameFailures = 0;
             setMessage('', false);
         }).catch(function (error) {
@@ -232,8 +410,10 @@
         inputChain = inputChain.then(function () {
             return jsonRequest('/api/dev-view/input', 'POST', payload);
         }).then(function () {
-            forceRefresh = true;
-            if (!fetchingFrame) requestFrame();
+            if (pollingFallback) {
+                forceRefresh = true;
+                if (!fetchingFrame) requestFrame();
+            }
         }).catch(function (error) {
             if (error.sessionInvalid) {
                 session = null;
@@ -339,12 +519,22 @@
         sendInput({ type: 'key', key: 'back' });
     });
     refreshButton.addEventListener('click', function () {
-        forceRefresh = true;
-        if (!fetchingFrame) requestFrame();
+        if (pollingFallback) {
+            forceRefresh = true;
+            if (!fetchingFrame) requestFrame();
+        } else {
+            reconnectAttempts = 0;
+            openFrameStream();
+        }
     });
     fullscreenRefreshButton.addEventListener('click', function () {
-        forceRefresh = true;
-        if (!fetchingFrame) requestFrame();
+        if (pollingFallback) {
+            forceRefresh = true;
+            if (!fetchingFrame) requestFrame();
+        } else {
+            reconnectAttempts = 0;
+            openFrameStream();
+        }
     });
     var keyButtons = document.querySelectorAll('.key-button');
     for (var i = 0; i < keyButtons.length; i++) {
@@ -364,7 +554,14 @@
         }
     });
     document.addEventListener('visibilitychange', function () {
-        if (!document.hidden && session && !fetchingFrame) requestFrame();
+        if (document.hidden) {
+            closeFrameStream();
+            if (pollTimer) window.clearTimeout(pollTimer);
+            pollTimer = null;
+        } else if (session) {
+            reconnectAttempts = 0;
+            openFrameStream();
+        }
     });
     document.addEventListener('fullscreenchange', syncFullscreenState);
     document.addEventListener('webkitfullscreenchange', syncFullscreenState);

@@ -21,6 +21,22 @@ public final class RemoteDevViewApiHandler {
 
     private RemoteDevViewApiHandler() {}
 
+    /** Package-private hooks used only by the authenticated WebSocket path. */
+    static boolean validateStreamSession(String session) {
+        return SESSIONS.validateAndTouch(session) != null;
+    }
+
+    static RemoteDevViewBridgeClient.Response captureStreamFrame(int maxWidth, int quality) {
+        try {
+            return BRIDGE.send(new JSONObject()
+                .put("command", "capture")
+                .put("maxWidth", maxWidth)
+                .put("quality", quality));
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
     public static boolean handle(String method, String path, String body, OutputStream out)
             throws Exception {
         if (path.equals("/api/dev-view/session") && method.equals("POST")) {

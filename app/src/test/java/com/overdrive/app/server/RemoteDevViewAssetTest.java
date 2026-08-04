@@ -1,6 +1,8 @@
 package com.overdrive.app.server;
 
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
@@ -24,7 +26,7 @@ public class RemoteDevViewAssetTest {
     }
 
     @Test
-    public void framesUseAuthenticatedPostAndNoStoreWithoutPuttingSessionInUrl() throws Exception {
+    public void frameFallbackUsesAuthenticatedPostAndNoStoreWithoutPuttingSessionInUrl() throws Exception {
         String script = read("src/main/assets/web/shared/remote-dev-view.js");
         String html = read("src/main/assets/web/local/remote-dev-view.html");
 
@@ -40,7 +42,35 @@ public class RemoteDevViewAssetTest {
         assertTrue(script.contains("maxWidth: 960, quality: 55"));
         assertTrue(script.contains("consecutiveFrameFailures >= 3"));
         assertTrue(script.contains(": 60"));
-        assertTrue(html.contains("remote-dev-view.js?v=4"));
+        assertTrue(html.contains("remote-dev-view.js?v=5"));
+    }
+
+    @Test
+    public void liveFramesUseLatestOnlyWebSocketWithCapabilityOutsideUrl() throws Exception {
+        String script = read("src/main/assets/web/shared/remote-dev-view.js");
+        String stream = read(
+            "src/main/java/com/overdrive/app/server/RemoteDevViewWebSocketStream.java");
+        String server = read("src/main/java/com/overdrive/app/server/HttpServer.java");
+        String bridge = read(
+            "src/main/java/com/overdrive/app/remote/RemoteDevViewBridgeService.kt");
+
+        assertTrue(script.contains("/ws/dev-view"));
+        assertTrue(script.contains("['overdrive-dev-view', token]"));
+        assertFalse(script.contains("session=' + encodeURIComponent"));
+        assertTrue(script.contains("pendingFrameBlob = blob"));
+        assertTrue(stream.contains("new ArrayBlockingQueue<>(1)"));
+        assertTrue(stream.contains("latest.poll()"));
+        assertTrue(server.contains("RemoteDevViewWebSocketStream"));
+        assertTrue(server.contains(".sessionFromProtocols(websocketProtocolHeader)"));
+        assertTrue(server.contains("requestLine.startsWith(\"GET /ws\")"));
+        assertTrue(bridge.contains("Executors.newFixedThreadPool(CLIENT_THREADS)"));
+
+        String capability = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        assertEquals(capability, RemoteDevViewWebSocketStream.sessionFromProtocols(
+            "overdrive-dev-view, " + capability));
+        assertNull(RemoteDevViewWebSocketStream.sessionFromProtocols(capability));
+        assertNull(RemoteDevViewWebSocketStream.sessionFromProtocols(
+            "overdrive-dev-view, not-a-capability"));
     }
 
     @Test
