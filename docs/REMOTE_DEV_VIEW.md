@@ -10,7 +10,9 @@ launches Overdrive normally. It does not bypass the PIN screen and does not
 turn on, uncover, or otherwise alter the physical head-unit display. The
 viewer can be expanded and scaled to browser fullscreen; Back, Keyboard,
 Screenshot, Refresh, End, and Exit remain available in a small overlay while
-direct touch control continues on the scaled frame.
+direct touch control continues on the scaled frame. Normal view presents the
+window inside a responsive in-dash tablet bezel. The decorative bezel is
+removed in fullscreen so the live window remains edge-to-edge.
 
 ## Security boundary
 

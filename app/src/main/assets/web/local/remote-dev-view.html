@@ -28,7 +28,10 @@
         .dev-button:disabled { opacity: .45; cursor: default; }
         .viewer-card { width: 100%; min-width: 0; display: flex; flex-direction: column; box-sizing: border-box; }
         .viewer-card:focus { outline: none; }
-        .frame-shell { width: 100%; min-width: 0; min-height: 280px; aspect-ratio: 16 / 9; display: flex; align-items: center; justify-content: center; background: #050608; border-radius: 12px; overflow: hidden; position: relative; }
+        .head-unit-bezel { position: relative; width: 100%; min-width: 0; padding: 18px 19px 22px; display: flex; flex-direction: column; box-sizing: border-box; border: 1px solid rgba(164, 179, 183, .25); border-radius: 28px; background: linear-gradient(145deg, #343c3e 0%, #171c1e 30%, #080b0c 70%, #252c2e 100%); box-shadow: 0 18px 38px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .12), inset 0 -1px 0 rgba(255, 255, 255, .04); }
+        .head-unit-bezel::before { content: ''; position: absolute; z-index: 2; top: 7px; left: 50%; width: 6px; height: 6px; border-radius: 50%; transform: translateX(-50%); pointer-events: none; background: radial-gradient(circle at 40% 35%, #22454b 0, #071012 35%, #010203 72%); box-shadow: 0 0 0 1px rgba(255, 255, 255, .08), inset 0 0 2px rgba(89, 206, 224, .35); }
+        .head-unit-bezel::after { content: ''; position: absolute; bottom: 8px; left: 50%; width: 34px; height: 2px; border-radius: 2px; transform: translateX(-50%); pointer-events: none; background: rgba(255, 255, 255, .13); box-shadow: 0 1px 0 rgba(0, 0, 0, .55); }
+        .frame-shell { width: 100%; min-width: 0; min-height: 280px; aspect-ratio: 16 / 9; display: flex; align-items: center; justify-content: center; background: #050608; border-radius: 11px; overflow: hidden; position: relative; box-shadow: 0 0 0 1px rgba(0, 0, 0, .92), 0 0 0 2px rgba(255, 255, 255, .035), inset 0 0 18px rgba(0, 0, 0, .7); }
         #remoteFrame { display: none; width: 100%; height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; touch-action: none; cursor: crosshair; }
         .frame-placeholder { color: #9097a5; text-align: center; padding: 40px; line-height: 1.5; }
         .viewer-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
@@ -43,6 +46,9 @@
         #viewerCard:fullscreen, #viewerCard:-webkit-full-screen, body.dev-view-focus #viewerCard { width: 100vw; height: 100vh; max-width: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: #050608; }
         body.dev-view-focus { overflow: hidden; }
         body.dev-view-focus #viewerCard { position: fixed; inset: 0; z-index: 10000; }
+        #viewerCard:fullscreen .head-unit-bezel, #viewerCard:-webkit-full-screen .head-unit-bezel, body.dev-view-focus #viewerCard .head-unit-bezel { flex: 1 1 auto; min-height: 0; padding: 0; border: 0; border-radius: 0; background: #050608; box-shadow: none; }
+        #viewerCard:fullscreen .head-unit-bezel::before, #viewerCard:-webkit-full-screen .head-unit-bezel::before, body.dev-view-focus #viewerCard .head-unit-bezel::before,
+        #viewerCard:fullscreen .head-unit-bezel::after, #viewerCard:-webkit-full-screen .head-unit-bezel::after, body.dev-view-focus #viewerCard .head-unit-bezel::after { display: none; }
         #viewerCard:fullscreen .frame-shell, #viewerCard:-webkit-full-screen .frame-shell, body.dev-view-focus #viewerCard .frame-shell { flex: 1 1 auto; min-height: 0; aspect-ratio: auto; border-radius: 0; }
         #viewerCard:fullscreen #remoteFrame, #viewerCard:-webkit-full-screen #remoteFrame, body.dev-view-focus #viewerCard #remoteFrame { width: 100%; height: 100%; object-fit: contain; }
         #viewerCard:fullscreen .viewer-footer, #viewerCard:-webkit-full-screen .viewer-footer, body.dev-view-focus #viewerCard .viewer-footer { display: none; }
@@ -55,6 +61,10 @@
         @media (max-width: 620px) {
             .session-strip { grid-template-columns: 1fr; }
             .session-actions .dev-button { width: 100%; }
+            .head-unit-bezel { padding: 10px 10px 14px; border-radius: 19px; }
+            .head-unit-bezel::before { top: 3px; width: 4px; height: 4px; }
+            .head-unit-bezel::after { bottom: 5px; width: 26px; }
+            .frame-shell { min-height: 0; border-radius: 8px; }
         }
     </style>
 </head>
@@ -81,17 +91,19 @@
 
             <div class="dev-view-grid">
                 <section id="viewerCard" class="dev-card viewer-card" tabindex="0">
-                    <div class="frame-shell">
-                        <div class="fullscreen-toolbar">
-                            <button id="fullscreenBackButton" class="dev-button compact" disabled>Back</button>
-                            <button id="fullscreenKeyboardButton" class="dev-button compact" disabled>Keyboard</button>
-                            <button id="fullscreenScreenshotButton" class="dev-button compact" disabled>Screenshot</button>
-                            <button id="fullscreenRefreshButton" class="dev-button compact" disabled>Refresh</button>
-                            <button id="fullscreenStopButton" class="dev-button compact danger" disabled>End</button>
-                            <button id="fullscreenExitButton" class="dev-button compact">Exit fullscreen</button>
+                    <div class="head-unit-bezel">
+                        <div class="frame-shell">
+                            <div class="fullscreen-toolbar">
+                                <button id="fullscreenBackButton" class="dev-button compact" disabled>Back</button>
+                                <button id="fullscreenKeyboardButton" class="dev-button compact" disabled>Keyboard</button>
+                                <button id="fullscreenScreenshotButton" class="dev-button compact" disabled>Screenshot</button>
+                                <button id="fullscreenRefreshButton" class="dev-button compact" disabled>Refresh</button>
+                                <button id="fullscreenStopButton" class="dev-button compact danger" disabled>End</button>
+                                <button id="fullscreenExitButton" class="dev-button compact">Exit fullscreen</button>
+                            </div>
+                            <div id="framePlaceholder" class="frame-placeholder">Start a session to view Overdrive.</div>
+                            <img id="remoteFrame" alt="Live Overdrive app window">
                         </div>
-                        <div id="framePlaceholder" class="frame-placeholder">Start a session to view Overdrive.</div>
-                        <img id="remoteFrame" alt="Live Overdrive app window">
                     </div>
                     <div class="viewer-footer">
                         <div class="frame-status">

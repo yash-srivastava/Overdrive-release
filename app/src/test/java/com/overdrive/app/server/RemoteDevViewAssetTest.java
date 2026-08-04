@@ -87,6 +87,12 @@ public class RemoteDevViewAssetTest {
         String script = read("src/main/assets/web/shared/remote-dev-view.js");
 
         assertTrue(html.contains("id=\"viewerCard\""));
+        assertTrue(html.contains("class=\"head-unit-bezel\""));
+        assertTrue(html.contains(".head-unit-bezel::before"));
+        assertTrue(html.contains(".head-unit-bezel::after"));
+        assertTrue(html.contains("#viewerCard:fullscreen .head-unit-bezel"));
+        assertTrue(html.contains("body.dev-view-focus #viewerCard .head-unit-bezel"));
+        assertTrue(html.contains(".head-unit-bezel::after { display: none; }"));
         assertTrue(html.contains("id=\"fullscreenButton\""));
         assertTrue(html.contains("id=\"fullscreenExitButton\""));
         assertTrue(script.contains("viewerCard.requestFullscreen"));
