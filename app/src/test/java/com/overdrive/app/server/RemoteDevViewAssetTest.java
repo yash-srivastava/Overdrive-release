@@ -25,7 +25,10 @@ public class RemoteDevViewAssetTest {
     @Test
     public void framesUseAuthenticatedPostAndNoStoreWithoutPuttingSessionInUrl() throws Exception {
         String script = read("src/main/assets/web/shared/remote-dev-view.js");
+        String html = read("src/main/assets/web/local/remote-dev-view.html");
 
+        assertTrue(script.contains("typeof BYDAuth === 'undefined'"));
+        assertFalse(script.contains("window.BYDAuth"));
         assertTrue(script.contains("BYDAuth.requireAuth()"));
         assertTrue(script.contains("BYDAuth.fetch('/api/dev-view/frame'"));
         assertTrue(script.contains("method: 'POST'"));
@@ -33,6 +36,7 @@ public class RemoteDevViewAssetTest {
         assertTrue(script.contains("body: JSON.stringify({ session: token"));
         assertFalse(script.contains("/api/dev-view/frame?"));
         assertFalse(script.contains("localStorage.setItem"));
+        assertTrue(html.contains("remote-dev-view.js?v=2"));
     }
 
     @Test

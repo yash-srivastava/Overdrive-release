@@ -1,7 +1,7 @@
 (function () {
     'use strict';
 
-    if (!window.BYDAuth || !BYDAuth.requireAuth()) return;
+    if (typeof BYDAuth === 'undefined' || !BYDAuth.requireAuth()) return;
 
     var session = null;
     var stopped = true;
