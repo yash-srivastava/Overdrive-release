@@ -37,7 +37,10 @@ public class RemoteDevViewAssetTest {
         assertTrue(script.contains("body: JSON.stringify({ session: token"));
         assertFalse(script.contains("/api/dev-view/frame?"));
         assertFalse(script.contains("localStorage.setItem"));
-        assertTrue(html.contains("remote-dev-view.js?v=3"));
+        assertTrue(script.contains("maxWidth: 960, quality: 55"));
+        assertTrue(script.contains("consecutiveFrameFailures >= 3"));
+        assertTrue(script.contains(": 60"));
+        assertTrue(html.contains("remote-dev-view.js?v=4"));
     }
 
     @Test
@@ -63,6 +66,9 @@ public class RemoteDevViewAssetTest {
         assertTrue(controller.contains("if (isRemoteTarget(activity))"));
         assertTrue(controller.contains("activityOwnedRoots(activity)"));
         assertTrue(controller.contains("owner == null || owner === activity"));
+        assertTrue(controller.contains("PIXEL_COPY_RETRY_COUNT = 2"));
+        assertTrue(controller.contains("catch (error: IllegalArgumentException)"));
+        assertTrue(controller.contains("getDeclaredMethod(\"getWindowViews\")"));
     }
 
     @Test

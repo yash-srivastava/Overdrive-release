@@ -41,6 +41,12 @@ then drawn over that frame on a best-effort basis. Pointer coordinates are
 normalized to the captured window, and the page also exposes a small allowlist
 of navigation keys plus focused-field text input.
 
+The browser requests a 960-pixel-wide, quality-55 JPEG profile and starts the
+next request 60 ms after a successful frame. Capture remains single-flight so
+the car cannot accumulate stale work. The app retries short-lived PixelCopy
+source/window races internally, while the browser keeps the last good frame
+and only surfaces an error after repeated failures.
+
 `DeterrentActivity` is intentionally not selected as the remote target. It can
 continue running in the foreground to block physical input while its warning is
 active, while Remote Dev View keeps capturing and dispatching directly to the

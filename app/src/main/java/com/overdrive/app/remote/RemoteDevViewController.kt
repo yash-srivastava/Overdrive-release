@@ -21,6 +21,7 @@ import android.view.inputmethod.EditorInfo
 import com.overdrive.app.DeterrentActivity
 import java.io.ByteArrayOutputStream
 import java.lang.ref.WeakReference
+import java.lang.reflect.Method
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -42,6 +43,8 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     private const val TAG = "RemoteDevView"
     private const val UI_TIMEOUT_SECONDS = 6L
     private const val MAX_TEXT_LENGTH = 256
+    private const val PIXEL_COPY_RETRY_COUNT = 2
+    private const val PIXEL_COPY_RETRY_DELAY_MS = 40L
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var installed = false
@@ -49,6 +52,10 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     private var currentActivity = WeakReference<Activity>(null)
     private var touchRoot = WeakReference<View>(null)
     private var touchDownTime = 0L
+    private var appRootsAccessor: AppRootsAccessor? = null
+    private var appRootsUnavailable = false
+
+    private data class AppRootsAccessor(val instance: Any, val method: Method)
 
     @Synchronized
     fun install(app: Application) {
@@ -143,28 +150,47 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
                     return@post
                 }
 
-                try {
-                    PixelCopy.request(activity.window, bitmap, { code ->
-                        if (code == PixelCopy.SUCCESS) {
-                            drawAppOwnedOverlayRoots(bitmap, activity, sourceWidth, sourceHeight)
-                            bitmapRef.set(bitmap)
-                        } else {
-                            bitmap.recycle()
-                        }
-                        resultRef.set(
-                            CaptureResult(code, pixelCopyResultName(code), outputWidth,
-                                outputHeight, activity.javaClass.name, null)
-                        )
-                        latch.countDown()
-                    }, mainHandler)
-                } catch (error: Throwable) {
-                    bitmap.recycle()
+                fun complete(code: Int, resultName: String, detail: String? = null) {
+                    if (code == PixelCopy.SUCCESS) {
+                        drawAppOwnedOverlayRoots(bitmap, activity, sourceWidth, sourceHeight)
+                        bitmapRef.set(bitmap)
+                    } else {
+                        bitmap.recycle()
+                    }
                     resultRef.set(
-                        CaptureResult(-1, "REQUEST_ERROR", outputWidth, outputHeight,
-                            activity.javaClass.name, null, error.javaClass.simpleName)
+                        CaptureResult(code, resultName, outputWidth, outputHeight,
+                            activity.javaClass.name, null, detail)
                     )
                     latch.countDown()
                 }
+
+                lateinit var requestCopy: (Int) -> Unit
+                requestCopy = { retriesRemaining ->
+                    try {
+                        PixelCopy.request(activity.window, bitmap, { code ->
+                            if (isRetryablePixelCopyResult(code) && retriesRemaining > 0) {
+                                mainHandler.postDelayed(
+                                    { requestCopy(retriesRemaining - 1) },
+                                    PIXEL_COPY_RETRY_DELAY_MS,
+                                )
+                            } else {
+                                complete(code, pixelCopyResultName(code))
+                            }
+                        }, mainHandler)
+                    } catch (error: IllegalArgumentException) {
+                        if (retriesRemaining > 0) {
+                            mainHandler.postDelayed(
+                                { requestCopy(retriesRemaining - 1) },
+                                PIXEL_COPY_RETRY_DELAY_MS,
+                            )
+                        } else {
+                            complete(-1, "REQUEST_ERROR", error.javaClass.simpleName)
+                        }
+                    } catch (error: Throwable) {
+                        complete(-1, "REQUEST_ERROR", error.javaClass.simpleName)
+                    }
+                }
+                requestCopy(PIXEL_COPY_RETRY_COUNT)
             }
         }
 
@@ -359,17 +385,49 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
      */
     private fun appOwnedRoots(): List<View> {
         val packageName = application?.packageName ?: return emptyList()
+        val accessor = resolveAppRootsAccessor() ?: return emptyList()
         return try {
-            val type = Class.forName("android.view.WindowManagerGlobal")
-            val instance = type.getDeclaredMethod("getInstance").invoke(null)
             @Suppress("UNCHECKED_CAST")
-            val roots = type.getDeclaredMethod("getRootViews").invoke(instance) as? List<View>
+            val roots = accessor.method.invoke(accessor.instance) as? List<View>
             roots.orEmpty().filter { it.context.applicationContext.packageName == packageName }
         } catch (error: Throwable) {
-            Log.d(TAG, "App-owned root enumeration unavailable: ${error.javaClass.simpleName}")
+            disableAppRootsAccessor(error)
             emptyList()
         }
     }
+
+    @Synchronized
+    private fun resolveAppRootsAccessor(): AppRootsAccessor? {
+        appRootsAccessor?.let { return it }
+        if (appRootsUnavailable) return null
+        return try {
+            val type = Class.forName("android.view.WindowManagerGlobal")
+            val instance = type.getDeclaredMethod("getInstance").invoke(null)
+                ?: throw IllegalStateException("WindowManagerGlobal instance unavailable")
+            val method = try {
+                type.getDeclaredMethod("getWindowViews")
+            } catch (_: NoSuchMethodException) {
+                type.getDeclaredMethod("getRootViews")
+            }
+            method.isAccessible = true
+            AppRootsAccessor(instance, method).also { appRootsAccessor = it }
+        } catch (error: Throwable) {
+            disableAppRootsAccessor(error)
+            null
+        }
+    }
+
+    @Synchronized
+    private fun disableAppRootsAccessor(error: Throwable) {
+        if (!appRootsUnavailable) {
+            Log.d(TAG, "App-owned root enumeration unavailable: ${error.javaClass.simpleName}")
+        }
+        appRootsAccessor = null
+        appRootsUnavailable = true
+    }
+
+    private fun isRetryablePixelCopyResult(code: Int): Boolean =
+        code == PixelCopy.ERROR_SOURCE_NO_DATA || code == PixelCopy.ERROR_SOURCE_INVALID
 
     /**
      * Keep dialogs and app-owned service overlays, but exclude roots belonging

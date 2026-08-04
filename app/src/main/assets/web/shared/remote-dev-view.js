@@ -11,6 +11,7 @@
     var inputChain = Promise.resolve();
     var pollTimer = null;
     var lastMoveAt = 0;
+    var consecutiveFrameFailures = 0;
 
     var confirmStart = document.getElementById('confirmStart');
     var startButton = document.getElementById('startButton');
@@ -56,6 +57,7 @@
         if (!running) {
             exitFullscreen();
             fetchingFrame = false;
+            consecutiveFrameFailures = 0;
             if (pollTimer) window.clearTimeout(pollTimer);
             pollTimer = null;
         }
@@ -162,11 +164,12 @@
     function requestFrame() {
         if (stopped || !session || fetchingFrame || document.hidden) return;
         fetchingFrame = true;
+        var frameFailed = false;
         var token = session;
         BYDAuth.fetch('/api/dev-view/frame', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ session: token, maxWidth: 1280, quality: 72 }),
+            body: JSON.stringify({ session: token, maxWidth: 960, quality: 55 }),
             cache: 'no-store'
         }).then(function (response) {
             if (!response.ok) {
@@ -195,16 +198,23 @@
             image.src = nextUrl;
             image.style.display = 'block';
             placeholder.style.display = 'none';
+            consecutiveFrameFailures = 0;
             setMessage('', false);
         }).catch(function (error) {
+            frameFailed = true;
+            consecutiveFrameFailures += 1;
             if (error.sessionInvalid) {
                 session = null;
                 setRunning(false);
             }
-            setMessage(error.message + (error.sessionInvalid ? '.' : ' — retrying.'), true);
+            if (error.sessionInvalid || !currentObjectUrl || consecutiveFrameFailures >= 3) {
+                setMessage(error.message + (error.sessionInvalid ? '.' : ' — retrying.'), true);
+            }
         }).then(function () {
             fetchingFrame = false;
-            var delay = forceRefresh ? 0 : 300;
+            var delay = forceRefresh ? 0 : (frameFailed
+                ? Math.min(1000, 120 * consecutiveFrameFailures)
+                : 60);
             forceRefresh = false;
             scheduleFrame(delay);
         });
