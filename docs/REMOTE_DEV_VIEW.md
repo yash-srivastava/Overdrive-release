@@ -8,9 +8,9 @@ Open the authenticated web dashboard, choose **Remote Dev View**, and press
 **Start session** beside the compact parked-use notice. Starting a session
 launches Overdrive normally. It does not bypass the PIN screen and does not
 turn on, uncover, or otherwise alter the physical head-unit display. The
-viewer can be expanded and scaled to browser fullscreen; Back, Screenshot,
-Refresh, End, and Exit remain available in a small overlay while direct touch
-control continues on the scaled frame.
+viewer can be expanded and scaled to browser fullscreen; Back, Keyboard,
+Screenshot, Refresh, End, and Exit remain available in a small overlay while
+direct touch control continues on the scaled frame.
 
 ## Security boundary
 
@@ -42,8 +42,10 @@ control continues on the scaled frame.
 The last interactive Overdrive Activity window is captured with
 `PixelCopy.request(activity.window, ...)`. App-owned dialog and popup roots are
 then drawn over that frame on a best-effort basis. Pointer coordinates are
-normalized to the captured window, and the page also exposes a small allowlist
-of navigation keys plus focused-field text input.
+normalized to the captured window. The page forwards Escape as Android Back,
+Backspace as Delete, Enter, Tab, arrow-key navigation, and printable keyboard
+text. A compact Keyboard button focuses a hidden input so a phone or tablet can
+open its soft keyboard without keeping a separate input-tools sidebar.
 
 The app continuously produces a 960-pixel-wide, quality-55 JPEG stream while a
 visible WebSocket client is attached. A capacity-one queue on both sides keeps

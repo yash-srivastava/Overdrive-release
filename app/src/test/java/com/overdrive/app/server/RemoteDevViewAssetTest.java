@@ -46,7 +46,7 @@ public class RemoteDevViewAssetTest {
         assertTrue(script.contains("maxWidth: 960, quality: 55"));
         assertTrue(script.contains("Waiting for a stable app frame"));
         assertTrue(script.contains(": 60"));
-        assertTrue(html.contains("remote-dev-view.js?v=7"));
+        assertTrue(html.contains("remote-dev-view.js?v=8"));
     }
 
     @Test
@@ -95,6 +95,25 @@ public class RemoteDevViewAssetTest {
         assertTrue(script.contains("fullscreenStopButton"));
         assertTrue(html.contains("object-fit: contain"));
         assertTrue(script.contains("frameContentRect()"));
+    }
+
+    @Test
+    public void viewerUsesBrowserKeyboardWithoutTheInputToolsSidebar() throws Exception {
+        String html = read("src/main/assets/web/local/remote-dev-view.html");
+        String script = read("src/main/assets/web/shared/remote-dev-view.js");
+
+        assertFalse(html.contains("<h2>Input tools</h2>"));
+        assertFalse(html.contains("class=\"dev-button key-button"));
+        assertFalse(html.contains("id=\"textInput\""));
+        assertTrue(html.contains("id=\"keyboardButton\""));
+        assertTrue(html.contains("id=\"fullscreenKeyboardButton\""));
+        assertTrue(html.contains("id=\"keyboardCapture\""));
+        assertTrue(script.contains("case 'Escape': return 'back'"));
+        assertTrue(script.contains("case 'Backspace': return 'delete'"));
+        assertTrue(script.contains("case 'ArrowUp': return 'dpad_up'"));
+        assertTrue(script.contains("queueKeyboardText(event.key)"));
+        assertTrue(script.contains("keyboardCapture.addEventListener('compositionend'"));
+        assertTrue(script.contains("viewerCard.focus({ preventScroll: true })"));
     }
 
     @Test

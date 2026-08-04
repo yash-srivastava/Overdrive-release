@@ -20,12 +20,16 @@
     var pendingFrameBlob = null;
     var frameTimes = [];
     var screenshotInFlight = false;
+    var pendingKeyboardText = '';
+    var keyboardTextTimer = null;
+    var keyboardComposing = false;
 
     var startButton = document.getElementById('startButton');
     var stopButton = document.getElementById('stopButton');
     var refreshButton = document.getElementById('refreshButton');
     var fullscreenButton = document.getElementById('fullscreenButton');
     var fullscreenBackButton = document.getElementById('fullscreenBackButton');
+    var fullscreenKeyboardButton = document.getElementById('fullscreenKeyboardButton');
     var fullscreenScreenshotButton = document.getElementById('fullscreenScreenshotButton');
     var fullscreenRefreshButton = document.getElementById('fullscreenRefreshButton');
     var fullscreenStopButton = document.getElementById('fullscreenStopButton');
@@ -39,8 +43,8 @@
     var dimensions = document.getElementById('frameDimensions');
     var pixelCopyState = document.getElementById('pixelCopyState');
     var activityState = document.getElementById('activityState');
-    var textInput = document.getElementById('textInput');
-    var textButton = document.getElementById('textButton');
+    var keyboardButton = document.getElementById('keyboardButton');
+    var keyboardCapture = document.getElementById('keyboardCapture');
     var screenshotButton = document.getElementById('screenshotButton');
 
     function setMessage(text, isError) {
@@ -56,14 +60,13 @@
         refreshButton.disabled = !running;
         fullscreenButton.disabled = !running;
         fullscreenBackButton.disabled = !running;
+        keyboardButton.disabled = !running;
+        fullscreenKeyboardButton.disabled = !running;
+        keyboardCapture.disabled = !running;
         screenshotButton.disabled = !running || screenshotInFlight;
         fullscreenScreenshotButton.disabled = !running || screenshotInFlight;
         fullscreenRefreshButton.disabled = !running;
         fullscreenStopButton.disabled = !running;
-        textInput.disabled = !running;
-        textButton.disabled = !running;
-        var keyButtons = document.querySelectorAll('.key-button');
-        for (var i = 0; i < keyButtons.length; i++) keyButtons[i].disabled = !running;
         liveDot.className = running ? 'status-dot live' : 'status-dot';
         connectionState.textContent = running ? 'Connected' : 'Stopped';
         if (!running) {
@@ -75,6 +78,11 @@
             renderingFrame = false;
             pendingFrameBlob = null;
             frameTimes = [];
+            pendingKeyboardText = '';
+            if (keyboardTextTimer) window.clearTimeout(keyboardTextTimer);
+            keyboardTextTimer = null;
+            keyboardCapture.value = '';
+            keyboardCapture.blur();
             if (pollTimer) window.clearTimeout(pollTimer);
             pollTimer = null;
         }
@@ -167,6 +175,8 @@
                     : 'Waiting for Overdrive to render...';
                 setMessage('', false);
                 openFrameStream();
+                try { viewerCard.focus({ preventScroll: true }); }
+                catch (error) { viewerCard.focus(); }
             })
             .catch(function (error) {
                 session = null;
@@ -437,6 +447,72 @@
         return inputChain;
     }
 
+    function flushKeyboardText() {
+        if (keyboardTextTimer) window.clearTimeout(keyboardTextTimer);
+        keyboardTextTimer = null;
+        if (!pendingKeyboardText || !session) {
+            pendingKeyboardText = '';
+            return;
+        }
+        var text = pendingKeyboardText;
+        pendingKeyboardText = '';
+        sendInput({ type: 'text', text: text });
+    }
+
+    function queueKeyboardText(text) {
+        if (!text || !session) return;
+        pendingKeyboardText += text;
+        if (pendingKeyboardText.length >= 256) {
+            var overflow = pendingKeyboardText.substring(256);
+            pendingKeyboardText = pendingKeyboardText.substring(0, 256);
+            flushKeyboardText();
+            if (overflow) queueKeyboardText(overflow);
+            return;
+        }
+        if (keyboardTextTimer) window.clearTimeout(keyboardTextTimer);
+        keyboardTextTimer = window.setTimeout(flushKeyboardText, 120);
+    }
+
+    function mappedRemoteKey(key) {
+        switch (key) {
+            case 'Escape': return 'back';
+            case 'Backspace': return 'delete';
+            case 'Enter': return 'enter';
+            case 'Tab': return 'tab';
+            case 'ArrowUp': return 'dpad_up';
+            case 'ArrowDown': return 'dpad_down';
+            case 'ArrowLeft': return 'dpad_left';
+            case 'ArrowRight': return 'dpad_right';
+            default: return null;
+        }
+    }
+
+    function forwardKeyboardEvent(event, captureTextLocally) {
+        if (stopped || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) {
+            return false;
+        }
+        var mapped = mappedRemoteKey(event.key);
+        if (mapped) {
+            event.preventDefault();
+            flushKeyboardText();
+            sendInput({ type: 'key', key: mapped });
+            return true;
+        }
+        if (!captureTextLocally && event.key && event.key.length === 1) {
+            event.preventDefault();
+            queueKeyboardText(event.key);
+            return true;
+        }
+        return false;
+    }
+
+    function focusRemoteKeyboard() {
+        if (!session) return;
+        keyboardCapture.value = '';
+        try { keyboardCapture.focus({ preventScroll: true }); }
+        catch (error) { keyboardCapture.focus(); }
+    }
+
     function setScreenshotBusy(busy) {
         screenshotInFlight = busy;
         screenshotButton.disabled = stopped || busy;
@@ -610,6 +686,8 @@
     fullscreenBackButton.addEventListener('click', function () {
         sendInput({ type: 'key', key: 'back' });
     });
+    keyboardButton.addEventListener('click', focusRemoteKeyboard);
+    fullscreenKeyboardButton.addEventListener('click', focusRemoteKeyboard);
     refreshButton.addEventListener('click', function () {
         if (pollingFallback) {
             forceRefresh = true;
@@ -628,22 +706,32 @@
             openFrameStream();
         }
     });
-    var keyButtons = document.querySelectorAll('.key-button');
-    for (var i = 0; i < keyButtons.length; i++) {
-        keyButtons[i].addEventListener('click', function () {
-            sendInput({ type: 'key', key: this.getAttribute('data-key') });
-        });
-    }
-    textButton.addEventListener('click', function () {
-        if (!textInput.value) return;
-        sendInput({ type: 'text', text: textInput.value });
-        textInput.value = '';
+    keyboardCapture.addEventListener('focus', function () {
+        keyboardButton.textContent = 'Keyboard active';
+        fullscreenKeyboardButton.textContent = 'Keyboard active';
     });
-    textInput.addEventListener('keydown', function (event) {
-        if (event.key === 'Enter') {
-            event.preventDefault();
-            textButton.click();
-        }
+    keyboardCapture.addEventListener('blur', function () {
+        flushKeyboardText();
+        keyboardButton.textContent = 'Keyboard';
+        fullscreenKeyboardButton.textContent = 'Keyboard';
+    });
+    keyboardCapture.addEventListener('compositionstart', function () {
+        keyboardComposing = true;
+    });
+    keyboardCapture.addEventListener('compositionend', function (event) {
+        keyboardComposing = false;
+        var text = keyboardCapture.value || event.data || '';
+        keyboardCapture.value = '';
+        queueKeyboardText(text);
+    });
+    keyboardCapture.addEventListener('input', function () {
+        if (keyboardComposing) return;
+        var text = keyboardCapture.value;
+        keyboardCapture.value = '';
+        queueKeyboardText(text);
+    });
+    keyboardCapture.addEventListener('keydown', function (event) {
+        forwardKeyboardEvent(event, true);
     });
     document.addEventListener('visibilitychange', function () {
         if (document.hidden) {
@@ -658,9 +746,15 @@
     document.addEventListener('fullscreenchange', syncFullscreenState);
     document.addEventListener('webkitfullscreenchange', syncFullscreenState);
     document.addEventListener('keydown', function (event) {
-        if (event.key === 'Escape' && document.body.classList.contains('dev-view-focus')) {
+        if (event.key === 'Escape' && isFullscreen()) {
+            event.preventDefault();
             exitFullscreen();
+            return;
         }
+        var target = event.target;
+        if (target !== keyboardCapture && target && target.closest &&
+                target.closest('button, a, input, textarea, select')) return;
+        forwardKeyboardEvent(event, target === keyboardCapture);
     });
     window.addEventListener('beforeunload', function () {
         if (session) endSession(true);
