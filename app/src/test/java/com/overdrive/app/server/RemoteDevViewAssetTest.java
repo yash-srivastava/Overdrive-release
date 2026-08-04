@@ -99,6 +99,8 @@ public class RemoteDevViewAssetTest {
         assertTrue(controller.contains("PIXEL_COPY_RETRY_COUNT = 2"));
         assertTrue(controller.contains("catch (error: IllegalArgumentException)"));
         assertTrue(controller.contains("getDeclaredMethod(\"getWindowViews\")"));
+        assertTrue(controller.contains("captureLock = ReentrantLock(true)"));
+        assertFalse(controller.contains("@Synchronized\n    fun capture"));
     }
 
     @Test

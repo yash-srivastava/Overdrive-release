@@ -25,6 +25,7 @@ import java.lang.reflect.Method
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.locks.ReentrantLock
 import kotlin.math.roundToInt
 
 /**
@@ -54,6 +55,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     private var touchDownTime = 0L
     private var appRootsAccessor: AppRootsAccessor? = null
     private var appRootsUnavailable = false
+    private val captureLock = ReentrantLock(true)
 
     private data class AppRootsAccessor(val instance: Any, val method: Method)
 
@@ -113,8 +115,16 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     }
 
     /** Blocks the bridge worker, never the main thread. */
-    @Synchronized
     fun capture(maxWidth: Int, quality: Int): CaptureResult {
+        captureLock.lock()
+        return try {
+            captureSingleFlight(maxWidth, quality)
+        } finally {
+            captureLock.unlock()
+        }
+    }
+
+    private fun captureSingleFlight(maxWidth: Int, quality: Int): CaptureResult {
         val activity = currentActivity.get()
         if (activity == null || activity.isFinishing || activity.isDestroyed) {
             return CaptureResult(-1, "NO_ACTIVITY", 0, 0, null, null)
