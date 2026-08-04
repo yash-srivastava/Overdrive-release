@@ -46,7 +46,7 @@ public class RemoteDevViewAssetTest {
         assertTrue(script.contains("maxWidth: 960, quality: 55"));
         assertTrue(script.contains("Waiting for a stable app frame"));
         assertTrue(script.contains(": 60"));
-        assertTrue(html.contains("remote-dev-view.js?v=6"));
+        assertTrue(html.contains("remote-dev-view.js?v=7"));
     }
 
     @Test
