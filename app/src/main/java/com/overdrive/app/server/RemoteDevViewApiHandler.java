@@ -97,6 +97,7 @@ public final class RemoteDevViewApiHandler {
             bridgeRequest.put("command", "capture");
             bridgeRequest.put("maxWidth", request.optInt("maxWidth", 1280));
             bridgeRequest.put("quality", request.optInt("quality", 72));
+            bridgeRequest.put("format", request.optString("format", "jpeg"));
             RemoteDevViewBridgeClient.Response bridgeResponse = BRIDGE.send(bridgeRequest);
             if (bridgeResponse == null) {
                 unavailable(out, "App-process bridge is unavailable");
@@ -115,7 +116,8 @@ public final class RemoteDevViewApiHandler {
             headers.put("X-Overdrive-PixelCopy-Result",
                 metadata.optString("pixelCopyResult", "UNKNOWN"));
             headers.put("X-Overdrive-Activity", metadata.optString("activity", ""));
-            HttpResponse.sendBinaryNoStore(out, "image/jpeg", bridgeResponse.payload, headers);
+            HttpResponse.sendBinaryNoStore(out,
+                metadata.optString("mimeType", "image/jpeg"), bridgeResponse.payload, headers);
             return true;
         }
 

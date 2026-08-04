@@ -4,12 +4,13 @@ Remote Overdrive Dev View captures and controls Overdrive's own Android window.
 Its primary use is development while a BYD is ACC-off and the OEM's opaque
 `AccAnimation` layer makes whole-display capture tools return black.
 
-Open the authenticated web dashboard, choose **Remote Dev View**, acknowledge
-the compact parked-use notice, and start a session. Starting a session launches
-Overdrive normally. It does not bypass the PIN screen and does not turn on,
-uncover, or otherwise alter the physical head-unit display. The viewer can be
-expanded to browser fullscreen; Back, Refresh, End, and Exit remain available
-in a small overlay while direct touch control continues on the frame.
+Open the authenticated web dashboard, choose **Remote Dev View**, and press
+**Start session** beside the compact parked-use notice. Starting a session
+launches Overdrive normally. It does not bypass the PIN screen and does not
+turn on, uncover, or otherwise alter the physical head-unit display. The
+viewer can be expanded and scaled to browser fullscreen; Back, Screenshot,
+Refresh, End, and Exit remain available in a small overlay while direct touch
+control continues on the scaled frame.
 
 ## Security boundary
 
@@ -50,8 +51,11 @@ only the latest completed frame, so a slow tunnel or browser cannot accumulate
 stale work. Capture remains single-flight, but input is handled by independent
 bridge workers instead of waiting behind PixelCopy. The app retries short-lived
 PixelCopy source/window races internally, while the browser keeps the last good
-frame and only surfaces an error after repeated failures. If WebSocket setup
-fails, the browser falls back to sequential authenticated POST requests.
+frame through transient failures instead of blanking it or moving the page. If
+WebSocket setup fails, the browser falls back to sequential authenticated POST
+requests. The Screenshot button performs a separate native-size, lossless PNG
+capture and downloads it locally; it does not reduce the streaming frame rate
+or persist a copy on the vehicle.
 
 `DeterrentActivity` is intentionally not selected as the remote target. It can
 continue running in the foreground to block physical input while its warning is

@@ -19,13 +19,14 @@
     var renderingFrame = false;
     var pendingFrameBlob = null;
     var frameTimes = [];
+    var screenshotInFlight = false;
 
-    var confirmStart = document.getElementById('confirmStart');
     var startButton = document.getElementById('startButton');
     var stopButton = document.getElementById('stopButton');
     var refreshButton = document.getElementById('refreshButton');
     var fullscreenButton = document.getElementById('fullscreenButton');
     var fullscreenBackButton = document.getElementById('fullscreenBackButton');
+    var fullscreenScreenshotButton = document.getElementById('fullscreenScreenshotButton');
     var fullscreenRefreshButton = document.getElementById('fullscreenRefreshButton');
     var fullscreenStopButton = document.getElementById('fullscreenStopButton');
     var fullscreenExitButton = document.getElementById('fullscreenExitButton');
@@ -40,6 +41,7 @@
     var activityState = document.getElementById('activityState');
     var textInput = document.getElementById('textInput');
     var textButton = document.getElementById('textButton');
+    var screenshotButton = document.getElementById('screenshotButton');
 
     function setMessage(text, isError) {
         message.textContent = text || '';
@@ -48,11 +50,14 @@
 
     function setRunning(running) {
         stopped = !running;
-        startButton.disabled = running || !confirmStart.checked;
+        startButton.disabled = running;
+        startButton.textContent = running ? 'Session active' : 'Start session';
         stopButton.disabled = !running;
         refreshButton.disabled = !running;
         fullscreenButton.disabled = !running;
         fullscreenBackButton.disabled = !running;
+        screenshotButton.disabled = !running || screenshotInFlight;
+        fullscreenScreenshotButton.disabled = !running || screenshotInFlight;
         fullscreenRefreshButton.disabled = !running;
         fullscreenStopButton.disabled = !running;
         textInput.disabled = !running;
@@ -148,16 +153,19 @@
     }
 
     function startSession() {
-        if (!confirmStart.checked || session) return;
+        if (session) return;
         startButton.disabled = true;
-        setMessage('Starting the protected app-process bridge…', false);
+        startButton.textContent = 'Starting...';
+        connectionState.textContent = 'Starting';
+        setMessage('', false);
         jsonRequest('/api/dev-view/session', 'POST', { confirm: 'I UNDERSTAND' })
             .then(function (data) {
                 session = data.session;
                 setRunning(true);
-                setMessage(data.activityReady
-                    ? 'Session ready. The physical display has not been changed.'
-                    : 'Bridge ready; waiting for the Overdrive activity to render.', false);
+                placeholder.textContent = data.activityReady
+                    ? 'Connecting live stream...'
+                    : 'Waiting for Overdrive to render...';
+                setMessage('', false);
                 openFrameStream();
             })
             .catch(function (error) {
@@ -278,10 +286,10 @@
             setMessage('', false);
         } else {
             consecutiveFrameFailures += 1;
-            if (!currentObjectUrl || consecutiveFrameFailures >= 3) {
-                setMessage((data.detail || data.error || data.pixelCopyResult || 'Capture failed') +
-                    ' — retrying.', true);
-            }
+            connectionState.textContent = currentObjectUrl
+                ? 'Live - holding last frame'
+                : 'Waiting for a stable frame';
+            if (!currentObjectUrl) placeholder.textContent = 'Waiting for a stable app frame...';
         }
     }
 
@@ -295,28 +303,29 @@
         }
         renderingFrame = true;
         var nextUrl = URL.createObjectURL(blob);
-        image.onload = function () {
-            if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
+        var loader = new Image();
+        loader.onload = function () {
+            var previousUrl = currentObjectUrl;
             currentObjectUrl = nextUrl;
-            image.onload = null;
-            image.onerror = null;
+            image.src = nextUrl;
             renderingFrame = false;
             image.style.display = 'block';
             placeholder.style.display = 'none';
             noteDisplayedFrame();
+            if (previousUrl) {
+                window.setTimeout(function () { URL.revokeObjectURL(previousUrl); }, 1000);
+            }
             if (pendingFrameBlob) {
                 var newest = pendingFrameBlob;
                 pendingFrameBlob = null;
                 renderFrame(newest);
             }
         };
-        image.onerror = function () {
+        loader.onerror = function () {
             URL.revokeObjectURL(nextUrl);
-            image.onload = null;
-            image.onerror = null;
             renderingFrame = false;
         };
-        image.src = nextUrl;
+        loader.src = nextUrl;
     }
 
     function noteDisplayedFrame() {
@@ -385,8 +394,12 @@
                 session = null;
                 setRunning(false);
             }
-            if (error.sessionInvalid || !currentObjectUrl || consecutiveFrameFailures >= 3) {
-                setMessage(error.message + (error.sessionInvalid ? '.' : ' — retrying.'), true);
+            if (error.sessionInvalid) setMessage(error.message + '.', true);
+            else {
+                connectionState.textContent = currentObjectUrl
+                    ? 'Connected - holding last frame'
+                    : 'Waiting for a stable frame';
+                if (!currentObjectUrl) placeholder.textContent = 'Waiting for a stable app frame...';
             }
         }).then(function () {
             fetchingFrame = false;
@@ -424,8 +437,88 @@
         return inputChain;
     }
 
-    function pointerPayload(event, phase) {
+    function setScreenshotBusy(busy) {
+        screenshotInFlight = busy;
+        screenshotButton.disabled = stopped || busy;
+        fullscreenScreenshotButton.disabled = stopped || busy;
+        screenshotButton.textContent = busy ? 'Capturing...' : 'Screenshot';
+        fullscreenScreenshotButton.textContent = busy ? 'Capturing...' : 'Screenshot';
+    }
+
+    function captureScreenshot() {
+        if (!session || screenshotInFlight) return;
+        var token = session;
+        setScreenshotBusy(true);
+        BYDAuth.fetch('/api/dev-view/frame', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session: token,
+                maxWidth: 1920,
+                quality: 100,
+                format: 'png'
+            }),
+            cache: 'no-store'
+        }).then(function (response) {
+            if (!response.ok) {
+                return response.json().then(function (data) {
+                    var error = new Error(data.error || data.detail ||
+                        data.pixelCopyResult || ('HTTP ' + response.status));
+                    error.sessionInvalid = response.status === 403;
+                    throw error;
+                });
+            }
+            return response.blob();
+        }).then(function (blob) {
+            if (!blob || !blob.size || token !== session) return;
+            var url = URL.createObjectURL(blob);
+            var link = document.createElement('a');
+            link.href = url;
+            link.download = 'overdrive-dev-view-' +
+                new Date().toISOString().replace(/[:.]/g, '-') + '.png';
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+            setMessage('', false);
+        }).catch(function (error) {
+            if (error.sessionInvalid) {
+                session = null;
+                setRunning(false);
+            }
+            setMessage('Screenshot failed: ' + error.message, true);
+        }).then(function () {
+            setScreenshotBusy(false);
+        });
+    }
+
+    function frameContentRect() {
         var rect = image.getBoundingClientRect();
+        var naturalWidth = image.naturalWidth || 16;
+        var naturalHeight = image.naturalHeight || 9;
+        var imageAspect = naturalWidth / naturalHeight;
+        var boxAspect = rect.width / Math.max(1, rect.height);
+        if (boxAspect > imageAspect) {
+            var width = rect.height * imageAspect;
+            return {
+                left: rect.left + (rect.width - width) / 2,
+                top: rect.top,
+                width: width,
+                height: rect.height
+            };
+        }
+        var height = rect.width / imageAspect;
+        return {
+            left: rect.left,
+            top: rect.top + (rect.height - height) / 2,
+            width: rect.width,
+            height: height
+        };
+    }
+
+    function pointerPayload(event, phase) {
+        var rect = frameContentRect();
         var clientX = event.clientX;
         var clientY = event.clientY;
         if (event.touches && event.touches.length) {
@@ -507,13 +600,12 @@
             });
     }
 
-    confirmStart.addEventListener('change', function () {
-        startButton.disabled = !confirmStart.checked || !!session;
-    });
     startButton.addEventListener('click', startSession);
     stopButton.addEventListener('click', function () { endSession(false); });
     fullscreenStopButton.addEventListener('click', function () { endSession(false); });
     fullscreenButton.addEventListener('click', toggleFullscreen);
+    screenshotButton.addEventListener('click', captureScreenshot);
+    fullscreenScreenshotButton.addEventListener('click', captureScreenshot);
     fullscreenExitButton.addEventListener('click', exitFullscreen);
     fullscreenBackButton.addEventListener('click', function () {
         sendInput({ type: 'key', key: 'back' });

@@ -44,7 +44,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     private const val TAG = "RemoteDevView"
     private const val UI_TIMEOUT_SECONDS = 6L
     private const val MAX_TEXT_LENGTH = 256
-    private const val PIXEL_COPY_RETRY_COUNT = 2
+    private const val PIXEL_COPY_RETRY_COUNT = 4
     private const val PIXEL_COPY_RETRY_DELAY_MS = 40L
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -95,6 +95,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
         val activityName: String?,
         val jpeg: ByteArray?,
         val detail: String? = null,
+        val mimeType: String = "image/jpeg",
     )
 
     data class InputResult(
@@ -115,16 +116,16 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     }
 
     /** Blocks the bridge worker, never the main thread. */
-    fun capture(maxWidth: Int, quality: Int): CaptureResult {
+    fun capture(maxWidth: Int, quality: Int, format: String = "jpeg"): CaptureResult {
         captureLock.lock()
         return try {
-            captureSingleFlight(maxWidth, quality)
+            captureSingleFlight(maxWidth, quality, format)
         } finally {
             captureLock.unlock()
         }
     }
 
-    private fun captureSingleFlight(maxWidth: Int, quality: Int): CaptureResult {
+    private fun captureSingleFlight(maxWidth: Int, quality: Int, format: String): CaptureResult {
         val activity = currentActivity.get()
         if (activity == null || activity.isFinishing || activity.isDestroyed) {
             return CaptureResult(-1, "NO_ACTIVITY", 0, 0, null, null)
@@ -212,13 +213,16 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
             ?: return CaptureResult(-1, "UNKNOWN", 0, 0, activity.javaClass.name, null)
         val bitmap = bitmapRef.get() ?: return base
         return try {
+            val isPng = format.equals("png", ignoreCase = true)
+            val compressFormat = if (isPng) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
+            val compressQuality = if (isPng) 100 else quality.coerceIn(35, 90)
             val bytes = ByteArrayOutputStream().use { output ->
-                if (!bitmap.compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(35, 90), output)) {
+                if (!bitmap.compress(compressFormat, compressQuality, output)) {
                     throw IllegalStateException("Bitmap.compress returned false")
                 }
                 output.toByteArray()
             }
-            base.copy(jpeg = bytes)
+            base.copy(jpeg = bytes, mimeType = if (isPng) "image/png" else "image/jpeg")
         } catch (error: Throwable) {
             base.copy(resultName = "ENCODE_ERROR", detail = error.javaClass.simpleName)
         } finally {

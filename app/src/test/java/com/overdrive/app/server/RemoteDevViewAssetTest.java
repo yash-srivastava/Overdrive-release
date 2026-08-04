@@ -15,14 +15,18 @@ import java.nio.file.Paths;
 public class RemoteDevViewAssetTest {
 
     @Test
-    public void pageRequiresCompactExplicitConfirmationForRealInput() throws Exception {
+    public void pageUsesOneClickStartWithACompactParkedUseNotice() throws Exception {
         String html = read("src/main/assets/web/local/remote-dev-view.html");
 
-        assertTrue(html.contains("id=\"confirmStart\""));
-        assertTrue(html.contains("Remote input operates the real Overdrive app"));
+        assertFalse(html.contains("id=\"confirmStart\""));
+        assertTrue(html.contains("Controls the real Overdrive app"));
         assertTrue(html.contains("Use only while parked"));
-        assertTrue(html.contains("id=\"startButton\" class=\"dev-button primary\" disabled"));
+        assertTrue(html.contains("id=\"startButton\" class=\"dev-button primary\""));
+        assertFalse(html.contains("id=\"startButton\" class=\"dev-button primary\" disabled"));
         assertFalse(html.contains("warning-card"));
+        assertTrue(html.contains(".dev-view-page { width: 100%"));
+        assertTrue(html.contains("#message { position: absolute"));
+        assertTrue(html.contains("#message:empty { visibility: hidden"));
     }
 
     @Test
@@ -40,9 +44,9 @@ public class RemoteDevViewAssetTest {
         assertFalse(script.contains("/api/dev-view/frame?"));
         assertFalse(script.contains("localStorage.setItem"));
         assertTrue(script.contains("maxWidth: 960, quality: 55"));
-        assertTrue(script.contains("consecutiveFrameFailures >= 3"));
+        assertTrue(script.contains("Waiting for a stable app frame"));
         assertTrue(script.contains(": 60"));
-        assertTrue(html.contains("remote-dev-view.js?v=5"));
+        assertTrue(html.contains("remote-dev-view.js?v=6"));
     }
 
     @Test
@@ -58,6 +62,8 @@ public class RemoteDevViewAssetTest {
         assertTrue(script.contains("['overdrive-dev-view', token]"));
         assertFalse(script.contains("session=' + encodeURIComponent"));
         assertTrue(script.contains("pendingFrameBlob = blob"));
+        assertTrue(script.contains("holding last frame"));
+        assertFalse(script.contains("data.pixelCopyResult || 'Capture failed'"));
         assertTrue(stream.contains("new ArrayBlockingQueue<>(1)"));
         assertTrue(stream.contains("latest.poll()"));
         assertTrue(server.contains("RemoteDevViewWebSocketStream"));
@@ -85,6 +91,26 @@ public class RemoteDevViewAssetTest {
         assertTrue(script.contains("webkitRequestFullscreen"));
         assertTrue(script.contains("dev-view-focus"));
         assertTrue(script.contains("fullscreenStopButton"));
+        assertTrue(html.contains("object-fit: contain"));
+        assertTrue(script.contains("frameContentRect()"));
+    }
+
+    @Test
+    public void screenshotUsesAFullResolutionLosslessNoStoreCapture() throws Exception {
+        String html = read("src/main/assets/web/local/remote-dev-view.html");
+        String script = read("src/main/assets/web/shared/remote-dev-view.js");
+        String api = read("src/main/java/com/overdrive/app/server/RemoteDevViewApiHandler.java");
+        String controller = read(
+            "src/main/java/com/overdrive/app/remote/RemoteDevViewController.kt");
+
+        assertTrue(html.contains("id=\"screenshotButton\""));
+        assertTrue(html.contains("id=\"fullscreenScreenshotButton\""));
+        assertTrue(script.contains("maxWidth: 1920"));
+        assertTrue(script.contains("format: 'png'"));
+        assertTrue(script.contains("cache: 'no-store'"));
+        assertTrue(script.contains(".png'"));
+        assertTrue(api.contains("request.optString(\"format\", \"jpeg\")"));
+        assertTrue(controller.contains("Bitmap.CompressFormat.PNG"));
     }
 
     @Test
@@ -96,7 +122,7 @@ public class RemoteDevViewAssetTest {
         assertTrue(controller.contains("if (isRemoteTarget(activity))"));
         assertTrue(controller.contains("activityOwnedRoots(activity)"));
         assertTrue(controller.contains("owner == null || owner === activity"));
-        assertTrue(controller.contains("PIXEL_COPY_RETRY_COUNT = 2"));
+        assertTrue(controller.contains("PIXEL_COPY_RETRY_COUNT = 4"));
         assertTrue(controller.contains("catch (error: IllegalArgumentException)"));
         assertTrue(controller.contains("getDeclaredMethod(\"getWindowViews\")"));
         assertTrue(controller.contains("captureLock = ReentrantLock(true)"));

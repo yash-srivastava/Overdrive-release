@@ -99,6 +99,7 @@ class RemoteDevViewBridgeService : Service() {
                                 .coerceIn(MIN_WIDTH, MAX_WIDTH),
                             request.optInt("quality", DEFAULT_QUALITY)
                                 .coerceIn(MIN_QUALITY, MAX_QUALITY),
+                            request.optString("format", "jpeg"),
                         )
                         response.put("success", capture.jpeg != null)
                         response.put("pixelCopyCode", capture.resultCode)
@@ -106,6 +107,7 @@ class RemoteDevViewBridgeService : Service() {
                         response.put("width", capture.width)
                         response.put("height", capture.height)
                         response.put("activity", capture.activityName ?: JSONObject.NULL)
+                        response.put("mimeType", capture.mimeType)
                         if (capture.detail != null) response.put("detail", capture.detail)
                         payload = capture.jpeg
                     }
