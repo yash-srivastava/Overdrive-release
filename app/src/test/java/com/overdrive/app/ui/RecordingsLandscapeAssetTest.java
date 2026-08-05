@@ -71,6 +71,18 @@ public class RecordingsLandscapeAssetTest {
     }
 
     @Test
+    public void inlinePreviewBuildsTitlesWithTheAttachedHostContext() throws IOException {
+        String host = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/ui/fragment/RecordingsFragment.kt");
+
+        assertTrue(host.contains("val hostContext = context ?: return"));
+        assertTrue(host.contains("RecordingUiText.headline(hostContext, recording)"));
+        assertFalse(host.contains("RecordingUiText.headline(requireContext(), recording)"));
+        assertTrue(host.contains("initialPreviewRunnable?.let { mainHandler.removeCallbacks(it) }"));
+        assertTrue(host.contains("onPlayRecording = null"));
+    }
+
+    @Test
     public void selectingARowDoesNotRequireLegacyThemeColorAccent() throws IOException {
         String row = readRepositoryFile(
                 "app/src/main/res/layout/item_recording_landscape.xml");

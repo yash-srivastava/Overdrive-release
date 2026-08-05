@@ -150,6 +150,7 @@ class RecordingsFragment : Fragment() {
     private var activeInlinePath: String? = null
     private var selectedInlineRecording: RecordingFile? = null
     private var initialPreviewScheduled: Boolean = false
+    private var initialPreviewRunnable: Runnable? = null
 
     /**
      * Whether the inline player is currently maximized (chrome hidden +
@@ -326,6 +327,15 @@ class RecordingsFragment : Fragment() {
         placeSearchRunnable = null
         warmingRetryRunnable?.let { mainHandler.removeCallbacks(it) }
         warmingRetryRunnable = null
+        initialPreviewRunnable?.let { mainHandler.removeCallbacks(it) }
+        initialPreviewRunnable = null
+        libraryFragment?.apply {
+            onPlayRecording = null
+            onListChanged = null
+            onContentChanged = null
+            onClearAllFiltersRequested = null
+        }
+        libraryFragment = null
         metricsExecutor?.shutdownNow()
         metricsExecutor = null
         super.onDestroyView()
@@ -368,12 +378,15 @@ class RecordingsFragment : Fragment() {
             if (isLandscape && activeInlinePath == null && list.isNotEmpty() && !initialPreviewScheduled) {
                 initialPreviewScheduled = true
                 val first = list.first()
-                mainHandler.post {
+                val preview = Runnable {
+                    initialPreviewRunnable = null
                     if (isAdded && view != null && activeInlinePath == null &&
                         !childFragmentManager.isStateSaved) {
                         showInlinePreview(first, startPaused = true)
                     }
                 }
+                initialPreviewRunnable = preview
+                mainHandler.post(preview)
             }
         }
         // Library content changed (delete / batch-delete) — re-scan to
@@ -502,6 +515,7 @@ class RecordingsFragment : Fragment() {
      */
     private fun showInlinePreview(recording: RecordingFile, startPaused: Boolean = false) {
         val view = view ?: return
+        val hostContext = context ?: return
         if (view.findViewById<View>(R.id.previewContainer) == null) return
 
         activeInlinePath = recording.path
@@ -516,7 +530,7 @@ class RecordingsFragment : Fragment() {
         // the NEWER clip while the library RecyclerView stays newest-first.
         val ordered = currentPlaylist.asReversed()
         val paths = ordered.map { it.path }.toTypedArray()
-        val titles = ordered.map { RecordingUiText.headline(requireContext(), it) }.toTypedArray()
+        val titles = ordered.map { RecordingUiText.headline(hostContext, it) }.toTypedArray()
         val playerIndex = ordered.indexOfFirst { it.path == recording.path }
         libraryFragment?.setActiveRecording(recording.path)
 
@@ -525,7 +539,7 @@ class RecordingsFragment : Fragment() {
                 putString(VideoPlayerFragment.ARG_VIDEO_PATH, recording.path)
                 putString(
                     VideoPlayerFragment.ARG_VIDEO_TITLE,
-                    RecordingUiText.headline(requireContext(), recording)
+                    RecordingUiText.headline(hostContext, recording)
                 )
                 putBoolean(VideoPlayerFragment.ARG_INLINE, true)
                 putBoolean(VideoPlayerFragment.ARG_COMPACT_INLINE, true)
@@ -585,12 +599,13 @@ class RecordingsFragment : Fragment() {
     /** Bind the persistent event context around the inline player. */
     private fun bindPreviewDetails(recording: RecordingFile) {
         val root = view ?: return
+        val hostContext = context ?: return
         selectedInlineRecording = recording
         root.findViewById<View>(R.id.previewPlaceholder)?.visibility = View.GONE
         root.findViewById<View>(R.id.previewContent)?.visibility = View.VISIBLE
 
         root.findViewById<TextView>(R.id.tvPreviewTitle)?.text =
-            RecordingUiText.headline(requireContext(), recording)
+            RecordingUiText.headline(hostContext, recording)
         root.findViewById<TextView>(R.id.tvPreviewFilename)?.text = recording.name
         root.findViewById<TextView>(R.id.tvPreviewTypeBadge)?.text = when (recording.type) {
             RecordingFile.RecordingType.NORMAL -> getString(R.string.recording_lib_type_normal)
@@ -613,7 +628,7 @@ class RecordingsFragment : Fragment() {
             )
         }
         root.findViewById<TextView>(R.id.tvPreviewDetectedValue)?.text =
-            RecordingUiText.actorAndDistance(requireContext(), recording)
+            RecordingUiText.actorAndDistance(hostContext, recording)
                 ?: getString(R.string.recording_preview_no_detection)
         root.findViewById<TextView>(R.id.tvPreviewSeverityValue)?.text = when {
             severity != null -> severity.lowercase(Locale.ROOT).replaceFirstChar { it.titlecase(Locale.ROOT) }
@@ -639,9 +654,10 @@ class RecordingsFragment : Fragment() {
     private fun setupPreviewActions(root: View) {
         root.findViewById<View>(R.id.btnPreviewMore)?.setOnClickListener { anchor ->
             val recording = selectedInlineRecording ?: return@setOnClickListener
+            val popupContext = context ?: return@setOnClickListener
             val shareTitle = getString(R.string.action_share)
             val deleteTitle = getString(R.string.action_delete)
-            PopupMenu(requireContext(), anchor).apply {
+            PopupMenu(popupContext, anchor).apply {
                 menu.add(shareTitle).setIcon(R.drawable.ic_share)
                 menu.add(deleteTitle).setIcon(R.drawable.ic_delete)
                 setOnMenuItemClickListener { item ->
