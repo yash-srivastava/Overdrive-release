@@ -36,6 +36,7 @@
     var fullscreenExitButton = document.getElementById('fullscreenExitButton');
     var viewerCard = document.getElementById('viewerCard');
     var image = document.getElementById('remoteFrame');
+    var frameContext = image.getContext('2d', { alpha: false });
     var placeholder = document.getElementById('framePlaceholder');
     var message = document.getElementById('message');
     var liveDot = document.getElementById('liveDot');
@@ -295,7 +296,7 @@
         if (data.width && data.height) {
             dimensions.textContent = data.width + ' × ' + data.height;
         }
-        pixelCopyState.textContent = 'PixelCopy ' +
+        pixelCopyState.textContent = (data.captureBackend || 'PixelCopy') + ' ' +
             (data.pixelCopyResult || '--') + ' (' +
             (typeof data.pixelCopyCode === 'number' ? data.pixelCopyCode : '--') + ')';
         activityState.textContent = 'Activity ' + shortActivity(data.activity);
@@ -317,7 +318,11 @@
         loader.onload = function () {
             var previousUrl = currentObjectUrl;
             currentObjectUrl = nextUrl;
-            image.src = nextUrl;
+            if (image.width !== loader.naturalWidth || image.height !== loader.naturalHeight) {
+                image.width = loader.naturalWidth;
+                image.height = loader.naturalHeight;
+            }
+            frameContext.drawImage(loader, 0, 0, image.width, image.height);
             renderingFrame = false;
             image.style.display = 'block';
             placeholder.style.display = 'none';
@@ -386,7 +391,8 @@
             }
             dimensions.textContent = response.headers.get('X-Overdrive-Width') + ' × ' +
                 response.headers.get('X-Overdrive-Height');
-            pixelCopyState.textContent = 'PixelCopy ' +
+            pixelCopyState.textContent =
+                (response.headers.get('X-Overdrive-Capture-Backend') || 'PixelCopy') + ' ' +
                 (response.headers.get('X-Overdrive-PixelCopy-Result') || '--') + ' (' +
                 (response.headers.get('X-Overdrive-PixelCopy-Code') || '--') + ')';
             activityState.textContent = 'Activity ' +
@@ -415,7 +421,7 @@
             fetchingFrame = false;
             var delay = forceRefresh ? 0 : (frameFailed
                 ? Math.min(1000, 120 * consecutiveFrameFailures)
-                : 60);
+                : 100);
             forceRefresh = false;
             scheduleFrame(delay);
         });
@@ -571,8 +577,8 @@
 
     function frameContentRect() {
         var rect = image.getBoundingClientRect();
-        var naturalWidth = image.naturalWidth || 16;
-        var naturalHeight = image.naturalHeight || 9;
+        var naturalWidth = image.width || 16;
+        var naturalHeight = image.height || 9;
         var imageAspect = naturalWidth / naturalHeight;
         var boxAspect = rect.width / Math.max(1, rect.height);
         if (boxAspect > imageAspect) {

@@ -45,8 +45,8 @@ public class RemoteDevViewAssetTest {
         assertFalse(script.contains("localStorage.setItem"));
         assertTrue(script.contains("maxWidth: 960, quality: 55"));
         assertTrue(script.contains("Waiting for a stable app frame"));
-        assertTrue(script.contains(": 60"));
-        assertTrue(html.contains("remote-dev-view.js?v=8"));
+        assertTrue(script.contains(": 100"));
+        assertTrue(html.contains("remote-dev-view.js?v=9"));
     }
 
     @Test
@@ -67,7 +67,8 @@ public class RemoteDevViewAssetTest {
         assertFalse(script.contains("data.pixelCopyResult || 'Capture failed'"));
         assertTrue(stream.contains("new ArrayBlockingQueue<>(1)"));
         assertTrue(stream.contains("latest.poll()"));
-        assertTrue(stream.contains("successful || !hasSuccessfulFrame"));
+        assertTrue(stream.contains("isNewFrame || (!successful && !hasSuccessfulFrame)"));
+        assertTrue(stream.contains("sourceSequence != lastSourceSequence"));
         assertTrue(server.contains("RemoteDevViewWebSocketStream"));
         assertTrue(server.contains(".sessionFromProtocols(websocketProtocolHeader)"));
         assertTrue(server.contains("requestLine.startsWith(\"GET /ws\")"));
@@ -100,6 +101,9 @@ public class RemoteDevViewAssetTest {
         assertTrue(script.contains("dev-view-focus"));
         assertTrue(script.contains("fullscreenStopButton"));
         assertTrue(html.contains("object-fit: contain"));
+        assertTrue(html.contains("<canvas id=\"remoteFrame\" width=\"960\" height=\"540\""));
+        assertTrue(script.contains("frameContext.drawImage"));
+        assertFalse(script.contains("image.src = nextUrl"));
         assertTrue(script.contains("frameContentRect()"));
     }
 
@@ -145,7 +149,8 @@ public class RemoteDevViewAssetTest {
         String controller = read(
             "src/main/java/com/overdrive/app/remote/RemoteDevViewController.kt");
 
-        assertTrue(controller.contains("activity !is DeterrentActivity"));
+        assertTrue(controller.contains("activity is DeterrentActivity"));
+        assertTrue(controller.contains("rootDisplayId == activityDisplayId"));
         assertTrue(controller.contains("if (isRemoteTarget(activity))"));
         assertTrue(controller.contains("activityOwnedRoots(activity)"));
         assertTrue(controller.contains("owner == null || owner === activity"));

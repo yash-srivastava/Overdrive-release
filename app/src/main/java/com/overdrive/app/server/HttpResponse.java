@@ -66,6 +66,7 @@ public class HttpResponse {
             }
             headers.append("Access-Control-Expose-Headers: X-Overdrive-Width, X-Overdrive-Height, ")
                    .append("X-Overdrive-PixelCopy-Code, X-Overdrive-PixelCopy-Result, ")
+                   .append("X-Overdrive-Capture-Backend, X-Overdrive-Frame-Sequence, ")
                    .append("X-Overdrive-Activity\r\n");
         }
         headers.append("Connection: close\r\n\r\n");

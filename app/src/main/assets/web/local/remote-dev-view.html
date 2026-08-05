@@ -32,7 +32,7 @@
         .head-unit-bezel::before { content: ''; position: absolute; z-index: 2; top: 7px; left: 50%; width: 6px; height: 6px; border-radius: 50%; transform: translateX(-50%); pointer-events: none; background: radial-gradient(circle at 40% 35%, #22454b 0, #071012 35%, #010203 72%); box-shadow: 0 0 0 1px rgba(255, 255, 255, .08), inset 0 0 2px rgba(89, 206, 224, .35); }
         .head-unit-bezel::after { content: ''; position: absolute; bottom: 8px; left: 50%; width: 34px; height: 2px; border-radius: 2px; transform: translateX(-50%); pointer-events: none; background: rgba(255, 255, 255, .13); box-shadow: 0 1px 0 rgba(0, 0, 0, .55); }
         .frame-shell { width: 100%; min-width: 0; min-height: 280px; aspect-ratio: 16 / 9; display: flex; align-items: center; justify-content: center; background: #050608; border-radius: 11px; overflow: hidden; position: relative; box-shadow: 0 0 0 1px rgba(0, 0, 0, .92), 0 0 0 2px rgba(255, 255, 255, .035), inset 0 0 18px rgba(0, 0, 0, .7); }
-        #remoteFrame { display: none; width: 100%; height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; touch-action: none; cursor: crosshair; }
+        #remoteFrame { display: none; width: 100%; height: 100%; object-fit: contain; user-select: none; touch-action: none; cursor: crosshair; }
         .frame-placeholder { color: #9097a5; text-align: center; padding: 40px; line-height: 1.5; }
         .viewer-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
         .frame-status { display: flex; flex-wrap: wrap; gap: 6px 12px; color: var(--text-secondary); font: 12px/1.4 'JetBrains Mono', monospace; }
@@ -102,14 +102,14 @@
                                 <button id="fullscreenExitButton" class="dev-button compact">Exit fullscreen</button>
                             </div>
                             <div id="framePlaceholder" class="frame-placeholder">Start a session to view Overdrive.</div>
-                            <img id="remoteFrame" alt="Live Overdrive app window">
+                            <canvas id="remoteFrame" width="960" height="540" role="img" aria-label="Live Overdrive app window"></canvas>
                         </div>
                     </div>
                     <div class="viewer-footer">
                         <div class="frame-status">
                             <span><span id="liveDot" class="status-dot"></span><span id="connectionState">Stopped</span></span>
                             <span id="frameDimensions">--</span>
-                            <span id="pixelCopyState">PixelCopy --</span>
+                            <span id="pixelCopyState">Capture --</span>
                             <span id="activityState">Activity --</span>
                         </div>
                         <div class="button-row">
@@ -128,6 +128,6 @@
 </div>
 
 <script src="../shared/auth.js"></script>
-<script src="../shared/remote-dev-view.js?v=8"></script>
+<script src="../shared/remote-dev-view.js?v=9"></script>
 </body>
 </html>

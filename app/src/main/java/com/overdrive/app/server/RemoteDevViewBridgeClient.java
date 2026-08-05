@@ -86,7 +86,8 @@ final class RemoteDevViewBridgeClient {
     }
 
     void shutdown() {
-        // The private bridge remains dormant for later sessions; the HTTP
-        // capability is the revocation boundary.
+        try {
+            send(new JSONObject().put("command", "stop"));
+        } catch (Exception ignored) {}
     }
 }

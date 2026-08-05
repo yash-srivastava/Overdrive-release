@@ -4,7 +4,6 @@ import android.app.Service
 import android.content.Intent
 import android.os.IBinder
 import android.util.Log
-import com.overdrive.app.ui.MainActivity
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
@@ -48,6 +47,7 @@ class RemoteDevViewBridgeService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        RemoteDevVirtualDisplay.stop()
         try { serverSocket?.close() } catch (_: Exception) {}
         listener.shutdownNow()
         clients.shutdownNow()
@@ -88,11 +88,24 @@ class RemoteDevViewBridgeService : Service() {
                 val request = authenticated.request
                 when (request.optString("command", "")) {
                     "launch" -> {
-                        launchOverdrive()
-                        response.put("success", true)
-                        response.put("launchRequested", true)
+                        val launch = RemoteDevVirtualDisplay.start(application)
+                        response.put("success", launch.success)
+                        response.put("launchRequested", launch.success)
+                        response.put("captureBackend", RemoteDevVirtualDisplay.BACKEND_NAME)
+                        response.put("displayId", launch.displayId)
+                        if (launch.detail != null) response.put("detail", launch.detail)
                     }
-                    "status" -> putInputResult(response, RemoteDevViewController.status())
+                    "status" -> {
+                        putInputResult(response, RemoteDevViewController.status())
+                        response.put("captureBackend", RemoteDevVirtualDisplay.BACKEND_NAME)
+                        response.put("virtualDisplayRunning", RemoteDevVirtualDisplay.isRunning())
+                        response.put("displayId", RemoteDevVirtualDisplay.displayId())
+                    }
+                    "stop" -> {
+                        RemoteDevVirtualDisplay.stop()
+                        response.put("success", true)
+                        response.put("stopped", true)
+                    }
                     "capture" -> {
                         val capture = RemoteDevViewController.capture(
                             request.optInt("maxWidth", DEFAULT_MAX_WIDTH)
@@ -108,6 +121,8 @@ class RemoteDevViewBridgeService : Service() {
                         response.put("height", capture.height)
                         response.put("activity", capture.activityName ?: JSONObject.NULL)
                         response.put("mimeType", capture.mimeType)
+                        response.put("captureBackend", capture.backend)
+                        response.put("frameSequence", capture.sequence)
                         if (capture.detail != null) response.put("detail", capture.detail)
                         payload = capture.jpeg
                     }
@@ -153,20 +168,6 @@ class RemoteDevViewBridgeService : Service() {
             output.flush()
         } catch (error: Throwable) {
             Log.w(TAG, "Unable to return bridge response", error)
-        }
-    }
-
-    private fun launchOverdrive() {
-        try {
-            startActivity(
-                Intent(this, MainActivity::class.java).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                    addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                }
-            )
-        } catch (error: Throwable) {
-            Log.w(TAG, "Unable to launch MainActivity for developer view", error)
         }
     }
 

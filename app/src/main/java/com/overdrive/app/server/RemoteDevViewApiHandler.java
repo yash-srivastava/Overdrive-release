@@ -5,6 +5,10 @@ import org.json.JSONObject;
 import java.io.OutputStream;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Authenticated HTTP surface for Remote Overdrive Dev View.
@@ -18,6 +22,19 @@ public final class RemoteDevViewApiHandler {
         new RemoteDevViewSessionManager();
     private static final RemoteDevViewBridgeClient BRIDGE =
         new RemoteDevViewBridgeClient();
+    private static final AtomicBoolean BRIDGE_ACTIVE = new AtomicBoolean(false);
+    private static final ScheduledExecutorService SESSION_REAPER =
+        Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "remote-dev-session-reaper");
+            thread.setDaemon(true);
+            return thread;
+        });
+
+    static {
+        SESSION_REAPER.scheduleWithFixedDelay(() -> {
+            if (BRIDGE_ACTIVE.get() && !SESSIONS.hasActiveSession()) stopBridge();
+        }, 30L, 30L, TimeUnit.SECONDS);
+    }
 
     private RemoteDevViewApiHandler() {}
 
@@ -54,10 +71,12 @@ public final class RemoteDevViewApiHandler {
             }
             RemoteDevViewBridgeClient.Response ready = BRIDGE.awaitReady();
             if (ready == null) {
+                BRIDGE.shutdown();
                 unavailable(out, "App-process bridge did not become ready");
                 return true;
             }
             RemoteDevViewSessionManager.Session session = SESSIONS.start();
+            BRIDGE_ACTIVE.set(true);
             JSONObject response = new JSONObject();
             response.put("success", true);
             response.put("session", session.token);
@@ -65,6 +84,8 @@ public final class RemoteDevViewApiHandler {
             response.put("maxLifetimeMs", RemoteDevViewSessionManager.MAX_LIFETIME_MS);
             response.put("activityReady", ready.metadata.optBoolean("success", false));
             response.put("activity", ready.metadata.opt("activity"));
+            response.put("captureBackend", ready.metadata.opt("captureBackend"));
+            response.put("displayId", ready.metadata.optInt("displayId", -1));
             response.put("physicalDisplayChanged", false);
             HttpResponse.sendJson(out, response.toString());
             return true;
@@ -76,7 +97,7 @@ public final class RemoteDevViewApiHandler {
                 invalidSession(out);
                 return true;
             }
-            BRIDGE.shutdown();
+            stopBridge();
             HttpResponse.sendJsonSuccess(out);
             return true;
         }
@@ -116,6 +137,10 @@ public final class RemoteDevViewApiHandler {
             headers.put("X-Overdrive-PixelCopy-Result",
                 metadata.optString("pixelCopyResult", "UNKNOWN"));
             headers.put("X-Overdrive-Activity", metadata.optString("activity", ""));
+            headers.put("X-Overdrive-Capture-Backend",
+                metadata.optString("captureBackend", "PixelCopy"));
+            headers.put("X-Overdrive-Frame-Sequence",
+                Long.toString(metadata.optLong("frameSequence", 0L)));
             HttpResponse.sendBinaryNoStore(out,
                 metadata.optString("mimeType", "image/jpeg"), bridgeResponse.payload, headers);
             return true;
@@ -179,6 +204,7 @@ public final class RemoteDevViewApiHandler {
     }
 
     private static void invalidSession(OutputStream out) throws Exception {
+        if (!SESSIONS.hasActiveSession()) stopBridge();
         HttpResponse.sendJson(out, 403, new JSONObject()
             .put("success", false)
             .put("error", "Developer-view session is invalid or expired")
@@ -188,5 +214,10 @@ public final class RemoteDevViewApiHandler {
     private static void unavailable(OutputStream out, String detail) throws Exception {
         HttpResponse.sendJson(out, 503, new JSONObject()
             .put("success", false).put("error", detail).toString());
+    }
+
+    private static void stopBridge() {
+        if (!BRIDGE_ACTIVE.compareAndSet(true, false)) return;
+        BRIDGE.shutdown();
     }
 }

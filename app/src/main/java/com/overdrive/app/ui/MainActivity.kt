@@ -52,7 +52,7 @@ import com.overdrive.app.util.BydDataCacheWhitelist
  * `invoke*Action` thin wrappers that the new SettingsFragment / Diagnostics
  * fragment call.
  */
-class MainActivity : AppCompatActivity() {
+open class MainActivity : AppCompatActivity() {
 
     private lateinit var navController: NavController
     private lateinit var appBarConfiguration: AppBarConfiguration
@@ -87,6 +87,7 @@ class MainActivity : AppCompatActivity() {
     // explicitly setIntent — without this latch the stale boot intent
     // would permanently bypass the PIN gate after a launcher tap.
     private var headlessBootSilenceGate: Boolean = false
+    private var remoteDevSession: Boolean = false
 
     // UI elements
     private lateinit var toolbar: MaterialToolbar
@@ -106,6 +107,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        remoteDevSession = this is RemoteMainActivity &&
+            intent?.getBooleanExtra(EXTRA_REMOTE_DEV_SESSION, false) == true
+
         // The main app must run on the HEAD UNIT (display 0), never the driver
         // cluster. When the OEM cluster projection opens a secondary display, AMS
         // auto-launches the LAUNCHER activity (this one) onto it. If we land on a
@@ -116,7 +120,7 @@ class MainActivity : AppCompatActivity() {
         // and bailing here this early means the startup work hasn't begun yet.)
         try {
             val did = display?.displayId ?: android.view.Display.DEFAULT_DISPLAY
-            if (did != android.view.Display.DEFAULT_DISPLAY) {
+            if (did != android.view.Display.DEFAULT_DISPLAY && !remoteDevSession) {
                 android.util.Log.w("MainActivity", "launched on display $did — relaunching on display 0")
                 val opts = android.app.ActivityOptions.makeBasic().apply {
                     launchDisplayId = android.view.Display.DEFAULT_DISPLAY
@@ -131,6 +135,11 @@ class MainActivity : AppCompatActivity() {
                 finish()
                 return
             }
+            if (did == android.view.Display.DEFAULT_DISPLAY && remoteDevSession) {
+                android.util.Log.w("MainActivity", "refusing RemoteMainActivity on display 0")
+                finish()
+                return
+            }
         } catch (_: Throwable) { /* best effort; fall through to a normal start */ }
 
         setContentView(R.layout.activity_main_new)
@@ -138,7 +147,7 @@ class MainActivity : AppCompatActivity() {
         // Storage setup is posted off the onCreate critical path so a failure
         // (e.g. ROM lacking the All-Files-Access Settings activity on BYD SL7)
         // cannot abort activity launch. See setupStorageDirectories().
-        window.decorView.post {
+        if (!remoteDevSession) window.decorView.post {
             try {
                 setupStorageDirectories()
             } catch (e: Exception) {
@@ -147,24 +156,26 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Initialize DeviceIdGenerator with ADB executor for file sync
-        val adbExecutor = com.overdrive.app.launcher.AdbShellExecutor(this)
-        com.overdrive.app.util.DeviceIdGenerator.init(adbExecutor)
+        if (!remoteDevSession) {
+            val adbExecutor = com.overdrive.app.launcher.AdbShellExecutor(this)
+            com.overdrive.app.util.DeviceIdGenerator.init(adbExecutor)
         
         // Generate device ID early - this syncs to file for daemon compatibility
         // Must happen BEFORE any daemon starts
-        val deviceId = com.overdrive.app.util.DeviceIdGenerator.generateDeviceId(this)
-        android.util.Log.i("MainActivity", "Device ID initialized: $deviceId")
+            val deviceId = com.overdrive.app.util.DeviceIdGenerator.generateDeviceId(this)
+            android.util.Log.i("MainActivity", "Device ID initialized: $deviceId")
         
         // Apply BYD whitelist (ACC + data cache) to prevent background killing
         // CRITICAL: Run on background thread to avoid blocking UI on boot
         // ActivityThread.systemMain() can block for 1+ minute waiting for system services
-        Thread {
-            try {
-                BydDataCacheWhitelist.applyAll(this)
-            } catch (e: Exception) {
-                android.util.Log.e("MainActivity", "BYD whitelist error: ${e.message}")
-            }
-        }.start()
+            Thread {
+                try {
+                    BydDataCacheWhitelist.applyAll(this)
+                } catch (e: Exception) {
+                    android.util.Log.e("MainActivity", "BYD whitelist error: ${e.message}")
+                }
+            }.start()
+        }
         
         // Register the screen-off receiver that locks the PIN session as
         // soon as the panel sleeps. Idempotent — safe to call again on
@@ -197,7 +208,7 @@ class MainActivity : AppCompatActivity() {
         setupNavigation(savedInstanceState)
         handleNavigateExtra(intent)
         setupCopyButton()
-        setupLogListener()
+        if (!remoteDevSession) setupLogListener()
         observeViewModels()
         
         // Initialize daemon startup manager
@@ -205,14 +216,14 @@ class MainActivity : AppCompatActivity() {
         daemonsViewModel.setStartupManager(daemonStartupManager)
         
         // Setup ADB auth callback to re-initialize when auth is granted
-        setupAdbAuthCallback()
+        if (!remoteDevSession) setupAdbAuthCallback()
         
         // Log app start
         logsViewModel.info("App", "OverDrive started")
 
         // Seed out-of-process revival watchdog so the process gets resurrected
         // if it ever gets force-stopped or OOM-killed without an external event.
-        try {
+        if (!remoteDevSession) try {
             com.overdrive.app.receiver.ProcessRevivalReceiver.schedule(applicationContext)
         } catch (e: Exception) {
             android.util.Log.w("MainActivity", "ProcessRevivalReceiver.schedule failed: ${e.message}")
@@ -226,23 +237,23 @@ class MainActivity : AppCompatActivity() {
         // The daemon will reload from file when getState() is called
         
         // Start Location Sidecar service (establishes ADB connection)
-        startLocationSidecarService()
+        if (!remoteDevSession) startLocationSidecarService()
         
         // Initialize daemons after a short delay to allow ADB connection.
         // If this is a post-update launch, run UpdateLifecycle.hardResetDaemons
         // FIRST so any zombie daemons / watchdogs from the previous install are
         // dead before the new daemon launcher starts. See UpdateLifecycle for
         // the sentinel handshake details.
-        runDaemonStartup(intent, fromOnCreate = true)
+        if (!remoteDevSession) runDaemonStartup(intent, fromOnCreate = true)
         
         // Handle Location start intent (from SentryDaemon restart)
-        handleLocationStartIntent(intent)
+        if (!remoteDevSession) handleLocationStartIntent(intent)
         
         // Check traffic monitor status early so drawer shows correct state
         checkTrafficMonitorStatus()
         
         // Check for app updates (delayed to not block startup)
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+        if (!remoteDevSession) android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             // Clean up any leftover update APK from previous install. Use the
             // shared daemonStartupManager.adbLauncher — allocating a fresh
             // AdbDaemonLauncher here would leak its non-daemon executor + a
@@ -294,15 +305,15 @@ class MainActivity : AppCompatActivity() {
         }, 10000) // 10 seconds after launch
         
         // Schedule periodic update checks (every 6 hours)
-        schedulePeriodicUpdateCheck()
+        if (!remoteDevSession) schedulePeriodicUpdateCheck()
         
         // Status overlay: start immediately if permission granted, show guide if not
-        startStatusOverlay()
+        if (!remoteDevSession) startStatusOverlay()
         
         // If launched from boot receiver with minimize flag, move to back immediately.
         // This keeps the process alive (important for daemon stability) without
         // showing the app UI over the BYD home screen.
-        if (headlessBootSilenceGate) {
+        if (!remoteDevSession && headlessBootSilenceGate) {
             android.util.Log.i("MainActivity", "Boot launch — minimizing to background")
             moveTaskToBack(true)
             // NB: do NOT clear headlessBootSilenceGate here. This block runs
@@ -388,7 +399,7 @@ class MainActivity : AppCompatActivity() {
         // covered without relying on onResume firing first.
         maybeShowPinLock()
         intent?.let {
-            handleLocationStartIntent(it)
+            if (!remoteDevSession) handleLocationStartIntent(it)
             handleNavigateExtra(it)
             // Critical: when MainActivity is already running and the install
             // script's `am start --ez post_update true` re-delivers the
@@ -399,7 +410,7 @@ class MainActivity : AppCompatActivity() {
             // by daemonStartupRequested + by the sentinel/intent-extra
             // checks inside isPostUpdateLaunch — once the sentinels are
             // consumed, subsequent calls become no-ops).
-            runDaemonStartup(it, fromOnCreate = false)
+            if (!remoteDevSession) runDaemonStartup(it, fromOnCreate = false)
         }
     }
 
@@ -660,12 +671,12 @@ class MainActivity : AppCompatActivity() {
         maybeShowPinLock()
 
         // Try to start overlay if permission was just granted (user returned from settings)
-        com.overdrive.app.overlay.StatusOverlayService.startIfPermitted(this)
+        if (!remoteDevSession) com.overdrive.app.overlay.StatusOverlayService.startIfPermitted(this)
 
         // Re-sync the RoadSense overlay on resume: the user may have just toggled
         // RoadSense on/off in the web UI and returned to the app, or granted the
         // overlay permission. Cheap — a no-op if the state already matches.
-        syncRoadSenseOverlay()
+        if (!remoteDevSession) syncRoadSenseOverlay()
 
         // Daemon-ready flush of any pending onboarding operating-mode choice. The
         // auth-granted callback fires BEFORE the user reaches the MODE step (and only
@@ -674,7 +685,9 @@ class MainActivity : AppCompatActivity() {
         // any non-first launch. Idempotent + no-op when nothing is pending, and it
         // reconciles against the live config so it never clobbers a later Settings
         // change (see flushPendingOperatingMode).
-        com.overdrive.app.onboarding.OnboardingHost.flushPendingOperatingMode(applicationContext)
+        if (!remoteDevSession) {
+            com.overdrive.app.onboarding.OnboardingHost.flushPendingOperatingMode(applicationContext)
+        }
 
         // Re-drive a rail tap that was deferred because it raced Activity state saving. Now
         // resumed, FragmentManager can commit. navigateToRailDestination re-checks isStateSaved
@@ -729,7 +742,7 @@ class MainActivity : AppCompatActivity() {
             headlessBootSilenceGate = false
             android.util.Log.i("MainActivity", "Boot-silence latch consumed on first onPause")
         }
-        com.overdrive.app.auth.PinSession.notePaused()
+        if (!remoteDevSession) com.overdrive.app.auth.PinSession.notePaused()
     }
 
     /**
@@ -3685,7 +3698,7 @@ class MainActivity : AppCompatActivity() {
             navigationRailScroll.onRailSwipe = null
         }
         // Remove log listener
-        LogManager.setLogListener(null)
+        if (!remoteDevSession) LogManager.setLogListener(null)
         // Tear down the onboarding overlay + its ACC receiver (mirrors the auth-callback
         // teardown below — any guard cleared only in a callback needs a destroy path).
         onboardingHost?.dismiss()
@@ -3694,7 +3707,7 @@ class MainActivity : AppCompatActivity() {
         navPollRunnable?.let { mainHandler.removeCallbacks(it) }
         navPollRunnable = null
         // Remove ADB auth callback
-        com.overdrive.app.launcher.AdbShellExecutor.setAuthCallback(null)
+        if (!remoteDevSession) com.overdrive.app.launcher.AdbShellExecutor.setAuthCallback(null)
         // Cancel the periodic update check so the Runnable doesn't leak the
         // activity reference after recreate.
         updateCheckRunnable?.let { mainHandler.removeCallbacks(it) }
@@ -3939,5 +3952,6 @@ class MainActivity : AppCompatActivity() {
     companion object {
         /** Deep-link extra consumed by [handleNavigateExtra] (launcher glance widgets). */
         const val EXTRA_NAVIGATE_TO = "navigate_to"
+        const val EXTRA_REMOTE_DEV_SESSION = "remote_dev_session"
     }
 }

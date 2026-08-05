@@ -32,6 +32,7 @@ final class RemoteDevViewWebSocketStream {
     private static final int STREAM_QUALITY = 55;
     private static final int MAX_WS_FRAGMENT_BYTES = 32 * 1024;
     private static final long ERROR_RETRY_MS = 120L;
+    private static final long STREAM_POLL_INTERVAL_MS = 80L;
 
     private RemoteDevViewWebSocketStream() {}
 
@@ -114,6 +115,7 @@ final class RemoteDevViewWebSocketStream {
             BlockingQueue<StreamFrame> latest,
             AtomicLong sequence) {
         boolean hasSuccessfulFrame = false;
+        long lastSourceSequence = -1L;
         while (running.get() && !client.isClosed()
                 && RemoteDevViewApiHandler.validateStreamSession(session)) {
             long started = System.nanoTime();
@@ -125,18 +127,28 @@ final class RemoteDevViewWebSocketStream {
                 response, sequence.incrementAndGet(), captureMs);
             byte[] jpeg = response == null ? new byte[0] : response.payload;
             boolean successful = metadata.optBoolean("success", false) && jpeg.length > 0;
+            long sourceSequence = metadata.optLong("frameSequence", 0L);
+            boolean isNewFrame = successful
+                && (sourceSequence <= 0L || sourceSequence != lastSourceSequence);
 
-            if (successful || !hasSuccessfulFrame) {
+            if (isNewFrame || (!successful && !hasSuccessfulFrame)) {
                 // Capacity one: replace an unsent old frame with this newer
                 // one. Once a good frame exists, transient PixelCopy races do
                 // not replace it or its successful metadata with an error.
                 latest.poll();
                 latest.offer(new StreamFrame(metadata, jpeg));
             }
-            if (successful) hasSuccessfulFrame = true;
+            if (isNewFrame) {
+                hasSuccessfulFrame = true;
+                lastSourceSequence = sourceSequence;
+            }
 
-            if (!successful) {
-                try { Thread.sleep(ERROR_RETRY_MS); }
+            long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            long delayMs = successful
+                ? Math.max(1L, STREAM_POLL_INTERVAL_MS - elapsedMs)
+                : ERROR_RETRY_MS;
+            if (delayMs > 0L) {
+                try { Thread.sleep(delayMs); }
                 catch (InterruptedException error) {
                     Thread.currentThread().interrupt();
                     break;

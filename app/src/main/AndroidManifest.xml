@@ -263,6 +263,20 @@
             </intent-filter>
         </activity>
 
+        <!-- Private-display instance used only by authenticated Remote Dev View.
+             A distinct component/task keeps it separate from the physical
+             MainActivity while executing the same UI implementation. -->
+        <activity
+            android:name="com.overdrive.app.ui.RemoteMainActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity="com.overdrive.app.remote_dev"
+            android:launchMode="singleTask"
+            android:resizeableActivity="true"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|density|fontScale|uiMode"
+            android:theme="@style/Theme.Overdrive.M3" />
+
 
 
         <!-- PIN Lock Activity. Gates MainActivity only — never the cam
@@ -543,8 +557,8 @@
             android:exported="true" />
 
         <!-- Remote Overdrive Dev View app-process bridge. It is never externally
-             startable; Overdrive starts it itself. Its abstract Unix socket checks
-             kernel peer credentials and accepts only the shell CameraDaemon. -->
+             startable; Overdrive starts it itself. Its loopback-only protocol is
+             time-bounded, replay-protected, and HMAC-authenticated. -->
         <service
             android:name="com.overdrive.app.remote.RemoteDevViewBridgeService"
             android:exported="false" />

@@ -17,6 +17,8 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.PixelCopy
 import android.view.View
+import android.view.Display
+import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import com.overdrive.app.DeterrentActivity
 import java.io.ByteArrayOutputStream
@@ -31,14 +33,11 @@ import kotlin.math.roundToInt
 /**
  * App-process half of Remote Overdrive Dev View.
  *
- * PixelCopy is deliberately performed against the last interactive Overdrive
- * Activity's Window, before SurfaceFlinger combines it with BYD's opaque
- * AccAnimation layer. The transparent [DeterrentActivity] may temporarily take
- * foreground to protect the physical screen; it is never selected as the
- * developer-view target, so that safety activity can keep running while the
- * underlying MainActivity remains stable here. Input is dispatched only into
- * roots owned by the selected Activity; this class never uses global input
- * injection and cannot address another package.
+ * Live frames come from [RemoteDevVirtualDisplay], which contains only a
+ * dedicated Overdrive task. PixelCopy remains available for an explicit
+ * lossless Window screenshot. Input is dispatched only into roots owned by
+ * the selected Activity on that private display; this class never uses global
+ * input injection and cannot address another package or display stack 0.
  */
 object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     private const val TAG = "RemoteDevView"
@@ -51,6 +50,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
     private var installed = false
     private var application: Application? = null
     private var currentActivity = WeakReference<Activity>(null)
+    @Volatile private var remoteDisplayId = Display.INVALID_DISPLAY
     private var touchRoot = WeakReference<View>(null)
     private var touchDownTime = 0L
     private var appRootsAccessor: AppRootsAccessor? = null
@@ -85,7 +85,34 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
         }
     }
 
-    private fun isRemoteTarget(activity: Activity): Boolean = activity !is DeterrentActivity
+    private fun isRemoteTarget(activity: Activity): Boolean {
+        if (activity is DeterrentActivity) return false
+        val targetDisplay = remoteDisplayId
+        val activityDisplay = activity.display?.displayId ?: Display.DEFAULT_DISPLAY
+        return if (targetDisplay != Display.INVALID_DISPLAY) {
+            activityDisplay == targetDisplay
+        } else {
+            activityDisplay == Display.DEFAULT_DISPLAY
+        }
+    }
+
+    fun bindRemoteDisplay(displayId: Int) {
+        remoteDisplayId = displayId
+        currentActivity.clear()
+        touchRoot.clear()
+    }
+
+    fun unbindRemoteDisplay(displayId: Int) {
+        if (remoteDisplayId != displayId) return
+        remoteDisplayId = Display.INVALID_DISPLAY
+        currentActivity.clear()
+        touchRoot.clear()
+    }
+
+    fun isRemoteWindowSecure(): Boolean {
+        val activity = currentActivity.get() ?: return false
+        return activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0
+    }
 
     data class CaptureResult(
         val resultCode: Int,
@@ -96,6 +123,8 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
         val jpeg: ByteArray?,
         val detail: String? = null,
         val mimeType: String = "image/jpeg",
+        val backend: String = "PixelCopy",
+        val sequence: Long = 0L,
     )
 
     data class InputResult(
@@ -117,6 +146,30 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
 
     /** Blocks the bridge worker, never the main thread. */
     fun capture(maxWidth: Int, quality: Int, format: String = "jpeg"): CaptureResult {
+        if (!format.equals("png", ignoreCase = true)) {
+            val cached = RemoteDevVirtualDisplay.latestFrame()
+            if (cached != null) {
+                return CaptureResult(
+                    resultCode = PixelCopy.SUCCESS,
+                    resultName = "LIVE",
+                    width = cached.width,
+                    height = cached.height,
+                    activityName = currentActivity.get()?.javaClass?.name,
+                    jpeg = cached.jpeg,
+                    detail = "encodeMs=${cached.encodeMs};droppedBlack=${cached.droppedBlackFrames}",
+                    mimeType = "image/jpeg",
+                    backend = RemoteDevVirtualDisplay.BACKEND_NAME,
+                    sequence = cached.sequence,
+                )
+            }
+            if (RemoteDevVirtualDisplay.isRunning()) {
+                return CaptureResult(
+                    -1, "NO_VIRTUAL_FRAME", 0, 0,
+                    currentActivity.get()?.javaClass?.name, null,
+                    backend = RemoteDevVirtualDisplay.BACKEND_NAME,
+                )
+            }
+        }
         captureLock.lock()
         return try {
             captureSingleFlight(maxWidth, quality, format)
@@ -246,7 +299,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
             else -> return InputResult(false, false, currentActivity.get()?.javaClass?.name,
                 "Unknown touch phase")
         }
-        return runOnUiThread {
+        val result = runOnUiThread {
             val activity = readyActivity()
                 ?: return@runOnUiThread InputResult(false, false, null, "No Overdrive activity is ready")
             val decor = activity.window.decorView
@@ -281,6 +334,8 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
             }
             InputResult(true, handled, activity.javaClass.name)
         }
+        if (result.success) RemoteDevVirtualDisplay.requestImmediateFrame()
+        return result
     }
 
     fun dispatchKey(name: String): InputResult {
@@ -298,7 +353,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
             else -> return InputResult(false, false, currentActivity.get()?.javaClass?.name,
                 "Key is not allowed")
         }
-        return runOnUiThread {
+        val result = runOnUiThread {
             val activity = readyActivity()
                 ?: return@runOnUiThread InputResult(false, false, null, "No Overdrive activity is ready")
             if (keyCode == KeyEvent.KEYCODE_BACK) {
@@ -313,6 +368,8 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
             val handled = root.dispatchKeyEvent(down) or root.dispatchKeyEvent(up)
             InputResult(true, handled, activity.javaClass.name)
         }
+        if (result.success) RemoteDevVirtualDisplay.requestImmediateFrame()
+        return result
     }
 
     fun dispatchText(text: String): InputResult {
@@ -320,7 +377,7 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
             return InputResult(false, false, currentActivity.get()?.javaClass?.name,
                 "Text must contain 1-$MAX_TEXT_LENGTH characters")
         }
-        return runOnUiThread {
+        val result = runOnUiThread {
             val activity = readyActivity()
                 ?: return@runOnUiThread InputResult(false, false, null, "No Overdrive activity is ready")
             val root = topInputRoot(activity.window.decorView, activity)
@@ -342,6 +399,8 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
             InputResult(true, handled, activity.javaClass.name,
                 if (handled) null else "No focused text input accepted the text")
         }
+        if (result.success) RemoteDevVirtualDisplay.requestImmediateFrame()
+        return result
     }
 
     private fun readyActivity(): Activity? = currentActivity.get()?.takeUnless {
@@ -450,9 +509,13 @@ object RemoteDevViewController : Application.ActivityLifecycleCallbacks {
      * touch-swallowing root must continue protecting the physical screen
      * without swallowing input dispatched directly to MainActivity here.
      */
-    private fun activityOwnedRoots(activity: Activity): List<View> = appOwnedRoots().filter { root ->
-        val owner = contextActivity(root.context)
-        owner == null || owner === activity
+    private fun activityOwnedRoots(activity: Activity): List<View> {
+        val activityDisplayId = activity.display?.displayId ?: Display.DEFAULT_DISPLAY
+        return appOwnedRoots().filter { root ->
+            val rootDisplayId = root.display?.displayId ?: Display.DEFAULT_DISPLAY
+            val owner = contextActivity(root.context)
+            rootDisplayId == activityDisplayId && (owner == null || owner === activity)
+        }
     }
 
     private fun contextActivity(context: Context): Activity? {
