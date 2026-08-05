@@ -72,9 +72,13 @@ public class RemoteDevVirtualDisplayAssetTest {
         Path current = Paths.get("").toAbsolutePath();
         Path fromModule = current.resolve(moduleRelativePath);
         if (Files.exists(fromModule)) {
-            return new String(Files.readAllBytes(fromModule), StandardCharsets.UTF_8);
+            return normalizeNewlines(Files.readAllBytes(fromModule));
         }
         Path fromRepository = current.resolve("app").resolve(moduleRelativePath);
-        return new String(Files.readAllBytes(fromRepository), StandardCharsets.UTF_8);
+        return normalizeNewlines(Files.readAllBytes(fromRepository));
+    }
+
+    private static String normalizeNewlines(byte[] bytes) {
+        return new String(bytes, StandardCharsets.UTF_8).replace("\r\n", "\n");
     }
 }
