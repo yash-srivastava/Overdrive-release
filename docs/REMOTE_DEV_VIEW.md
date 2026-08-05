@@ -47,10 +47,12 @@ removed in fullscreen so the live window remains edge-to-edge.
 
 ## Capture and input behavior
 
-The virtual display has the same 1920 x 1080 logical size and 240 dpi as the
-head unit, while SurfaceFlinger scales its output directly into a 960 x 540
-ImageReader surface. A bounded app-process encoder keeps the newest JPEG at a
-10 fps target. Web clients read that cached frame; they do not initiate a
+The virtual display and its ImageReader surface both use the same 1920 x 1080
+size and 240 dpi as the head unit. This match is required on BYD's Android 10
+compositor: a smaller consumer surface receives a top-left crop rather than a
+scaled display. The app reads the complete buffer and then downsamples it to a
+960 x 540 stream frame. A bounded app-process encoder keeps the newest JPEG at
+a 10 fps target. Web clients read that cached frame; they do not initiate a
 window screenshot or wait behind the UI thread. A successful input requests
 the next available virtual-display frame immediately.
 

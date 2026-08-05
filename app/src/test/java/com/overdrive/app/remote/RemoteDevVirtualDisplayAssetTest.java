@@ -23,6 +23,8 @@ public class RemoteDevVirtualDisplayAssetTest {
         assertTrue(host.contains("ImageReader.newInstance("));
         assertTrue(host.contains("LOGICAL_WIDTH = 1920"));
         assertTrue(host.contains("STREAM_WIDTH = 960"));
+        assertTrue(host.contains("ImageReader.newInstance(\n            LOGICAL_WIDTH,\n            LOGICAL_HEIGHT"));
+        assertTrue(host.contains("Rect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT)"));
         assertTrue(host.contains("STREAM_FRAME_INTERVAL_MS = 100L"));
         assertTrue(host.contains("RemoteMainActivity::class.java"));
         assertFalse(host.contains("MediaProjection"));

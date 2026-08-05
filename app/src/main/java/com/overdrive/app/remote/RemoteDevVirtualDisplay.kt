@@ -32,9 +32,12 @@ import java.util.concurrent.atomic.AtomicReference
  * Renders a second, real Overdrive Activity onto an app-owned private display.
  *
  * Display stack 0 and BYD's AccAnimation layer are never part of this display.
- * SurfaceFlinger scales the normal 1920x1080 / 240-dpi Activity composition
- * into a 960x540 ImageReader surface. The newest image is JPEG encoded at a
- * bounded cadence and cached, so web clients do not initiate UI screenshots.
+ * The ImageReader surface matches the normal 1920x1080 / 240-dpi Activity
+ * composition. Frames are downscaled to 960x540 only after the complete
+ * display buffer has been read; BYD's Android 10 compositor otherwise crops a
+ * full-size projection into a smaller consumer surface instead of scaling it.
+ * The newest image is JPEG encoded at a bounded cadence and cached, so web
+ * clients do not initiate UI screenshots.
  */
 object RemoteDevVirtualDisplay {
     const val BACKEND_NAME = "Virtual display"
@@ -131,8 +134,8 @@ object RemoteDevVirtualDisplay {
             Thread(runnable, "remote-dev-frame-encoder").apply { isDaemon = true }
         }
         private val reader = ImageReader.newInstance(
-            STREAM_WIDTH,
-            STREAM_HEIGHT,
+            LOGICAL_WIDTH,
+            LOGICAL_HEIGHT,
             PixelFormat.RGBA_8888,
             MAX_IMAGES,
         )
@@ -223,13 +226,13 @@ object RemoteDevVirtualDisplay {
             val plane = image.planes.firstOrNull() ?: return
             val pixelStride = plane.pixelStride
             val rowStride = plane.rowStride
-            if (pixelStride != 4 || rowStride < STREAM_WIDTH * pixelStride) {
+            if (pixelStride != 4 || rowStride < LOGICAL_WIDTH * pixelStride) {
                 throw IllegalStateException("Unsupported RGBA plane pixelStride=$pixelStride rowStride=$rowStride")
             }
             val stagingWidth = rowStride / pixelStride
             val staging = stagingBitmap?.takeIf {
-                !it.isRecycled && it.width == stagingWidth && it.height == STREAM_HEIGHT
-            } ?: Bitmap.createBitmap(stagingWidth, STREAM_HEIGHT, Bitmap.Config.ARGB_8888).also {
+                !it.isRecycled && it.width == stagingWidth && it.height == LOGICAL_HEIGHT
+            } ?: Bitmap.createBitmap(stagingWidth, LOGICAL_HEIGHT, Bitmap.Config.ARGB_8888).also {
                 stagingBitmap?.takeUnless(Bitmap::isRecycled)?.recycle()
                 stagingBitmap = it
             }
@@ -245,7 +248,7 @@ object RemoteDevVirtualDisplay {
             output.eraseColor(Color.BLACK)
             Canvas(output).drawBitmap(
                 staging,
-                Rect(0, 0, STREAM_WIDTH, STREAM_HEIGHT),
+                Rect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT),
                 Rect(0, 0, STREAM_WIDTH, STREAM_HEIGHT),
                 Paint(Paint.FILTER_BITMAP_FLAG),
             )
