@@ -64,8 +64,22 @@ class RecordingSectionHeaderDecoration(
         letterSpacing = 0.08f
         color = ResourcesCompat.getColor(res, R.color.text_secondary, null)
     }
-    private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = ResourcesCompat.getColor(res, R.color.bg_surface, null)
+    private val stickyBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        val pageBackground = TypedValue()
+        color = if (context.theme.resolveAttribute(
+                android.R.attr.colorBackground,
+                pageBackground,
+                true
+            )
+        ) {
+            if (pageBackground.resourceId != 0) {
+                ResourcesCompat.getColor(res, pageBackground.resourceId, context.theme)
+            } else {
+                pageBackground.data
+            }
+        } else {
+            ResourcesCompat.getColor(res, R.color.bg_surface, context.theme)
+        }
     }
 
     override fun getItemOffsets(
@@ -161,7 +175,7 @@ class RecordingSectionHeaderDecoration(
         // Solid background only for the sticky row so non-sticky labels float
         // over the list cleanly.
         if (sticky) {
-            c.drawRect(left, top, right, bottom, backgroundPaint)
+            c.drawRect(left, top, right, bottom, stickyBackgroundPaint)
         }
         c.drawText(
             label.uppercase(Locale.getDefault()),

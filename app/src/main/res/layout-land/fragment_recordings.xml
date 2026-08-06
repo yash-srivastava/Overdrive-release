@@ -70,77 +70,6 @@
                 android:textColor="?attr/colorOnSurfaceVariant"
                 tools:text="12 today · 320 total · 42 GB" />
 
-            <!-- Free-text place search. Lives in the title row so it sits
-                 next to the date card on the row below; debounced 300ms in
-                 RecordingsFragment.setupPlaceSearch and pushed through
-                 applyAll(placeContains=…). Landscape-only — portrait users
-                 still rely on the chip row for place narrowing. -->
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/cardPlaceSearch"
-                android:layout_width="220dp"
-                android:layout_height="48dp"
-                android:layout_marginStart="12dp"
-                app:cardBackgroundColor="?attr/colorSurfaceVariant"
-                app:cardCornerRadius="20dp"
-                app:cardElevation="0dp"
-                app:strokeWidth="0dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:paddingStart="12dp"
-                    android:paddingEnd="4dp">
-
-                    <ImageView
-                        android:layout_width="18dp"
-                        android:layout_height="18dp"
-                        android:contentDescription="@null"
-                        android:src="@drawable/ic_events"
-                        app:tint="?attr/colorOnSurfaceVariant" />
-
-                    <EditText
-                        android:id="@+id/etPlaceSearch"
-                        android:layout_width="0dp"
-                        android:layout_height="match_parent"
-                        android:layout_weight="1"
-                        android:layout_marginStart="8dp"
-                        android:background="@null"
-                        android:hint="@string/recording_lib_place_search_hint"
-                        android:imeOptions="actionSearch"
-                        android:importantForAutofill="no"
-                        android:inputType="text"
-                        android:maxLines="1"
-                        android:singleLine="true"
-                        android:textColor="?attr/colorOnSurface"
-                        android:textColorHint="?attr/colorOnSurfaceVariant"
-                        android:textSize="14sp" />
-
-                    <ImageButton
-                        android:id="@+id/btnClearPlaceSearch"
-                        android:layout_width="32dp"
-                        android:layout_height="32dp"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="@string/cd_clear_date_filter"
-                        android:padding="6dp"
-                        android:src="@drawable/ic_clear"
-                        android:visibility="gone"
-                        app:tint="?attr/colorOnSurfaceVariant"
-                        tools:visibility="visible" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnRecordingsSettings"
-                style="@style/Widget.Material3.Button.IconButton"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_marginStart="12dp"
-                android:contentDescription="@string/recordings_action_settings"
-                app:icon="@drawable/ic_settings"
-                app:iconGravity="textStart"
-                app:iconSize="22dp" />
         </LinearLayout>
     </LinearLayout>
 
@@ -227,6 +156,65 @@
                 android:layout_width="0dp"
                 android:layout_height="1dp"
                 android:layout_weight="1" />
+
+            <!-- Keep search available without restoring the redundant title
+                 row. It shares the compact control strip with source, date,
+                 filters and settings. -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardPlaceSearch"
+                android:layout_width="220dp"
+                android:layout_height="48dp"
+                android:layout_marginStart="12dp"
+                app:cardBackgroundColor="?attr/colorSurfaceVariant"
+                app:cardCornerRadius="20dp"
+                app:cardElevation="0dp"
+                app:strokeWidth="0dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="4dp">
+
+                    <ImageView
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_events"
+                        app:tint="?attr/colorOnSurfaceVariant" />
+
+                    <EditText
+                        android:id="@+id/etPlaceSearch"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:layout_marginStart="8dp"
+                        android:background="@null"
+                        android:hint="@string/recording_lib_place_search_hint"
+                        android:imeOptions="actionSearch"
+                        android:importantForAutofill="no"
+                        android:inputType="text"
+                        android:maxLines="1"
+                        android:singleLine="true"
+                        android:textColor="?attr/colorOnSurface"
+                        android:textColorHint="?attr/colorOnSurfaceVariant"
+                        android:textSize="14sp" />
+
+                    <ImageButton
+                        android:id="@+id/btnClearPlaceSearch"
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/cd_clear_date_filter"
+                        android:padding="6dp"
+                        android:src="@drawable/ic_clear"
+                        android:visibility="gone"
+                        app:tint="?attr/colorOnSurfaceVariant"
+                        tools:visibility="visible" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnPrevDay"
@@ -340,6 +328,17 @@
                 app:icon="@drawable/ic_filter_list"
                 app:iconGravity="textStart"
                 app:iconSize="20dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnRecordingsSettings"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginStart="8dp"
+                android:contentDescription="@string/recordings_action_settings"
+                app:icon="@drawable/ic_settings"
+                app:iconGravity="textStart"
+                app:iconSize="22dp" />
         </LinearLayout>
 
         <!-- Row C: TYPE + WHAT chips on a single line.

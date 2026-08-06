@@ -95,6 +95,34 @@ public class RecordingsLandscapeAssetTest {
     }
 
     @Test
+    public void searchAndSettingsRemainInTheVisibleLandscapeToolbar() throws IOException {
+        String page = readRepositoryFile(
+                "app/src/main/res/layout-land/fragment_recordings.xml");
+
+        int toolbarSpacer = page.indexOf("android:id=\"@+id/recordingsToolbarSpacer\"");
+        int search = page.indexOf("android:id=\"@+id/cardPlaceSearch\"");
+        int date = page.indexOf("android:id=\"@+id/cardDateJump\"");
+        int filters = page.indexOf("android:id=\"@+id/btnFilterToggle\"");
+        int settings = page.indexOf("android:id=\"@+id/btnRecordingsSettings\"");
+
+        assertTrue(toolbarSpacer >= 0);
+        assertTrue(toolbarSpacer < search);
+        assertTrue(search < date);
+        assertTrue(date < filters);
+        assertTrue(filters < settings);
+    }
+
+    @Test
+    public void stickySectionHeaderUsesThePageBackground() throws IOException {
+        String decoration = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/ui/util/RecordingSectionHeaderDecoration.kt");
+
+        assertTrue(decoration.contains("android.R.attr.colorBackground"));
+        assertTrue(decoration.contains("stickyBackgroundPaint"));
+        assertFalse(decoration.contains("c.drawRect(left, top, right, bottom, backgroundPaint)"));
+    }
+
+    @Test
     public void preparedDurationFlowsBackToPreviewAndList() throws IOException {
         String host = readRepositoryFile(
                 "app/src/main/java/com/overdrive/app/ui/fragment/RecordingsFragment.kt");
