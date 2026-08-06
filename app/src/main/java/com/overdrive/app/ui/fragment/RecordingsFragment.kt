@@ -332,8 +332,14 @@ class RecordingsFragment : Fragment() {
         libraryFragment?.apply {
             onPlayRecording = null
             onListChanged = null
+            onDurationResolved = null
             onContentChanged = null
             onClearAllFiltersRequested = null
+        }
+        (childFragmentManager.findFragmentByTag(TAG_INLINE_PLAYER) as? VideoPlayerFragment)?.apply {
+            onFullscreenToggle = null
+            onPlaylistItemChanged = null
+            onDurationResolved = null
         }
         libraryFragment = null
         metricsExecutor?.shutdownNow()
@@ -389,6 +395,7 @@ class RecordingsFragment : Fragment() {
                 mainHandler.post(preview)
             }
         }
+        lib.onDurationResolved = ::onInlinePlayerDurationResolved
         // Library content changed (delete / batch-delete) — re-scan to
         // refresh the chip-derivation set + segment counters. Distinct
         // from `onListChanged` which fires on every filter pass /
@@ -556,6 +563,7 @@ class RecordingsFragment : Fragment() {
                 setPlayerFullscreen(wantFullscreen)
             }
             onPlaylistItemChanged = ::onInlinePlayerClipChanged
+            onDurationResolved = ::onInlinePlayerDurationResolved
         }
         childFragmentManager.commit {
             setCustomAnimations(R.anim.fade_in, R.anim.fade_out)
@@ -582,6 +590,7 @@ class RecordingsFragment : Fragment() {
             setPlayerFullscreen(wantFullscreen)
         }
         player.onPlaylistItemChanged = ::onInlinePlayerClipChanged
+        player.onDurationResolved = ::onInlinePlayerDurationResolved
         // Re-apply the host-side layout to whatever state we restored into.
         view?.let { applyFullscreenLayout(it, playerFullscreen, animate = false) }
     }
@@ -594,6 +603,30 @@ class RecordingsFragment : Fragment() {
             bindPreviewDetails(currentPlaylist[index])
         }
         libraryFragment?.setActiveRecording(path)
+    }
+
+    /** Keep the list row and surrounding details in sync with MediaPlayer. */
+    private fun onInlinePlayerDurationResolved(path: String, durationMs: Long) {
+        if (durationMs <= 0 || view == null) return
+
+        currentPlaylist = currentPlaylist.map { recording ->
+            if (recording.path == path && recording.durationMs != durationMs) {
+                recording.copy(durationMs = durationMs)
+            } else {
+                recording
+            }
+        }
+        libraryFragment?.updateRecordingDuration(path, durationMs)
+
+        if (activeInlinePath != path) return
+        val resolved = currentPlaylist.firstOrNull { it.path == path }
+            ?: selectedInlineRecording
+                ?.takeIf { it.path == path }
+                ?.copy(durationMs = durationMs)
+            ?: return
+        selectedInlineRecording = resolved
+        view?.findViewById<TextView>(R.id.tvPreviewDurationValue)?.text =
+            resolved.formattedDuration
     }
 
     /** Bind the persistent event context around the inline player. */

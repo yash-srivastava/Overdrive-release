@@ -25,7 +25,7 @@ public class RecordingsLandscapeAssetTest {
         assertTrue(page.contains("android:id=\"@+id/rowPrimaryFilters\""));
         assertTrue(row.contains("android:id=\"@+id/tvEventTitle\""));
         assertTrue(row.contains("android:id=\"@+id/btnMore\""));
-        assertTrue(row.contains("android:layout_height=\"132dp\""));
+        assertTrue(row.contains("android:layout_height=\"112dp\""));
     }
 
     @Test
@@ -68,6 +68,37 @@ public class RecordingsLandscapeAssetTest {
         assertTrue(page.contains("android:id=\"@+id/previewDetails\""));
         assertTrue(host.contains("putBoolean(VideoPlayerFragment.ARG_COMPACT_INLINE, true)"));
         assertTrue(host.contains("showInlinePreview(first, startPaused = true)"));
+    }
+
+    @Test
+    public void dateAndFilterControlsKeepPreviewLikeProportions() throws IOException {
+        String page = readRepositoryFile(
+                "app/src/main/res/layout-land/fragment_recordings.xml");
+
+        assertTrue(page.contains("android:id=\"@+id/recordingsToolbarSpacer\""));
+        int dateCard = page.indexOf("android:id=\"@+id/cardDateJump\"");
+        assertTrue(dateCard >= 0);
+        String dateCardBlock = page.substring(
+                dateCard, Math.min(dateCard + 320, page.length()));
+        assertTrue(dateCardBlock.contains("android:layout_width=\"200dp\""));
+        assertFalse(dateCardBlock.contains("android:layout_weight"));
+        assertTrue(page.contains("android:layout_weight=\"13\""));
+        assertTrue(page.contains("android:layout_weight=\"7\""));
+    }
+
+    @Test
+    public void preparedDurationFlowsBackToPreviewAndList() throws IOException {
+        String host = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/ui/fragment/RecordingsFragment.kt");
+        String player = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/ui/fragment/VideoPlayerFragment.kt");
+        String library = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/ui/fragment/RecordingLibraryFragment.kt");
+
+        assertTrue(player.contains("onDurationResolved?.invoke(path, duration.toLong())"));
+        assertTrue(host.contains("onDurationResolved = ::onInlinePlayerDurationResolved"));
+        assertTrue(host.contains("resolved.formattedDuration"));
+        assertTrue(library.contains("recording.copy(durationMs = durationMs)"));
     }
 
     @Test

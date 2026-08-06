@@ -207,6 +207,16 @@
                     app:iconPadding="6dp" />
             </com.google.android.material.button.MaterialButtonToggleGroup>
 
+            <!-- Keep the date/filter cluster compact and right-aligned. The
+                 previous date card used weight=1, so it swallowed every spare
+                 pixel between the source tabs and Filters on a 1920px head
+                 unit. The generated design uses a short date picker instead. -->
+            <Space
+                android:id="@+id/recordingsToolbarSpacer"
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnPrevDay"
                 style="@style/Widget.Material3.Button.IconButton"
@@ -222,9 +232,8 @@
 
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/cardDateJump"
-                android:layout_width="0dp"
+                android:layout_width="200dp"
                 android:layout_height="48dp"
-                android:layout_weight="1"
                 android:layout_marginHorizontal="6dp"
                 android:clickable="true"
                 android:focusable="true"
@@ -682,7 +691,7 @@
             android:id="@+id/libraryContainer"
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="11" />
+            android:layout_weight="13" />
 
         <View
             android:id="@+id/paneSpacer"
@@ -697,7 +706,7 @@
             android:id="@+id/previewCard"
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="9"
+            android:layout_weight="7"
             app:cardBackgroundColor="?attr/colorSurfaceContainer"
             app:cardCornerRadius="@dimen/card_radius_hero"
             app:cardElevation="0dp">

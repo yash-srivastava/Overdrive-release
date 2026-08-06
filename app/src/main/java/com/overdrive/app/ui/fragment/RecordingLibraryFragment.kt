@@ -281,6 +281,9 @@ class RecordingLibraryFragment : Fragment() {
      */
     var onListChanged: ((List<RecordingFile>) -> Unit)? = null
 
+    /** Reports duration metadata resolved lazily for a visible recording. */
+    var onDurationResolved: ((String, Long) -> Unit)? = null
+
     /**
      * Fires only when the underlying file set CHANGES (delete / batch
      * delete / external rescan after invalidate). Distinct from
@@ -794,6 +797,7 @@ class RecordingLibraryFragment : Fragment() {
             onDelete = { recording -> confirmDelete(recording) },
             onSelectionChanged = { count -> onSelectionChanged(count) },
             onShare = { recording -> shareSingleRecording(recording) },
+            onDurationResolved = ::handleDurationResolved,
             landscapeRows = embeddedLandscape
         )
 
@@ -1375,6 +1379,44 @@ class RecordingLibraryFragment : Fragment() {
     /** Keep the event row highlight in sync with inline player navigation. */
     fun setActiveRecording(path: String?) {
         if (::recordingAdapter.isInitialized) recordingAdapter.setActiveRecording(path)
+    }
+
+    /**
+     * Replace the API's unknown duration with media-derived metadata without
+     * forcing a full page reload. The paging accumulator is updated too so a
+     * later append does not restore the placeholder value.
+     */
+    fun updateRecordingDuration(path: String, durationMs: Long) {
+        if (durationMs <= 0 || view == null) return
+        var changed = false
+        val updated = currentList.map { recording ->
+            if (recording.path == path && recording.durationMs != durationMs) {
+                changed = true
+                recording.copy(durationMs = durationMs)
+            } else {
+                recording
+            }
+        }
+        if (!changed) return
+
+        currentList = updated
+        for (i in pagingState.accumulated.indices) {
+            val recording = pagingState.accumulated[i]
+            if (recording.path == path && recording.durationMs != durationMs) {
+                pagingState.accumulated[i] = recording.copy(durationMs = durationMs)
+            }
+        }
+        if (::recordingAdapter.isInitialized) {
+            recordingAdapter.submitList(updated) {
+                recyclerRecordings.invalidateItemDecorations()
+            }
+        }
+    }
+
+    private fun handleDurationResolved(path: String, durationMs: Long) {
+        if (!isAdded || view == null) return
+        updateRecordingDuration(path, durationMs)
+        onDurationResolved?.invoke(path, durationMs)
     }
 
     /** Actions shared by the row overflow and the landscape detail pane. */

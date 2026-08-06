@@ -132,6 +132,17 @@ class VideoPlayerFragment : Fragment() {
     var onPlaylistItemChanged: ((String) -> Unit)? = null
 
     /**
+     * Reports the authoritative duration discovered by MediaPlayer after a
+     * clip prepares. Recording list rows arrive with durationMs=0 when the
+     * daemon index has no duration metadata; the inline host uses this signal
+     * to replace its placeholder and update the selected row.
+     */
+    var onDurationResolved: ((String, Long) -> Unit)? = null
+
+    /** URI currently owned by the prepare cycle; rejects stale callbacks. */
+    private var loadedVideoPath: String? = null
+
+    /**
      * Current maximize state. The host is the source of truth for the
      * actual layout; this just mirrors what was last requested so the icon
      * + content description stay in sync. Setting it externally (e.g. when
@@ -500,6 +511,7 @@ class VideoPlayerFragment : Fragment() {
         // prepare callback fires, which would route mute toggles to a dead
         // player.
         currentMediaPlayer = null
+        loadedVideoPath = path
         videoView.setVideoURI(Uri.fromFile(File(path)))
 
         videoView.setOnPreparedListener { mp ->
@@ -507,6 +519,9 @@ class VideoPlayerFragment : Fragment() {
             seekBar.max = duration
             tvDuration.text = formatTime(duration)
             eventTimeline.setPlayhead(0)
+            if (duration > 0 && loadedVideoPath == path) {
+                onDurationResolved?.invoke(path, duration.toLong())
+            }
 
             mp.isLooping = false
             currentMediaPlayer = mp
@@ -822,6 +837,7 @@ class VideoPlayerFragment : Fragment() {
     override fun onDestroyView() {
         handler.removeCallbacks(updateRunnable)
         handler.removeCallbacks(hideOverlayRunnable)
+        loadedVideoPath = null
         videoView.stopPlayback()
         super.onDestroyView()
     }

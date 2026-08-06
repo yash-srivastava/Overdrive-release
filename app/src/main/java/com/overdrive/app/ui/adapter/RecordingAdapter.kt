@@ -24,6 +24,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Adapter for displaying recording files with video thumbnails.
@@ -34,6 +35,7 @@ class RecordingAdapter(
     private val onDelete: (RecordingFile) -> Unit,
     private val onSelectionChanged: ((Int) -> Unit)? = null,
     private val onShare: ((RecordingFile) -> Unit)? = null,
+    private val onDurationResolved: ((String, Long) -> Unit)? = null,
     private val landscapeRows: Boolean = false
 ) : ListAdapter<RecordingFile, RecordingAdapter.RecordingViewHolder>(RecordingDiffCallback()) {
     
@@ -46,6 +48,12 @@ class RecordingAdapter(
     private val thumbnailCache = object : LruCache<String, Bitmap>(8 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
+
+    // Durations are cheap scalar metadata, but the daemon's recordings index
+    // does not currently persist them. Resolve only rows that become visible,
+    // cache the result, and coalesce recycler rebinds for the same path.
+    private val durationCache = LruCache<String, Long>(256)
+    private val durationLoads = ConcurrentHashMap.newKeySet<String>()
     
     // Multi-select state
     var selectMode = false
@@ -136,7 +144,11 @@ class RecordingAdapter(
         fun bind(recording: RecordingFile) {
             tvCameraId.text = "C${recording.cameraId}"
             tvRecordingTime.text = recording.formattedTime
-            tvDuration.text = if (recording.durationMs > 0) recording.formattedDuration else "--:--"
+            val knownDuration = recording.durationMs.takeIf { it > 0 }
+                ?: durationCache.get(recording.path)
+            tvDuration.text = knownDuration
+                ?.let { recording.copy(durationMs = it).formattedDuration }
+                ?: "--:--"
             tvSize.text = recording.formattedSize
             tvFilename?.text = recording.file.name
             tvEventTitle?.text = RecordingUiText.headline(itemView.context, recording)
@@ -239,6 +251,7 @@ class RecordingAdapter(
 
             // Load thumbnail
             loadThumbnail(recording)
+            if (knownDuration == null) loadDuration(recording)
             
             if (selectMode) {
                 cbSelect.visibility = View.VISIBLE
@@ -383,10 +396,46 @@ class RecordingAdapter(
                 null
             }
         }
+
+        private fun loadDuration(recording: RecordingFile) {
+            val path = recording.path
+            if (!durationLoads.add(path)) return
+
+            CoroutineScope(Dispatchers.IO).launch {
+                val durationMs = extractDuration(path)
+                if (durationMs > 0) durationCache.put(path, durationMs)
+                durationLoads.remove(path)
+
+                if (durationMs > 0) withContext(Dispatchers.Main) {
+                    if (bindingAdapterPosition != RecyclerView.NO_POSITION &&
+                        getItem(bindingAdapterPosition).path == path) {
+                        tvDuration.text = recording.copy(durationMs = durationMs).formattedDuration
+                    }
+                    onDurationResolved?.invoke(path, durationMs)
+                }
+            }
+        }
+
+        private fun extractDuration(path: String): Long {
+            val retriever = MediaMetadataRetriever()
+            return try {
+                retriever.setDataSource(path)
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull()
+                    ?.takeIf { it > 0 }
+                    ?: 0L
+            } catch (_: Exception) {
+                0L
+            } finally {
+                runCatching { retriever.release() }
+            }
+        }
     }
     
     fun clearCache() {
         thumbnailCache.evictAll()
+        durationCache.evictAll()
+        durationLoads.clear()
     }
     
     private class RecordingDiffCallback : DiffUtil.ItemCallback<RecordingFile>() {
