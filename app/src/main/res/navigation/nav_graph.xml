@@ -30,7 +30,7 @@
     <fragment
         android:id="@+id/recordingsFragment"
         android:name="com.overdrive.app.ui.fragment.RecordingsFragment"
-        android:label="@string/rail_recordings"
+        android:label="@string/recordings_title_in_car"
         tools:layout="@layout/fragment_recordings">
         <argument
             android:name="today_only"

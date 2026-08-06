@@ -58,14 +58,20 @@ public class RecordingsLandscapeAssetTest {
     public void selectedRecordingPaneKeepsPlayerAndContextTogether() throws IOException {
         String page = readRepositoryFile(
                 "app/src/main/res/layout-land/fragment_recordings.xml");
+        String metadata = readRepositoryFile(
+                "app/src/main/res/layout-land/recording_preview_metadata.xml");
         String host = readRepositoryFile(
                 "app/src/main/java/com/overdrive/app/ui/fragment/RecordingsFragment.kt");
 
         assertTrue(page.contains("android:id=\"@+id/previewContent\""));
         assertTrue(page.contains("android:id=\"@+id/previewContainer\""));
-        assertTrue(page.contains("android:id=\"@+id/tvPreviewDetectedValue\""));
-        assertTrue(page.contains("android:id=\"@+id/tvPreviewSeverityValue\""));
-        assertTrue(page.contains("android:id=\"@+id/previewDetails\""));
+        assertTrue(page.contains("layout=\"@layout/recording_preview_metadata\""));
+        assertTrue(metadata.contains("android:id=\"@+id/tvPreviewDetectedValue\""));
+        assertTrue(metadata.contains("android:id=\"@+id/tvPreviewDistanceValue\""));
+        assertTrue(metadata.contains("android:id=\"@+id/previewDetails\""));
+        assertTrue(metadata.contains("@drawable/ic_recording_person"));
+        assertTrue(metadata.contains("@drawable/ic_recording_storage"));
+        assertTrue(metadata.contains("@drawable/ic_recording_file"));
         assertTrue(host.contains("putBoolean(VideoPlayerFragment.ARG_COMPACT_INLINE, true)"));
         assertTrue(host.contains("showInlinePreview(first, startPaused = true)"));
     }
@@ -80,10 +86,12 @@ public class RecordingsLandscapeAssetTest {
         assertTrue(dateCard >= 0);
         String dateCardBlock = page.substring(
                 dateCard, Math.min(dateCard + 320, page.length()));
-        assertTrue(dateCardBlock.contains("android:layout_width=\"200dp\""));
+        assertTrue(dateCardBlock.contains("android:layout_width=\"150dp\""));
         assertFalse(dateCardBlock.contains("android:layout_weight"));
-        assertTrue(page.contains("android:layout_weight=\"13\""));
-        assertTrue(page.contains("android:layout_weight=\"7\""));
+        assertTrue(page.contains("android:id=\"@+id/segmentAll\""));
+        assertTrue(page.contains("android:layout_weight=\"12\""));
+        assertTrue(page.contains("android:layout_weight=\"8\""));
+        assertTrue(page.contains("android:visibility=\"gone\""));
     }
 
     @Test

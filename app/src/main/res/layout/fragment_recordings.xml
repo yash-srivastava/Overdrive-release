@@ -138,20 +138,33 @@
             android:orientation="vertical"
             android:padding="12dp">
 
-        <!-- Row 1: Dashcam | Replays | Surveillance segmented control -->
+        <!-- Row 1: All | Dashcam | Replays | Surveillance segmented control -->
         <com.google.android.material.button.MaterialButtonToggleGroup
             android:id="@+id/segmentedSource"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            app:checkedButton="@id/segmentDashcam"
+            app:checkedButton="@id/segmentAll"
             app:singleSelection="true"
             app:selectionRequired="true">
 
-            <!-- Three weight-1 segments must share the card width with the
+            <!-- Four weight-1 segments must share the card width with the
                  runtime count labels ("Surveillance · 45"). Compact insets
                  (12dp vs the M3 default 24dp), 12sp single-line ellipsized
                  text keep the longest label from wrapping/clipping inside
                  the fixed 44dp height on the portrait head unit. -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/segmentAll"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="44dp"
+                android:text="@string/recordings_segment_all"
+                android:textAllCaps="false"
+                android:textSize="12sp"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:paddingHorizontal="8dp" />
+
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/segmentDashcam"
                 style="@style/Widget.Material3.Button.OutlinedButton"

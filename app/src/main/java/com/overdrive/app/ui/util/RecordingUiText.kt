@@ -45,7 +45,7 @@ object RecordingUiText {
         }
     }
 
-    fun actorAndDistance(context: Context, recording: RecordingFile): String? {
+    fun actorSummary(context: Context, recording: RecordingFile): String? {
         val parts = mutableListOf<String>()
         if (recording.personCount > 0) {
             parts += context.resources.getQuantityString(
@@ -76,18 +76,27 @@ object RecordingUiText {
             )
         }
 
+        return parts.takeIf { it.isNotEmpty() }?.joinToString(" \u00B7 ")
+    }
+
+    fun distanceLabel(context: Context, recording: RecordingFile): String? =
         when (RecordingPresentationResolver.resolve(recording).distance) {
             RecordingPresentation.Distance.VERY_CLOSE ->
-                parts += context.getString(R.string.recording_distance_very_close)
+                context.getString(R.string.recording_distance_very_close)
             RecordingPresentation.Distance.CLOSE ->
-                parts += context.getString(R.string.recording_distance_close)
+                context.getString(R.string.recording_distance_close)
             RecordingPresentation.Distance.MID ->
-                parts += context.getString(R.string.recording_distance_mid)
+                context.getString(R.string.recording_distance_mid)
             RecordingPresentation.Distance.FAR ->
-                parts += context.getString(R.string.recording_distance_far)
-            null -> Unit
+                context.getString(R.string.recording_distance_far)
+            null -> null
         }
 
+    fun actorAndDistance(context: Context, recording: RecordingFile): String? {
+        val parts = listOfNotNull(
+            actorSummary(context, recording),
+            distanceLabel(context, recording)
+        )
         return parts.takeIf { it.isNotEmpty() }?.joinToString(" \u00B7 ")
     }
 }

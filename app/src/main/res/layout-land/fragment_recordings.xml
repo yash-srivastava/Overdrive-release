@@ -37,7 +37,8 @@
         android:orientation="vertical"
         android:paddingHorizontal="@dimen/page_padding_horizontal"
         android:paddingTop="@dimen/page_padding_top"
-        android:paddingBottom="6dp">
+        android:paddingBottom="6dp"
+        android:visibility="gone">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -150,6 +151,7 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:paddingHorizontal="@dimen/page_padding_horizontal"
+        android:paddingTop="12dp"
         android:paddingBottom="6dp">
 
         <!-- Row B: segmented control + date jump -->
@@ -164,9 +166,29 @@
                 android:id="@+id/segmentedSource"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                app:checkedButton="@id/segmentDashcam"
+                app:checkedButton="@id/segmentAll"
                 app:singleSelection="true"
                 app:selectionRequired="true">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/segmentAll"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:text="@string/recordings_segment_all"
+                    android:textAllCaps="false" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/segmentSurveillance"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:text="@string/recordings_segment_surveillance"
+                    android:textAllCaps="false"
+                    app:icon="@drawable/ic_sentry"
+                    app:iconSize="16dp"
+                    app:iconGravity="textStart"
+                    app:iconPadding="6dp" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/segmentDashcam"
@@ -194,17 +216,6 @@
                     app:iconGravity="textStart"
                     app:iconPadding="6dp" />
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/segmentSurveillance"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="48dp"
-                    android:text="@string/recordings_segment_surveillance"
-                    android:textAllCaps="false"
-                    app:icon="@drawable/ic_sentry"
-                    app:iconSize="16dp"
-                    app:iconGravity="textStart"
-                    app:iconPadding="6dp" />
             </com.google.android.material.button.MaterialButtonToggleGroup>
 
             <!-- Keep the date/filter cluster compact and right-aligned. The
@@ -224,6 +235,7 @@
                 android:layout_height="48dp"
                 android:layout_marginStart="12dp"
                 android:contentDescription="@string/cd_previous_day"
+                android:visibility="gone"
                 app:icon="@drawable/ic_chevron_left"
                 app:iconSize="22dp"
                 app:iconTint="?attr/colorOnSurfaceVariant"
@@ -232,7 +244,7 @@
 
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/cardDateJump"
-                android:layout_width="200dp"
+                android:layout_width="150dp"
                 android:layout_height="48dp"
                 android:layout_marginHorizontal="6dp"
                 android:clickable="true"
@@ -307,6 +319,7 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:contentDescription="@string/cd_next_day"
+                android:visibility="gone"
                 app:icon="@drawable/ic_chevron_right"
                 app:iconSize="22dp"
                 app:iconTint="?attr/colorOnSurfaceVariant"
@@ -691,7 +704,7 @@
             android:id="@+id/libraryContainer"
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="13" />
+            android:layout_weight="12" />
 
         <View
             android:id="@+id/paneSpacer"
@@ -706,7 +719,7 @@
             android:id="@+id/previewCard"
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="7"
+            android:layout_weight="8"
             app:cardBackgroundColor="?attr/colorSurfaceContainer"
             app:cardCornerRadius="@dimen/card_radius_hero"
             app:cardElevation="0dp">
@@ -810,198 +823,12 @@
                         android:background="@android:color/black"
                         android:minHeight="184dp" />
 
-                    <LinearLayout
+                    <include
                         android:id="@+id/previewInsights"
+                        layout="@layout/recording_preview_metadata"
                         android:layout_width="match_parent"
-                        android:layout_height="60dp"
-                        android:layout_marginTop="6dp"
-                        android:baselineAligned="false"
-                        android:orientation="horizontal">
-
-                        <com.google.android.material.card.MaterialCardView
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_marginEnd="5dp"
-                            android:layout_weight="1"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                            app:cardCornerRadius="12dp"
-                            app:cardElevation="0dp">
-
-                            <LinearLayout
-                                android:layout_width="match_parent"
-                                android:layout_height="match_parent"
-                                android:gravity="center_vertical"
-                                android:orientation="vertical"
-                                android:paddingHorizontal="14dp">
-
-                                <TextView
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:text="@string/recording_preview_detected"
-                                    android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                                    android:textColor="?attr/colorOnSurfaceVariant" />
-
-                                <TextView
-                                    android:id="@+id/tvPreviewDetectedValue"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="2dp"
-                                    android:ellipsize="end"
-                                    android:maxLines="1"
-                                    android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
-                                    android:textColor="?attr/colorOnSurface"
-                                    tools:text="1 person · Very close" />
-                            </LinearLayout>
-                        </com.google.android.material.card.MaterialCardView>
-
-                        <com.google.android.material.card.MaterialCardView
-                            android:layout_width="0dp"
-                            android:layout_height="match_parent"
-                            android:layout_marginStart="5dp"
-                            android:layout_weight="1"
-                            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                            app:cardCornerRadius="12dp"
-                            app:cardElevation="0dp">
-
-                            <LinearLayout
-                                android:layout_width="match_parent"
-                                android:layout_height="match_parent"
-                                android:gravity="center_vertical"
-                                android:orientation="vertical"
-                                android:paddingHorizontal="14dp">
-
-                                <TextView
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:text="@string/recording_preview_severity"
-                                    android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-                                    android:textColor="?attr/colorOnSurfaceVariant" />
-
-                                <TextView
-                                    android:id="@+id/tvPreviewSeverityValue"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="2dp"
-                                    android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
-                                    android:textColor="?attr/colorOnSurface"
-                                    tools:text="Critical" />
-                            </LinearLayout>
-                        </com.google.android.material.card.MaterialCardView>
-                    </LinearLayout>
-
-                    <com.google.android.material.card.MaterialCardView
-                        android:id="@+id/previewDetails"
-                        android:layout_width="match_parent"
-                        android:layout_height="68dp"
-                        android:layout_marginTop="6dp"
-                        app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                        app:cardCornerRadius="12dp"
-                        app:cardElevation="0dp">
-
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="match_parent"
-                            android:baselineAligned="false"
-                            android:orientation="horizontal"
-                            android:paddingHorizontal="14dp"
-                            android:paddingVertical="8dp">
-
-                            <LinearLayout
-                                android:layout_width="0dp"
-                                android:layout_height="match_parent"
-                                android:layout_weight="1.45"
-                                android:orientation="vertical">
-
-                                <TextView
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:text="@string/recording_preview_recorded"
-                                    android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
-                                    android:textColor="?attr/colorOnSurfaceVariant" />
-
-                                <TextView
-                                    android:id="@+id/tvPreviewRecordedValue"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:ellipsize="end"
-                                    android:maxLines="1"
-                                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                                    android:textColor="?attr/colorOnSurface"
-                                    tools:text="Aug 2, 2026  4:39 PM" />
-                            </LinearLayout>
-
-                            <LinearLayout
-                                android:layout_width="0dp"
-                                android:layout_height="match_parent"
-                                android:layout_marginStart="12dp"
-                                android:layout_weight="0.7"
-                                android:orientation="vertical">
-
-                                <TextView
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:text="@string/recording_preview_duration"
-                                    android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
-                                    android:textColor="?attr/colorOnSurfaceVariant" />
-
-                                <TextView
-                                    android:id="@+id/tvPreviewDurationValue"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                                    android:textColor="?attr/colorOnSurface"
-                                    tools:text="0:10" />
-                            </LinearLayout>
-
-                            <LinearLayout
-                                android:layout_width="0dp"
-                                android:layout_height="match_parent"
-                                android:layout_marginStart="12dp"
-                                android:layout_weight="0.9"
-                                android:orientation="vertical">
-
-                                <TextView
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:text="@string/recording_preview_storage"
-                                    android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
-                                    android:textColor="?attr/colorOnSurfaceVariant" />
-
-                                <TextView
-                                    android:id="@+id/tvPreviewStorageValue"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:ellipsize="end"
-                                    android:maxLines="1"
-                                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                                    android:textColor="?attr/colorOnSurface"
-                                    tools:text="Internal" />
-                            </LinearLayout>
-
-                            <LinearLayout
-                                android:layout_width="0dp"
-                                android:layout_height="match_parent"
-                                android:layout_marginStart="12dp"
-                                android:layout_weight="0.7"
-                                android:orientation="vertical">
-
-                                <TextView
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:text="@string/recording_preview_file_size"
-                                    android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
-                                    android:textColor="?attr/colorOnSurfaceVariant" />
-
-                                <TextView
-                                    android:id="@+id/tvPreviewSizeValue"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                                    android:textColor="?attr/colorOnSurface"
-                                    tools:text="6.0 MB" />
-                            </LinearLayout>
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
+                        android:layout_height="176dp"
+                        android:layout_marginTop="8dp" />
                 </LinearLayout>
 
                 <LinearLayout

@@ -62,7 +62,7 @@ import java.util.concurrent.Executors
 class RecordingsFragment : Fragment() {
 
     private var libraryFragment: RecordingLibraryFragment? = null
-    private var currentSource: Source = Source.DASHCAM
+    private var currentSource: Source = Source.ALL
 
     // -------- Filter state owned at this level --------
     private val actorClassFilter = mutableSetOf<String>()  // lowercase
@@ -188,7 +188,7 @@ class RecordingsFragment : Fragment() {
      */
     private val pendingPosts = mutableListOf<Runnable>()
 
-    enum class Source { DASHCAM, REPLAYS, SURVEILLANCE }
+    enum class Source { ALL, DASHCAM, REPLAYS, SURVEILLANCE }
 
     private val isLandscape: Boolean
         get() = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -206,7 +206,7 @@ class RecordingsFragment : Fragment() {
         savedInstanceState?.let { state ->
             currentSource = state.getString(KEY_SOURCE)
                 ?.let { runCatching { Source.valueOf(it) }.getOrNull() }
-                ?: Source.DASHCAM
+                ?: Source.ALL
             state.getStringArray(KEY_ACTORS)?.let { actorClassFilter.addAll(it) }
             state.getStringArray(KEY_SEVERITY)?.let { severityFilter.addAll(it) }
             state.getStringArray(KEY_DASHCAM_TYPES)?.let { dashcamTypes.addAll(it) }
@@ -445,6 +445,12 @@ class RecordingsFragment : Fragment() {
         val actors: Set<String>
         val severities: Set<String>
         when (currentSource) {
+            Source.ALL -> {
+                source = RecordingLibraryFragment.RecordingFilter.ALL
+                extra = null
+                actors = emptySet()
+                severities = emptySet()
+            }
             Source.DASHCAM -> {
                 // Derive type narrowing from the user's chip toggles. Empty
                 // OR both = show NORMAL + PROXIMITY (the default Dashcam
@@ -661,15 +667,11 @@ class RecordingsFragment : Fragment() {
             )
         }
         root.findViewById<TextView>(R.id.tvPreviewDetectedValue)?.text =
-            RecordingUiText.actorAndDistance(hostContext, recording)
+            RecordingUiText.actorSummary(hostContext, recording)
                 ?: getString(R.string.recording_preview_no_detection)
-        root.findViewById<TextView>(R.id.tvPreviewSeverityValue)?.text = when {
-            severity != null -> severity.lowercase(Locale.ROOT).replaceFirstChar { it.titlecase(Locale.ROOT) }
-            recording.type == RecordingFile.RecordingType.SENTRY ||
-                recording.type == RecordingFile.RecordingType.PROXIMITY ->
-                getString(R.string.recording_preview_notice)
-            else -> getString(R.string.recording_preview_standard)
-        }
+        root.findViewById<TextView>(R.id.tvPreviewDistanceValue)?.text =
+            RecordingUiText.distanceLabel(hostContext, recording)
+                ?: getString(R.string.recording_preview_not_available)
         root.findViewById<TextView>(R.id.tvPreviewRecordedValue)?.text =
             SimpleDateFormat("MMM d, yyyy  h:mm a", Locale.getDefault())
                 .format(Date(recording.timestamp))
@@ -788,13 +790,17 @@ class RecordingsFragment : Fragment() {
             }
         }
 
-        fadeAndToggle(header, !fullscreen)
+        // The landscape page title now lives in the app toolbar, matching the
+        // single-header reference. Keep the legacy portrait-equivalent hero
+        // hidden when leaving fullscreen instead of resurrecting a duplicate
+        // title/search row.
+        header.visibility = View.GONE
         fadeAndToggle(filterStrip, !fullscreen)
 
         // Collapse the library column without detaching its fragment.
         val params = library.layoutParams as? LinearLayout.LayoutParams
         if (params != null) {
-            params.weight = if (fullscreen) 0f else 11f
+            params.weight = if (fullscreen) 0f else 12f
             params.width = 0
             library.layoutParams = params
         }
@@ -833,6 +839,7 @@ class RecordingsFragment : Fragment() {
     private fun setupSegmentedControl(view: View) {
         val group = view.findViewById<MaterialButtonToggleGroup>(R.id.segmentedSource)
         when (currentSource) {
+            Source.ALL -> group.check(R.id.segmentAll)
             Source.DASHCAM -> group.check(R.id.segmentDashcam)
             Source.REPLAYS -> group.check(R.id.segmentReplays)
             Source.SURVEILLANCE -> group.check(R.id.segmentSurveillance)
@@ -845,6 +852,7 @@ class RecordingsFragment : Fragment() {
             // this flag before calling group.check as well.
             autoSelectTodaySource = false
             currentSource = when (checkedId) {
+                R.id.segmentAll -> Source.ALL
                 R.id.segmentSurveillance -> Source.SURVEILLANCE
                 R.id.segmentReplays -> Source.REPLAYS
                 else -> Source.DASHCAM
@@ -876,6 +884,7 @@ class RecordingsFragment : Fragment() {
      * `rowSeverityFilter`. The null-safe `findViewById` handles both cases.
      */
     private fun applyChipRowVisibility(view: View) {
+        val isAll = currentSource == Source.ALL
         val isDashcam = currentSource == Source.DASHCAM
         // Replays: single type, no actor/severity sidecars — every chip row
         // is meaningless, so hide all three (place/storage/date still apply
@@ -883,7 +892,7 @@ class RecordingsFragment : Fragment() {
         val isReplays = currentSource == Source.REPLAYS
         val showAdvanced = !isLandscape || filtersExpanded
         view.findViewById<View>(R.id.rowPrimaryFilters)?.visibility =
-            if (showAdvanced && !isReplays) View.VISIBLE else View.GONE
+            if (showAdvanced && !isAll && !isReplays) View.VISIBLE else View.GONE
         view.findViewById<View>(R.id.rowTypeFilter)?.visibility =
             if (showAdvanced && isDashcam) View.VISIBLE else View.GONE
         view.findViewById<View>(R.id.rowWhatFilter)?.visibility =
@@ -914,7 +923,7 @@ class RecordingsFragment : Fragment() {
             val target = when (currentSource) {
                 // Replays are produced by the dashcam encoder's pre-record
                 // ring; their knobs live on the same recording settings page.
-                Source.DASHCAM, Source.REPLAYS -> R.id.recordingSettingsWebFragment
+                Source.ALL, Source.DASHCAM, Source.REPLAYS -> R.id.recordingSettingsWebFragment
                 Source.SURVEILLANCE -> R.id.surveillanceSettingsWebFragment
             }
             findNavController().navigate(target)
@@ -1148,6 +1157,7 @@ class RecordingsFragment : Fragment() {
         // active-filter affordance regardless of the current source.
         val storageActive = storageFilter.isNotEmpty()
         val chipsActive = storageActive || when (currentSource) {
+            Source.ALL -> placeFilter.isNotEmpty() || searchActive
             Source.DASHCAM -> dashcamTypes.isNotEmpty() || placeFilter.isNotEmpty() || searchActive
             Source.REPLAYS -> placeFilter.isNotEmpty() || searchActive
             Source.SURVEILLANCE -> actorClassFilter.isNotEmpty()
@@ -1176,6 +1186,7 @@ class RecordingsFragment : Fragment() {
 
     private fun activeFilterCount(): Int {
         val segmentCount = when (currentSource) {
+            Source.ALL -> 0
             Source.DASHCAM -> dashcamTypes.size
             Source.REPLAYS -> 0
             Source.SURVEILLANCE -> actorClassFilter.size + severityFilter.size
@@ -1382,6 +1393,7 @@ class RecordingsFragment : Fragment() {
                 val totalToday = dashcamStats.today + replayStats.today + surveillanceStats.today
                 val totalBytes = dashcamStats.bytes + replayStats.bytes + surveillanceStats.bytes
                 val segmentClips = when (sourceAtDispatch) {
+                    Source.ALL -> all
                     Source.DASHCAM -> dashcam
                     Source.REPLAYS -> replays
                     Source.SURVEILLANCE -> surveillance
@@ -1453,7 +1465,8 @@ class RecordingsFragment : Fragment() {
      * Dashcam segment passes "normal" plus we sum normalCount + proximityCount
      * for the badge. Sentry is its own bucket.
      */
-    private fun Source.toApiType(): String = when (this) {
+    private fun Source.toApiType(): String? = when (this) {
+        Source.ALL -> null
         Source.DASHCAM -> "normal"
         Source.REPLAYS -> "replay"
         Source.SURVEILLANCE -> "sentry"
@@ -1484,6 +1497,7 @@ class RecordingsFragment : Fragment() {
         if (target == currentSource) return
 
         val targetId = when (target) {
+            Source.ALL -> R.id.segmentAll
             Source.DASHCAM -> R.id.segmentDashcam
             Source.REPLAYS -> R.id.segmentReplays
             Source.SURVEILLANCE -> R.id.segmentSurveillance
@@ -1574,6 +1588,12 @@ class RecordingsFragment : Fragment() {
                     else activeCtx.getString(
                         R.string.recordings_segment_surveillance_count,
                         surveillanceCount.toInt()
+                    )
+                v.findViewById<MaterialButton>(R.id.segmentAll)?.text =
+                    if (indexDown) activeCtx.getString(R.string.recordings_segment_all)
+                    else activeCtx.getString(
+                        R.string.recordings_segment_all_count,
+                        totalCount.toInt()
                     )
 
                 availablePlaces = sortedPlaces

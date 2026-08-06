@@ -982,6 +982,7 @@
     <!-- Recordings page (header + segmented control + page actions) -->
     <string name="recordings_title">Recordings</string>
     <string name="recordings_title_in_car">In-Car Recordings</string>
+    <string name="recordings_segment_all">All</string>
     <string name="recordings_segment_dashcam">Dashcam</string>
     <string name="recordings_segment_replays">Replays</string>
     <string name="recordings_segment_surveillance">Surveillance</string>
@@ -998,6 +999,7 @@
     <string name="recordings_segment_dashcam_count">Dashcam · %d</string>
     <string name="recordings_segment_replays_count">Replays · %d</string>
     <string name="recordings_segment_surveillance_count">Surveillance · %d</string>
+    <string name="recordings_segment_all_count">All · %d</string>
     <!-- Layout-time placeholder for the counts subtitle before the scan completes. -->
     <string name="recordings_summary_pending">—</string>
     <!-- Landscape recordings preview placeholder (right pane). -->
@@ -1005,6 +1007,8 @@
     <string name="recordings_preview_placeholder_body">Tap any item on the left to play it.</string>
     <string name="recording_preview_detected">Detected</string>
     <string name="recording_preview_no_detection">No detection</string>
+    <string name="recording_preview_not_available">—</string>
+    <string name="recording_preview_distance">Distance</string>
     <string name="recording_preview_severity">Severity</string>
     <string name="recording_preview_notice">Notice</string>
     <string name="recording_preview_standard">Standard</string>
