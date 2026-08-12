@@ -15,12 +15,10 @@ import android.util.TypedValue
 import androidx.annotation.AttrRes
 import androidx.annotation.WorkerThread
 import com.overdrive.app.R
-import com.overdrive.app.ui.model.RecordingFile
-import com.overdrive.app.ui.util.RecordingScanner
+import com.overdrive.app.ui.util.RecordingsApiClient
 import com.overdrive.app.util.DaemonHttpClient
 import org.json.JSONObject
 import java.net.HttpURLConnection
-import java.util.Calendar
 
 /**
  * One row in the rotating dashboard hero subtitle.
@@ -73,15 +71,21 @@ class DashboardInsightProvider(appContext: Context) {
             androidx.appcompat.R.attr.colorPrimary,
             fallback = 0
         )
+        val recordingStats = fetchRecordingStats()
+        val newestSentryTimestamp = fetchNewestSentryTimestamp()
 
         val insights = mutableListOf<DashboardInsight>()
 
         welcomeInsight(visitCountBefore)?.let { insights += it }
         parkingDeltaInsight(emphasisColor)?.let { insights += it }
-        lastSurveillanceInsight(emphasisColor)?.let { insights += it }
+        lastSurveillanceInsight(emphasisColor, newestSentryTimestamp)?.let { insights += it }
         chargingRecapInsight(emphasisColor)?.let { insights += it }
-        todaysClipsInsight(emphasisColor)?.let { insights += it }
-        storageMilestoneInsight(emphasisColor)?.let { insights += it }
+        todaysClipsInsight(emphasisColor, recordingStats?.totalToday)?.let { insights += it }
+        storageMilestoneInsight(
+            emphasisColor,
+            recordingStats?.totalCount,
+            recordingStats?.totalSize
+        )?.let { insights += it }
         uptimeInsight(emphasisColor)?.let { insights += it }
 
         // Deterministic order by priority, but tie-break randomly so back-to-back
@@ -154,18 +158,11 @@ class DashboardInsightProvider(appContext: Context) {
     }
 
     /** "Last surveillance alert: 2 hours ago" — only when an event ≤ 7 days old exists. */
-    private fun lastSurveillanceInsight(emphasisColor: Int): DashboardInsight? {
-        // Use the shared scanner so the dashboard agrees with the recordings
-        // page on what "surveillance" means (covers active + alternate +
-        // legacy paths, picks the parsed-from-filename timestamp not mtime).
-        val newest = try {
-            RecordingScanner.scanRecordings(ctx)
-                .asSequence()
-                .filter { it.type == RecordingFile.RecordingType.SENTRY }
-                .maxOfOrNull { it.timestamp } ?: 0L
-        } catch (_: Throwable) {
-            return null
-        }
+    private fun lastSurveillanceInsight(
+        emphasisColor: Int,
+        newest: Long?
+    ): DashboardInsight? {
+        if (newest == null) return null
         if (newest <= 0L) return null
         val ageMs = System.currentTimeMillis() - newest
         if (ageMs <= 0L || ageMs > 7L * 24 * 60 * 60 * 1000L) return null
@@ -203,18 +200,12 @@ class DashboardInsightProvider(appContext: Context) {
     }
 
     /** "12 clips recorded today" — only when count > 0. */
-    private fun todaysClipsInsight(emphasisColor: Int): DashboardInsight? {
-        val startOfDay = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }.timeInMillis
-        val n = try {
-            RecordingScanner.scanRecordings(ctx).count { it.timestamp >= startOfDay }
-        } catch (_: Throwable) {
-            return null
-        }
+    private fun todaysClipsInsight(
+        emphasisColor: Int,
+        todayCount: Long?
+    ): DashboardInsight? {
+        if (todayCount == null || todayCount > Int.MAX_VALUE) return null
+        val n = todayCount.toInt()
         if (n <= 0) return null
         val template = ctx.resources.getQuantityString(
             R.plurals.dashboard_insight_today_clips, n, n
@@ -226,14 +217,12 @@ class DashboardInsightProvider(appContext: Context) {
     }
 
     /** "320 clips · 42 GB recorded" — only when total clips > 50. */
-    private fun storageMilestoneInsight(emphasisColor: Int): DashboardInsight? {
-        val all = try {
-            RecordingScanner.scanRecordings(ctx)
-        } catch (_: Throwable) {
-            return null
-        }
-        val totalClips = all.size
-        val totalBytes = all.sumOf { it.sizeBytes }
+    private fun storageMilestoneInsight(
+        emphasisColor: Int,
+        totalClips: Long?,
+        totalBytes: Long?
+    ): DashboardInsight? {
+        if (totalClips == null || totalBytes == null) return null
         if (totalClips <= 50) return null
         if (totalBytes <= 0L) return null
         val sizeStr = Formatter.formatShortFileSize(ctx, totalBytes)
@@ -274,6 +263,30 @@ class DashboardInsightProvider(appContext: Context) {
     }
 
     // ============== Helpers ==============
+
+    private fun fetchRecordingStats(): RecordingsApiClient.StatsPayload? {
+        return try {
+            RecordingsApiClient.fetchStats()?.takeUnless {
+                it.indexUnavailable || it.warming
+            }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun fetchNewestSentryTimestamp(): Long? {
+        return try {
+            val page = RecordingsApiClient.fetchRecordings(
+                RecordingsApiClient.Filter(type = "sentry"),
+                page = 1,
+                pageSize = 1
+            ) ?: return null
+            if (page.indexUnavailable || page.warming) return null
+            page.recordings.firstOrNull()?.timestamp
+        } catch (_: Throwable) {
+            null
+        }
+    }
 
     /**
      * GET against the in-process daemon. Returns null on any error (timeout,

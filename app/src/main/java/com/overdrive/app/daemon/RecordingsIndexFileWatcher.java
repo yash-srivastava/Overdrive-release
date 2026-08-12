@@ -218,7 +218,7 @@ public final class RecordingsIndexFileWatcher {
                         RecordingsIndex.getInstance().upsert(f);
                     }
                 } else if ((action & (FileObserver.DELETE | FileObserver.MOVED_FROM)) != 0) {
-                    RecordingsIndex.getInstance().remove(path);
+                    RecordingsIndex.getInstance().removeByPath(new File(dir, path).getAbsolutePath());
                 }
             } else if (path.endsWith(".json")
                     && (action & FileObserver.MODIFY) != 0) {

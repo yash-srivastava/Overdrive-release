@@ -12,7 +12,6 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.Observer
@@ -31,12 +30,11 @@ import com.overdrive.app.ui.model.DaemonStatus
 import com.overdrive.app.ui.model.DaemonType
 import com.overdrive.app.ui.model.localizedName
 import com.overdrive.app.ui.util.QrCodeGenerator
-import com.overdrive.app.ui.util.RecordingScanner
+import com.overdrive.app.ui.util.RecordingsApiClient
 import com.overdrive.app.ui.viewmodel.DaemonsViewModel
 import com.overdrive.app.ui.viewmodel.MainViewModel
 import com.overdrive.app.ui.viewmodel.RecordingViewModel
 import com.overdrive.app.util.DeviceIdGenerator
-import java.util.Calendar
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -111,7 +109,7 @@ class DashboardFragment : Fragment() {
 
     // Latest values cached so the recording-state observer (which fires on its
     // own cadence) can re-render without re-walking the disk.
-    @Volatile private var todayClipCount: Int = 0
+    @Volatile private var todayClipCount: Int = -1
 
     // ============== Hero subtitle insights carousel ==============
     //
@@ -173,15 +171,8 @@ class DashboardFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
-        // Cheap-but-not-free disk walk: refresh on every resume so the storage
-        // and today's-clip-count numbers update after the user records, deletes,
-        // or sentry events fire while the dashboard wasn't on screen.
-        //
-        // Drop the scanner cache first — deletions in other fragments don't
-        // notify the dashboard, so without this the tile and the carousel
-        // could read up to 5s of stale data after the user navigates back
-        // from the recordings page.
-        RecordingScanner.invalidateCache()
+        // Refresh indexed recording statistics on every return so new and
+        // deleted clips are reflected without materializing the full library.
         refreshMetricsTiles()
         refreshVehicleTile()
         // Always rebuild the insight list on resume — data may have changed
@@ -327,34 +318,25 @@ class DashboardFragment : Fragment() {
     // ============== Metric tiles (storage + today's recordings) ==============
 
     /**
-     * Walks the recordings directories on a background thread via the
-     * shared [RecordingScanner], then posts today's clip count back.
-     *
-     * Uses the same source-of-truth as [RecordingsFragment] so the dashboard
-     * tile and the recordings page can never disagree. The scanner already
-     * walks active + alternate + legacy paths for cam_* / surveillance /
-     * proximity, dedupes by filename, and exposes parsed-from-filename
-     * timestamps — counting via mtime here would have missed every clip
-     * whose file was copied after capture (different mtime than filename).
+     * Reads today's clip count from the daemon's indexed stats endpoint on a
+     * background thread, then posts it to the tile. An unavailable or warming
+     * index leaves the last known value intact instead of rendering a false zero.
      */
     private fun refreshMetricsTiles() {
-        val ctx = context?.applicationContext ?: return
+        if (context == null) return
         val executor = metricsExecutor ?: Executors.newSingleThreadExecutor()
             .also { metricsExecutor = it }
 
         executor.execute {
-            var clipCountToday = 0
-            try {
-                val startOfDayMs = Calendar.getInstance().apply {
-                    set(Calendar.HOUR_OF_DAY, 0)
-                    set(Calendar.MINUTE, 0)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }.timeInMillis
-                clipCountToday = RecordingScanner.scanRecordings(ctx)
-                    .count { it.timestamp >= startOfDayMs }
+            val clipCountToday = try {
+                val stats = RecordingsApiClient.fetchStats()
+                DashboardRecordingMetricPolicy.authoritativeTodayCount(
+                    indexUnavailable = stats?.indexUnavailable ?: true,
+                    warming = stats?.warming ?: false,
+                    totalToday = stats?.totalToday ?: 0L
+                )
             } catch (_: Throwable) {
-                // Leave defaults — still post so the tile updates off "—".
+                null
             }
 
             mainHandler.post {
@@ -366,7 +348,9 @@ class DashboardFragment : Fragment() {
                 // width. Storage lives in its own surfaces.
                 metricStorageValue.text = getString(R.string.dashboard_metric_recordings)
 
-                todayClipCount = clipCountToday
+                if (clipCountToday != null) {
+                    todayClipCount = clipCountToday
+                }
                 renderRecordingsValue()
             }
         }
@@ -380,11 +364,28 @@ class DashboardFragment : Fragment() {
      */
     private fun renderRecordingsValue() {
         if (!::metricRecordingsValue.isInitialized) return
+        if (todayClipCount < 0) {
+            metricRecordingsValue.setText(R.string.battery_health_dashes)
+            return
+        }
         val isRec = recordingViewModel.isRecording.value == true
         metricRecordingsValue.text = if (isRec) {
             getString(R.string.dashboard_recordings_value_live, todayClipCount)
         } else {
             todayClipCount.toString()
+        }
+    }
+
+    internal object DashboardRecordingMetricPolicy {
+        fun authoritativeTodayCount(
+            indexUnavailable: Boolean,
+            warming: Boolean,
+            totalToday: Long
+        ): Int? {
+            if (indexUnavailable || warming || totalToday < 0L || totalToday > Int.MAX_VALUE) {
+                return null
+            }
+            return totalToday.toInt()
         }
     }
 

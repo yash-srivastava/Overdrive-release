@@ -487,28 +487,6 @@ public class QualitySettingsApiHandler {
                 response.put("message", Messages.get("messages.quality_storage_settings_updated"));
             }
 
-            // Re-arm RecordingsIndex FileObservers against the new active dir
-            // set, AND walk the new active dir to populate the index. The
-            // refresh-only call would only catch live writes going forward —
-            // existing files on the new volume would be invisible to the
-            // index until the 1-hour periodic reconcile. Reconcile here fills
-            // them immediately. Run on a background thread so the HTTP
-            // response doesn't block on the FUSE walk.
-            if (storageTypeChanged) {
-                try {
-                    com.overdrive.app.daemon.RecordingsIndexFileWatcher.getInstance().refresh();
-                } catch (Throwable t) {
-                    CameraDaemon.log("RecordingsIndexFileWatcher refresh failed: " + t.getMessage());
-                }
-                new Thread(() -> {
-                    try {
-                        com.overdrive.app.server.RecordingsIndex.getInstance().reconcile();
-                    } catch (Throwable t) {
-                        CameraDaemon.log("Post-storage-switch reconcile failed: " + t.getMessage());
-                    }
-                }, "RecordingsIndexStorageSwitchReconcile").start();
-            }
-            
             HttpResponse.sendJson(out, response.toString());
             
         } catch (Exception e) {

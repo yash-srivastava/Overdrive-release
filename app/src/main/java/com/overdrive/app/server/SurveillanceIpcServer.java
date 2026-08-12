@@ -765,22 +765,6 @@ public class SurveillanceIpcServer implements Runnable {
                         sentry.setEventOutputDir(storageManager.getSurveillanceDir());
                         logger.info("Updated sentry output dir: " + storageManager.getSurveillanceDir().getAbsolutePath());
                     }
-                    // Re-arm FileObservers + reconcile the index against
-                    // the freshly-targeted volume. Refresh alone catches
-                    // future writes; reconcile pulls in existing files
-                    // that lived on the new volume already.
-                    try {
-                        com.overdrive.app.daemon.RecordingsIndexFileWatcher.getInstance().refresh();
-                    } catch (Throwable t) {
-                        logger.warn("RecordingsIndexFileWatcher refresh failed: " + t.getMessage());
-                    }
-                    new Thread(() -> {
-                        try {
-                            com.overdrive.app.server.RecordingsIndex.getInstance().reconcile();
-                        } catch (Throwable t) {
-                            logger.warn("Post-storage-switch reconcile failed: " + t.getMessage());
-                        }
-                    }, "RecordingsIndexStorageSwitchReconcile").start();
                 } else {
                     logger.warn("Failed to set surveillance storage to " + type + " - not available");
                 }

@@ -559,27 +559,6 @@ public class GpuMosaicRecorder {
                     logger.warn("Segment-rotated listener threw: " + t.getMessage());
                 }
             }
-            
-            // SOTA: Trigger storage cleanup after each file is saved
-            try {
-                com.overdrive.app.storage.StorageManager storageManager =
-                    com.overdrive.app.storage.StorageManager.getInstance();
-                
-                // Determine if this was a surveillance or manual recording based on output path
-                // Surveillance files go to surveillance dir, manual recordings to recordings dir
-                if (encoder != null) {
-                    String lastPath = encoder.getCurrentOutputPath();
-                    if (lastPath != null) {
-                        if (lastPath.contains("/surveillance/") || lastPath.contains("event_")) {
-                            storageManager.onSurveillanceFileSaved();
-                        } else {
-                            storageManager.onRecordingFileSaved();
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                logger.warn("Storage cleanup after file close failed: " + e.getMessage());
-            }
         });
         
         // Get encoder's input surface

@@ -17,8 +17,12 @@ import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.overdrive.app.ui.model.RecordingFile
 import com.overdrive.app.R
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -42,6 +46,8 @@ class RecordingAdapter(
     private val thumbnailCache = object : LruCache<String, Bitmap>(8 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
+    private var thumbnailScope = newThumbnailScope()
+    private var thumbnailLoads = newThumbnailCoordinator(thumbnailScope)
     
     // Multi-select state
     var selectMode = false
@@ -89,6 +95,30 @@ class RecordingAdapter(
     override fun onBindViewHolder(holder: RecordingViewHolder, position: Int) {
         holder.bind(getItem(position))
     }
+
+    override fun onViewRecycled(holder: RecordingViewHolder) {
+        holder.cancelThumbnailWait()
+        super.onViewRecycled(holder)
+    }
+
+    override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
+        if (!thumbnailScope.isActive) {
+            thumbnailScope = newThumbnailScope()
+            thumbnailLoads = newThumbnailCoordinator(thumbnailScope)
+        }
+        super.onAttachedToRecyclerView(recyclerView)
+    }
+
+    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        thumbnailScope.cancel()
+        super.onDetachedFromRecyclerView(recyclerView)
+    }
+
+    private fun newThumbnailScope(): CoroutineScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private fun newThumbnailCoordinator(scope: CoroutineScope) =
+        InFlightLoadCoordinator<String, Bitmap?>(scope, maxConcurrent = 2)
     
     inner class RecordingViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val ivThumbnail: ImageView = itemView.findViewById(R.id.ivThumbnail)
@@ -106,8 +136,10 @@ class RecordingAdapter(
         private val tvActorSummary: TextView? = itemView.findViewById(R.id.tvActorSummary)
         private val severityStripe: View? = itemView.findViewById(R.id.severityStripe)
         private val tvLocation: TextView? = itemView.findViewById(R.id.tvLocation)
+        private var thumbnailWaitJob: Job? = null
 
         fun bind(recording: RecordingFile) {
+            cancelThumbnailWait()
             tvCameraId.text = "C${recording.cameraId}"
             tvRecordingTime.text = recording.formattedTime
             tvDuration.text = if (recording.durationMs > 0) recording.formattedDuration else "--:--"
@@ -284,16 +316,23 @@ class RecordingAdapter(
 
             ivThumbnail.setImageResource(R.color.surface_variant)
 
-            CoroutineScope(Dispatchers.IO).launch {
-                // Prefer the hero JPEG written by ThumbnailBuffer next to the MP4.
-                // Falls back to MediaMetadataRetriever for legacy clips with no
-                // sidecar.
-                val thumbnail = recording.heroThumbnailFile?.let { decodeJpeg(it) }
-                    ?: extractThumbnail(recording.path)
-                if (thumbnail != null) {
-                    thumbnailCache.put(cacheKey, thumbnail)
+            val load = thumbnailLoads.load(cacheKey) {
+                thumbnailCache.get(cacheKey) ?: run {
+                    // Prefer the hero JPEG written by ThumbnailBuffer next to the MP4.
+                    // Falls back to MediaMetadataRetriever for legacy clips with no
+                    // sidecar. InFlightLoadCoordinator deduplicates identical keys and
+                    // caps distinct storage reads across the adapter.
+                    val thumbnail = recording.heroThumbnailFile?.let { decodeJpeg(it) }
+                        ?: extractThumbnail(recording.path)
+                    if (thumbnail != null) {
+                        thumbnailCache.put(cacheKey, thumbnail)
+                    }
+                    thumbnail
                 }
+            }
 
+            thumbnailWaitJob = thumbnailScope.launch {
+                val thumbnail = load.await()
                 withContext(Dispatchers.Main) {
                     if (bindingAdapterPosition != RecyclerView.NO_POSITION &&
                         getItem(bindingAdapterPosition).path == recording.path &&
@@ -302,6 +341,11 @@ class RecordingAdapter(
                     }
                 }
             }
+        }
+
+        fun cancelThumbnailWait() {
+            thumbnailWaitJob?.cancel()
+            thumbnailWaitJob = null
         }
 
         private fun decodeJpeg(file: java.io.File): Bitmap? {
@@ -313,14 +357,19 @@ class RecordingAdapter(
         }
 
         private fun extractThumbnail(path: String): Bitmap? {
+            var retriever: MediaMetadataRetriever? = null
             return try {
-                val retriever = MediaMetadataRetriever()
+                retriever = MediaMetadataRetriever()
                 retriever.setDataSource(path)
-                val frame = retriever.getFrameAtTime(1_000_000) // 1 second in
-                retriever.release()
-                frame
+                retriever.getFrameAtTime(1_000_000) // 1 second in
             } catch (e: Exception) {
                 null
+            } finally {
+                try {
+                    retriever?.release()
+                } catch (_: Throwable) {
+                    // Best-effort cleanup; thumbnail extraction has already completed.
+                }
             }
         }
     }
