@@ -145,7 +145,7 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
         gyro = resolved.gyroscope
 
         val delay = when (rate) {
-            ImuRate.FAST -> SensorManager.SENSOR_DELAY_FASTEST   // ~100 Hz (F-005)
+            ImuRate.FAST -> SensorManager.SENSOR_DELAY_GAME      // ~50 Hz (optimized for drive-mode efficiency)
             ImuRate.SLOW -> SensorManager.SENSOR_DELAY_NORMAL    // relaxed, ~5 Hz
         }
         // Hardware FIFO batching (FAST only): ask the sensor hub to buffer up to
