@@ -52,15 +52,6 @@ public class RecordingsApiHandler {
         return StorageManager.getInstance().getSurveillancePath();
     }
     
-    // Legacy paths for backward compatibility (migration). Used by the
-    // findVideoFile / findSiblingJpeg / findJsonSidecar fallback paths
-    // when the active StorageManager dirs don't contain the requested
-    // file — covers very old installs that wrote into <base>/recordings
-    // or directly into <base>.
-    private static final String LEGACY_RECORDINGS_DIR = "/storage/emulated/0/Android/data/com.overdrive.app/files";
-    private static final String LEGACY_SENTRY_DIR = LEGACY_RECORDINGS_DIR + "/sentry_events";
-
-
     // -----------------------------------------------------------------
     // Index integration
     // -----------------------------------------------------------------
@@ -88,12 +79,8 @@ public class RecordingsApiHandler {
      */
     public static void invalidateRecordingCache(String absMp4Path) {
         if (absMp4Path == null) return;
-        int slash = absMp4Path.lastIndexOf('/');
-        String filename = (slash >= 0 && slash + 1 < absMp4Path.length())
-                ? absMp4Path.substring(slash + 1)
-                : absMp4Path;
         try {
-            RecordingsIndex.getInstance().remove(filename);
+            RecordingsIndex.getInstance().removeByPath(absMp4Path);
         } catch (Throwable ignored) {}
     }
 
@@ -120,9 +107,9 @@ public class RecordingsApiHandler {
      */
     public static void pruneRecordingCache() {
         try {
-            RecordingsIndex.getInstance().reconcile();
+            RecordingsIndex.getInstance().requestReconcile("periodic-prune");
         } catch (Throwable t) {
-            CameraDaemon.log("RecordingsApiHandler reconcile failed: " + t.getMessage());
+            CameraDaemon.log("RecordingsApiHandler reconcile request failed: " + t.getMessage());
         }
     }
     
@@ -209,7 +196,32 @@ public class RecordingsApiHandler {
             return true;
         }
         
-        // Serve thumbnail
+        // Exact identity routes must be checked before legacy filename prefixes.
+        if (path.startsWith("/thumb/id/")) {
+            String recordingId = stripQuery(path.substring("/thumb/id/".length()));
+            serveThumbnailById(out, recordingId);
+            return true;
+        }
+
+        if (path.startsWith("/video/id/")) {
+            String recordingId = stripQuery(path.substring("/video/id/".length()));
+            streamVideoById(out, recordingId, null, null);
+            return true;
+        }
+
+        if (path.startsWith("/api/recordings/id/") && method.equals("DELETE")) {
+            String recordingId = stripQuery(path.substring("/api/recordings/id/".length()));
+            deleteRecordingById(out, recordingId);
+            return true;
+        }
+
+        if (path.startsWith("/api/events/id/") && method.equals("GET")) {
+            String recordingId = stripQuery(path.substring("/api/events/id/".length()));
+            serveEventTimelineById(out, recordingId);
+            return true;
+        }
+
+        // Serve legacy filename thumbnail
         if (path.startsWith("/thumb/")) {
             String filename = path.substring(7);
             // Strip any cache-busting/auth query (e.g. /thumb/foo.jpg?t=<token>);
@@ -276,12 +288,26 @@ public class RecordingsApiHandler {
     public static boolean handleWithRange(String method, String path, String body,
                                           String rangeHeader, String ifNoneMatchHeader,
                                           OutputStream out) throws Exception {
+        if (path.startsWith("/video/id/")) {
+            String recordingId = stripQuery(path.substring("/video/id/".length()));
+            streamVideoById(out, recordingId, rangeHeader, ifNoneMatchHeader);
+            return true;
+        }
         if (path.startsWith("/video/")) {
             String filename = path.substring(7);
             streamVideo(out, filename, rangeHeader, ifNoneMatchHeader);
             return true;
         }
         return handle(method, path, body, out);
+    }
+
+    private static String stripQuery(String value) {
+        int query = value.indexOf('?');
+        return query >= 0 ? value.substring(0, query) : value;
+    }
+
+    private static boolean validRecordingId(String recordingId) {
+        return recordingId != null && recordingId.matches("[0-9a-f]{32}");
     }
     
     // Background thumbnail generator
@@ -375,10 +401,64 @@ public class RecordingsApiHandler {
         }
         
         // Return 202 Accepted with retry hint - client should retry
-        String headers = "HTTP/1.1 202 Accepted\r\n" +
-                        "Content-Type: application/json\r\n" +
-                        "Retry-After: 1\r\n" +
-                        "Connection: close\r\n\r\n";
+        sendThumbnailGenerating(out);
+    }
+
+    private static void serveThumbnailById(OutputStream out, String recordingId) throws Exception {
+        if (!validRecordingId(recordingId)) {
+            HttpResponse.sendError(out, 400, Messages.get("errors.recordings_invalid_filename"));
+            return;
+        }
+        RecordingsIndex.RecordingRef ref =
+                RecordingsIndex.getInstance().resolveById(recordingId);
+        if (ref == null) {
+            HttpResponse.sendError(out, 404,
+                Messages.get("errors.recordings_thumbnail_not_found_with_filename", recordingId));
+            return;
+        }
+        File videoFile = ref.file();
+        if (!videoFile.isFile() || !videoFile.canRead()) {
+            HttpResponse.sendError(out, 410, Messages.get("errors.recordings_file_no_longer_accessible"));
+            return;
+        }
+        if (ref.heroThumbnail != null && !ref.heroThumbnail.isEmpty()) {
+            File hero = new File(videoFile.getParentFile(), ref.heroThumbnail);
+            if (hero.isFile() && hero.canRead() && hero.length() > 0) {
+                HttpResponse.sendImage(out, hero, "image/jpeg");
+                return;
+            }
+        }
+        File cacheDir = new File(getThumbnailCacheDir());
+        if (!cacheDir.exists()) cacheDir.mkdirs();
+        File thumbFile = new File(cacheDir, recordingId + ".jpg");
+        if (thumbFile.isFile() && thumbFile.length() > 0) {
+            HttpResponse.sendImage(out, thumbFile, "image/jpeg");
+            return;
+        }
+        if (pendingThumbs.add(recordingId)) {
+            thumbExecutor.submit(() -> {
+                try {
+                    byte[] data = generateThumbnail(videoFile);
+                    if (data != null) {
+                        try (FileOutputStream output = new FileOutputStream(thumbFile)) {
+                            output.write(data);
+                        }
+                    }
+                } catch (Exception failure) {
+                    CameraDaemon.log("ID thumbnail generation failed: " + failure.getMessage());
+                } finally {
+                    pendingThumbs.remove(recordingId);
+                }
+            });
+        }
+        sendThumbnailGenerating(out);
+    }
+
+    private static void sendThumbnailGenerating(OutputStream out) throws Exception {
+        String headers = "HTTP/1.1 202 Accepted\r\n"
+                + "Content-Type: application/json\r\n"
+                + "Retry-After: 1\r\n"
+                + "Connection: close\r\n\r\n";
         out.write(headers.getBytes());
         out.write("{\"status\":\"generating\"}".getBytes());
         out.flush();
@@ -527,14 +607,6 @@ public class RecordingsApiHandler {
             if (f.exists() && f.canRead() && f.length() > 0) return f;
         }
 
-        // Check legacy recordings location
-        File legacyFile = new File(LEGACY_RECORDINGS_DIR, filename);
-        if (legacyFile.exists() && legacyFile.canRead() && legacyFile.length() > 0) return legacyFile;
-
-        // Check legacy sentry location
-        File legacySentryFile = new File(LEGACY_SENTRY_DIR, filename);
-        if (legacySentryFile.exists() && legacySentryFile.canRead() && legacySentryFile.length() > 0) return legacySentryFile;
-
         // In-flight fallback (thumbnails only): a notification fires the moment
         // startRecording() returns, but the file on disk is still
         // <name>.mp4.tmp until closeEventRecording() finishes (10-15s
@@ -582,10 +654,6 @@ public class RecordingsApiHandler {
             File f = new File(dir, jpegName);
             if (f.exists() && f.canRead() && f.length() > 0) return f;
         }
-        File legacy = new File(LEGACY_RECORDINGS_DIR, jpegName);
-        if (legacy.exists() && legacy.canRead() && legacy.length() > 0) return legacy;
-        File legacySentry = new File(LEGACY_SENTRY_DIR, jpegName);
-        if (legacySentry.exists() && legacySentry.canRead() && legacySentry.length() > 0) return legacySentry;
         return null;
     }
 
@@ -835,32 +903,11 @@ public class RecordingsApiHandler {
         return files != null && files.length > 0;
     }
 
-    private static final java.util.concurrent.atomic.AtomicBoolean RECONCILE_IN_FLIGHT =
-            new java.util.concurrent.atomic.AtomicBoolean(false);
-
     /**
-     * @return true when this call started a fresh reconcile thread.
-     *         false when one was already in flight (caller may still
-     *         signal "reconciling" to the client — the existing
-     *         in-flight pass will pick up the missing rows).
+     * @return true only when the coalesced repair request was accepted.
      */
     private static boolean kickBackgroundReconcile(RecordingsIndex idx) {
-        if (!RECONCILE_IN_FLIGHT.compareAndSet(false, true)) {
-            // Already running. Tell caller we're reconciling so the
-            // client retries — but don't spawn a duplicate thread.
-            return true;
-        }
-        Thread t = new Thread(() -> {
-            try { idx.reconcile(); }
-            catch (Throwable thr) {
-                CameraDaemon.log("Reconcile kick failed: " + thr.getMessage());
-            } finally {
-                RECONCILE_IN_FLIGHT.set(false);
-            }
-        }, "RecordingsIndexReconcileKick");
-        t.setDaemon(true);
-        t.start();
-        return true;
+        return idx.requestReconcile("api-repair-on-read");
     }
 
     /**
@@ -1135,6 +1182,31 @@ public class RecordingsApiHandler {
             return;
         }
 
+        streamVideoFile(out, file, rangeHeader, ifNoneMatchHeader);
+    }
+
+    private static void streamVideoById(OutputStream out, String recordingId,
+                                        String rangeHeader, String ifNoneMatchHeader) throws Exception {
+        if (!validRecordingId(recordingId)) {
+            HttpResponse.sendError(out, 400, Messages.get("errors.recordings_invalid_filename"));
+            return;
+        }
+        RecordingsIndex.RecordingRef ref =
+                RecordingsIndex.getInstance().resolveById(recordingId);
+        if (ref == null) {
+            HttpResponse.sendError(out, 404, Messages.get("errors.recordings_not_found"));
+            return;
+        }
+        File file = ref.file();
+        if (!file.isFile() || !file.canRead()) {
+            HttpResponse.sendError(out, 410, Messages.get("errors.recordings_file_no_longer_accessible"));
+            return;
+        }
+        streamVideoFile(out, file, rangeHeader, ifNoneMatchHeader);
+    }
+
+    private static void streamVideoFile(OutputStream out, File file, String rangeHeader,
+                                        String ifNoneMatchHeader) throws Exception {
         // Conditional GET: if the client's cached copy matches our ETag,
         // skip re-streaming. Tag is "<length>-<mtime>" so any append/replace
         // invalidates without us needing a content hash.
@@ -1228,6 +1300,28 @@ public class RecordingsApiHandler {
         HttpResponse.sendJson(out, response.toString());
     }
 
+    private static void deleteRecordingById(OutputStream out, String recordingId) throws Exception {
+        if (!validRecordingId(recordingId)) {
+            HttpResponse.sendJsonError(out, Messages.get("errors.recordings_invalid_filename"));
+            return;
+        }
+        RecordingsIndex.RecordingRef ref =
+            RecordingsIndex.getInstance().resolveById(recordingId);
+        if (ref == null) {
+            HttpResponse.sendJsonError(out, Messages.get("errors.recordings_not_found"));
+            return;
+        }
+        File file = ref.file();
+        boolean deleted = file.delete();
+        if (deleted) {
+            deleteSidecars(file, ref.filename);
+        }
+        JSONObject response = new JSONObject();
+        response.put("success", deleted);
+        if (!deleted) response.put("error", Messages.get("errors.recordings_delete_failed"));
+        HttpResponse.sendJson(out, response.toString());
+    }
+
     /**
      * Sweep the .mp4's sidecar files: JSON event timeline, cached thumb,
      * v3 hero JPEG, per-actor thumbs ({@code thumb_<base>_a*.jpg}).
@@ -1254,24 +1348,11 @@ public class RecordingsApiHandler {
     }
 
     private static void deleteSidecars(File mp4File, String filename) {
-        // Invalidate the in-memory parse cache so the next /api/recordings
-        // call doesn't return a phantom entry for the just-deleted file.
-        // Tearing down the inverted-index entry happens here too so a
-        // place chip pointing at this file's place key vanishes the
-        // moment the delete completes. Use the helper so the new
-        // (path|type) compound key is matched correctly.
+        // This helper is the single index-removal owner. It delegates to
+        // RecordingsIndex.remove(filename), so a second explicit remove here
+        // would repeat the synchronized DELETE and advance the tombstone
+        // sequence twice for every file deletion.
         invalidateRecordingCache(mp4File.getAbsolutePath());
-
-        // Drop the H2 row eagerly so a /api/recordings call immediately
-        // after delete can't return the just-deleted row. FileObserver
-        // would catch this too, but FUSE-mounted SD cards can drop the
-        // DELETE event.
-        try {
-            com.overdrive.app.server.RecordingsIndex.getInstance().remove(filename);
-        } catch (Throwable ignored) {
-            // RecordingsIndex may not be initialised yet; the
-            // FileObserver / reconcile path will catch up.
-        }
 
         // Sidecar stem: strip a TRAILING ".mp4" only.
         //
@@ -1298,6 +1379,9 @@ public class RecordingsApiHandler {
         // Cached thumbnail
         File thumbFile = new File(getThumbnailCacheDir(), stem + ".jpg");
         if (thumbFile.exists()) thumbFile.delete();
+        File idThumbFile = new File(getThumbnailCacheDir(),
+            RecordingIdentity.fromPath(mp4File.getAbsolutePath()).recordingId + ".jpg");
+        if (idThumbFile.exists()) idThumbFile.delete();
 
         // v3 hero JPEG sibling: <base>.jpg next to the mp4.
         //
@@ -1376,9 +1460,11 @@ public class RecordingsApiHandler {
         
         try {
             JSONObject request = new JSONObject(body);
-            JSONArray filenames = request.optJSONArray("filenames");
+                JSONArray ids = request.optJSONArray("ids");
+                JSONArray filenames = request.optJSONArray("filenames");
             
-            if (filenames == null || filenames.length() == 0) {
+                if ((ids == null || ids.length() == 0)
+                    && (filenames == null || filenames.length() == 0)) {
                 response.put("success", false);
                 response.put("error", Messages.get("errors.recordings_no_filenames"));
                 HttpResponse.sendJson(out, response.toString());
@@ -1387,7 +1473,10 @@ public class RecordingsApiHandler {
             
             // Limit batch size to prevent abuse
             int maxBatch = 100;
-            if (filenames.length() > maxBatch) {
+            int idCount = ids != null ? ids.length() : 0;
+            int filenameCount = filenames != null ? filenames.length() : 0;
+            int batchSize = idCount + filenameCount;
+            if (batchSize > maxBatch) {
                 response.put("success", false);
                 response.put("error", Messages.get("errors.recordings_max_batch_with_count", maxBatch));
                 HttpResponse.sendJson(out, response.toString());
@@ -1398,30 +1487,37 @@ public class RecordingsApiHandler {
             int failed = 0;
             JSONArray errors = new JSONArray();
             
-            for (int i = 0; i < filenames.length(); i++) {
-                String filename = filenames.getString(i);
+            for (int i = 0; i < batchSize; i++) {
+                String recordingId = i < idCount ? ids.getString(i) : null;
+                String filename = recordingId == null ? filenames.getString(i - idCount) : null;
                 
                 // Security: prevent path traversal
-                if (filename.contains("..") || filename.contains("/")) {
+                if ((recordingId != null && !validRecordingId(recordingId))
+                        || (filename != null && (filename.contains("..") || filename.contains("/")))) {
                     failed++;
-                    errors.put(filename + ": invalid filename");
+                    errors.put((recordingId != null ? recordingId : filename) + ": invalid identity");
                     continue;
                 }
                 
-                File file = findVideoFile(filename);
+                RecordingsIndex.RecordingRef ref = recordingId != null
+                        ? RecordingsIndex.getInstance().resolveById(recordingId) : null;
+                File file = recordingId != null
+                    ? (ref != null ? ref.file() : null)
+                    : findVideoFile(filename);
+                String resolvedFilename = ref != null ? ref.filename : filename;
                 if (file == null) {
                     failed++;
-                    errors.put(filename + ": not found");
+                    errors.put((recordingId != null ? recordingId : filename) + ": not found");
                     continue;
                 }
                 
                 boolean success = file.delete();
                 if (success) {
                     deleted++;
-                    deleteSidecars(file, filename);
+                    deleteSidecars(file, resolvedFilename);
                 } else {
                     failed++;
-                    errors.put(filename + ": delete failed");
+                    errors.put((recordingId != null ? recordingId : filename) + ": delete failed");
                 }
             }
             
@@ -1451,8 +1547,11 @@ public class RecordingsApiHandler {
             return;
         }
         
-        // Convert .mp4 filename to .json
-        String jsonFilename = filename.replace(".mp4", ".json");
+        // Replace only the trailing extension. Segmented/custom names may
+        // legitimately contain ".mp4" earlier in the stem.
+        String jsonFilename = filename.endsWith(".mp4")
+            ? filename.substring(0, filename.length() - ".mp4".length()) + ".json"
+            : filename + ".json";
         
         // Search for the JSON sidecar in all storage locations
         File jsonFile = findJsonSidecar(jsonFilename);
@@ -1476,6 +1575,40 @@ public class RecordingsApiHandler {
             // Backward compatible: no sidecar = empty events array
             sendEmptyTimeline(out);
         }
+    }
+
+    private static void serveEventTimelineById(OutputStream out, String recordingId) throws Exception {
+        if (!validRecordingId(recordingId)) {
+            HttpResponse.sendError(out, 400, Messages.get("errors.recordings_invalid_filename"));
+            return;
+        }
+        RecordingsIndex.RecordingRef ref =
+                RecordingsIndex.getInstance().resolveById(recordingId);
+        if (ref == null) {
+            HttpResponse.sendError(out, 404, Messages.get("errors.recordings_not_found"));
+            return;
+        }
+        String name = ref.filename;
+        String stem = name.endsWith(".mp4")
+                ? name.substring(0, name.length() - ".mp4".length()) : name;
+        File jsonFile = new File(ref.file().getParentFile(), stem + ".json");
+        serveTimelineFile(out, jsonFile);
+    }
+
+    private static void serveTimelineFile(OutputStream out, File jsonFile) throws Exception {
+        if (jsonFile != null && jsonFile.exists()) {
+            try (java.io.BufferedReader reader =
+                         new java.io.BufferedReader(new java.io.FileReader(jsonFile))) {
+                StringBuilder json = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) json.append(line);
+                HttpResponse.sendJson(out, json.toString());
+                return;
+            } catch (Exception ignored) {
+                // Fall through to the backward-compatible empty timeline.
+            }
+        }
+        sendEmptyTimeline(out);
     }
     
     /**

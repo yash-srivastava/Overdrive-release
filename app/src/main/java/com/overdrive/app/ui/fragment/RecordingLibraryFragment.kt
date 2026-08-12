@@ -328,7 +328,6 @@ class RecordingLibraryFragment : Fragment() {
         checkPermissionsAndScan()
 
         updateDateHeader()
-        loadRecordingsForSelectedDate()
         renderActiveFilters()
     }
 
