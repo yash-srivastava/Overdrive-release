@@ -593,7 +593,9 @@ public class OemDashcamPipeline {
         }
         String path = generateOutputPath();
         long clampedPost = Math.max(0L, postRecordMs);
-        boolean ok = encoder != null && encoder.triggerEventRecording(path, clampedPost);
+        HardwareEventRecorderGpu.VideoUploadPolicy uploadPolicy = uploadPolicyFor(eventOwned);
+        boolean ok = encoder != null
+                && encoder.triggerEventRecording(path, clampedPost, uploadPolicy);
         if (!ok) {
             synchronized (recordingStateLock) {
                 recording.set(false);
@@ -605,6 +607,13 @@ public class OemDashcamPipeline {
         // refcount on start and release on stop.
         reconcileTelemetryHold();
         return ok;
+    }
+
+    /** Package-visible ownership-to-upload policy seam for regression tests. */
+    static HardwareEventRecorderGpu.VideoUploadPolicy uploadPolicyFor(boolean eventOwned) {
+        return eventOwned
+                ? HardwareEventRecorderGpu.VideoUploadPolicy.SURVEILLANCE_GATED
+                : HardwareEventRecorderGpu.VideoUploadPolicy.AUTOMATIC;
     }
 
     /** True iff the in-flight clip (if any) is surveillance-event-owned.
@@ -628,13 +637,42 @@ public class OemDashcamPipeline {
      * by deferring muxer finalization until the tail elapses.
      */
     public void stopRecording(long postRecordMs) {
-        synchronized (recordingStateLock) {
-            if (!recording.getAndSet(false)) return;
-            recordingEventOwned.set(false);
+        stopRecordingAndGetFinalizedClip(postRecordMs);
+    }
+
+    /**
+     * Finalized OEM clip metadata returned to the surveillance owner. The
+     * recorder itself suppresses automatic Telegram delivery for event-owned
+     * clips; SurveillanceEngineGpu uses this result only after its tier gate
+     * passes.
+     */
+    public static final class FinalizedClip {
+        private final String path;
+        private final int durationSeconds;
+
+        FinalizedClip(String path, int durationSeconds) {
+            this.path = path;
+            this.durationSeconds = durationSeconds;
         }
-        if (encoder != null) encoder.stopEventRecording(true, Math.max(0L, postRecordMs));
+
+        public String getPath() { return path; }
+        public int getDurationSeconds() { return durationSeconds; }
+    }
+
+    private FinalizedClip stopRecordingAndGetFinalizedClip(long postRecordMs) {
+        HardwareEventRecorderGpu enc;
+        String path;
+        synchronized (recordingStateLock) {
+            if (!recording.getAndSet(false)) return null;
+            recordingEventOwned.set(false);
+            enc = encoder;
+            path = enc != null ? enc.getCurrentOutputPath() : null;
+        }
+        if (enc != null) enc.stopEventRecording(true, Math.max(0L, postRecordMs));
         reapplyIdleStrideAfterStop();
         reconcileTelemetryHold();
+        if (path == null || !new File(path).isFile()) return null;
+        return new FinalizedClip(path, enc != null ? enc.getLastFinalizedDurationSec() : 0);
     }
 
     /** Back-compat overload — no post-roll. */
@@ -701,12 +739,21 @@ public class OemDashcamPipeline {
     /** Stop only if the caller (e.g. surveillance) owns the recording.
      *  Pass the engine's post-window so the OEM tail matches pano's. */
     public void stopRecordingIfOwned(boolean owned, long postRecordMs) {
-        if (owned) stopRecording(postRecordMs);
+        if (owned) stopRecordingAndGetFinalizedClip(postRecordMs);
     }
 
     /** Back-compat overload — no post-roll. */
     public void stopRecordingIfOwned(boolean owned) {
         stopRecordingIfOwned(owned, 0L);
+    }
+
+    /**
+     * Surveillance stop variant that returns the finalized OEM mirror for
+     * delivery after the parent event passes its Telegram severity gate.
+     */
+    public FinalizedClip stopRecordingIfOwnedAndGetFinalizedClip(
+            boolean owned, long postRecordMs) {
+        return owned ? stopRecordingAndGetFinalizedClip(postRecordMs) : null;
     }
 
     /**

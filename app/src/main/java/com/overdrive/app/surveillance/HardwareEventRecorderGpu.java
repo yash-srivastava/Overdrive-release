@@ -1147,6 +1147,29 @@ public class HardwareEventRecorderGpu {
     private volatile boolean recording = false;
     private String outputPath;
     private File tempFile;
+    /**
+     * Controls who may initiate the Telegram upload when a clip is finalized.
+     * Most recorder clients retain the historical automatic behaviour.
+     * Surveillance-owned clips are emitted later by SurveillanceEngineGpu,
+     * after the event's Notice/Alert/Critical tier has been evaluated.
+     */
+    public enum VideoUploadPolicy {
+        AUTOMATIC,
+        SURVEILLANCE_GATED;
+
+        /** Pure policy check kept Android-runtime independent for local tests. */
+        boolean shouldAutoUpload(String fileName) {
+            if (this != AUTOMATIC) return false;
+            if (fileName == null) return true;
+            String name = fileName;
+            int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
+            if (slash >= 0 && slash + 1 < name.length()) {
+                name = name.substring(slash + 1);
+            }
+            return !name.startsWith("event_");
+        }
+    }
+    private VideoUploadPolicy videoUploadPolicy = VideoUploadPolicy.AUTOMATIC;
     private int recordedFrames = 0;
     private long firstFramePtsUs = -1;   // PTS of first frame written to muxer
     private long lastFramePtsUs = -1;    // PTS of last frame written to muxer
@@ -2416,6 +2439,21 @@ public class HardwareEventRecorderGpu {
      * @return true if started successfully, false otherwise
      */
     public boolean triggerEventRecording(String outputPath, long postRecordDurationMs) {
+        return triggerEventRecording(outputPath, postRecordDurationMs,
+                VideoUploadPolicy.AUTOMATIC);
+    }
+
+    /**
+     * Trigger event recording with an explicit Telegram upload owner.
+     *
+     * <p>{@link VideoUploadPolicy#SURVEILLANCE_GATED} suppresses this low-level
+     * recorder's automatic upload. The surveillance engine must then emit the
+     * finalized clip only after its severity-tier gate passes. This is required
+     * for OEM {@code dvr_*} mirrors of parked events: their filename otherwise
+     * looks like an ordinary driving clip and bypasses the parent event gate.
+     */
+    public boolean triggerEventRecording(String outputPath, long postRecordDurationMs,
+            VideoUploadPolicy uploadPolicy) {
         // Format barrier (LOCK-FREE): refuse to build a muxer until the encoder
         // has published its OUTPUT_FORMAT_CHANGED. Run BEFORE startStopLock
         // entry so a 2-s busy poll doesn't block concurrent stopEventRecording
@@ -2468,6 +2506,8 @@ public class HardwareEventRecorderGpu {
 
         try {
             this.outputPath = outputPath;
+            this.videoUploadPolicy = uploadPolicy != null
+                    ? uploadPolicy : VideoUploadPolicy.AUTOMATIC;
             
             // Write to temp file during recording
             tempFile = new File(outputPath + ".tmp");
@@ -3101,17 +3141,18 @@ public class HardwareEventRecorderGpu {
                         logger.warn("Index upsert failed for " + finalFile.getName() + ": " + e.getMessage());
                     }
 
-                    // Telegram auto video-upload. Surveillance (event_*.mp4) is
+                    // Telegram auto video-upload. Surveillance (event_*.mp4)
+                    // and explicitly SURVEILLANCE_GATED OEM mirrors are
                     // DELIBERATELY excluded here: those clips are sent from
                     // SurveillanceEngineGpu.sendFinalTelegramNotification, which
                     // is the only place that knows the event's peak severity and
                     // therefore the only place that can honour the per-tier
                     // Telegram toggles (NOTICE/ALERT/CRITICAL). Sending from here
                     // too would bypass that gate — the "NOTICE muted but video
-                    // still arrives" bug — and double-send. Dashcam (cam_*) and
-                    // proximity (proximity_*) clips have no severity concept, so
-                    // they keep the simple videoUploads-only auto-send.
-                    if (!"surveillance".equals(inferGeocodingFlow(finalFile.getName()))) {
+                    // still arrives" bug — and double-send. Ordinary dashcam
+                    // (cam_*/dvr_*) and proximity clips have no severity concept,
+                    // so they keep the simple videoUploads-only auto-send.
+                    if (videoUploadPolicy.shouldAutoUpload(finalFile.getName())) {
                         try {
                             TelegramNotifier.notifyVideoRecorded(
                                     finalFile.getAbsolutePath(), null, (int) durationSec);

@@ -6383,7 +6383,8 @@ public class SurveillanceEngineGpu {
      * text-only message. Falls back gracefully on the daemon side if the photo
      * can't be sent.
      */
-    private void sendFinalTelegramNotification(String videoFilename, String heroPhotoPath) {
+    private void sendFinalTelegramNotification(String videoFilename, String heroPhotoPath,
+            com.overdrive.app.camera.OemDashcamPipeline.FinalizedClip oemFinalizedClip) {
         // Event-peak union (not the TTL-pruned lastActors) so the caption names
         // the same actor the hero shows — see finalNotificationActors().
         java.util.List<Actor> snap = finalNotificationActors();
@@ -6530,6 +6531,24 @@ public class SurveillanceEngineGpu {
             }
         } catch (Throwable t) {
             logger.debug("Telegram surveillance video send failed: " + t.getMessage());
+        }
+
+        // The OEM forward-camera mirror is opened with SURVEILLANCE_GATED, so
+        // HardwareEventRecorderGpu deliberately does not auto-upload it when
+        // the dvr_* file closes. We are past the same tier gate as the parent
+        // event here; emitting it now preserves OEM video delivery for allowed
+        // events without leaking muted/empty parked events as bare dashcam clips.
+        try {
+            if (oemFinalizedClip != null
+                    && oemFinalizedClip.getPath() != null
+                    && new java.io.File(oemFinalizedClip.getPath()).exists()) {
+                String label = threat != null ? Actor.groupLabel(threat.classGroup) : null;
+                TelegramNotifier.notifyVideoRecorded(
+                        oemFinalizedClip.getPath(), label,
+                        oemFinalizedClip.getDurationSeconds());
+            }
+        } catch (Throwable t) {
+            logger.debug("Telegram OEM surveillance video send failed: " + t.getMessage());
         }
     }
 
@@ -8533,7 +8552,9 @@ public class SurveillanceEngineGpu {
         // joins the encoder drainer thread, after which no further frames or
         // segment-rotation listener calls can fire.
         recorder.stopEventRecording(true, 0);
-        // Symmetric OEM stop — fire-and-forget; never block pano teardown.
+        // Capture the finalized surveillance-owned OEM mirror so it can be
+        // delivered only if the parent event passes the Telegram tier gate.
+        com.overdrive.app.camera.OemDashcamPipeline.FinalizedClip oemFinalizedClip = null;
         try {
             com.overdrive.app.camera.OemDashcamPipeline oemPipe =
                 com.overdrive.app.daemon.CameraDaemon.getOemDashcamPipeline();
@@ -8548,7 +8569,10 @@ public class SurveillanceEngineGpu {
             // Engine has already absorbed the post-record window via its
             // own loop (lastMotionTime + postRecordMs gate). Pass 0 so the
             // OEM recorder finalizes promptly, matching pano's behaviour.
-            if (oemPipe != null) oemPipe.stopRecordingIfOwned(canStop, 0L);
+            if (oemPipe != null) {
+                oemFinalizedClip = oemPipe.stopRecordingIfOwnedAndGetFinalizedClip(
+                        canStop, 0L);
+            }
             oemEventOwned = false;
             oemEventOwnedGeneration = -1;
         } catch (Throwable t) {
@@ -8682,7 +8706,7 @@ public class SurveillanceEngineGpu {
             if (!videoName.equals(lastFinalNotifiedEvent.getAndSet(videoName))) {
                 try { publishMotionFinal(videoName, heroName, heroIsCloseUp); }
                 catch (Throwable t) { logger.debug("publishMotionFinal threw: " + t.getMessage()); }
-                try { sendFinalTelegramNotification(videoName, heroPath); }
+                try { sendFinalTelegramNotification(videoName, heroPath, oemFinalizedClip); }
                 catch (Throwable t) { logger.debug("sendFinalTelegramNotification threw: " + t.getMessage()); }
             } else {
                 logger.debug("Final notification already sent for " + videoName + "; skipping duplicate");
