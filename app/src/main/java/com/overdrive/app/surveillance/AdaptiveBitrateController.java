@@ -84,31 +84,16 @@ public class AdaptiveBitrateController {
      * @param targetBitrate Target bitrate in bps
      */
     private void rampToBitrate(int targetBitrate) {
-        // Cancel any ongoing animation
         if (bitrateAnimator != null && bitrateAnimator.isRunning()) {
             bitrateAnimator.cancel();
         }
         
-        logger.info( String.format("Ramping bitrate: %d → %d Mbps (motion-based)",
+        logger.info(String.format("Updating bitrate: %d → %d Mbps (motion-based)",
                 currentBitrate / 1_000_000, targetBitrate / 1_000_000));
         
-        // Create animator for smooth transition
-        bitrateAnimator = ValueAnimator.ofInt(currentBitrate, targetBitrate);
-        bitrateAnimator.setDuration(RAMP_DURATION_MS);
-        
-        bitrateAnimator.addUpdateListener(animation -> {
-            int animatedBitrate = (int) animation.getAnimatedValue();
-            encoder.setBitrate(animatedBitrate);
-            currentBitrate = animatedBitrate;
-            // A ramp step IS a real push, so currentBitrate now reflects hardware —
-            // mark it so setImmediateBitrate's idempotent skip becomes trustworthy.
-            // Without this the flag stayed false after a completed ramp and the next
-            // same-value immediate-set did a redundant encoder push (harmless, but it
-            // made the flag's meaning inconsistent).
-            pushedOnce = true;
-        });
-        
-        bitrateAnimator.start();
+        encoder.setBitrate(targetBitrate);
+        currentBitrate = targetBitrate;
+        pushedOnce = true;
     }
     
     /**
