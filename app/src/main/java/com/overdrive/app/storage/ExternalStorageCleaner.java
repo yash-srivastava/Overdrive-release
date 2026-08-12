@@ -78,6 +78,29 @@ public class ExternalStorageCleaner {
         }
     }
 
+    private static final int PROCESS_WAIT_FAILED = -1;
+    private static final long GETPROP_TIMEOUT_MS = 1_000L;
+    private static final long DELETE_TIMEOUT_MS = 4_000L;
+
+    static int waitForBounded(Process process, long timeoutMs) {
+        try {
+            if (process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
+                return process.exitValue();
+            }
+            process.destroyForcibly();
+            try {
+                process.waitFor(500L, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return PROCESS_WAIT_FAILED;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            try { process.destroyForcibly(); } catch (Throwable ignored) {}
+            return PROCESS_WAIT_FAILED;
+        }
+    }
+
     // ==================== Constants ====================
     
     // Known BYD CDR (dashcam) recording directories
@@ -295,11 +318,18 @@ public class ExternalStorageCleaner {
             // Fall back to shell
             try {
                 Process p = Runtime.getRuntime().exec(new String[]{"getprop", key});
-                BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
-                String line = reader.readLine();
-                reader.close();
-                p.waitFor();
-                return line != null ? line.trim() : "";
+                int exitCode = waitForBounded(p, GETPROP_TIMEOUT_MS);
+                if (exitCode != 0) {
+                    if (exitCode == PROCESS_WAIT_FAILED) {
+                        logWarn("getprop " + key + " timed out or was interrupted");
+                    }
+                    return "";
+                }
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(p.getInputStream()))) {
+                    String line = reader.readLine();
+                    return line != null ? line.trim() : "";
+                }
             } catch (Exception e2) {
                 return "";
             }
@@ -892,7 +922,10 @@ public class ExternalStorageCleaner {
         // Try shell rm
         try {
             Process p = Runtime.getRuntime().exec(new String[]{"rm", "-f", file.getAbsolutePath()});
-            int exitCode = p.waitFor();
+            int exitCode = waitForBounded(p, DELETE_TIMEOUT_MS);
+            if (exitCode == PROCESS_WAIT_FAILED) {
+                logWarn("Shell delete timed out or was interrupted: " + file.getAbsolutePath());
+            }
             return exitCode == 0 && !file.exists();
         } catch (Exception e) {
             logWarn("Shell delete failed: " + e.getMessage());

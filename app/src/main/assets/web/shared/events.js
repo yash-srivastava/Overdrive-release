@@ -87,6 +87,15 @@ BYD.events = {
     _QUADRANT_HIDE_MS: 3000,
     _quadrantHideTimer: null,
 
+    recordingKey(rec) {
+        return rec && rec.id ? rec.id : (rec ? rec.filename : '');
+    },
+
+    findRecording(key) {
+        return this.recordings.find(rec => this.recordingKey(rec) === key)
+            || this.recordings.find(rec => rec.filename === key);
+    },
+
     /**
      * Read the recording.audioEnabled setting from the backend on every
      * call. Used by playVideo() to decide whether to default the mute
@@ -516,6 +525,7 @@ BYD.events = {
         // exploit it.
         const qParam = (urlParams.get('q') || '').slice(0, 64).trim();
         if (qParam) this.placeContainsQuery = qParam;
+        const idParam = urlParams.get('id');
         const fileParam = urlParams.get('file');
 
         // iOS Web Push can't render options.image, so the SW forwards the
@@ -539,7 +549,10 @@ BYD.events = {
         //   - If it's neither finalized nor in flight (older notification, file
         //     was deleted, etc.): silently no-op so we don't yank the user
         //     around.
-        if (fileParam) {
+        if (idParam) {
+            const found = this.findRecording(idParam);
+            if (found) this.playVideo(idParam);
+        } else if (fileParam) {
             const found = this.recordings.find(r => r.filename === fileParam);
             if (found) {
                 this.playVideo(fileParam);
@@ -1570,20 +1583,21 @@ BYD.events = {
         }
 
         list.innerHTML = inflightHtml + visible.map(rec => {
-            const thumbId = this._thumbDomId(rec.filename);
+            const recordingKey = this.recordingKey(rec);
+            const thumbId = this._thumbDomId(recordingKey);
             const badge = rec.type === 'sentry' ? BYD.i18n.t('events.badge_sentry') : rec.type === 'proximity' ? BYD.i18n.t('events.badge_proximity') : rec.type === 'replay' ? BYD.i18n.t('events.badge_replay') : BYD.i18n.t('events.badge_normal');
             const fname = rec.filename.length > 28 ? rec.filename.substring(0, 25) + '...' : rec.filename;
-            const isSelected = this.selectedFiles.has(rec.filename);
+            const isSelected = this.selectedFiles.has(recordingKey);
             
             // Checkbox for select mode
             const checkbox = this.selectMode 
-                ? '<label class="select-checkbox-wrap" onclick="event.stopPropagation()"><input type="checkbox" class="select-checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="BYD.events.toggleFileSelection(\'' + rec.filename + '\', event)"></label>'
+                ? '<label class="select-checkbox-wrap" onclick="event.stopPropagation()"><input type="checkbox" class="select-checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="BYD.events.toggleFileSelection(\'' + recordingKey + '\', event)"></label>'
                 : '';
             
             // Card click handler depends on mode
             const cardClick = this.selectMode 
-                ? 'BYD.events.toggleFileSelection(\'' + rec.filename + '\')'
-                : 'BYD.events.playVideo(\'' + rec.filename + '\')';
+                ? 'BYD.events.toggleFileSelection(\'' + recordingKey + '\')'
+                : 'BYD.events.playVideo(\'' + recordingKey + '\')';
             
             // v3 enrichment (item 6): use hero JPEG when present, sev badge, actor summary
             const sev = (rec.peakSeverity || '').toUpperCase();
@@ -1640,7 +1654,7 @@ BYD.events = {
                 placeRow = '<div class="recording-place">📍 ' + escaped + '</div>';
             }
 
-            return '<div class="recording-card' + (isSelected ? ' selected' : '') + (sevClass ? ' ' + sevClass : '') + '" data-filename="' + rec.filename + '" onclick="' + cardClick + '">' +
+            return '<div class="recording-card' + (isSelected ? ' selected' : '') + (sevClass ? ' ' + sevClass : '') + '" data-recording-key="' + recordingKey + '" data-filename="' + rec.filename + '" onclick="' + cardClick + '">' +
                 checkbox +
                 '<div class="recording-thumbnail" id="' + thumbId + '" data-thumb="' + thumbUrl + '">' +
                 '<div class="thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg></div>' +
@@ -1655,8 +1669,8 @@ BYD.events = {
                 '</div>' +
                 (this.selectMode ? '' : 
                 '<div class="recording-actions">' +
-                '<button class="action-btn" onclick="event.stopPropagation(); BYD.events.downloadVideo(\'' + rec.filename + '\')" title="' + BYD.i18n.t('common.download') + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>' +
-                '<button class="action-btn delete" onclick="event.stopPropagation(); BYD.events.deleteRecording(\'' + rec.filename + '\')" title="' + BYD.i18n.t('common.delete') + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>' +
+                '<button class="action-btn" onclick="event.stopPropagation(); BYD.events.downloadVideo(\'' + recordingKey + '\')" title="' + BYD.i18n.t('common.download') + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>' +
+                '<button class="action-btn delete" onclick="event.stopPropagation(); BYD.events.deleteRecording(\'' + recordingKey + '\')" title="' + BYD.i18n.t('common.delete') + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>' +
                 '</div>') +
                 '</div>';
         }).join('');
@@ -1726,8 +1740,8 @@ BYD.events = {
         container.innerHTML = '<div class="thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>' + BYD.i18n.t('events.no_preview') + '</span></div><div class="play-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>';
     },
     
-    playVideo(filename) {
-        const rec = this.recordings.find(r => r.filename === filename);
+    playVideo(recordingKey) {
+        const rec = this.findRecording(recordingKey);
         if (!rec) return;
         
         document.getElementById('videoTitle').textContent = rec.filename;
@@ -1794,7 +1808,7 @@ BYD.events = {
 
         // Load event-timeline marker overlay for this recording (the
         // scrubber itself stays visible even with no markers).
-        this.loadTimeline(rec.filename, player);
+        this.loadTimeline(rec, player);
     },
     
     closeVideo() {
@@ -1819,8 +1833,8 @@ BYD.events = {
         this.destroyTimeline();
     },
     
-    downloadVideo(filename) {
-        const rec = this.recordings.find(r => r.filename === filename);
+    downloadVideo(recordingKey) {
+        const rec = this.findRecording(recordingKey);
         if (!rec) return;
         const a = document.createElement('a');
         a.href = rec.videoUrl;
@@ -1830,8 +1844,10 @@ BYD.events = {
         document.body.removeChild(a);
     },
     
-    async deleteRecording(filename) {
-        if (!confirm(BYD.i18n.t('events.confirm_delete_one', {filename: filename}))) return;
+    async deleteRecording(recordingKey) {
+        const rec = this.findRecording(recordingKey);
+        if (!rec) return;
+        if (!confirm(BYD.i18n.t('events.confirm_delete_one', {filename: rec.filename}))) return;
 
         // If the modal player is currently showing this recording, pause it
         // and detach the source BEFORE the DELETE goes through. Otherwise
@@ -1839,13 +1855,14 @@ BYD.events = {
         // the user sees an "error: source not supported" toast.
         try {
             const player = document.getElementById('videoPlayer');
-            if (player && player.src && player.src.endsWith('/video/' + filename)) {
+            if (player && player.getAttribute('src') === rec.videoUrl) {
                 this.closeVideo();
             }
         } catch (_) {}
 
         try {
-            const res = await fetch('/api/recordings/' + filename, { method: 'DELETE' });
+            const deleteUrl = rec.deleteUrl || ('/api/recordings/' + encodeURIComponent(rec.filename));
+            const res = await fetch(deleteUrl, { method: 'DELETE' });
             const data = await res.json();
 
             if (data.success) {
@@ -1886,20 +1903,20 @@ BYD.events = {
         this.renderRecordings();
     },
     
-    toggleFileSelection(filename, event) {
+    toggleFileSelection(recordingKey, event) {
         if (event) event.stopPropagation();
         
-        if (this.selectedFiles.has(filename)) {
-            this.selectedFiles.delete(filename);
+        if (this.selectedFiles.has(recordingKey)) {
+            this.selectedFiles.delete(recordingKey);
         } else {
-            this.selectedFiles.add(filename);
+            this.selectedFiles.add(recordingKey);
         }
         this.updateSelectUI();
-        this.updateCardSelection(filename);
+        this.updateCardSelection(recordingKey);
     },
     
     selectAll() {
-        this.recordings.forEach(rec => this.selectedFiles.add(rec.filename));
+        this.recordings.forEach(rec => this.selectedFiles.add(this.recordingKey(rec)));
         this.updateSelectUI();
         this.renderRecordings();
     },
@@ -1910,12 +1927,12 @@ BYD.events = {
         this.renderRecordings();
     },
     
-    updateCardSelection(filename) {
-        const card = document.querySelector('[data-filename="' + filename + '"]');
+    updateCardSelection(recordingKey) {
+        const card = document.querySelector('[data-recording-key="' + recordingKey + '"]');
         if (card) {
-            card.classList.toggle('selected', this.selectedFiles.has(filename));
+            card.classList.toggle('selected', this.selectedFiles.has(recordingKey));
             const checkbox = card.querySelector('.select-checkbox');
-            if (checkbox) checkbox.checked = this.selectedFiles.has(filename);
+            if (checkbox) checkbox.checked = this.selectedFiles.has(recordingKey);
         }
     },
     
@@ -1940,13 +1957,17 @@ BYD.events = {
         
         if (!confirm(BYD.i18n.plural('events.confirm_delete_n', count))) return;
         
-        const filenames = Array.from(this.selectedFiles);
+        const selected = Array.from(this.selectedFiles)
+            .map(key => this.findRecording(key)).filter(Boolean);
+        const ids = selected.map(rec => rec.id).filter(Boolean);
+        const filenames = selected.filter(rec => !rec.id).map(rec => rec.filename);
+        const payload = { ids: ids, filenames: filenames };
         
         try {
             const res = await fetch('/api/recordings/batch-delete', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ filenames: filenames })
+                body: JSON.stringify(payload)
             });
             const data = await res.json();
             
@@ -2003,7 +2024,7 @@ BYD.events = {
      * from the JSON sidecar — when none exists, the scrubber still shows
      * (so the user can still seek), just without colored event ranges.
      */
-    async loadTimeline(filename, videoEl) {
+    async loadTimeline(recording, videoEl) {
         const scrubber = document.getElementById('timelineScrubber');
         const legend = document.getElementById('timelineLegend');
         const track = document.getElementById('timelineTrack');
@@ -2029,7 +2050,9 @@ BYD.events = {
         if (_wrapReset) _wrapReset.classList.remove('dashcam');
 
         try {
-            const res = await fetch('/api/events/' + filename);
+            const eventUrl = recording.eventUrl
+                || ('/api/events/' + encodeURIComponent(recording.filename));
+            const res = await fetch(eventUrl);
             const data = await res.json();
             // Composition layout drives the per-camera zoom regions: toggle the
             // `dashcam` class so the dashcam CSS zoom rects apply, and store it

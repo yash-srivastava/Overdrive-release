@@ -403,17 +403,31 @@ object RecordingsApiClient {
      * {success:true}. Body of the DELETE response is otherwise ignored.
      */
     fun deleteRecording(filename: String): Boolean {
+        return deleteRecordingUrl("$BASE_URL/api/recordings/${enc(filename)}", filename)
+    }
+
+    fun deleteRecording(recording: RecordingFile): Boolean {
+        val id = recording.recordingId
+        val url = if (!id.isNullOrEmpty()) {
+            "$BASE_URL/api/recordings/id/${enc(id)}"
+        } else {
+            "$BASE_URL/api/recordings/${enc(recording.file.name)}"
+        }
+        return deleteRecordingUrl(url, recording.file.name)
+    }
+
+    private fun deleteRecordingUrl(url: String, label: String): Boolean {
         return try {
-            if (filename.isEmpty() || filename.contains("..") || filename.contains("/")) {
+            if (label.isEmpty() || label.contains("..") || label.contains("/")) {
                 return false
             }
             val req = Request.Builder()
-                .url("$BASE_URL/api/recordings/${enc(filename)}")
+                .url(url)
                 .delete()
                 .build()
             http.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) {
-                    Log.w(TAG, "deleteRecording HTTP ${resp.code} for $filename")
+                    Log.w(TAG, "deleteRecording HTTP ${resp.code} for $label")
                     return false
                 }
                 val body = resp.body?.string() ?: return false
@@ -488,9 +502,9 @@ object RecordingsApiClient {
         // mirrors. If we can't find it on disk, leave heroThumbnailFile
         // null — adapters tolerate that and fall back to the daemon's
         // thumbnail endpoint anyway.
-        val heroThumbnailFile = rec.optString("heroThumbnailUrl")
-            .takeIf { it.isNotEmpty() }
-            ?.let { resolveHeroJpeg(it, absPath) }
+        val heroName = rec.optString("heroThumbnailName").takeIf { it.isNotEmpty() }
+            ?: rec.optString("heroThumbnailUrl").takeIf { it.isNotEmpty() }
+        val heroThumbnailFile = heroName?.let { resolveHeroJpeg(it, absPath) }
 
         val actorsArr = rec.optJSONArray("actors")
         val actorClasses = if (actorsArr != null && actorsArr.length() > 0) {
@@ -546,7 +560,13 @@ object RecordingsApiClient {
             startLat = startLat,
             startLng = startLng,
             bucketLabel = bucketLabel,
-            storageType = storageType
+            storageType = storageType,
+            recordingId = rec.optString("id").takeIf { it.isNotEmpty() },
+            videoUrl = rec.optString("videoUrl").takeIf { it.isNotEmpty() },
+            thumbnailUrl = rec.optString("thumbnailUrl").takeIf { it.isNotEmpty() },
+            deleteUrl = rec.optString("deleteUrl").takeIf { it.isNotEmpty() },
+            eventUrl = rec.optString("eventUrl").takeIf { it.isNotEmpty() },
+            available = rec.optBoolean("available", true)
         )
     }
 

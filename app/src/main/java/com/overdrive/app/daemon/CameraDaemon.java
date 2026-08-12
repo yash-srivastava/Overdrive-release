@@ -1908,9 +1908,10 @@ public class CameraDaemon {
         // reconcile cadence for the rest of the daemon's life.
         memoryLogScheduler.scheduleAtFixedRate(() -> {
             try {
-                com.overdrive.app.server.RecordingsIndex.getInstance().reconcile();
+                com.overdrive.app.server.RecordingsIndex.getInstance()
+                        .requestReconcile("hourly-integrity");
             } catch (Throwable t) {
-                log("RecordingsIndex reconcile tick failed: "
+                log("RecordingsIndex reconcile request failed: "
                     + t.getClass().getSimpleName() + ": " + t.getMessage());
             }
         }, 60, 60, java.util.concurrent.TimeUnit.MINUTES);
