@@ -130,8 +130,8 @@ public class StorageManager {
     // Legacy paths from older app versions. Files here aren't written anymore
     // but they still count toward the user's configured limit and must be
     // reaped — otherwise a 500 MB limit can show 800 MB used in the UI.
-    private static final String LEGACY_APP_FILES_DIR = "/storage/emulated/0/Android/data/com.overdrive.app/files";
-    private static final String LEGACY_SURVEILLANCE_DIR = LEGACY_APP_FILES_DIR + "/sentry_events";
+    private static final String LEGACY_APP_FILES_DIR = RecordingDirectoryRegistry.LEGACY_BASE;
+    private static final String LEGACY_SURVEILLANCE_DIR = RecordingDirectoryRegistry.LEGACY_SENTRY;
 
     // Subdirectories
     public static final String RECORDINGS_SUBDIR = "recordings";
@@ -186,6 +186,10 @@ public class StorageManager {
     
     // Periodic cleanup interval (30 seconds)
     private static final long CLEANUP_INTERVAL_SECONDS = 30;
+    // Out-of-band edits and missed events still need an integrity backstop, but
+    // an idle daemon does not need to walk every recording directory every 30s.
+    private static final long PERIODIC_INTEGRITY_INTERVAL_MS = TimeUnit.HOURS.toMillis(1);
+    private volatile long lastPeriodicIntegrityAtMs = 0L;
 
     // Max anchor files to delete in a single BOUNDED-TRIM pass that runs WHILE the
     // encoder is writing. This caps SD-card I/O contention against the muxer's disk
@@ -3530,19 +3534,41 @@ public class StorageManager {
      * Callers should iterate all returned directories to find all files.
      */
     public List<File> getAllRecordingsDirs() {
-        return getAllDirsForType(recordingsDir, internalRecordingsDir, sdCardRecordingsDir, usbRecordingsDir);
+        return RecordingDirectoryRegistry.recordings(
+            recordingsDir, internalRecordingsDir, sdCardRecordingsDir, usbRecordingsDir);
     }
 
     public List<File> getAllSurveillanceDirs() {
-        return getAllDirsForType(surveillanceDir, internalSurveillanceDir, sdCardSurveillanceDir, usbSurveillanceDir);
+        return RecordingDirectoryRegistry.surveillance(
+            surveillanceDir, internalSurveillanceDir, sdCardSurveillanceDir, usbSurveillanceDir);
     }
 
     public List<File> getAllProximityDirs() {
-        return getAllDirsForType(proximityDir, internalProximityDir, sdCardProximityDir, usbProximityDir);
+        return RecordingDirectoryRegistry.proximity(
+            proximityDir, internalProximityDir, sdCardProximityDir, usbProximityDir);
     }
 
     public List<File> getAllTripsDirs() {
         return getAllDirsForType(tripsDir, internalTripsDir, sdCardTripsDir, usbTripsDir);
+    }
+
+    /** Active-first rank used only to resolve legacy filename-only requests. */
+    public int getRecordingRootRank(File file) {
+        if (file == null) return 100;
+        String path = file.getAbsolutePath();
+        List<File> roots = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (List<File> category : java.util.Arrays.asList(
+                getAllRecordingsDirs(), getAllSurveillanceDirs(), getAllProximityDirs())) {
+            for (File root : category) {
+                if (root != null && seen.add(root.getAbsolutePath())) roots.add(root);
+            }
+        }
+        for (int rank = 0; rank < roots.size(); rank++) {
+            String root = roots.get(rank).getAbsolutePath();
+            if (path.equals(root) || path.startsWith(root + File.separator)) return rank;
+        }
+        return 100;
     }
 
     /**
@@ -3580,60 +3606,29 @@ public class StorageManager {
     }
 
     /**
-     * Same as {@link #getAllSurveillanceDirs()} et al, but additionally
-     * includes legacy app-files locations from older app versions where
-     * stale media may still be living and counting toward the limit.
+    * Same canonical roots as {@link #getAllSurveillanceDirs()} et al.
      *
      * Used by both the size accounting and the cleanup reaper so the two
      * agree about what "the surveillance pool" actually is — otherwise
      * the UI can show 800 MB used against a 500 MB limit while cleanup
      * (which only saw the active dir) thinks everything is fine.
      *
-     * Includes the flat legacy base ({@link #LEGACY_APP_FILES_DIR}) when a
-     * non-null filename prefix is supplied via {@link #namePrefixForCategory},
-     * because the flat base is shared across categories and only files
-     * matching the category's prefix should be touched.
+     * The flat legacy base is shared across categories, so callers use
+     * {@link #namePrefixForCategory} to touch only matching files.
      */
     private List<File> getReapableDirs(String category) {
-        List<File> dirs;
-        String legacyPath = null;
-        boolean includeFlatBase = false;
         switch (category) {
             case "recordings":
-                dirs = new ArrayList<>(getAllRecordingsDirs());
-                legacyPath = LEGACY_APP_FILES_DIR + "/recordings";
-                includeFlatBase = true;  // some old installs wrote cam_* into <base>
-                break;
+                return new ArrayList<>(getAllRecordingsDirs());
             case "surveillance":
-                dirs = new ArrayList<>(getAllSurveillanceDirs());
-                legacyPath = LEGACY_SURVEILLANCE_DIR;
-                break;
+                return new ArrayList<>(getAllSurveillanceDirs());
             case "proximity":
-                dirs = new ArrayList<>(getAllProximityDirs());
-                legacyPath = LEGACY_APP_FILES_DIR + "/proximity_events";
-                break;
+                return new ArrayList<>(getAllProximityDirs());
             case "trips":
-                dirs = new ArrayList<>(getAllTripsDirs());
-                break;
+                return new ArrayList<>(getAllTripsDirs());
             default:
                 return new ArrayList<>();
         }
-        if (legacyPath != null) {
-            addDirIfMissing(dirs, new File(legacyPath));
-        }
-        if (includeFlatBase) {
-            addDirIfMissing(dirs, new File(LEGACY_APP_FILES_DIR));
-        }
-        return dirs;
-    }
-
-    private static void addDirIfMissing(List<File> dirs, File candidate) {
-        if (candidate == null || !candidate.exists() || !candidate.isDirectory()) return;
-        String path = candidate.getAbsolutePath();
-        for (File d : dirs) {
-            if (d != null && d.getAbsolutePath().equals(path)) return;
-        }
-        dirs.add(candidate);
     }
 
     /**
@@ -4895,7 +4890,21 @@ public class StorageManager {
      * This handles the case where UI app owns the directory but daemon needs to list files.
      * Returns every file in the directory regardless of extension.
      */
+    static final class FileListResult {
+        final File[] files;
+        final boolean complete;
+
+        FileListResult(File[] files, boolean complete) {
+            this.files = files;
+            this.complete = complete;
+        }
+    }
+
     private File[] listFilesViaShell(File dir) {
+        return listFilesViaShellWithStatus(dir).files;
+    }
+
+    private FileListResult listFilesViaShellWithStatus(File dir) {
         Process p = null;
         try {
             p = Runtime.getRuntime().exec(new String[]{"ls", dir.getAbsolutePath()});
@@ -4930,6 +4939,7 @@ public class StorageManager {
             drain.setDaemon(true);
             drain.start();
             drain.join(4_000);
+            boolean complete = false;
             if (drain.isAlive()) {
                 logWarn("listFilesViaShell(" + dir.getName() + "): `ls` drain exceeded 4s"
                     + " — killing child and returning partial list (" + files.size() + " so far)");
@@ -4939,7 +4949,8 @@ public class StorageManager {
                 drain.join(500);
             } else {
                 // Drain finished; reap the (now-exited or about-to-exit) child.
-                waitForBounded(p, 1_000, "listFilesViaShell(" + dir.getName() + ")");
+                complete = waitForBounded(
+                        p, 1_000, "listFilesViaShell(" + dir.getName() + ")") == 0;
             }
 
             File[] snapshot;
@@ -4947,13 +4958,13 @@ public class StorageManager {
                 snapshot = files.toArray(new File[0]);
             }
             logDebug("listFilesViaShell: found " + snapshot.length + " files in " + dir.getName());
-            return snapshot;
+            return new FileListResult(snapshot, complete);
         } catch (Exception e) {
             logWarn("listFilesViaShell failed: " + e.getMessage());
             if (p != null) {
                 try { p.destroyForcibly(); } catch (Exception ignored) {}
             }
-            return new File[0];
+            return new FileListResult(new File[0], false);
         }
     }
 
@@ -4986,6 +4997,68 @@ public class StorageManager {
      */
     public File[] listMp4Files(File dir) {
         return listFilesWithFallback(dir, ".mp4");
+    }
+
+    public static final class Mp4Listing {
+        public final File[] files;
+        public final boolean available;
+        public final boolean complete;
+
+        Mp4Listing(File[] files, boolean available, boolean complete) {
+            this.files = files;
+            this.available = available;
+            this.complete = complete;
+        }
+    }
+
+    /**
+     * MP4 listing with enough status for destructive reconciliation. A partial
+     * shell result may add/update rows, but callers must delete missing rows
+     * only when {@link Mp4Listing#complete} is true.
+     */
+    public Mp4Listing listMp4FilesWithStatus(File dir) {
+        if (dir == null || !dir.exists() || !dir.isDirectory()) {
+            return new Mp4Listing(new File[0], false, false);
+        }
+        java.io.FileFilter mp4Filter = file -> file.getName().endsWith(".mp4");
+        FileListResult direct = listFilesDirectWithStatus(dir, mp4Filter, 4_000L);
+        if (direct.complete) {
+            return new Mp4Listing(direct.files, true, true);
+        }
+        FileListResult shell = listFilesViaShellWithStatus(dir);
+        java.util.List<File> mp4 = new java.util.ArrayList<>();
+        for (File file : shell.files) {
+            if (file.getName().endsWith(".mp4")) mp4.add(file);
+        }
+        return new Mp4Listing(mp4.toArray(new File[0]), true, shell.complete);
+    }
+
+    static FileListResult listFilesDirectWithStatus(
+            File dir, java.io.FileFilter filter, long timeoutMs) {
+        java.util.concurrent.atomic.AtomicReference<File[]> files =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicBoolean finished =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+        Thread worker = new Thread(() -> {
+            try {
+                files.set(dir.listFiles(filter));
+            } catch (Throwable ignored) {
+                files.set(null);
+            } finally {
+                finished.set(true);
+            }
+        }, "StorageDirectList-" + dir.getName());
+        worker.setDaemon(true);
+        worker.start();
+        try {
+            worker.join(Math.max(1L, timeoutMs));
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return new FileListResult(new File[0], false);
+        }
+        File[] result = files.get();
+        return new FileListResult(result != null ? result : new File[0],
+                finished.get() && result != null);
     }
 
     /**
@@ -5063,13 +5136,12 @@ public class StorageManager {
         } catch (Throwable t) {
             logWarn(reason + ": RecordingsIndexFileWatcher refresh failed: " + t.getMessage());
         }
-        new Thread(() -> {
-            try {
-                com.overdrive.app.server.RecordingsIndex.getInstance().reconcile();
-            } catch (Throwable t) {
-                logWarn(reason + ": RecordingsIndex reconcile failed: " + t.getMessage());
-            }
-        }, "RecordingsIndexHotplugReconcile").start();
+        try {
+            com.overdrive.app.server.RecordingsIndex.getInstance()
+                    .requestReconcile(reason);
+        } catch (Throwable t) {
+            logWarn(reason + ": RecordingsIndex reconcile request failed: " + t.getMessage());
+        }
     }
 
     // ==================== Cleanup Logic ====================
@@ -5854,8 +5926,8 @@ public class StorageManager {
                 // only knows about .mp4 filenames.
                 if (file.getName().endsWith(".mp4")) {
                     try {
-                        com.overdrive.app.server.RecordingsIndex
-                                .getInstance().remove(file.getName());
+                            com.overdrive.app.server.RecordingsIndex
+                                .getInstance().removeByPath(file.getAbsolutePath());
                     } catch (Throwable ignored) {}
                 }
 
@@ -6309,9 +6381,6 @@ public class StorageManager {
         asyncCleanupExecutor.execute(() -> {
             synchronized (recordingsCleanupLock) {
                 try {
-                    // Make all files in directory readable
-                    makeFilesReadable(recordingsDir);
-
                     // Scoped to the active volume so a fallback to internal triggers
                     // (and bounds) on internal's pool + effective limit, not the
                     // combined cross-volume pool vs the raw external limit.
@@ -6370,9 +6439,6 @@ public class StorageManager {
         asyncCleanupExecutor.execute(() -> {
             synchronized (surveillanceCleanupLock) {
                 try {
-                    // Make all files in directory readable
-                    makeFilesReadable(surveillanceDir);
-
                     long currentSize = scopedSizeForCategory("surveillance");
                     long limitBytes = scopedLimitBytesForCategory("surveillance");
 
@@ -6415,9 +6481,6 @@ public class StorageManager {
         asyncCleanupExecutor.execute(() -> {
             synchronized (proximityCleanupLock) {
                 try {
-                    // Make all files in directory readable
-                    makeFilesReadable(proximityDir);
-
                     long currentSize = scopedSizeForCategory("proximity");
                     long limitBytes = scopedLimitBytesForCategory("proximity");
 
@@ -6458,9 +6521,6 @@ public class StorageManager {
         asyncCleanupExecutor.execute(() -> {
             synchronized (tripsCleanupLock) {
                 try {
-                    // Make all files in directory readable
-                    makeFilesReadable(tripsDir);
-
                     // Scoped (parity with the other onXxxFileSaved handlers) so a
                     // trips fallback to internal triggers on internal's pool + cap.
                     // scopedSizeForCategory("trips") still uses the DB-cached size in
@@ -6638,7 +6698,8 @@ public class StorageManager {
     
     /**
      * Start periodic cleanup for long recording sessions.
-     * Runs every 30 seconds while recording is active.
+      * Runs every 30 seconds while storage work is active and performs an
+      * hourly full integrity pass while idle.
      */
     public void startPeriodicCleanup() {
         if (cleanupScheduler != null && !cleanupScheduler.isShutdown()) {
@@ -6659,8 +6720,13 @@ public class StorageManager {
             t.setPriority(Thread.MIN_PRIORITY);
             return t;
         });
-        
-        cleanupScheduler.scheduleAtFixedRate(() -> {
+
+        // The constructor already queued a startup reap. Start the idle
+        // integrity clock here so the first 30-second tick does not duplicate
+        // that whole-library work while daemon initialization is still busy.
+        lastPeriodicIntegrityAtMs = statClockMs();
+
+        cleanupScheduler.scheduleWithFixedDelay(() -> {
             try {
                 // Don't run un-gated cleanup before the encoder probe is wired.
                 // Daemon-init ordering: startPeriodicCleanup() fires early
@@ -6671,6 +6737,25 @@ public class StorageManager {
                 if (!probeWired.get()) {
                     logDebug("Periodic cleanup tick skipped — encoder probe not wired yet");
                     return;
+                }
+                final long tickNowMs = statClockMs();
+                final boolean encoderWriting = isEncoderWriting();
+                final boolean activeSession = recordingActive.get()
+                    || surveillanceActive.get()
+                    || activeTripFilePath != null
+                    || encoderWriting;
+                final boolean deferredWork = !deferredCleanupDirs.isEmpty();
+                final boolean fallbackWasActive = recordingsEnospcFallbackActive;
+                final boolean integrityDue = isPeriodicIntegrityDue(
+                    tickNowMs, lastPeriodicIntegrityAtMs);
+                if (!shouldRunPeriodicMaintenance(activeSession, deferredWork,
+                        fallbackWasActive, integrityDue)) {
+                    return;
+                }
+                if (integrityDue) {
+                    // Advance before I/O so a failed or degraded-volume pass
+                    // cannot retry continuously on every 30-second tick.
+                    lastPeriodicIntegrityAtMs = tickNowMs;
                 }
                 // Self-clear a stale ENOSPC fallback. recordingsEnospcFallbackActive
                 // latches true when a mounted-but-full external volume redirects a
@@ -6722,8 +6807,8 @@ public class StorageManager {
                 // to run the whole-tree idle-only work (deferred drain + orphan
                 // tmp sweep) — kept OUT of the steady-state recording path to
                 // hold tick I/O low, but still run during a genuine emergency.
-                boolean encoderWriting = isEncoderWriting();
                 boolean diskCritical = false;
+                boolean emergencyMaintenance = false;
 
                 // Scoped size/limit snapshot for recordings/surveillance/proximity,
                 // measured ONCE per tick in the recording branch and reused by the
@@ -6793,6 +6878,7 @@ public class StorageManager {
                         || (sdFree > 0 && sdFree < 200L * 1024 * 1024);  // <200MB free
 
                     boolean hardOverlimit = recHard || survHard || tripsHard || proxHard || diskCritical;
+                    emergencyMaintenance = hardOverlimit;
                     if (hardOverlimit) {
                         // Emergency: log it AND run the idle-only whole-tree work
                         // (orphan tmp sweep) right now — the disk is about to
@@ -6805,7 +6891,6 @@ public class StorageManager {
                             + " trips=" + formatSize(tripsBytes) + "/" + formatSize(tripsLim) + (tripsHard ? " HARD" : "")
                             + " prox=" + formatSize(proxBytes) + "/" + formatSize(proxLim) + (proxHard ? " HARD" : "")
                             + " sdFree=" + formatSize(sdFree) + (diskCritical ? " CRITICAL" : ""));
-                        sweepOrphanTempFiles();
                     }
                     // Soft state (over cap ≤5%, disk healthy): fall through to the
                     // per-category passes, which run a BOUNDED trim. We intentionally
@@ -6813,10 +6898,22 @@ public class StorageManager {
                     // keep steady-state recording-tick I/O low; both run at idle.
                 } else {
                     // Encoder idle: drain any deferred work first so storage limits
-                    // re-converge after a long recording, then sweep orphan
-                    // .mp4.tmp / .broken / .jpg.tmp partials (whole-tree walk, safe
-                    // when idle; otherwise partials only get reaped at daemon boot).
+                    // re-converge after a long recording. Sweep orphan partials only
+                    // on the hourly integrity pass; startup and hard-emergency paths
+                    // retain their immediate sweeps.
                     drainDeferredCleanupIfDue();
+                    boolean fallbackRecovered = fallbackWasActive
+                        && !recordingsEnospcFallbackActive;
+                    if (!shouldRunFullPeriodicMaintenance(
+                            activeSession, integrityDue, fallbackRecovered)) {
+                        // A deferred-only tick already drained its categories. An
+                        // unresolved fallback-only tick already performed the cheap
+                        // free-space probe. Neither needs the four full scans below.
+                        return;
+                    }
+                }
+
+                if (shouldSweepOrphanTempFiles(integrityDue, emergencyMaintenance)) {
                     sweepOrphanTempFiles();
                 }
 
@@ -6899,6 +6996,28 @@ public class StorageManager {
         }, CLEANUP_INTERVAL_SECONDS, CLEANUP_INTERVAL_SECONDS, TimeUnit.SECONDS);
         
         logInfo("Started periodic storage cleanup (interval=" + CLEANUP_INTERVAL_SECONDS + "s)");
+    }
+
+    static boolean shouldRunPeriodicMaintenance(boolean activeSession,
+                                                boolean deferredWork,
+                                                boolean fallbackActive,
+                                                boolean integrityDue) {
+        return activeSession || deferredWork || fallbackActive || integrityDue;
+    }
+
+    static boolean isPeriodicIntegrityDue(long nowMs, long lastRunMs) {
+        return lastRunMs <= 0L || (nowMs - lastRunMs) >= PERIODIC_INTEGRITY_INTERVAL_MS;
+    }
+
+    static boolean shouldRunFullPeriodicMaintenance(boolean activeSession,
+                                                    boolean integrityDue,
+                                                    boolean fallbackRecovered) {
+        return activeSession || integrityDue || fallbackRecovered;
+    }
+
+    static boolean shouldSweepOrphanTempFiles(boolean integrityDue,
+                                              boolean emergencyMaintenance) {
+        return integrityDue || emergencyMaintenance;
     }
     
     /**
@@ -7323,7 +7442,8 @@ public class StorageManager {
 
         if (file.getName().endsWith(".mp4")) {
             try {
-                com.overdrive.app.server.RecordingsIndex.getInstance().remove(file.getName());
+                com.overdrive.app.server.RecordingsIndex.getInstance()
+                    .removeByPath(file.getAbsolutePath());
             } catch (Throwable ignored) {}
         }
         if (sidecarExts.length > 0) {

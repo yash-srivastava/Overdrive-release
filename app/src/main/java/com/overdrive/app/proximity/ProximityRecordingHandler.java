@@ -191,9 +191,6 @@ public class ProximityRecordingHandler {
 
             logger.info("Proximity recording stopped");
 
-            // Trigger cleanup
-            storageManager.onProximityFileSaved();
-
             // Final-stage push with the now-finalised hero JPEG. The start
             // push deliberately skipped the snapshot URL because the hero
             // JPEG is only written when stopRecording finalises the segment.
