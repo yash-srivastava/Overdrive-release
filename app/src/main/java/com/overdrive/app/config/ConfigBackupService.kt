@@ -11,6 +11,7 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicLong
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * Single source of truth for Overdrive's settings backup / restore.
@@ -51,9 +52,9 @@ object ConfigBackupService {
     // CredentialCipher.DID_PATH — duplicated as a literal rather than exposing
     // it, to keep this class free of a crypto dependency. Must match
     // CredentialCipher.java:29.
-    private const val DID_PATH = "/data/local/tmp/.byd_device_id"
-    private const val RESTORE_JOURNAL_PATH =
-        "/data/local/tmp/.overdrive_config_restore_txn.json"
+    private val DID_PATH = ScratchPaths.path(".byd_device_id")
+    private val RESTORE_JOURNAL_PATH =
+        ScratchPaths.path(".overdrive_config_restore_txn.json")
     private const val RESTORE_JOURNAL_VERSION = 1
     private val didTempSequence = AtomicLong(0)
     private val restoreJournalTempSequence = AtomicLong(0)

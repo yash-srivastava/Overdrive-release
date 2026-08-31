@@ -1,6 +1,7 @@
 package com.overdrive.app.auth;
 
 import android.util.Base64;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.daemon.CameraDaemon;
@@ -61,12 +62,12 @@ public class AuthManager {
     // Legacy single-purpose auth file. Read-only at this point — kept
     // around purely so existing installs can be migrated forward into
     // the unified config without forcing the user to re-pair.
-    private static final String LEGACY_AUTH_FILE = "/data/local/tmp/.byd_auth.json";
+    private static final String LEGACY_AUTH_FILE = ScratchPaths.path(".byd_auth.json");
 
     // Device ID file — written via ADB shell from MainActivity, survives
     // app reinstall. Consulted only when the unified config has no
     // deviceId yet (cold-start before MainActivity has synced).
-    private static final String DEVICE_ID_FILE = "/data/local/tmp/.overdrive_device_id";
+    private static final String DEVICE_ID_FILE = ScratchPaths.path(".overdrive_device_id");
 
     // JWT settings.
     //
@@ -582,7 +583,7 @@ public class AuthManager {
      */
     private static boolean unifiedConfigContainsSecret(String expectedSecret) {
         try {
-            File file = new File("/data/local/tmp/overdrive_config.json");
+            File file = new File(ScratchPaths.path("overdrive_config.json"));
             if (!file.exists() || !file.canRead()) return false;
             StringBuilder sb = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(new FileReader(file))) {

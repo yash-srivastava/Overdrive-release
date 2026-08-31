@@ -10,6 +10,7 @@ import com.overdrive.app.byd.routing.VehicleCommandRouter.CommandResult;
 import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.util.ScratchPaths;
 
 import org.json.JSONObject;
 
@@ -226,7 +227,7 @@ public class BydCloudApiHandler {
 
             InputStream tablesStream = getTablesStream(config);
             if (tablesStream == null) {
-                logger.error("  FAILED: transport tables not found at /data/local/tmp/ or in assets");
+                logger.error("  FAILED: transport tables not found at " + ScratchPaths.getDir() + "/ or in assets");
                 response.put("success", false);
                 response.put("error", Messages.get("errors.bydcloud_bangcle_tables_missing_reinstall"));
                 HttpResponse.sendJson(out, response.toString());

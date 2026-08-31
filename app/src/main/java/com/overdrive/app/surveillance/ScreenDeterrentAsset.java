@@ -2,11 +2,12 @@ package com.overdrive.app.surveillance;
 
 import java.io.File;
 import java.util.Locale;
+import com.overdrive.app.util.ScratchPaths;
 
 /** Shared trust boundary for uploaded screen-deterrent assets. */
 public final class ScreenDeterrentAsset {
 
-    public static final String DIRECTORY = "/data/local/tmp/.overdrive";
+    public static final String DIRECTORY = ScratchPaths.path(".overdrive");
     public static final String PREFIX = "screen_deterrent_asset.";
 
     private ScreenDeterrentAsset() {}

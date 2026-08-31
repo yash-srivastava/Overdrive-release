@@ -13,6 +13,7 @@ import android.media.Image;
 import android.media.ImageReader;
 import android.os.IBinder;
 import android.view.Surface;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -97,7 +98,7 @@ public final class ClusterMirrorController {
     // stays negligible. Capped, single-thread, torn down on stop.
     private static final long STILL_POLL_MS = 500;   // 2 Hz
     private static final long EXEC_KEEPALIVE_MS = 5000;
-    private static final String SCREENCAP_DIR = "/data/local/tmp/.overdrive/mirror";
+    private static final String SCREENCAP_DIR = ScratchPaths.path(".overdrive/mirror");
 
     /** Mode after {@link #startOnExec}. Reported to the UI so it can show the right state. */
     public static final int MODE_STOPPED       = 0;

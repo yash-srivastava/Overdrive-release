@@ -9,6 +9,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * App-process brain for physical-key mappings.
@@ -105,7 +106,7 @@ object KeyMapDispatcher {
     // instead of one per REFRESH_THROTTLE_MS — the zero-overhead-when-disabled bar.
     private const val REENABLE_POLL_MS = 30_000L
     // Unified config file — watched for instant propagation of settings edits.
-    private const val CONFIG_PATH = "/data/local/tmp/overdrive_config.json"
+    private val CONFIG_PATH = ScratchPaths.path("overdrive_config.json")
 
     // Pooled I/O executor for daemon POSTs and config refreshes. Cached (not
     // single-thread) so one slow/hung POST never blocks either the timing

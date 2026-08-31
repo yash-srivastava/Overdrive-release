@@ -1,6 +1,7 @@
 package com.overdrive.app.camera.dilink5;
 
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.util.ScratchPaths;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -21,7 +22,7 @@ public class DiLink5QCarCamBackend {
             System.loadLibrary("surveillance");
         } catch (Throwable t) {
             try {
-                System.load("/data/local/tmp/libsurveillance.so");
+                System.load(com.overdrive.app.util.ScratchPaths.path("libsurveillance.so"));
             } catch (Throwable t2) {
                 logger.warn("Failed to load libsurveillance.so: " + t2.getMessage());
             }
@@ -67,7 +68,7 @@ public class DiLink5QCarCamBackend {
             logger.info("Starting Qualcomm QCarCam hardware capture supervisor...");
 
             // Ensure 4cam.xml exists in /data/local/tmp
-            java.io.File cfgFile = new java.io.File("/data/local/tmp/4cam.xml");
+            java.io.File cfgFile = new java.io.File(ScratchPaths.path("4cam.xml"));
             if (!cfgFile.exists()) {
                 String defaultXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
                         "<qcarcam_inputs>\n" +
@@ -98,7 +99,7 @@ public class DiLink5QCarCamBackend {
             }
 
             // Path to libhook_qcarcam.so
-            String hookPath = "/data/local/tmp/libhook_qcarcam.so";
+            String hookPath = ScratchPaths.path("libhook_qcarcam.so");
             java.io.File hookFile = new java.io.File(hookPath);
             if (!hookFile.exists()) {
                 java.io.File appHook = new java.io.File("/data/app", "libhook_qcarcam.so");
@@ -107,14 +108,14 @@ public class DiLink5QCarCamBackend {
                 }
             }
 
-            String qcarcamBin = "/data/local/tmp/qcarcam_test";
+            String qcarcamBin = ScratchPaths.path("qcarcam_test");
             if (!new java.io.File(qcarcamBin).exists()) {
                 qcarcamBin = "/vendor/bin/qcarcam_test";
             }
 
             ProcessBuilder pb = new ProcessBuilder(
                     "/system/bin/sh", "-c",
-                    "LD_PRELOAD=" + hookPath + " " + qcarcamBin + " -config=/data/local/tmp/4cam.xml"
+                    "LD_PRELOAD=" + hookPath + " " + qcarcamBin + " -config=" + ScratchPaths.getDir() + "/4cam.xml"
             );
             pb.redirectErrorStream(true);
             sHardwareProcess = pb.start();

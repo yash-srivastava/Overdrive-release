@@ -2,6 +2,7 @@ package com.overdrive.app.logging
 
 import android.content.Context
 import java.io.File
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * Configuration for LogManager.
@@ -89,7 +90,7 @@ data class LogConfig(
          * Daemon log directory (for processes running via ADB shell).
          * These have shell permissions and can write to /data/local/tmp.
          */
-        const val DAEMON_LOG_DIR = "/data/local/tmp"
+        val DAEMON_LOG_DIR = ScratchPaths.getDir()
     }
     
     /**

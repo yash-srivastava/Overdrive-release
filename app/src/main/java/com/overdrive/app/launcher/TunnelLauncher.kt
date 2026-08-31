@@ -2,6 +2,7 @@ package com.overdrive.app.launcher
 
 import android.content.Context
 import com.overdrive.app.logging.LogManager
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * Launches tunnel processes via ADB shell for remote access.
@@ -19,8 +20,8 @@ class TunnelLauncher(
         private const val LAUNCH_GUARD_TIMEOUT_SECONDS = 90L
         
         // Cloudflared paths
-        private const val CLOUDFLARED_TMP_PATH = "/data/local/tmp/cloudflared"
-        private const val CLOUDFLARED_LOG = "/data/local/tmp/cloudflared.log"
+        private val CLOUDFLARED_TMP_PATH = ScratchPaths.path("cloudflared")
+        private val CLOUDFLARED_LOG = ScratchPaths.path("cloudflared.log")
         
         // Process name for identification
         private const val CLOUDFLARED_PROCESS = "cloudflared"
@@ -229,10 +230,10 @@ class TunnelLauncher(
                         // important is dropped (defense-in-depth even though
                         // the script form already prevents the suicide).
                         val killScript =
-                            "[ -f /data/local/tmp/zrok.disabled ] || " +
-                            "echo \"disabled — cloudflared starting at \$(date)\" > /data/local/tmp/zrok.disabled\n" +
-                            "chmod 666 /data/local/tmp/zrok.disabled 2>/dev/null\n" +
-                            "rm -f /data/local/tmp/start_zrok.sh 2>/dev/null\n" +
+                            "[ -f " + ScratchPaths.getDir() + "/zrok.disabled ] || " +
+                            "echo \"disabled — cloudflared starting at \$(date)\" > " + ScratchPaths.getDir() + "/zrok.disabled\n" +
+                            "chmod 666 " + ScratchPaths.getDir() + "/zrok.disabled 2>/dev/null\n" +
+                            "rm -f " + ScratchPaths.getDir() + "/start_zrok.sh 2>/dev/null\n" +
                             com.overdrive.app.launcher.DaemonLauncher.psAwkKillLine("zrok") +
                             "killall -9 zrok 2>/dev/null\n" +
                             "echo done\n"

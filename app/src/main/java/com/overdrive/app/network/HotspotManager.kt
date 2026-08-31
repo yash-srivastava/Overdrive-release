@@ -12,6 +12,7 @@ import com.overdrive.app.logging.LogManager
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * Single app-wide owner of the WiFi-hotspot feature: AP state, the SoftAp
@@ -393,7 +394,7 @@ object HotspotManager {
             append(" | awk '{print \$1}' | while read pid; do\n")
             append("  if [ \"\$pid\" != \"\$MY_PID\" ]; then kill -9 \$pid 2>/dev/null; fi\n")
             append("done\n")
-            append("if [ -f /data/local/tmp/singbox.disabled ]; then echo configured-stopped; exit 0; fi\n")
+            append("if [ -f " + ScratchPaths.getDir() + "/singbox.disabled ]; then echo configured-stopped; exit 0; fi\n")
             append("test -x $bin || exit 3\n")
             append("nohup $bin run -c $cfgPath >/dev/null 2>&1 &\n")
             // `nohup ... &` reports success on fork, so verify the process survived —
@@ -433,7 +434,7 @@ object HotspotManager {
             append(" | awk '{print \$1}' | while read pid; do\n")
             append("  if [ \"\$pid\" != \"\$MY_PID\" ]; then kill -9 \$pid 2>/dev/null; fi\n")
             append("done\n")
-            append("if [ -f /data/local/tmp/singbox.disabled ]; then echo cleared-stopped; exit 0; fi\n")
+            append("if [ -f " + ScratchPaths.getDir() + "/singbox.disabled ]; then echo cleared-stopped; exit 0; fi\n")
             append("test -x $bin || exit 3\n")
             append("nohup $bin run -c $cfgPath >/dev/null 2>&1 &\n")
             append("sleep 2\n")

@@ -46,15 +46,22 @@ public class ModelsApiHandler {
     private static final String TAG = "ModelsApiHandler";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
-    public static final String MODELS_DIR = "/data/local/tmp/overdrive/models";
+    public static String modelsDir() {
+        com.overdrive.app.util.ScratchPaths.syncFromEnv();
+        return com.overdrive.app.util.ScratchPaths.path("overdrive/models");
+    }
 
     // Manifest path inside the extracted web assets — bundled copy ships with the APK
     // and is the offline-safe baseline.
-    private static final String MANIFEST_BUNDLED_PATH = "/data/local/tmp/web/shared/models/manifest.json";
+    private static String manifestBundledPath() {
+        return com.overdrive.app.util.ScratchPaths.path("web/shared/models/manifest.json");
+    }
     // Cached remote manifest. Persisted across app updates so an offline boot still
     // shows the most recently-seen model list. Promoted in front of the bundled copy
     // by readManifest() whenever its top-level "version" is newer.
-    private static final String MANIFEST_REMOTE_CACHE = "/data/local/tmp/overdrive/models/manifest.json";
+    private static String manifestRemoteCachePath() {
+        return com.overdrive.app.util.ScratchPaths.path("overdrive/models/manifest.json");
+    }
     // GitHub release manifest URL — same baseUrl convention as the GLBs themselves.
     private static final String MANIFEST_REMOTE_URL =
             "https://github.com/yash-srivastava/Overdrive-release/releases/download/models-v1/manifest.json";
@@ -244,7 +251,7 @@ public class ModelsApiHandler {
     }
 
     private static boolean writeRemoteCache(JSONObject manifest) {
-        File cache = new File(MANIFEST_REMOTE_CACHE);
+        File cache = new File(manifestRemoteCachePath());
         File parent = cache.getParentFile();
         if (parent != null && !parent.exists()) parent.mkdirs();
 
@@ -433,7 +440,7 @@ public class ModelsApiHandler {
     /** Returns true when the GLB exists in the persistent download cache. */
     public static File cachedModelFile(String fileName) {
         if (fileName == null || fileName.contains("/") || fileName.contains("..")) return null;
-        File f = new File(MODELS_DIR, fileName);
+        File f = new File(modelsDir(), fileName);
         return f.exists() && f.isFile() ? f : null;
     }
 
@@ -620,11 +627,11 @@ public class ModelsApiHandler {
 
     private static void doDownload(String id, String url, String fileName, long expectedSize,
                                    String expectedSha, DownloadState ds) {
-        File modelsDir = new File(MODELS_DIR);
+        File modelsDir = new File(modelsDir());
         if (!modelsDir.exists() && !modelsDir.mkdirs()) {
             ds.state = "error";
-            ds.error = "Cannot create " + MODELS_DIR;
-            logger.warn(TAG + ": mkdir failed for " + MODELS_DIR);
+            ds.error = "Cannot create " + modelsDir();
+            logger.warn(TAG + ": mkdir failed for " + modelsDir());
             return;
         }
 
@@ -747,8 +754,8 @@ public class ModelsApiHandler {
      * return null so callers know to fail gracefully.
      */
     private static JSONObject readManifest() {
-        JSONObject bundled = readManifestFile(new File(MANIFEST_BUNDLED_PATH));
-        JSONObject cached  = readManifestFile(new File(MANIFEST_REMOTE_CACHE));
+        JSONObject bundled = readManifestFile(new File(manifestBundledPath()));
+        JSONObject cached  = readManifestFile(new File(manifestRemoteCachePath()));
         if (bundled == null) return cached;
         if (cached  == null) return bundled;
         int bv = bundled.optInt("version", 0);

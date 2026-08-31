@@ -2,6 +2,7 @@ package com.overdrive.app.byd;
 
 import com.overdrive.app.byd.routing.VehicleCommandRouter;
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.util.ScratchPaths;
 
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -123,7 +124,7 @@ public final class AcAutoOffTimer {
      * switch it off. That is the battery drain this class exists to prevent. A watchdog restart
      * or crash has the same effect.
      */
-    private static final String STATE_PATH = "/data/local/tmp/overdrive_ac_auto_off_due";
+    private static final String STATE_PATH = ScratchPaths.path("overdrive_ac_auto_off_due");
 
     private AcAutoOffTimer() {}
 

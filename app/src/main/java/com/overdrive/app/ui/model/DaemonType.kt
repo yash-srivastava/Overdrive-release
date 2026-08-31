@@ -2,6 +2,7 @@ package com.overdrive.app.ui.model
 
 import android.content.Context
 import com.overdrive.app.R
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * Types of background daemons managed by the app.
@@ -33,14 +34,14 @@ enum class DaemonType(
      */
     val sentinelPath: String
 ) {
-    CAMERA_DAEMON("Camera Daemon", "byd_cam_daemon", "/data/local/tmp/camera_daemon.disabled"),
-    SENTRY_DAEMON("Sentry Daemon", "sentry_daemon", "/data/local/tmp/sentry_daemon.disabled"),
-    ACC_SENTRY_DAEMON("ACC Sentry", "acc_sentry_daemon", "/data/local/tmp/acc_sentry_daemon.disabled"),
-    SINGBOX_PROXY("Sing-box Proxy", "sing-box", "/data/local/tmp/singbox.disabled"),
-    CLOUDFLARED_TUNNEL("Cloudflared Tunnel", "cloudflared", "/data/local/tmp/cloudflared.disabled"),
-    ZROK_TUNNEL("Zrok Tunnel", "zrok", "/data/local/tmp/zrok.disabled"),
-    TAILSCALE_TUNNEL("Tailscale Tunnel", "tailscaled", "/data/local/tmp/tailscale.disabled"),
-    TELEGRAM_DAEMON("Telegram Bot", "telegram_bot_daemon", "/data/local/tmp/telegram_bot_daemon.disabled")
+    CAMERA_DAEMON("Camera Daemon", "byd_cam_daemon", ScratchPaths.path("camera_daemon.disabled")),
+    SENTRY_DAEMON("Sentry Daemon", "sentry_daemon", ScratchPaths.path("sentry_daemon.disabled")),
+    ACC_SENTRY_DAEMON("ACC Sentry", "acc_sentry_daemon", ScratchPaths.path("acc_sentry_daemon.disabled")),
+    SINGBOX_PROXY("Sing-box Proxy", "sing-box", ScratchPaths.path("singbox.disabled")),
+    CLOUDFLARED_TUNNEL("Cloudflared Tunnel", "cloudflared", ScratchPaths.path("cloudflared.disabled")),
+    ZROK_TUNNEL("Zrok Tunnel", "zrok", ScratchPaths.path("zrok.disabled")),
+    TAILSCALE_TUNNEL("Tailscale Tunnel", "tailscaled", ScratchPaths.path("tailscale.disabled")),
+    TELEGRAM_DAEMON("Telegram Bot", "telegram_bot_daemon", ScratchPaths.path("telegram_bot_daemon.disabled"))
 }
 
 /**
@@ -59,7 +60,8 @@ enum class DaemonType(
  * of park (for the stale-age fail-safe).
  */
 object ParkedShutdown {
-    const val MARKER_PATH = "/data/local/tmp/overdrive_parked_shutdown"
+    @JvmField
+    val MARKER_PATH = ScratchPaths.path("overdrive_parked_shutdown")
     /** Max age before the marker is treated as stale and force-cleared (fail-safe so a
      *  marker can never permanently suppress an active session). */
     const val MAX_AGE_MS = 24L * 60 * 60 * 1000

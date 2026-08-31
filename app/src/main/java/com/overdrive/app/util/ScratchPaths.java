@@ -138,6 +138,12 @@ public final class ScratchPaths {
         return dir;
     }
 
+    /** Rewrite legacy tmp prefixes in a shell command (daemon execShell entry point). */
+    public static String prepareExecShell(String command) {
+        syncFromEnv();
+        return remapShell(command);
+    }
+
     /** Rewrite legacy tmp prefixes in a shell command or script body. */
     public static String remapShell(String command) {
         if (command == null || command.isEmpty() || usesLegacyDir()) {

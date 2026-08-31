@@ -2,6 +2,7 @@ package com.overdrive.app.abrp;
 
 import com.overdrive.app.logging.DaemonLogger;
 import org.json.JSONObject;
+import com.overdrive.app.util.ScratchPaths;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -19,7 +20,7 @@ public class AbrpConfig {
     private static final String TAG = "AbrpConfig";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
-    private static final String CONFIG_PATH = "/data/local/tmp/abrp_config.properties";
+    private static final String CONFIG_PATH = ScratchPaths.path("abrp_config.properties");
     private static final String PROP_USER_TOKEN = "user_token";
     private static final String PROP_ENABLED = "enabled";
     private static final String PROP_CAR_MODEL = "car_model";

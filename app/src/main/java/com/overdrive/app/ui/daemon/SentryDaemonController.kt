@@ -3,6 +3,7 @@ package com.overdrive.app.ui.daemon
 import com.overdrive.app.launcher.AdbDaemonLauncher
 import com.overdrive.app.ui.model.DaemonStatus
 import com.overdrive.app.ui.model.DaemonType
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * Controller for the Sentry Daemon (SentryDaemon.java).
@@ -35,9 +36,9 @@ class SentryDaemonController(
         // the SentryDaemon class — neither contains "AccSentry" as a
         // substring.
         return "echo 'STOP' | nc -w 1 127.0.0.1 19879 2>/dev/null; " +  // Port 19879 for SentryDaemon
-               "if [ -f /data/local/tmp/sentry_daemon.pid ]; then " +
-               "kill -9 \$(cat /data/local/tmp/sentry_daemon.pid) 2>/dev/null; " +
-               "rm -f /data/local/tmp/sentry_daemon.pid; fi; " +
+               "if [ -f " + ScratchPaths.getDir() + "/sentry_daemon.pid ]; then " +
+               "kill -9 \$(cat " + ScratchPaths.getDir() + "/sentry_daemon.pid) 2>/dev/null; " +
+               "rm -f " + ScratchPaths.getDir() + "/sentry_daemon.pid; fi; " +
                "MY_PID=\$\$; ps -A -o PID,ARGS | grep -F sentry_daemon | grep -v grep " +
                "| grep -v acc_sentry | awk '{print \$1}' | while read pid; do " +
                "if [ \"\$pid\" != \"\$MY_PID\" ]; then kill -9 \$pid 2>/dev/null; fi; done; " +

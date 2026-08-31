@@ -1,6 +1,7 @@
 package com.overdrive.app.monitor;
 
 import android.os.SystemClock;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.daemon.CameraDaemon;
 import org.json.JSONObject;
@@ -29,7 +30,7 @@ public class GpsMonitor {
     private static final Object lock = new Object();
 
     // Primary cache file (daemon uid 2000 can write to /data/local/tmp)
-    private static final String CACHE_FILE = "/data/local/tmp/gps_cache.json";
+    private static final String CACHE_FILE = ScratchPaths.path("gps_cache.json");
     
     // Secondary cache file (app data directory - read-only for daemon, written by LocationSidecarService)
     private static final String CACHE_FILE_APP = "/data/data/com.overdrive.app/files/gps_cache.json";

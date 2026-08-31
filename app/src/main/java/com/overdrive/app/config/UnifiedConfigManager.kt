@@ -1816,7 +1816,7 @@ object UnifiedConfigManager {
             writeFileAndSync(bakTmp, config.toString(2), worldAccessible = true)
             if (!bakTmp.renameTo(bakFile)) {
                 // tmp-create/rename can fail for the app UID on sticky
-                // /data/local/tmp. Do NOT fall back to a non-atomic direct
+                // " + ScratchPaths.getDir() + ". Do NOT fall back to a non-atomic direct
                 // write of the .bak: that would TRUNCATE the existing
                 // last-known-good copy, and a pm-install kill mid-write could
                 // leave BOTH primary and .bak torn — defeating the self-heal
@@ -1871,7 +1871,7 @@ object UnifiedConfigManager {
     /**
      * Mirror the good config to an APP-PRIVATE .bak the app process can ALWAYS
      * refresh atomically (its own data dir, where it can create a sibling and
-     * rename — unlike sticky /data/local/tmp). Confirmed IPC writes refresh it,
+     * rename — unlike sticky " + ScratchPaths.getDir() + "). Confirmed IPC writes refresh it,
      * and recoverFromBackup picks the higher-seq source between this and the
      * sticky .bak.
      *
@@ -2024,7 +2024,7 @@ object UnifiedConfigManager {
         // a half-written corrupt config that would wipe user settings.
         //
         // When the app UID (10xxx) cannot create this sibling in sticky
-        // /data/local/tmp, the write is deferred/rejected. It must never fall
+        // " + ScratchPaths.getDir() + ", the write is deferred/rejected. It must never fall
         // back to opening CONFIG_PATH with truncate semantics: a process kill
         // during that write can destroy the only live config.
         // Per-PROCESS-unique tmp name (.tmp.<pid>): the rename onto CONFIG_PATH
@@ -3471,8 +3471,8 @@ object UnifiedConfigManager {
      *   "screenshotPrivacyMode": boolean
      * }
      *
-     * The legacy file at /data/local/tmp/.overdrive/locale was unreliable
-     * because the app UID can't `mkdir` under /data/local/tmp/, so writes
+     * The legacy file at " + ScratchPaths.getDir() + "/.overdrive/locale was unreliable
+     * because the app UID can't `mkdir` under " + ScratchPaths.getDir() + "/, so writes
      * from the picker silently failed and the language reverted on next
      * cold start.
      */

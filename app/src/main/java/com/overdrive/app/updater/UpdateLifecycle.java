@@ -3,6 +3,7 @@ package com.overdrive.app.updater;
 import android.content.Context;
 import android.content.Intent;
 import android.util.Log;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.launcher.AdbDaemonLauncher;
 
@@ -36,8 +37,8 @@ public final class UpdateLifecycle {
             + "if [ \"$pid\" != \"$MY_PID\" ]; then kill -9 $pid 2>/dev/null; fi; done\n";
     }
 
-    public static final String UPDATE_IN_PROGRESS_FILE = "/data/local/tmp/overdrive_update_in_progress";
-    public static final String POST_UPDATE_FILE = "/data/local/tmp/overdrive_post_update";
+    public static final String UPDATE_IN_PROGRESS_FILE = ScratchPaths.path("overdrive_update_in_progress");
+    public static final String POST_UPDATE_FILE = ScratchPaths.path("overdrive_post_update");
     /**
      * One-shot marker read by TelegramBotDaemon's notifyTunnel handler so the
      * first post-update tunnel-URL message can include the new version (and a
@@ -46,7 +47,7 @@ public final class UpdateLifecycle {
      * daemon after consuming.
      */
     public static final String TELEGRAM_POST_UPDATE_HINT_FILE =
-            "/data/local/tmp/overdrive_post_update_pending_telegram";
+            ScratchPaths.path("overdrive_post_update_pending_telegram");
     /**
      * Failure twin of {@link #TELEGRAM_POST_UPDATE_HINT_FILE}. Planted by the
      * detached install script's FAILURE branch (only for an IPC-triggered
@@ -60,7 +61,7 @@ public final class UpdateLifecycle {
      * this one, so the bot never sends both a success and a failure message.
      */
     public static final String TELEGRAM_INSTALL_FAILED_HINT_FILE =
-            "/data/local/tmp/overdrive_install_failed_pending_telegram";
+            ScratchPaths.path("overdrive_install_failed_pending_telegram");
 
     public static final String EXTRA_POST_UPDATE = "post_update";
 
@@ -133,17 +134,17 @@ public final class UpdateLifecycle {
         // record of a UI stop that AccSentryDaemon's ACC-on auto-start gate
         // relies on. Write-if-absent also preserves a manual CORE-daemon stop.
         String script =
-                "[ -f /data/local/tmp/camera_daemon.disabled ] || " +
-                "echo \"disabled by post-update reset at $(date)\" > /data/local/tmp/camera_daemon.disabled\n" +
-                "chmod 666 /data/local/tmp/camera_daemon.disabled 2>/dev/null\n" +
-                "[ -f /data/local/tmp/sentry_daemon.disabled ] || " +
-                "echo \"disabled by post-update reset at $(date)\" > /data/local/tmp/sentry_daemon.disabled\n" +
-                "chmod 666 /data/local/tmp/sentry_daemon.disabled 2>/dev/null\n" +
-                "[ -f /data/local/tmp/acc_sentry_daemon.disabled ] || " +
-                "echo \"disabled by post-update reset at $(date)\" > /data/local/tmp/acc_sentry_daemon.disabled\n" +
-                "chmod 666 /data/local/tmp/acc_sentry_daemon.disabled 2>/dev/null\n" +
-                "rm -f /data/local/tmp/cam_watchdog.pid 2>/dev/null\n" +
-                "rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/start_acc_sentry.sh /data/local/tmp/start_zrok.sh /data/local/tmp/start_telegram.sh 2>/dev/null\n" +
+                "[ -f " + ScratchPaths.getDir() + "/camera_daemon.disabled ] || " +
+                "echo \"disabled by post-update reset at $(date)\" > " + ScratchPaths.getDir() + "/camera_daemon.disabled\n" +
+                "chmod 666 " + ScratchPaths.getDir() + "/camera_daemon.disabled 2>/dev/null\n" +
+                "[ -f " + ScratchPaths.getDir() + "/sentry_daemon.disabled ] || " +
+                "echo \"disabled by post-update reset at $(date)\" > " + ScratchPaths.getDir() + "/sentry_daemon.disabled\n" +
+                "chmod 666 " + ScratchPaths.getDir() + "/sentry_daemon.disabled 2>/dev/null\n" +
+                "[ -f " + ScratchPaths.getDir() + "/acc_sentry_daemon.disabled ] || " +
+                "echo \"disabled by post-update reset at $(date)\" > " + ScratchPaths.getDir() + "/acc_sentry_daemon.disabled\n" +
+                "chmod 666 " + ScratchPaths.getDir() + "/acc_sentry_daemon.disabled 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/cam_watchdog.pid 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/start_cam_daemon.sh " + ScratchPaths.getDir() + "/start_acc_sentry.sh " + ScratchPaths.getDir() + "/start_zrok.sh " + ScratchPaths.getDir() + "/start_telegram.sh 2>/dev/null\n" +
                 // ps+awk+kill cascade — single-source-of-truth process
                 // names below. Each pattern walks /proc and SIGKILLs the
                 // matching PIDs except the calling shell's own PID.
@@ -169,20 +170,20 @@ public final class UpdateLifecycle {
                 // mid-shutdown could still rewrite the lock between our
                 // pkill and our rm.
                 "sleep 1\n" +
-                "rm -f /data/local/tmp/*_daemon.lock 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/*_daemon.lock 2>/dev/null\n" +
                 // The detached install script has finished executing by the
                 // time the new MainActivity runs this reset — remove it so it
                 // doesn't linger in /data/local/tmp (hygiene; it's rewritten via
                 // atomic tmp+rename each install so it never blocks recovery).
-                "rm -f /data/local/tmp/overdrive_install.sh 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/overdrive_install.sh 2>/dev/null\n" +
                 // Clear only known machine-written CORE markers. A pre-existing
                 // "disabled by ui/telegram" sentinel is durable manual intent
                 // and must survive the update.
                 // The post-update markers (UPDATE_IN_PROGRESS_FILE /
                 // POST_UPDATE_FILE) survive — new process owns them.
-                "for S in /data/local/tmp/camera_daemon.disabled " +
-                "/data/local/tmp/sentry_daemon.disabled " +
-                "/data/local/tmp/acc_sentry_daemon.disabled; do\n" +
+                "for S in " + ScratchPaths.getDir() + "/camera_daemon.disabled " +
+                ScratchPaths.path("sentry_daemon.disabled ") +
+                ScratchPaths.path("acc_sentry_daemon.disabled; do\n") +
                 "  R=$(head -1 \"$S\" 2>/dev/null)\n" +
                 "  case \"$R\" in " +
                 "'disabled by post-update reset'*|'disabled for update'*|" +
@@ -199,7 +200,7 @@ public final class UpdateLifecycle {
                 // braveheart→braveheart update or we'd wipe the very logs the
                 // user wants to send. Excludes the install log + sentinels.
                 (com.overdrive.app.BuildConfig.LOG_CAPTURE ? "" :
-                    "for lf in /data/local/tmp/*.log /data/local/tmp/*.log.[0-9]*; do " +
+                    "for lf in " + ScratchPaths.getDir() + "/*.log " + ScratchPaths.getDir() + "/*.log.[0-9]*; do " +
                     "case \"$lf\" in *overdrive_install.log) ;; *) rm -f \"$lf\" 2>/dev/null;; esac; " +
                     "done\n") +
                 "rm -f " + UPDATE_IN_PROGRESS_FILE + " " + POST_UPDATE_FILE + " 2>/dev/null\n" +

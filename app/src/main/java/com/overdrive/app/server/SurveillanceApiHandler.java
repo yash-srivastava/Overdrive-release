@@ -6,6 +6,7 @@ import com.overdrive.app.surveillance.SurveillanceConfig;
 import com.overdrive.app.surveillance.SurveillanceConfigManager;
 import com.overdrive.app.surveillance.SurveillanceEngineGpu;
 import com.overdrive.app.surveillance.MotionPipelineV2;
+import com.overdrive.app.util.ScratchPaths;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -21,7 +22,7 @@ import java.io.OutputStream;
  */
 public class SurveillanceApiHandler {
     
-    private static final String UNIFIED_CONFIG_FILE = "/data/local/tmp/overdrive_config.json";
+    private static final String UNIFIED_CONFIG_FILE = ScratchPaths.path("overdrive_config.json");
     
     /**
      * Handle surveillance API requests.

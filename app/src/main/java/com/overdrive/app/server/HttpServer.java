@@ -10,6 +10,7 @@ import com.overdrive.app.monitor.AccMonitor;
 import com.overdrive.app.monitor.BatteryMonitor;
 import com.overdrive.app.surveillance.GpuPipelineConfig;
 import com.overdrive.app.surveillance.HardwareEventRecorderGpu;
+import com.overdrive.app.util.ScratchPaths;
 
 import org.json.JSONObject;
 
@@ -49,7 +50,11 @@ import java.util.concurrent.TimeUnit;
  */
 public class HttpServer {
 
-    private static final String WEB_ROOT = "/data/local/tmp/web";
+    private static String webRoot() {
+        ScratchPaths.syncFromEnv();
+        return ScratchPaths.path("web");
+    }
+
     private final int port;
     private ServerSocket serverSocket;
     private volatile boolean running = true;
@@ -72,7 +77,9 @@ public class HttpServer {
         }
         
         try {
-            File webRoot = new File(WEB_ROOT);
+            ScratchPaths.syncFromEnv();
+            ScratchPaths.ensureDir();
+            File webRoot = new File(webRoot());
             
             // Always delete and recreate to ensure fresh files on app update
             if (webRoot.exists()) {
@@ -82,19 +89,19 @@ public class HttpServer {
             webRoot.mkdirs();
             
             // Extract web/local and web/shared directories
-            extractAssetDir(assetManager, "web/local", new File(WEB_ROOT, "local"));
-            extractAssetDir(assetManager, "web/shared", new File(WEB_ROOT, "shared"));
+            extractAssetDir(assetManager, "web/local", new File(webRoot(), "local"));
+            extractAssetDir(assetManager, "web/shared", new File(webRoot(), "shared"));
             // Extract i18n catalogs (one JSON per supported locale).
             // The web/i18n directory is created by the NLLB translation pipeline
             // — at minimum web/i18n/en.json must exist for the runtime to load.
-            extractAssetDir(assetManager, "web/i18n", new File(WEB_ROOT, "i18n"));
+            extractAssetDir(assetManager, "web/i18n", new File(webRoot(), "i18n"));
             // Extract server-side i18n catalogs (Messages.java lookup source).
             // Kept distinct from web/i18n so the HTTP /i18n/ route doesn't accidentally
             // expose internal error keys, and the two catalogs can diverge if needed.
-            extractAssetDir(assetManager, "server-i18n", new File(WEB_ROOT, "server-i18n"));
+            extractAssetDir(assetManager, "server-i18n", new File(webRoot(), "server-i18n"));
 
             // Extract overlay icons for telemetry overlay
-            extractAssetDir(assetManager, "overlay", new File("/data/local/tmp/overlay"));
+            extractAssetDir(assetManager, "overlay", new File(ScratchPaths.path("overlay")));
             
             // Extract BYD cloud crypto tables — re-extract whenever the cache
             // is missing or fails magic/size validation, so a stale or
@@ -129,7 +136,7 @@ public class HttpServer {
                 CameraDaemon.log("Could not extract BYD WBSK tables: " + e.getMessage());
             }
             
-            CameraDaemon.log("Web assets extracted to " + WEB_ROOT);
+            CameraDaemon.log("Web assets extracted to " + webRoot());
         } catch (Exception e) {
             CameraDaemon.log("Failed to extract web assets: " + e.getMessage());
         }
@@ -1676,7 +1683,7 @@ public class HttpServer {
             return false;
         }
 
-        File file = new File(WEB_ROOT, relativePath);
+        File file = new File(webRoot(), relativePath);
         if (!file.exists() || !file.isFile()) {
             // Fall back to the persistent models cache for GLBs that were downloaded
             // at runtime. The bundled default (seal.glb) lives in WEB_ROOT; everything

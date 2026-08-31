@@ -18,6 +18,7 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * Local-first hazard store for RoadSense [D-017].
@@ -72,7 +73,7 @@ class RoadSenseStore private constructor() {
          * `/data/local/tmp` is the daemon-writable (UID 2000) location the
          * project already uses for its H2 stores.
          */
-        private const val DB_PATH = "/data/local/tmp/overdrive_roadsense_h2"
+        private val DB_PATH = ScratchPaths.path("overdrive_roadsense_h2")
 
         /**
          * JDBC URL — identical flag set to SocHistoryDatabase:
@@ -87,7 +88,7 @@ class RoadSenseStore private constructor() {
          */
         // AUTO_COMPACT_FILL_RATE=50: idle-CPU tuning shared by all seven H2
         // stores (see SocHistoryDatabase.JDBC_URL for the rationale).
-        private const val JDBC_URL =
+        private val JDBC_URL =
             "jdbc:h2:file:$DB_PATH;FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
                 ";AUTO_COMPACT_FILL_RATE=50"
 

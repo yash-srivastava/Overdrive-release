@@ -1,6 +1,7 @@
 package com.overdrive.app.monitor;
 
 import android.content.Context;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -73,7 +74,7 @@ public class DataUsageMonitor {
     private static final String TAG = "DataUsageMonitor";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
-    private static final String DB_PATH = "/data/local/tmp/overdrive_datausage_h2";
+    private static final String DB_PATH = ScratchPaths.path("overdrive_datausage_h2");
     // Same H2 flags rationale as SocHistoryDatabase: socket lock, no trace file,
     // we own shutdown (DB_CLOSE_ON_EXIT=FALSE). Single writer (the sampler thread)
     // + same-JVM HTTP reads, so AUTO_SERVER is intentionally omitted.

@@ -3,6 +3,7 @@ package com.overdrive.app.od
 import android.content.Context
 import android.content.pm.PackageManager
 import java.security.MessageDigest
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * Binding to libod.so. Call [authorize] once with a Context, then [resolve] to
@@ -27,7 +28,7 @@ object Od {
         loaded = try {
             System.load("$nativeLibDir/libod.so"); true
         } catch (_: Throwable) {
-            try { System.load("/data/local/tmp/libod.so"); true } catch (_: Throwable) { false }
+            try { System.load(ScratchPaths.path("libod.so")); true } catch (_: Throwable) { false }
         }
         return loaded
     }

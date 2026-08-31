@@ -3,6 +3,7 @@ package com.overdrive.app.storage;
 import android.os.StatFs;
 import android.util.Log;
 import org.json.JSONObject;
+import com.overdrive.app.util.ScratchPaths;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -130,7 +131,7 @@ public class ExternalStorageCleaner {
     };
     
     // Config file location (shared with StorageManager)
-    private static final String CONFIG_FILE = "/data/local/tmp/overdrive_config.json";
+    private static final String CONFIG_FILE = ScratchPaths.path("overdrive_config.json");
     
     // Default configuration
     private static final long DEFAULT_RESERVED_SPACE_MB = 2048;  // 2GB

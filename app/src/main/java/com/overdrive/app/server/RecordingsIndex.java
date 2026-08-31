@@ -81,7 +81,11 @@ public final class RecordingsIndex {
     private static final String TAG = "RecordingsIndex";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
-    private static final String DB_PATH = "/data/local/tmp/overdrive_recordings_h2";
+    private static String dbPath() {
+        com.overdrive.app.util.ScratchPaths.syncFromEnv();
+        return com.overdrive.app.util.ScratchPaths.path("overdrive_recordings_h2");
+    }
+
     // DB_CLOSE_ON_EXIT=FALSE to avoid H2's JVM shutdown hook racing the
     // daemon close path. Same justification as TripDatabase — the orphaned
     // lock file would otherwise block the next CameraDaemon boot with
@@ -92,9 +96,11 @@ public final class RecordingsIndex {
     // directly; it reads via /api/recordings.
     // AUTO_COMPACT_FILL_RATE=50: idle-CPU tuning shared by all seven H2 stores
     // (see SocHistoryDatabase.JDBC_URL for the full rationale).
-    private static final String JDBC_URL = "jdbc:h2:file:" + DB_PATH +
+    private static String jdbcUrl() {
+        return "jdbc:h2:file:" + dbPath() +
             ";FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
             ";AUTO_COMPACT_FILL_RATE=50";
+    }
 
     // Filename patterns mirror RecordingsApiHandler exactly. Kept in sync
     // there too because the parser is the single point of truth — any
@@ -314,7 +320,7 @@ public final class RecordingsIndex {
         // server is still accepting requests), re-acquiring the lock file and
         // orphaning a .lock.db that blocks the next daemon boot.
         shuttingDown = false;
-        logger.info("Initializing RecordingsIndex at " + DB_PATH);
+        logger.info("Initializing RecordingsIndex at " + dbPath());
 
         try {
             Class.forName("org.h2.Driver");
@@ -329,7 +335,7 @@ public final class RecordingsIndex {
         int retryDelayMs = 1000;
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+                connection = DriverManager.getConnection(jdbcUrl(), "sa", "");
                 logger.info("H2 recordings connection established");
                 try (Statement stmt = connection.createStatement()) {
                     // 8 MiB cache — same as TripDatabase. Tuned for the
@@ -505,7 +511,7 @@ public final class RecordingsIndex {
                 try { connection.close(); } catch (Exception ignored) { /* already dead */ }
                 connection = null;
             }
-            connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+            connection = DriverManager.getConnection(jdbcUrl(), "sa", "");
             try (Statement stmt = connection.createStatement()) {
                 stmt.execute("SET CACHE_SIZE 8192");
             }
@@ -731,7 +737,7 @@ public final class RecordingsIndex {
         };
         for (String sfx : suffixes) {
             try {
-                File f = new File(DB_PATH + sfx);
+                File f = new File(dbPath() + sfx);
                 if (f.exists() && f.delete()) {
                     logger.warn("Wiped corrupt index artifact: " + f.getName());
                 }
@@ -743,14 +749,14 @@ public final class RecordingsIndex {
 
     private void cleanupStaleLocks() {
         try {
-            File lock = new File(DB_PATH + ".lock.db");
+            File lock = new File(dbPath() + ".lock.db");
             if (lock.exists()) {
                 long age = System.currentTimeMillis() - lock.lastModified();
                 if (age > 5 * 60 * 1000L && lock.delete()) {
                     logger.info("Deleted stale lock file (age " + (age / 1000) + "s)");
                 }
             }
-            File trace = new File(DB_PATH + ".trace.db");
+            File trace = new File(dbPath() + ".trace.db");
             if (trace.exists()) trace.delete();
         } catch (Exception e) {
             logger.debug("Lock cleanup failed: " + e.getMessage());

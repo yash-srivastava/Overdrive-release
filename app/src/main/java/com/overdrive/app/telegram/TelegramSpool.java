@@ -1,6 +1,7 @@
 package com.overdrive.app.telegram;
 
 import android.util.Log;
+import com.overdrive.app.util.ScratchPaths;
 
 import org.json.JSONObject;
 
@@ -54,7 +55,7 @@ public final class TelegramSpool {
      * no world bits are needed — and world-writable would be a local
      * command-injection surface (a crafted entry would be replayed verbatim).
      */
-    static final String DIR = "/data/local/tmp/.overdrive_tg_spool";
+    static final String DIR = ScratchPaths.path(".overdrive_tg_spool");
 
     /** Cap on spooled files. Oldest is evicted past this so the dir can't grow. */
     static final int MAX_ENTRIES = 50;

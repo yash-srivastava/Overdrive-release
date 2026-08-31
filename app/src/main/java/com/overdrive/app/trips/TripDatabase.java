@@ -1,6 +1,7 @@
 package com.overdrive.app.trips;
 
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.util.ScratchPaths;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -21,7 +22,7 @@ public class TripDatabase {
     private static final String TAG = "TripDatabase";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
-    private static final String DB_PATH = "/data/local/tmp/overdrive_trips_h2";
+    private static final String DB_PATH = ScratchPaths.path("overdrive_trips_h2");
     // DB_CLOSE_ON_EXIT=FALSE: avoid H2's JVM shutdown hook racing the
     // daemon's explicit close path. Without this we hit the same orphaned-
     // lock-file pattern as SocHistoryDatabase, which blocks the next

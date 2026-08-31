@@ -16,6 +16,7 @@ import com.overdrive.app.automation.value.StringValue;
 import com.overdrive.app.automation.value.Value;
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.server.Messages;
+import com.overdrive.app.util.ScratchPaths;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -35,7 +36,7 @@ public class Automations {
     private static final DaemonLogger logger = DaemonLogger.getInstance("Automations");
     static final String AUTOMATION_HOME_PROPERTY = "overdrive.automation.home";
     private static final File AUTOMATION_HOME = new File(System.getProperty(
-            AUTOMATION_HOME_PROPERTY, "/data/local/tmp/.automations"));
+            AUTOMATION_HOME_PROPERTY, ScratchPaths.path(".automations")));
     private static final File AUTOMATION_CONFIG = new File(AUTOMATION_HOME, "config.json");
     // Last-known-good backup + scratch file for the atomic write. loadFromFile falls back to .bak when
     // the live file is truncated/corrupt (e.g. daemon killed mid-write on ACC-off), so a torn write can

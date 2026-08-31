@@ -4,6 +4,7 @@ import com.overdrive.app.telegram.IDaemonManager;
 import com.overdrive.app.telegram.model.DaemonInfo;
 import com.overdrive.app.telegram.model.DaemonStatus;
 import com.overdrive.app.util.DaemonHttpClient;
+import com.overdrive.app.util.ScratchPaths;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -86,7 +87,7 @@ public class DaemonManager implements IDaemonManager {
                 + "if [ \"$pid\" != \"$MY_PID\" ]; then kill -9 $pid 2>/dev/null; fi; done"
             ) != null;
             stopped &= execShell(
-                    "rm -f /data/local/tmp/start_cam_daemon.sh 2>/dev/null") != null;
+                    "rm -f " + ScratchPaths.getDir() + "/start_cam_daemon.sh 2>/dev/null") != null;
             try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
             stopped &= execShell(
                 "MY_PID=$$; ps -A -o PID,ARGS | grep -F byd_cam_daemon | grep -v grep "
@@ -95,7 +96,7 @@ public class DaemonManager implements IDaemonManager {
             ) != null;
             stopped &= execShell("killall -9 byd_cam_daemon 2>/dev/null") != null;
             stopped &= execShell(
-                    "rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null") != null;
+                    "rm -f " + ScratchPaths.getDir() + "/camera_daemon.lock 2>/dev/null") != null;
             if (!stopped) {
                 abortCameraRestart();
             }

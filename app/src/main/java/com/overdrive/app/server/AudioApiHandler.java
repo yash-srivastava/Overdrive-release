@@ -6,6 +6,7 @@ import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.media.ToneGenerator;
 import android.speech.tts.TextToSpeech;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.byd.BydDataCollector;
 import com.overdrive.app.daemon.CameraDaemon;
@@ -128,7 +129,7 @@ public class AudioApiHandler {
 
     // Where uploaded sounds live. World-readable dir so the daemon (UID 2000) can
     // both write (here, running as the daemon) and play them back.
-    private static final String AUDIO_DIR = "/data/local/tmp/.overdrive/audio";
+    private static final String AUDIO_DIR = ScratchPaths.path(".overdrive/audio");
     private static final String[] AUDIO_EXTS = { "mp3", "wav", "mp4", "m4a", "aac", "ogg" };
     // 48 MB per file — enough for a short alert/deterrent video clip, while keeping the
     // base64-in-JSON upload's transient memory safe on the daemon (a 48 MB file is a

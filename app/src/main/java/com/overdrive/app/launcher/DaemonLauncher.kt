@@ -26,10 +26,10 @@ class DaemonLauncher(
         
         // Log file paths for daemons (resolved at runtime via ScratchPaths)
         private fun cameraDaemonLog() = ScratchPaths.path("cam_daemon.log")
-        private const val SENTRY_DAEMON_LOG = "/data/local/tmp/sentry_daemon.log"
+        private val SENTRY_DAEMON_LOG = ScratchPaths.path("sentry_daemon.log")
         private const val SENTRY_DAEMON_LOG_SYSTEM = "/data/data/com.android.providers.settings/sentry_daemon.log"
         private fun accSentryDaemonLog() = ScratchPaths.path("acc_sentry_daemon.log")
-        private const val PROXY_DAEMON_LOG = "/data/local/tmp/proxy_daemon.log"
+        private val PROXY_DAEMON_LOG = ScratchPaths.path("proxy_daemon.log")
         private fun telegramDaemonLog() = ScratchPaths.path("telegrambotdaemon.log")
 
         /** Export scratch dir for app_process children in watchdog scripts. */
@@ -558,7 +558,7 @@ class DaemonLauncher(
                 // gated, the caller sees "running" only once the sentinel
                 // is actually gone.
                 adbShellExecutor.execute(
-                    command = "rm -f /data/local/tmp/camera_daemon.disabled 2>/dev/null; echo done",
+                    command = "rm -f " + ScratchPaths.getDir() + "/camera_daemon.disabled 2>/dev/null; echo done",
                     callback = object : AdbShellExecutor.ShellCallback {
                         override fun onSuccess(o: String) {
                             callback.onLaunched()
@@ -592,7 +592,7 @@ class DaemonLauncher(
     private fun launchCameraDaemonInternal(outputDir: String, nativeLibDir: String, callback: LaunchCallback) {
         val apkPath = context.applicationInfo.sourceDir
         val proxyArgs = getProxyArgs()
-        val scriptPath = "/data/local/tmp/start_cam_daemon.sh"
+        val scriptPath = ScratchPaths.path("start_cam_daemon.sh")
         
         logManager.debug(TAG, "Deploying CameraDaemon watchdog script...")
         callback.onLog("Deploying watchdog script...")
@@ -604,12 +604,12 @@ class DaemonLauncher(
         // settle, then rm lock file (lock-rm AFTER pkill prevents the
         // lockfile resurrection race).
         val cleanupScript = buildString {
-            append("rm -f /data/local/tmp/camera_daemon.disabled 2>/dev/null\n")
-            append("rm -f $scriptPath /data/local/tmp/cam_watchdog.pid 2>/dev/null\n")
+            append("rm -f " + ScratchPaths.getDir() + "/camera_daemon.disabled 2>/dev/null\n")
+            append("rm -f $scriptPath " + ScratchPaths.getDir() + "/cam_watchdog.pid 2>/dev/null\n")
             append(psAwkKillLine("cam_daemon"))
             append("killall -9 $CAMERA_DAEMON_PROCESS 2>/dev/null\n")
             append("sleep 1\n")
-            append("rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null\n")
+            append("rm -f " + ScratchPaths.getDir() + "/camera_daemon.lock 2>/dev/null\n")
             append("echo done\n")
         }
 
@@ -1007,7 +1007,7 @@ class DaemonLauncher(
                         }
                         callback.onLog(statusMsg)
                         adbShellExecutor.execute(
-                            command = "rm -f /data/local/tmp/acc_sentry_daemon.disabled 2>/dev/null; echo done",
+                            command = "rm -f " + ScratchPaths.getDir() + "/acc_sentry_daemon.disabled 2>/dev/null; echo done",
                             callback = object : AdbShellExecutor.ShellCallback {
                                 override fun onSuccess(o: String) {
                                     callback.onLaunched()
@@ -1036,8 +1036,8 @@ class DaemonLauncher(
     private fun launchAccSentryDaemonInternal(callback: LaunchCallback) {
         val apkPath = context.applicationInfo.sourceDir
         val proxyArgs = getProxyArgs()
-        val watchdogScriptPath = "/data/local/tmp/start_acc_sentry.sh"
-        val lockFilePath = "/data/local/tmp/acc_sentry_daemon.lock"
+        val watchdogScriptPath = ScratchPaths.path("start_acc_sentry.sh")
+        val lockFilePath = ScratchPaths.path("acc_sentry_daemon.lock")
         
         logManager.debug(TAG, "Deploying Immortal Watchdog Script for AccSentryDaemon...")
         callback.onLog("Deploying watchdog script via ADB (UID 2000)...")
@@ -1047,7 +1047,7 @@ class DaemonLauncher(
         // (user is explicitly starting), rm watchdog script, pkill,
         // settle, then rm lock file.
         val cleanupScript = buildString {
-            append("rm -f /data/local/tmp/acc_sentry_daemon.disabled 2>/dev/null\n")
+            append("rm -f " + ScratchPaths.getDir() + "/acc_sentry_daemon.disabled 2>/dev/null\n")
             append("rm -f $watchdogScriptPath 2>/dev/null\n")
             append(psAwkKillLine("acc_sentry"))
             append("sleep 1\n")
@@ -1253,12 +1253,12 @@ class DaemonLauncher(
         // straggler watchdog that the kill misses), watchdog-script rm,
         // ps+awk+kill, settle + lock-rm.
         adbShellExecutor.executeScript(
-            scriptBody = "echo \"disabled by ui at \$(date)\" > /data/local/tmp/acc_sentry_daemon.disabled\n" +
-                "chmod 666 /data/local/tmp/acc_sentry_daemon.disabled 2>/dev/null\n" +
-                "rm -f /data/local/tmp/start_acc_sentry.sh 2>/dev/null\n" +
+            scriptBody = "echo \"disabled by ui at \$(date)\" > " + ScratchPaths.getDir() + "/acc_sentry_daemon.disabled\n" +
+                "chmod 666 " + ScratchPaths.getDir() + "/acc_sentry_daemon.disabled 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/start_acc_sentry.sh 2>/dev/null\n" +
                 psAwkKillLine("acc_sentry") +
                 "sleep 1\n" +
-                "rm -f /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/acc_sentry_daemon.lock 2>/dev/null\n" +
                 "echo done\n",
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
@@ -1332,7 +1332,7 @@ class DaemonLauncher(
                         // Gated in the rm's own callback so onLaunched() only
                         // fires once the file is actually gone.
                         adbShellExecutor.execute(
-                            command = "rm -f /data/local/tmp/telegram_bot_daemon.disabled "
+                            command = "rm -f " + ScratchPaths.getDir() + "/telegram_bot_daemon.disabled "
                                 + "2>/dev/null; echo done",
                             callback = object : AdbShellExecutor.ShellCallback {
                                 override fun onSuccess(o: String) { guarded.onLaunched() }
@@ -1358,7 +1358,7 @@ class DaemonLauncher(
     private fun launchTelegramDaemonInternal(callback: LaunchCallback) {
         val apkPath = context.applicationInfo.sourceDir
         val proxyArgs = getProxyArgs()
-        val watchdogScriptPath = "/data/local/tmp/start_telegram.sh"
+        val watchdogScriptPath = ScratchPaths.path("start_telegram.sh")
 
         // Write output_dir to telegram config so daemon knows where events are stored
         writeOutputDirToTelegramConfig()
@@ -1380,12 +1380,12 @@ class DaemonLauncher(
         // restart-loop symptom (each daemon's killOldInstances kills the
         // others' daemons, those watchdogs respawn instantly, repeat).
         val cleanupScript =
-            "rm -f /data/local/tmp/telegram_bot_daemon.disabled 2>/dev/null\n" +
+            "rm -f " + ScratchPaths.getDir() + "/telegram_bot_daemon.disabled 2>/dev/null\n" +
             "rm -f $watchdogScriptPath 2>/dev/null\n" +
             psAwkKillLine("start_telegram.sh") +
             psAwkKillLine("telegram_bot_daemon") +
             "sleep 1\n" +
-            "rm -f /data/local/tmp/telegram_bot_daemon.lock 2>/dev/null\n" +
+            "rm -f " + ScratchPaths.getDir() + "/telegram_bot_daemon.lock 2>/dev/null\n" +
             "echo done\n"
 
         adbShellExecutor.executeScript(
@@ -1546,9 +1546,9 @@ class DaemonLauncher(
         // crash-loop spam, not user intent.
         adbShellExecutor.executeScript(
             scriptBody =
-                "echo \"disabled by ui at \$(date)\" > /data/local/tmp/telegram_bot_daemon.disabled\n" +
-                "chmod 666 /data/local/tmp/telegram_bot_daemon.disabled 2>/dev/null\n" +
-                "rm -f /data/local/tmp/start_telegram.sh 2>/dev/null\n" +
+                "echo \"disabled by ui at \$(date)\" > " + ScratchPaths.getDir() + "/telegram_bot_daemon.disabled\n" +
+                "chmod 666 " + ScratchPaths.getDir() + "/telegram_bot_daemon.disabled 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/start_telegram.sh 2>/dev/null\n" +
                 // Kill watchdog shells too. The sentinel-gate on next loop
                 // would also stop them, but an explicit kill ensures the
                 // daemon doesn't get respawned in the ~5–10 s window
@@ -1556,8 +1556,8 @@ class DaemonLauncher(
                 psAwkKillLine("start_telegram.sh") +
                 psAwkKillLine("telegram_bot_daemon") +
                 "sleep 1\n" +
-                "rm -f /data/local/tmp/telegram_bot_daemon.lock 2>/dev/null\n" +
-                "rm -f /data/local/tmp/.tg_last_greeted 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/telegram_bot_daemon.lock 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/.tg_last_greeted 2>/dev/null\n" +
                 "echo done\n",
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
@@ -1588,7 +1588,7 @@ class DaemonLauncher(
         killProcessesByPattern(listOf(PROXY_DAEMON_PROCESS, "sing-box")) {
             // Clean up old config files via ADB
             adbShellExecutor.execute(
-                command = "rm -f /data/local/tmp/singbox_config.json /data/local/tmp/start_singbox.sh 2>/dev/null; echo done",
+                command = "rm -f " + ScratchPaths.getDir() + "/singbox_config.json " + ScratchPaths.getDir() + "/start_singbox.sh 2>/dev/null; echo done",
                 callback = object : AdbShellExecutor.ShellCallback {
                     override fun onSuccess(output: String) {
                         // Copy sing-box to /data/system/ via privileged shell (UID 1000)
@@ -1618,7 +1618,7 @@ class DaemonLauncher(
     private fun copySingboxViaPrivilegedShell(callback: LaunchCallback, onComplete: () -> Unit) {
         val nativeLibDir = context.applicationInfo.nativeLibraryDir
         val srcPath = "$nativeLibDir/libsingbox.so"
-        val destPath = "/data/local/tmp/sing-box"
+        val destPath = ScratchPaths.path("sing-box")
         
         logManager.info(TAG, "Installing sing-box from $srcPath to $destPath")
         callback.onLog("Installing sing-box binary...")
@@ -1948,11 +1948,11 @@ class DaemonLauncher(
             // contain the variable assignment text but the kill
             // operates on a PID list, so $$ filtering correctly
             // excludes the priv-shell's PID.
-            "rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/cam_watchdog.pid 2>/dev/null; " +
+            "rm -f " + ScratchPaths.getDir() + "/start_cam_daemon.sh " + ScratchPaths.getDir() + "/cam_watchdog.pid 2>/dev/null; " +
             "MY_PID=\$\$; ps -A -o PID,ARGS | grep -F cam_daemon | grep -v grep " +
             "| awk '{print \$1}' | while read pid; do " +
             "if [ \"\$pid\" != \"\$MY_PID\" ]; then kill -9 \$pid 2>/dev/null; fi; done; " +
-            "sleep 1; rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null"
+            "sleep 1; rm -f " + ScratchPaths.getDir() + "/camera_daemon.lock 2>/dev/null"
         } else {
             "MY_PID=\$\$; ps -A -o PID,ARGS | grep -F '$processName' | grep -v grep " +
             "| awk '{print \$1}' | while read pid; do " +
@@ -2042,29 +2042,29 @@ class DaemonLauncher(
 
         val killScript = when (processName) {
             ACC_SENTRY_DAEMON_PROCESS ->
-                "[ -f /data/local/tmp/acc_sentry_daemon.disabled ] || " +
-                "echo \"disabled by killDaemon at \$(date)\" > /data/local/tmp/acc_sentry_daemon.disabled\n" +
-                "chmod 666 /data/local/tmp/acc_sentry_daemon.disabled 2>/dev/null\n" +
-                "rm -f /data/local/tmp/start_acc_sentry.sh 2>/dev/null\n" +
+                "[ -f " + ScratchPaths.getDir() + "/acc_sentry_daemon.disabled ] || " +
+                "echo \"disabled by killDaemon at \$(date)\" > " + ScratchPaths.getDir() + "/acc_sentry_daemon.disabled\n" +
+                "chmod 666 " + ScratchPaths.getDir() + "/acc_sentry_daemon.disabled 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/start_acc_sentry.sh 2>/dev/null\n" +
                 psAwkKillLine("acc_sentry") +
                 "sleep 1\n" +
-                "rm -f /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/acc_sentry_daemon.lock 2>/dev/null\n" +
                 "echo done\n"
             CAMERA_DAEMON_PROCESS ->
                 // No sentinel here — this generic kill path is non-user-initiated
                 // (e.g. mutual exclusion). cam_daemon's user stops live in
                 // CameraDaemonController which DOES plant the sentinel.
-                "rm -f /data/local/tmp/start_cam_daemon.sh 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/start_cam_daemon.sh 2>/dev/null\n" +
                 psAwkKillLine("cam_daemon") +
                 "killall -9 $processName 2>/dev/null\n" +
                 "sleep 1\n" +
-                "rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/camera_daemon.lock 2>/dev/null\n" +
                 "echo done\n"
             else -> // ZROK_PROCESS
-                "[ -f /data/local/tmp/zrok.disabled ] || " +
-                "echo \"disabled by killDaemon at \$(date)\" > /data/local/tmp/zrok.disabled\n" +
-                "chmod 666 /data/local/tmp/zrok.disabled 2>/dev/null\n" +
-                "rm -f /data/local/tmp/start_zrok.sh 2>/dev/null\n" +
+                "[ -f " + ScratchPaths.getDir() + "/zrok.disabled ] || " +
+                "echo \"disabled by killDaemon at \$(date)\" > " + ScratchPaths.getDir() + "/zrok.disabled\n" +
+                "chmod 666 " + ScratchPaths.getDir() + "/zrok.disabled 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/start_zrok.sh 2>/dev/null\n" +
                 psAwkKillLine("zrok") +
                 "killall -9 $processName 2>/dev/null\n" +
                 "echo done\n"
@@ -2095,11 +2095,11 @@ class DaemonLauncher(
         // its own `sh -c`. ps+awk+kill keeps the priv-shell alive (PID
         // exclusion via $$) so the trailing lock-rm runs.
         val privKillCmd = if (processName == CAMERA_DAEMON_PROCESS) {
-            "rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/cam_watchdog.pid 2>/dev/null; " +
+            "rm -f " + ScratchPaths.getDir() + "/start_cam_daemon.sh " + ScratchPaths.getDir() + "/cam_watchdog.pid 2>/dev/null; " +
             "MY_PID=\$\$; ps -A -o PID,ARGS | grep -F cam_daemon | grep -v grep " +
             "| awk '{print \$1}' | while read pid; do " +
             "if [ \"\$pid\" != \"\$MY_PID\" ]; then kill -9 \$pid 2>/dev/null; fi; done; " +
-            "sleep 1; rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null"
+            "sleep 1; rm -f " + ScratchPaths.getDir() + "/camera_daemon.lock 2>/dev/null"
         } else {
             "MY_PID=\$\$; ps -A -o PID,ARGS | grep -F '$processName' | grep -v grep " +
             "| awk '{print \$1}' | while read pid; do " +
@@ -2114,28 +2114,28 @@ class DaemonLauncher(
         // safer (avoids an unnecessary 137 exit on the inner sh that
         // runs the script body).
         val adbKillCmd = if (processName == ACC_SENTRY_DAEMON_PROCESS) {
-            "[ -f /data/local/tmp/acc_sentry_daemon.disabled ] || " +
-            "echo \"disabled by killDaemon at \$(date)\" > /data/local/tmp/acc_sentry_daemon.disabled; " +
-            "chmod 666 /data/local/tmp/acc_sentry_daemon.disabled 2>/dev/null; " +
-            "rm -f /data/local/tmp/start_acc_sentry.sh 2>/dev/null; " +
+            "[ -f " + ScratchPaths.getDir() + "/acc_sentry_daemon.disabled ] || " +
+            "echo \"disabled by killDaemon at \$(date)\" > " + ScratchPaths.getDir() + "/acc_sentry_daemon.disabled; " +
+            "chmod 666 " + ScratchPaths.getDir() + "/acc_sentry_daemon.disabled 2>/dev/null; " +
+            "rm -f " + ScratchPaths.getDir() + "/start_acc_sentry.sh 2>/dev/null; " +
             "MY_PID=\$\$; ps -A -o PID,ARGS | grep -F acc_sentry | grep -v grep " +
             "| awk '{print \$1}' | while read pid; do " +
             "if [ \"\$pid\" != \"\$MY_PID\" ]; then kill -9 \$pid 2>/dev/null; fi; done; " +
             "sleep 1; " +
-            "rm -f /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null"
+            "rm -f " + ScratchPaths.getDir() + "/acc_sentry_daemon.lock 2>/dev/null"
         } else if (processName == CAMERA_DAEMON_PROCESS) {
-            "rm -f /data/local/tmp/start_cam_daemon.sh 2>/dev/null; " +
+            "rm -f " + ScratchPaths.getDir() + "/start_cam_daemon.sh 2>/dev/null; " +
             "MY_PID=\$\$; ps -A -o PID,ARGS | grep -F cam_daemon | grep -v grep " +
             "| awk '{print \$1}' | while read pid; do " +
             "if [ \"\$pid\" != \"\$MY_PID\" ]; then kill -9 \$pid 2>/dev/null; fi; done; " +
             "killall -9 $processName 2>/dev/null; " +
             "sleep 1; " +
-            "rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null"
+            "rm -f " + ScratchPaths.getDir() + "/camera_daemon.lock 2>/dev/null"
         } else if (processName == ZROK_PROCESS) {
-            "[ -f /data/local/tmp/zrok.disabled ] || " +
-            "echo \"disabled by killDaemon at \$(date)\" > /data/local/tmp/zrok.disabled; " +
-            "chmod 666 /data/local/tmp/zrok.disabled 2>/dev/null; " +
-            "rm -f /data/local/tmp/start_zrok.sh 2>/dev/null; " +
+            "[ -f " + ScratchPaths.getDir() + "/zrok.disabled ] || " +
+            "echo \"disabled by killDaemon at \$(date)\" > " + ScratchPaths.getDir() + "/zrok.disabled; " +
+            "chmod 666 " + ScratchPaths.getDir() + "/zrok.disabled 2>/dev/null; " +
+            "rm -f " + ScratchPaths.getDir() + "/start_zrok.sh 2>/dev/null; " +
             "MY_PID=\$\$; ps -A -o PID,ARGS | grep -F zrok | grep -v grep " +
             "| awk '{print \$1}' | while read pid; do " +
             "if [ \"\$pid\" != \"\$MY_PID\" ]; then kill -9 \$pid 2>/dev/null; fi; done; " +

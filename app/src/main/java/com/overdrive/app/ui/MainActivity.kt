@@ -26,6 +26,7 @@ import androidx.navigation.ui.navigateUp
 import androidx.navigation.ui.setupWithNavController
 import com.overdrive.app.logging.LogLevel
 import com.overdrive.app.logging.LogManager
+import com.overdrive.app.util.ScratchPaths
 // import com.overdrive.app.shell.PrivilegedShellSetup
 import com.overdrive.app.storage.StorageSetup
 import com.overdrive.app.ui.daemon.DaemonStartupManager
@@ -292,7 +293,7 @@ open class MainActivity : AppCompatActivity() {
             // shared daemonStartupManager.adbLauncher — allocating a fresh
             // AdbDaemonLauncher here would leak its non-daemon executor + a
             // tunnel-poll scheduler thread on every postDelayed firing.
-            daemonStartupManager.adbLauncher.executeShellCommand("rm -f /data/local/tmp/overdrive_update.apk", object : com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback {
+            daemonStartupManager.adbLauncher.executeShellCommand("rm -f " + ScratchPaths.getDir() + "/overdrive_update.apk", object : com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback {
                 override fun onLog(message: String) {}
                 override fun onLaunched() {}
                 override fun onError(error: String) {}
@@ -3557,7 +3558,7 @@ open class MainActivity : AppCompatActivity() {
             var frameMismatch = false
 
             try {
-                val sohFile = java.io.File("/data/local/tmp/abrp_soh_estimate.properties")
+                val sohFile = java.io.File(ScratchPaths.path("abrp_soh_estimate.properties"))
                 if (sohFile.exists()) {
                     val props = java.util.Properties()
                     java.io.FileInputStream(sohFile).use { props.load(it) }
@@ -3893,7 +3894,7 @@ open class MainActivity : AppCompatActivity() {
                     }
                 } else {
                     // Fallback: try direct file delete (works if app has permissions)
-                    val sohFile = java.io.File("/data/local/tmp/abrp_soh_estimate.properties")
+                    val sohFile = java.io.File(ScratchPaths.path("abrp_soh_estimate.properties"))
                     val deleted = if (sohFile.exists()) sohFile.delete() else true
                     runOnUiThread {
                         if (deleted) {

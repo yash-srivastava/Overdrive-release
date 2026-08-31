@@ -8,6 +8,7 @@ import java.io.File
 import java.sql.Connection
 import java.sql.DriverManager
 import java.util.UUID
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * Append-only store of Calibration-Mode ground-truth labels (R-DET-7, D-025).
@@ -198,10 +199,10 @@ class GroundTruthStore private constructor() {
 
     companion object {
         private val logger = DaemonLogger.getInstance("RoadSense/GroundTruth")
-        private const val DB_PATH = "/data/local/tmp/overdrive_roadsense_labels_h2"
+        private val DB_PATH = ScratchPaths.path("overdrive_roadsense_labels_h2")
         // AUTO_COMPACT_FILL_RATE=50: idle-CPU tuning shared by all seven H2
         // stores (see SocHistoryDatabase.JDBC_URL for the rationale).
-        private const val JDBC_URL =
+        private val JDBC_URL =
             "jdbc:h2:file:$DB_PATH;FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
                 ";AUTO_COMPACT_FILL_RATE=50"
 

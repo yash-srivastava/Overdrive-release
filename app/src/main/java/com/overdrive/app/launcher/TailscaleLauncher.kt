@@ -3,6 +3,7 @@ package com.overdrive.app.launcher
 import android.content.Context
 import com.overdrive.app.logging.LogManager
 import com.overdrive.app.mqtt.ProxyHelper
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * Launches Tailscale tunnel processes via ADB shell for remote access.
@@ -18,14 +19,14 @@ class TailscaleLauncher(
         private const val TAG = "TailscaleLauncher"
 
         // Tailscale paths
-        private const val TAILSCALE_HOME = "/data/local/tmp/.tailscale"
-        private const val TAILSCALE_LOG = "$TAILSCALE_HOME/tailscale.log"
-        private const val TAILSCALE_PATH = "$TAILSCALE_HOME/tailscale"
-        private const val TAILSCALED_PATH = "$TAILSCALE_HOME/tailscaled"
+        private val TAILSCALE_HOME = ScratchPaths.path(".tailscale")
+        private val TAILSCALE_LOG = "$TAILSCALE_HOME/tailscale.log"
+        private val TAILSCALE_PATH = "$TAILSCALE_HOME/tailscale"
+        private val TAILSCALED_PATH = "$TAILSCALE_HOME/tailscaled"
 
         private const val TAILSCALE_COMMUNICATION_PORT = "8532"
 
-        private const val TAILSCALE_PROXY_FILE = "$TAILSCALE_HOME/proxy_enabled"
+        private val TAILSCALE_PROXY_FILE = "$TAILSCALE_HOME/proxy_enabled"
         private const val TAILSCALE_PROXY_PORT = "8539"
 
         // Proxy settings for sing-box (socks5 for tailscale)
@@ -35,7 +36,7 @@ class TailscaleLauncher(
         // Remote-ADB opt-in sentinel + the adbd port we forward to. Same
         // sentinel-file pattern as TAILSCALE_PROXY_FILE so the UID-2000 shell
         // side and the app agree on state across restarts.
-        private const val TAILSCALE_ADB_FILE = "$TAILSCALE_HOME/adb_enabled"
+        private val TAILSCALE_ADB_FILE = "$TAILSCALE_HOME/adb_enabled"
         private const val ADB_PORT = "5555"
 
         // Retries after the initial replay attempt, ~2s apart — covers a slow

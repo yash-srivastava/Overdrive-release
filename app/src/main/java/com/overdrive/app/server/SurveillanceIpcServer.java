@@ -3,6 +3,7 @@ package com.overdrive.app.server;
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.logging.DaemonLogger;
 import org.json.JSONObject;
+import com.overdrive.app.util.ScratchPaths;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -2413,7 +2414,7 @@ public class SurveillanceIpcServer implements Runnable {
             r.put("ts", System.currentTimeMillis());
         } catch (Exception ignored) {}
         try (java.io.FileWriter fw = new java.io.FileWriter(
-                "/data/local/tmp/overdrive_update_progress.json")) {
+                ScratchPaths.path("overdrive_update_progress.json"))) {
             fw.write(r.toString());
         } catch (Exception ignored) {}
     }
@@ -2473,7 +2474,7 @@ public class SurveillanceIpcServer implements Runnable {
      */
     private void handleGetUpdateProgress(JSONObject response) throws Exception {
         response.put("success", true);
-        java.io.File f = new java.io.File("/data/local/tmp/overdrive_update_progress.json");
+        java.io.File f = new java.io.File(ScratchPaths.path("overdrive_update_progress.json"));
         if (!f.exists()) {
             response.put("phase", "idle");
             response.put("percent", -1);

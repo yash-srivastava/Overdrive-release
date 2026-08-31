@@ -2,6 +2,7 @@ package com.overdrive.app.byd.cloud.crypto;
 
 import android.content.Context;
 import android.content.res.AssetManager;
+import com.overdrive.app.util.ScratchPaths;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -27,7 +28,7 @@ import java.util.Locale;
  */
 public final class BangcleTablesFile {
 
-    public static final String CACHE_PATH = "/data/local/tmp/bangcle_tables.bin";
+    public static final String CACHE_PATH = ScratchPaths.path("bangcle_tables.bin");
     public static final String ASSET_PATH = "byd/bangcle_tables.bin";
 
     private static final byte[] MAGIC = { 'B', 'G', 'T', 'B' };

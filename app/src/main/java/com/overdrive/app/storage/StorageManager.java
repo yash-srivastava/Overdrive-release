@@ -3,6 +3,7 @@ package com.overdrive.app.storage;
 import android.os.StatFs;
 import android.util.Log;
 import org.json.JSONObject;
+import com.overdrive.app.util.ScratchPaths;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -220,7 +221,7 @@ public class StorageManager {
     public static final String TRIPS_SUBDIR = "trips";
     
     // Config file location
-    private static final String CONFIG_FILE = "/data/local/tmp/overdrive_config.json";
+    private static final String CONFIG_FILE = ScratchPaths.path("overdrive_config.json");
 
     // Persisted UUID of whichever public volume we've previously confirmed as
     // the SD card. Used as the first-class signal in classifyPublicVolume()
@@ -232,7 +233,7 @@ public class StorageManager {
     // serial from a previous successful cycle bridges the gap. File is
     // tiny (~10 bytes), atomic-write semantics not required because a stale
     // value still resolves to the same physical card.
-    private static final String LEARNED_SD_UUID_FILE = "/data/local/tmp/overdrive_sd_uuid";
+    private static final String LEARNED_SD_UUID_FILE = ScratchPaths.path("overdrive_sd_uuid");
     
     // Default limits (in bytes)
     private static final long DEFAULT_RECORDINGS_LIMIT_MB = 500;
@@ -4025,7 +4026,7 @@ public class StorageManager {
     }
     
     /** Marker file that stores the epoch millis of the last successful broadcast scan. */
-    private static final String BROADCAST_MARKER_FILE = "/data/local/tmp/overdrive_last_mediascan";
+    private static final String BROADCAST_MARKER_FILE = ScratchPaths.path("overdrive_last_mediascan");
     
     /** Throttle delay between individual file broadcasts (ms). */
     private static final long BROADCAST_THROTTLE_MS = 50;

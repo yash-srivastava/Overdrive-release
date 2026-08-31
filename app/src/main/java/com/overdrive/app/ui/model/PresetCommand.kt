@@ -1,5 +1,6 @@
 package com.overdrive.app.ui.model
 
+import com.overdrive.app.util.ScratchPaths
 /**
  * A preset ADB command for quick execution.
  */
@@ -24,10 +25,10 @@ object PresetCommands {
         PresetCommand("Port Status", "netstat -tlnp | grep -E '8080|8119|8554'", "Status"),
         
         // Log commands
-        PresetCommand("Proxy Logs", "cat /data/local/tmp/singbox.log | tail -50", "Logs"),
-        PresetCommand("Tunnel Logs", "cat /data/local/tmp/cloudflared.log | tail -50", "Logs"),
-        PresetCommand("Camera Logs", "cat /data/local/tmp/byd_cam_daemon.log | tail -50", "Logs"),
-        PresetCommand("Sentry Logs", "cat /data/local/tmp/sentry_daemon.log | tail -50", "Logs"),
+        PresetCommand("Proxy Logs", "cat " + ScratchPaths.getDir() + "/singbox.log | tail -50", "Logs"),
+        PresetCommand("Tunnel Logs", "cat " + ScratchPaths.getDir() + "/cloudflared.log | tail -50", "Logs"),
+        PresetCommand("Camera Logs", "cat " + ScratchPaths.getDir() + "/byd_cam_daemon.log | tail -50", "Logs"),
+        PresetCommand("Sentry Logs", "cat " + ScratchPaths.getDir() + "/sentry_daemon.log | tail -50", "Logs"),
         
         // Control commands.
         //
@@ -66,13 +67,13 @@ object PresetCommands {
                 "ps -A -o PID,ARGS | grep -F start_cam_daemon | grep -v grep " +
                 "| awk '{print \$1}' | while read pid; do " +
                 "if [ \"\$pid\" != \"\$MY_PID\" ]; then kill -9 \$pid 2>/dev/null; fi; done; " +
-                "rm -f /data/local/tmp/start_cam_daemon.sh; " +
+                "rm -f " + ScratchPaths.getDir() + "/start_cam_daemon.sh; " +
                 "sleep 1; " +
                 "ps -A -o PID,ARGS | grep -F byd_cam_daemon | grep -v grep " +
                 "| awk '{print \$1}' | while read pid; do " +
                 "if [ \"\$pid\" != \"\$MY_PID\" ]; then kill -9 \$pid 2>/dev/null; fi; done; " +
                 "killall -9 byd_cam_daemon 2>/dev/null; " +
-                "rm -f /data/local/tmp/camera_daemon.lock",
+                "rm -f " + ScratchPaths.getDir() + "/camera_daemon.lock",
             "Control"
         ),
         PresetCommand(

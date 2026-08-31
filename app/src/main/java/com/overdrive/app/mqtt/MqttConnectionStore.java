@@ -1,6 +1,7 @@
 package com.overdrive.app.mqtt;
 
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.util.ScratchPaths;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -25,7 +26,7 @@ public class MqttConnectionStore {
     private static final String TAG = "MqttConnectionStore";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
-    private static final String CONFIG_PATH = "/data/local/tmp/mqtt_connections.json";
+    private static final String CONFIG_PATH = ScratchPaths.path("mqtt_connections.json");
     public static final int MAX_CONNECTIONS = 5;
 
     private final List<MqttConnectionConfig> connections = new ArrayList<>();
