@@ -1,5 +1,7 @@
 package com.overdrive.app.logging;
 
+import com.overdrive.app.util.ScratchPaths;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -16,32 +18,33 @@ public final class DaemonLogPaths {
 
     private DaemonLogPaths() {}
 
-    // LinkedHashMap so the order is stable for "list available daemons" UIs.
-    private static final Map<String, String> PATHS = new LinkedHashMap<>();
+    // Relative names under daemon scratch — resolved via ScratchPaths at lookup time.
+    private static final Map<String, String> RELATIVE = new LinkedHashMap<>();
     static {
-        PATHS.put("camera",     "/data/local/tmp/cam_daemon.log");
-        PATHS.put("accsentry",  "/data/local/tmp/acc_sentry_daemon.log");
-        PATHS.put("sentry",     "/data/local/tmp/sentry_daemon.log");
-        PATHS.put("telegram",   "/data/local/tmp/telegrambotdaemon.log");
-        PATHS.put("cloudflared","/data/local/tmp/cloudflared.log");
-        PATHS.put("zrok",       "/data/local/tmp/zrok.log");
-        PATHS.put("tailscale",  "/data/local/tmp/.tailscale/tailscale.log");
-        PATHS.put("singbox",    "/data/local/tmp/singbox.log");
+        RELATIVE.put("camera",     "cam_daemon.log");
+        RELATIVE.put("accsentry",  "acc_sentry_daemon.log");
+        RELATIVE.put("sentry",     "sentry_daemon.log");
+        RELATIVE.put("telegram",   "telegrambotdaemon.log");
+        RELATIVE.put("cloudflared","cloudflared.log");
+        RELATIVE.put("zrok",       "zrok.log");
+        RELATIVE.put("tailscale",  ".tailscale/tailscale.log");
+        RELATIVE.put("singbox",    "singbox.log");
     }
 
     /** @return the log path for a daemon key, or null if unknown. */
     public static String pathFor(String key) {
         if (key == null) return null;
-        return PATHS.get(key.trim().toLowerCase());
+        String rel = RELATIVE.get(key.trim().toLowerCase());
+        return rel != null ? ScratchPaths.path(rel) : null;
     }
 
     /** Stable, ordered set of known daemon keys. */
     public static java.util.Set<String> keys() {
-        return PATHS.keySet();
+        return RELATIVE.keySet();
     }
 
     /** Comma-joined key list for help text / error messages. */
     public static String keyList() {
-        return String.join(", ", PATHS.keySet());
+        return String.join(", ", RELATIVE.keySet());
     }
 }

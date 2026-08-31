@@ -1378,13 +1378,18 @@ public class AccSentryDaemon {
         }
     }
     
-    // Lock file for singleton enforcement
-    private static final String LOCK_FILE = "/data/local/tmp/acc_sentry_daemon.lock";
+    // Lock file for singleton enforcement (ScratchPaths remaps on Shark)
+    private static String lockFilePath() {
+        com.overdrive.app.util.ScratchPaths.syncFromEnv();
+        return com.overdrive.app.util.ScratchPaths.path("acc_sentry_daemon.lock");
+    }
     private static java.io.RandomAccessFile lockFileHandle;
     private static java.nio.channels.FileLock fileLock;
 
     public static void main(String[] args) {
         int myUid = android.os.Process.myUid();
+        com.overdrive.app.util.ScratchPaths.syncFromEnv();
+        com.overdrive.app.util.ScratchPaths.ensureDir();
 
         // Configure DaemonLogger for daemon context (enable stdout for app_process)
         DaemonLogger.configure(DaemonLogger.Config.defaults()
@@ -1392,7 +1397,7 @@ public class AccSentryDaemon {
             .withFileLog(true)
             .withConsoleLog(true));
 
-        logger = DaemonLogger.getInstance(TAG, PATH_DATA_LOCAL_TMP());
+        logger = DaemonLogger.getInstance(TAG, com.overdrive.app.util.ScratchPaths.getDir());
         
         // CRITICAL: Acquire singleton lock FIRST - exit if another instance is running
         if (!acquireSingletonLock()) {
@@ -1604,7 +1609,7 @@ public class AccSentryDaemon {
      */
     private static boolean acquireSingletonLock() {
         try {
-            java.io.File lockFileObj = new java.io.File(LOCK_FILE);
+            java.io.File lockFileObj = new java.io.File(lockFilePath());
             lockFileHandle = new java.io.RandomAccessFile(lockFileObj, "rw");
             java.nio.channels.FileChannel channel = lockFileHandle.getChannel();
             
@@ -1651,7 +1656,7 @@ public class AccSentryDaemon {
                 lockFileHandle.close();
                 lockFileHandle = null;
             }
-            new java.io.File(LOCK_FILE).delete();
+            new java.io.File(lockFilePath()).delete();
         } catch (Exception e) {
             log("Error releasing singleton lock: " + e.getMessage());
         }

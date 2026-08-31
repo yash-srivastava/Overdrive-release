@@ -21,6 +21,7 @@ import java.nio.charset.StandardCharsets
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * SOTA Unified Configuration Manager
@@ -44,8 +45,9 @@ import java.util.concurrent.atomic.AtomicLong
 object UnifiedConfigManager {
     private const val TAG = "UnifiedConfig"
     
-    // Single source of truth - world-readable location
-    private const val CONFIG_PATH = "/data/local/tmp/overdrive_config.json"
+    // Single source of truth - world-readable location (ScratchPaths remaps on Shark).
+    private val CONFIG_PATH: String
+        get() = ScratchPaths.path("overdrive_config.json")
 
     // ==================== DOUBLE-BUFFERED, SEQ-STAMPED DURABILITY ====================
     //
@@ -119,9 +121,11 @@ object UnifiedConfigManager {
     private const val IPC_RECONCILE_DELAY_MS = 75L
     private const val CACHE_REVALIDATE_MS = 1000L
     
-    // Legacy paths for migration
-    private const val LEGACY_SENTRY_CONFIG = "/data/local/tmp/sentry_config.json"
-    private const val LEGACY_CAMERA_SETTINGS = "/data/local/tmp/camera_settings.json"
+    // Legacy paths for migration (resolved at read time).
+    private val LEGACY_SENTRY_CONFIG: String
+        get() = ScratchPaths.path("sentry_config.json")
+    private val LEGACY_CAMERA_SETTINGS: String
+        get() = ScratchPaths.path("camera_settings.json")
     private const val LEGACY_SYSTEM_CONFIG = "/data/data/com.android.providers.settings/sentry_config.json"
     private const val ROOT_PROMOTION_SECTION = "__overdriveRootPromotion"
     private const val ROOT_PROMOTION_MARKER = "__overdrivePromoteRoot"
@@ -4121,7 +4125,8 @@ object UnifiedConfigManager {
     // peer's just-committed section (stale-snapshot lost update). An OS flock
     // held across the whole critical section makes those writers mutually
     // exclude. World-RW so any daemon UID can acquire it.
-    private const val LOCK_PATH = "$CONFIG_PATH.lock"
+    private val LOCK_PATH: String
+        get() = "$CONFIG_PATH.lock"
 
     /**
      * Every writer must lock this one stable inode. The live config inode is

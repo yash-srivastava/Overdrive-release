@@ -538,12 +538,17 @@ public class CameraDaemon {
     // BUMP THIS on every code change you intend to deploy + verify.
     private static final String BUILD_TAG = "20260603-coldstart-recfix-1";
 
-    // Lock file for singleton enforcement
-    private static final String LOCK_FILE = "/data/local/tmp/camera_daemon.lock";
+    // Lock file for singleton enforcement (ScratchPaths remaps on Shark)
+    private static String lockFilePath() {
+        com.overdrive.app.util.ScratchPaths.syncFromEnv();
+        return com.overdrive.app.util.ScratchPaths.path("camera_daemon.lock");
+    }
     private static java.io.RandomAccessFile lockFile;
     private static java.nio.channels.FileLock fileLock;
 
     public static void main(String[] args) {
+        com.overdrive.app.util.ScratchPaths.syncFromEnv();
+        com.overdrive.app.util.ScratchPaths.ensureDir();
         initFileLogging();
 
         // CRITICAL: Acquire singleton lock FIRST - exit if another instance is running
@@ -3077,7 +3082,7 @@ public class CameraDaemon {
      */
     private static boolean acquireSingletonLock() {
         try {
-            File lockFileObj = new File(LOCK_FILE);
+            File lockFileObj = new File(lockFilePath());
             lockFile = new java.io.RandomAccessFile(lockFileObj, "rw");
             java.nio.channels.FileChannel channel = lockFile.getChannel();
 
@@ -3576,7 +3581,7 @@ public class CameraDaemon {
                 lockFile = null;
             }
             // Delete lock file
-            new File(LOCK_FILE).delete();
+            new File(lockFilePath()).delete();
             log("Released singleton lock");
         } catch (Exception e) {
             log("Error releasing singleton lock: " + e.getMessage());

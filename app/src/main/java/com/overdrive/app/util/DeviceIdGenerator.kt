@@ -18,7 +18,7 @@ import java.io.FileReader
 object DeviceIdGenerator {
     
     private const val TAG = "DeviceIdGenerator"
-    private const val ID_FILE = "/data/local/tmp/.overdrive_device_id"
+    private const val ID_FILE_NAME = ".overdrive_device_id"
     private const val ID_PREFIX = "byd-"
     private const val PREFS_NAME = "device_id_prefs"
     private const val PREFS_KEY = "device_id"
@@ -152,10 +152,12 @@ object DeviceIdGenerator {
         return id
     }
     
+    private fun idFilePath(): String = ScratchPaths.path(ID_FILE_NAME)
+
     private fun loadFromFile(): String? {
         return try {
-            val file = File(ID_FILE)
-            if (file.exists()) {
+            val file = ScratchPaths.firstExistingFile(ID_FILE_NAME)
+            if (file.isFile) {
                 BufferedReader(FileReader(file)).use { reader ->
                     reader.readLine()?.takeIf { it.isNotEmpty() && it.startsWith(ID_PREFIX) }
                 }
@@ -176,7 +178,7 @@ object DeviceIdGenerator {
         }
         
         executor.execute(
-            command = "echo '$id' > $ID_FILE",
+            command = "echo '$id' > ${idFilePath()}",
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
                     Log.d(TAG, "Device ID saved to file via ADB: $id")
@@ -203,7 +205,7 @@ object DeviceIdGenerator {
         
         val id = generateDeviceId(context)
         return try {
-            val result = executor.executeSync("echo '$id' > $ID_FILE")
+            val result = executor.executeSync("echo '$id' > ${idFilePath()}")
             if (result.exitCode == 0) {
                 Log.i(TAG, "Device ID synced to file (sync): $id")
                 true

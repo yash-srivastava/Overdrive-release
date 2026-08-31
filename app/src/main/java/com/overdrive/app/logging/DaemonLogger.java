@@ -41,7 +41,7 @@ public class DaemonLogger {
      * Log configuration.
      */
     public static class Config {
-        public String logDir = "/data/local/tmp";
+        public String logDir = com.overdrive.app.util.ScratchPaths.getDir();
         public int retentionHours = 24;
         public int maxFileSizeMB = 10;
         public int rotationCount = 3;
@@ -56,7 +56,9 @@ public class DaemonLogger {
         public Level minLevel = Level.INFO;
 
         public static Config defaults() {
-            return new Config();
+            Config config = new Config();
+            config.logDir = com.overdrive.app.util.ScratchPaths.getDir();
+            return config;
         }
 
         public Config withMinLevel(Level level) {

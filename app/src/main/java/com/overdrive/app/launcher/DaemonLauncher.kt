@@ -3,6 +3,7 @@ package com.overdrive.app.launcher
 import android.content.Context
 import android.provider.Settings
 import com.overdrive.app.logging.LogManager
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * Launches daemon processes via ADB shell using app_process.
@@ -23,13 +24,26 @@ class DaemonLauncher(
     companion object {
         private const val TAG = "DaemonLauncher"
         
-        // Log file paths for daemons
-        private const val CAMERA_DAEMON_LOG = "/data/local/tmp/cam_daemon.log"
+        // Log file paths for daemons (resolved at runtime via ScratchPaths)
+        private fun cameraDaemonLog() = ScratchPaths.path("cam_daemon.log")
         private const val SENTRY_DAEMON_LOG = "/data/local/tmp/sentry_daemon.log"
         private const val SENTRY_DAEMON_LOG_SYSTEM = "/data/data/com.android.providers.settings/sentry_daemon.log"
-        private const val ACC_SENTRY_DAEMON_LOG = "/data/local/tmp/acc_sentry_daemon.log"
+        private fun accSentryDaemonLog() = ScratchPaths.path("acc_sentry_daemon.log")
         private const val PROXY_DAEMON_LOG = "/data/local/tmp/proxy_daemon.log"
-        private const val TELEGRAM_DAEMON_LOG = "/data/local/tmp/telegrambotdaemon.log"
+        private fun telegramDaemonLog() = ScratchPaths.path("telegrambotdaemon.log")
+
+        /** Export scratch dir for app_process children in watchdog scripts. */
+        private fun scratchEnvLines(): List<String> {
+            val dir = ScratchPaths.getDir().replace("'", "'\\''")
+            return listOf(
+                "export OVERDRIVE_SCRATCH='$dir'",
+                "export TMPDIR='$dir'",
+                "mkdir -p \"\$OVERDRIVE_SCRATCH\" 2>/dev/null",
+                ""
+            )
+        }
+
+        private fun parkedMarker() = ScratchPaths.path("overdrive_parked_shutdown")
 
         // ==================== LOG ROTATION ====================
         // Hard ceiling for a daemon's stdout-redirect log (the files the UI
@@ -211,22 +225,23 @@ class DaemonLauncher(
          * backoff) — see [[feedback_acc_sentry_uncapped_immortal]].
          */
         fun buildAccSentryWatchdogScript(apkPath: String, proxyArgs: String): List<String> {
-            val lockFile = "/data/local/tmp/acc_sentry_daemon.lock"
+            val lockFile = ScratchPaths.path("acc_sentry_daemon.lock")
             return listOf(
                 "#!/system/bin/sh",
                 "# AccSentryDaemon Watchdog Script",
+                *scratchEnvLines().toTypedArray(),
                 "APK_PATH=\"$apkPath\"",
                 "CLS=\"com.overdrive.app.daemon.AccSentryDaemon\"",
                 "PROCESS_NAME=\"$ACC_SENTRY_DAEMON_PROCESS\"",
-                "LOG_FILE=\"$ACC_SENTRY_DAEMON_LOG\"",
+                "LOG_FILE=\"${accSentryDaemonLog()}\"",
                 "LOCK_FILE=\"$lockFile\"",
-                "SENTINEL=\"/data/local/tmp/acc_sentry_daemon.disabled\"",
+                "SENTINEL=\"${ScratchPaths.path("acc_sentry_daemon.disabled")}\"",
                 // "Vehicle ON only" parked-shutdown marker (ParkedShutdown.MARKER_PATH).
                 // Present → the whole stack is terminated for the parked window; the
                 // watchdog must exit instead of respawning, same as the user .disabled
                 // sentinel. Cleared on the ACC-on edge. Never exists in onAndOff mode, so
                 // this gate is inert there (watchdog behaves byte-identically).
-                "PARKED=\"/data/local/tmp/overdrive_parked_shutdown\"",
+                "PARKED=\"${parkedMarker()}\"",
                 "PROXY_ARGS=\"$proxyArgs\"",
                 "",
                 "/system/bin/device_config put activity_manager max_phantom_processes 2147483647 > /dev/null 2>&1",
@@ -314,10 +329,11 @@ class DaemonLauncher(
             return listOf(
                 "#!/system/bin/sh",
                 "# TelegramBotDaemon Watchdog Script",
-                "LOG_FILE=\"$TELEGRAM_DAEMON_LOG\"",
-                "LOCK_FILE=\"/data/local/tmp/telegram_bot_daemon.lock\"",
-                "SENTINEL=\"/data/local/tmp/telegram_bot_daemon.disabled\"",
-                "PARKED=\"/data/local/tmp/overdrive_parked_shutdown\"",
+                *scratchEnvLines().toTypedArray(),
+                "LOG_FILE=\"${telegramDaemonLog()}\"",
+                "LOCK_FILE=\"${ScratchPaths.path("telegram_bot_daemon.lock")}\"",
+                "SENTINEL=\"${ScratchPaths.path("telegram_bot_daemon.disabled")}\"",
+                "PARKED=\"${parkedMarker()}\"",
                 "RETRY_COUNT=0",
                 "HEALTHY_UPTIME_SEC=300",
                 "",
@@ -395,10 +411,11 @@ class DaemonLauncher(
             return listOf(
                 "#!/system/bin/sh",
                 "# CameraDaemon Watchdog Script",
-                "LOG_FILE=\"$CAMERA_DAEMON_LOG\"",
-                "LOCK_FILE=\"/data/local/tmp/camera_daemon.lock\"",
-                "SENTINEL=\"/data/local/tmp/camera_daemon.disabled\"",
-                "PARKED=\"/data/local/tmp/overdrive_parked_shutdown\"",
+                *scratchEnvLines().toTypedArray(),
+                "LOG_FILE=\"${cameraDaemonLog()}\"",
+                "LOCK_FILE=\"${ScratchPaths.path("camera_daemon.lock")}\"",
+                "SENTINEL=\"${ScratchPaths.path("camera_daemon.disabled")}\"",
+                "PARKED=\"${parkedMarker()}\"",
                 "FALLBACK_APK_PATH=\"$apkPath\"",
                 "FALLBACK_NATIVE_LIB_DIR=\"$nativeLibDir\"",
                 "RETRY_COUNT=0",
@@ -409,7 +426,7 @@ class DaemonLauncher(
                 // pkill name-matching. $$ is the watchdog shell, NOT $! (which is
                 // the daemon/poller). Cleared by the same rm paths that already
                 // reference cam_watchdog.pid.
-                "echo \$\$ > /data/local/tmp/cam_watchdog.pid",
+                "echo \$\$ > ${ScratchPaths.path("cam_watchdog.pid")}",
                 "",
                 "while true; do",
                 // Catch a log left oversized by a previous run before relaunch;
@@ -668,7 +685,7 @@ class DaemonLauncher(
                     callback.onLog("Watchdog active. Verifying daemon...")
                     
                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        verifyDaemonRunning(CAMERA_DAEMON_PROCESS, "CameraDaemon", CAMERA_DAEMON_LOG, callback)
+                        verifyDaemonRunning(CAMERA_DAEMON_PROCESS, "CameraDaemon", cameraDaemonLog(), callback)
                     }, 1500)
                 }
                 
@@ -702,7 +719,7 @@ class DaemonLauncher(
             append("$nativeLibDir")
         }
         
-        val cmd = "nohup sh -c '$innerCmd' > $CAMERA_DAEMON_LOG 2>&1 &"
+        val cmd = "nohup sh -c '$innerCmd' > ${cameraDaemonLog()} 2>&1 &"
         
         adbShellExecutor.execute(
             command = cmd,
@@ -712,7 +729,7 @@ class DaemonLauncher(
                     callback.onLog("Launch command sent, verifying...")
                     
                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        verifyDaemonRunning(CAMERA_DAEMON_PROCESS, "CameraDaemon", CAMERA_DAEMON_LOG, callback)
+                        verifyDaemonRunning(CAMERA_DAEMON_PROCESS, "CameraDaemon", cameraDaemonLog(), callback)
                     }, 1500)
                 }
                 
@@ -1146,7 +1163,7 @@ class DaemonLauncher(
             append("com.overdrive.app.daemon.AccSentryDaemon")
         }
         
-        val cmd = "nohup sh -c '$innerCmd' > $ACC_SENTRY_DAEMON_LOG 2>&1 &"
+        val cmd = "nohup sh -c '$innerCmd' > ${accSentryDaemonLog()} 2>&1 &"
         
         logManager.debug(TAG, "AccSentryDaemon fallback command: $cmd")
         callback.onLog("Launching via simple nohup (fallback)...")
@@ -1195,7 +1212,7 @@ class DaemonLauncher(
                     } else {
                         // Check logs
                         adbShellExecutor.execute(
-                            command = "cat $ACC_SENTRY_DAEMON_LOG 2>/dev/null | tail -30",
+                            command = "cat ${accSentryDaemonLog()} 2>/dev/null | tail -30",
                             callback = object : AdbShellExecutor.ShellCallback {
                                 override fun onSuccess(logContent: String) {
                                     if (logContent.trim().isNotEmpty()) {
@@ -1485,7 +1502,7 @@ class DaemonLauncher(
                     } else {
                         // Check logs
                         adbShellExecutor.execute(
-                            command = "cat $TELEGRAM_DAEMON_LOG 2>/dev/null | tail -30",
+                            command = "cat ${telegramDaemonLog()} 2>/dev/null | tail -30",
                             callback = object : AdbShellExecutor.ShellCallback {
                                 override fun onSuccess(logContent: String) {
                                     if (logContent.trim().isNotEmpty()) {
