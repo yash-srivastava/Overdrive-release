@@ -32,16 +32,37 @@ public final class AisCaptureSidecarLauncher {
         killStaleCaptureProcesses();
 
         if (sSidecarProcess != null && sSidecarProcess.isAlive()) {
+            // Quick liveness check: process exists and has been alive for at least 100ms
+            try {
+                Thread.sleep(100);
+                if (sSidecarProcess.isAlive()) {
+                    return;
+                }
+                logger.warn("AIS sidecar process died immediately after check, restarting");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        // Pre-flight checks with detailed error messages
+        if (!vendorAisPresent()) {
+            logger.error("AIS sidecar cannot start: /vendor/lib64/libais_client.so not found");
             return;
         }
 
         String bin = resolveSidecarBinary();
         if (bin == null) {
-            logger.error("libais_capture.so not found under APK lib/arm64");
+            logger.error("AIS sidecar cannot start: libais_capture.so not found under APK lib/arm64 "
+                    + "(run 'pm path com.overdrive.app' to verify APK installation)");
             return;
         }
 
         File sidecarFile = new File(bin);
+        if (!sidecarFile.exists()) {
+            logger.error("AIS sidecar cannot start: resolved binary does not exist: " + bin);
+            return;
+        }
+
         if (!sidecarFile.canExecute() && !sidecarFile.setExecutable(true, false)) {
             logger.warn("Could not chmod libais_capture.so executable: " + bin);
         }
@@ -49,6 +70,12 @@ public final class AisCaptureSidecarLauncher {
         String linker = new File("/system/bin/linker64").exists()
                 ? "/system/bin/linker64"
                 : "/system/bin/linker";
+        
+        if (!new File(linker).exists()) {
+            logger.error("AIS sidecar cannot start: system linker not found at " + linker);
+            return;
+        }
+
         String logPath = ScratchPaths.path("ais_capture.log");
         int defaultCam = DiLink5PlatformHelper.defaultAisCameraId();
         String mosaicArg = DiLink5PlatformHelper.mosaicArg();
@@ -75,11 +102,23 @@ public final class AisCaptureSidecarLauncher {
                         logger.info("[ais_capture] " + line);
                     }
                 } catch (Throwable ignored) {}
-            }, "ais-capture-log");
+            }, "ais-capture-output");
             drain.setDaemon(true);
             drain.start();
+
+            // Verify process started successfully
+            try {
+                Thread.sleep(200);
+                if (!sSidecarProcess.isAlive()) {
+                    logger.error("AIS sidecar process died immediately after start - check "
+                            + logPath + " for details");
+                    sSidecarProcess = null;
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         } catch (Throwable t) {
-            logger.error("Failed to start AIS sidecar: " + t.getMessage(), t);
+            logger.error("Failed to start AIS sidecar process: " + t.getMessage(), t);
             sSidecarProcess = null;
         }
     }
@@ -152,7 +191,8 @@ public final class AisCaptureSidecarLauncher {
                 if (out.length() > 0) out.append('\n');
                 out.append(line);
             }
-            return out.toString().trim();
+            String result = out.toString();
+            return result.isEmpty() ? null : result.trim();
         } catch (Throwable ignored) {
             return null;
         }

@@ -1816,7 +1816,7 @@ object UnifiedConfigManager {
             writeFileAndSync(bakTmp, config.toString(2), worldAccessible = true)
             if (!bakTmp.renameTo(bakFile)) {
                 // tmp-create/rename can fail for the app UID on sticky
-                // " + ScratchPaths.getDir() + ". Do NOT fall back to a non-atomic direct
+                // scratch directories. Do NOT fall back to a non-atomic direct
                 // write of the .bak: that would TRUNCATE the existing
                 // last-known-good copy, and a pm-install kill mid-write could
                 // leave BOTH primary and .bak torn — defeating the self-heal
@@ -2024,7 +2024,7 @@ object UnifiedConfigManager {
         // a half-written corrupt config that would wipe user settings.
         //
         // When the app UID (10xxx) cannot create this sibling in sticky
-        // " + ScratchPaths.getDir() + ", the write is deferred/rejected. It must never fall
+        // scratch directories, the write is deferred/rejected. It must never fall
         // back to opening CONFIG_PATH with truncate semantics: a process kill
         // during that write can destroy the only live config.
         // Per-PROCESS-unique tmp name (.tmp.<pid>): the rename onto CONFIG_PATH

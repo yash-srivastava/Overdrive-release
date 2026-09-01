@@ -1047,8 +1047,8 @@ public class CameraDaemon {
         // correct regardless of how the build was installed.
 
 
-        // ImageReader FPS probe sentinel: when " + ScratchPaths.getDir() + "/run_imagereader_probe
-        // exists, run AvmImageReaderFpsProbe BEFORE initSurveillance so the probe
+        // ImageReader FPS probe sentinel: when run_imagereader_probe exists in the scratch
+        // directory, run AvmImageReaderFpsProbe BEFORE initSurveillance so the probe
         // has exclusive HAL access. Verifies whether replacing the live pipeline's
         // SurfaceTexture consumer with an ImageReader unblocks the ~8.5 fps panoramic
         // throttle (see CAMERA_FPS_INVESTIGATION.md). Sentinel is consumed (deleted)
@@ -1727,7 +1727,7 @@ public class CameraDaemon {
     // that, we refresh a lease deadline CAMERA_ACTIVE_LEASE_MS (8s) ahead of
     // now every CAMERA_ACTIVE_TICK_MS (4s) while the GPU pipeline is consuming
     // frames. The lease is a single timestamp in a dedicated sidecar file
-    // (" + ScratchPaths.getDir() + "/camera_active_lease), NOT a unified-config key — see
+    // (camera_active_lease in the scratch directory), NOT a unified-config key — see
     // writeCameraActiveLease for why the shared-config channel was too
     // expensive at a 4s cadence. AccSentryDaemon reads the sidecar cross-process
     // and skips its backlight-off tick while the lease is live. Gated on
@@ -2023,7 +2023,7 @@ public class CameraDaemon {
     // tiny sidecar file the other daemon reads directly is O(bytes) with no lock,
     // no parse, and no cross-subsystem cache invalidation. The reader
     // (AccSentryDaemon.isCameraPipelineActive) is a different process at the same
-    // UID 2000, so a plain file in " + ScratchPaths.getDir() + " is the right cross-process channel.
+    // UID 2000, so a plain file in the scratch directory is the right cross-process channel.
     private static final String CAMERA_ACTIVE_LEASE_PATH =
         ScratchPaths.path("camera_active_lease");
 
@@ -2060,7 +2060,7 @@ public class CameraDaemon {
                 }
                 tmp.delete();
             }
-            // Match the UnifiedConfigManager invariant for " + ScratchPaths.getDir() + " files:
+            // Match the UnifiedConfigManager invariant for scratch directory files:
             // world-readable/writable so a non-creator UID could open it. The only
             // reader today is the same-UID (2000) acc_sentry daemon, so this isn't
             // strictly required now, but it keeps parity with the config files and
@@ -9232,7 +9232,7 @@ public class CameraDaemon {
             java.io.FileWriter writer = new java.io.FileWriter(idFile);
             writer.write(id);
             writer.close();
-            // Files created in " + ScratchPaths.getDir() + " by the shell-UID daemon land
+            // Files created in the scratch directory by the shell-UID daemon land
             // at mode 0600 owned by shell. The app UID can't read them at
             // that mode, so CredentialCipher.readDid() returns null, deriveKey()
             // throws, and every encrypted credential (telegram bot token,
