@@ -559,6 +559,9 @@ public class CameraDaemon {
     public static void main(String[] args) {
         com.overdrive.app.util.ScratchPaths.syncFromEnv();
         com.overdrive.app.util.ScratchPaths.ensureDir();
+        if (com.overdrive.app.camera.dilink5.DiLink5PlatformHelper.usesAisSidecar()) {
+            com.overdrive.app.camera.dilink5.AisCaptureSidecarLauncher.killStaleCaptureProcesses();
+        }
         initFileLogging();
 
         // CRITICAL: Acquire singleton lock FIRST - exit if another instance is running

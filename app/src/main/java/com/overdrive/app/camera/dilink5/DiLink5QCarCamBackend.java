@@ -7,8 +7,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Backend driver for BYD DiLink 5.0 (Qualcomm Snapdragon SA8155P / QCarCam / AIS).
- * Communicates directly with /vendor/lib64/libais_client.so to stream raw camera frames
- * (1920x1300 @ 30 FPS) for OverDrive's Dashcam, Sentry, and EGL video encoding pipelines.
+ *
+ * <p>Sealion 7: {@code qcarcam_test} + {@code LD_PRELOAD} hook.
+ * Shark 6: {@code linker64} + {@code libais_capture.so} AIS sidecar over {@code @dilink5_cam}.
  */
 public class DiLink5QCarCamBackend {
 
@@ -22,7 +23,7 @@ public class DiLink5QCarCamBackend {
             System.loadLibrary("surveillance");
         } catch (Throwable t) {
             try {
-                System.load(com.overdrive.app.util.ScratchPaths.path("libsurveillance.so"));
+                System.load(ScratchPaths.path("libsurveillance.so"));
             } catch (Throwable t2) {
                 logger.warn("Failed to load libsurveillance.so: " + t2.getMessage());
             }
@@ -37,9 +38,13 @@ public class DiLink5QCarCamBackend {
     public static boolean isSupported() {
         if (sSupported != null) return sSupported;
         try {
-            sSupported = nativeIsSupported();
+            if (DiLink5PlatformHelper.usesAisSidecar()) {
+                sSupported = AisCaptureSidecarLauncher.canLaunch();
+            } else {
+                sSupported = nativeIsSupported();
+            }
         } catch (Throwable t) {
-            logger.warn("nativeIsSupported check failed: " + t.getMessage());
+            logger.warn("isSupported check failed: " + t.getMessage());
             sSupported = false;
         }
         return sSupported;
@@ -54,10 +59,19 @@ public class DiLink5QCarCamBackend {
     }
 
     private static synchronized void ensureHardwareProcess() {
+        if (DiLink5PlatformHelper.usesAisSidecar()) {
+            AisCaptureSidecarLauncher.ensureRunning();
+            return;
+        }
+        ensureQcarcamHookProcess();
+    }
+
+    /** Sealion 7 path: vendor qcarcam_test + LD_PRELOAD hook. */
+    private static synchronized void ensureQcarcamHookProcess() {
         try {
-            // Check if qcarcam_test is already running
             Process checkPgrep = Runtime.getRuntime().exec(new String[]{"pgrep", "-f", "qcarcam_test"});
-            java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(checkPgrep.getInputStream()));
+            java.io.BufferedReader reader = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(checkPgrep.getInputStream()));
             String line = reader.readLine();
             checkPgrep.waitFor();
             if (line != null && !line.trim().isEmpty()) {
@@ -65,40 +79,38 @@ public class DiLink5QCarCamBackend {
                 return;
             }
 
-            logger.info("Starting Qualcomm QCarCam hardware capture supervisor...");
+            logger.info("Starting Qualcomm QCarCam hardware capture supervisor (SL7 hook)...");
 
-            // Ensure 4cam.xml exists in /data/local/tmp
             java.io.File cfgFile = new java.io.File(ScratchPaths.path("4cam.xml"));
             if (!cfgFile.exists()) {
-                String defaultXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
-                        "<qcarcam_inputs>\n" +
-                        "    <input_device>\n" +
-                        "        <properties input_id=\"0\"/>\n" +
-                        "        <display_setting display_id=\"0\"/>\n" +
-                        "        <output_setting nbufs=\"5\"/>\n" +
-                        "    </input_device>\n" +
-                        "    <input_device>\n" +
-                        "        <properties input_id=\"1\"/>\n" +
-                        "        <display_setting display_id=\"0\"/>\n" +
-                        "        <output_setting nbufs=\"5\"/>\n" +
-                        "    </input_device>\n" +
-                        "    <input_device>\n" +
-                        "        <properties input_id=\"2\"/>\n" +
-                        "        <display_setting display_id=\"0\"/>\n" +
-                        "        <output_setting nbufs=\"5\"/>\n" +
-                        "    </input_device>\n" +
-                        "    <input_device>\n" +
-                        "        <properties input_id=\"3\"/>\n" +
-                        "        <display_setting display_id=\"0\"/>\n" +
-                        "        <output_setting nbufs=\"5\"/>\n" +
-                        "    </input_device>\n" +
-                        "</qcarcam_inputs>\n";
+                String defaultXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                        + "<qcarcam_inputs>\n"
+                        + "    <input_device>\n"
+                        + "        <properties input_id=\"0\"/>\n"
+                        + "        <display_setting display_id=\"0\"/>\n"
+                        + "        <output_setting nbufs=\"5\"/>\n"
+                        + "    </input_device>\n"
+                        + "    <input_device>\n"
+                        + "        <properties input_id=\"1\"/>\n"
+                        + "        <display_setting display_id=\"0\"/>\n"
+                        + "        <output_setting nbufs=\"5\"/>\n"
+                        + "    </input_device>\n"
+                        + "    <input_device>\n"
+                        + "        <properties input_id=\"2\"/>\n"
+                        + "        <display_setting display_id=\"0\"/>\n"
+                        + "        <output_setting nbufs=\"5\"/>\n"
+                        + "    </input_device>\n"
+                        + "    <input_device>\n"
+                        + "        <properties input_id=\"3\"/>\n"
+                        + "        <display_setting display_id=\"0\"/>\n"
+                        + "        <output_setting nbufs=\"5\"/>\n"
+                        + "    </input_device>\n"
+                        + "</qcarcam_inputs>\n";
                 java.io.FileWriter writer = new java.io.FileWriter(cfgFile);
                 writer.write(defaultXml);
                 writer.close();
             }
 
-            // Path to libhook_qcarcam.so
             String hookPath = ScratchPaths.path("libhook_qcarcam.so");
             java.io.File hookFile = new java.io.File(hookPath);
             if (!hookFile.exists()) {
@@ -115,13 +127,14 @@ public class DiLink5QCarCamBackend {
 
             ProcessBuilder pb = new ProcessBuilder(
                     "/system/bin/sh", "-c",
-                    "LD_PRELOAD=" + hookPath + " " + qcarcamBin + " -config=" + ScratchPaths.getDir() + "/4cam.xml"
+                    "LD_PRELOAD=" + hookPath + " " + qcarcamBin
+                            + " -config=" + ScratchPaths.getDir() + "/4cam.xml"
             );
             pb.redirectErrorStream(true);
             sHardwareProcess = pb.start();
-            logger.info("Qualcomm QCarCam hardware pipeline started successfully via supervisor.");
+            logger.info("Qualcomm QCarCam hardware pipeline started via SL7 hook.");
         } catch (Throwable t) {
-            logger.error("Failed to start Qualcomm QCarCam hardware supervisor: " + t.getMessage(), t);
+            logger.error("Failed to start QCarCam hook supervisor: " + t.getMessage(), t);
         }
     }
 
@@ -142,8 +155,12 @@ public class DiLink5QCarCamBackend {
                 sHardwareProcess.destroy();
                 sHardwareProcess = null;
             }
-            Runtime.getRuntime().exec(new String[]{"pkill", "-9", "-f", "qcarcam_test"});
-            logger.info("Qualcomm QCarCam hardware supervisor stopped.");
+            if (DiLink5PlatformHelper.usesAisSidecar()) {
+                AisCaptureSidecarLauncher.stop();
+            } else {
+                Runtime.getRuntime().exec(new String[]{"pkill", "-9", "-f", "qcarcam_test"});
+            }
+            logger.info("DiLink 5 hardware capture supervisor stopped.");
         } catch (Throwable t) {
             logger.warn("Error stopping hardware supervisor: " + t.getMessage());
         }
@@ -251,7 +268,7 @@ public class DiLink5QCarCamBackend {
     public static void setActiveCamera(int camIdx) {
         try {
             nativeSetActiveCamera(camIdx);
-            logger.info("Switched active QCarCam camera to: " + camIdx);
+            logger.info("Switched active QCarCam camera to AIS byte: " + camIdx);
         } catch (Throwable t) {
             logger.warn("Failed to set active camera: " + t.getMessage());
         }

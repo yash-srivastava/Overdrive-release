@@ -1921,13 +1921,17 @@ public class StreamingApiHandler {
 
     private static void handleStreamViewMode(
             OutputStream out, int viewMode, ViewRequest request) throws Exception {
-        // Live-view stream accepts only modes 0-6. Blind-spot views 7/8 are
-        // NOT valid here — they belong to the dedicated BS pipeline on port
+        // Live-view stream accepts modes 0-6 and Shark cabin mode 9. Blind-spot
+        // views 7/8 are NOT valid here — they belong to the dedicated BS pipeline on port
         // 8889 and must route through /api/bs/view/{mode} (validated at
         // handleBsView). Letting 7/8 through here would call
         // pipeline.setStreamViewMode() on the SHARED live-view scaler and
         // hijack the live-view stream.
-        if (viewMode < 0 || viewMode > 6) {
+        if (viewMode < 0 || viewMode > 9 || viewMode == 7 || viewMode == 8) {
+            HttpResponse.sendJsonError(out, Messages.get("errors.streaming_invalid_view_mode"));
+            return;
+        }
+        if (viewMode == 9 && !com.overdrive.app.camera.dilink5.DiLink5PlatformHelper.isSharkProfile()) {
             HttpResponse.sendJsonError(out, Messages.get("errors.streaming_invalid_view_mode"));
             return;
         }

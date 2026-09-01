@@ -1775,6 +1775,7 @@ class DashboardFragment : Fragment() {
             "seagull" -> getString(R.string.vehicle_model_seagull)
             "sealion6" -> "BYD Sealion 6"
             "sealion7" -> "BYD Sealion 7"
+            "shark6" -> "BYD Shark 6"
             "sealu", "seal-u" -> "BYD Seal U"
             else -> modelId.replaceFirstChar { it.uppercase() }
         }

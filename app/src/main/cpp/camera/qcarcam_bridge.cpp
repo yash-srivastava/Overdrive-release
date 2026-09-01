@@ -269,10 +269,51 @@ void* streamClientLoop(void* arg) {
             if (g_nativeWindow) {
                 ANativeWindow_Buffer winBuffer;
                 if (ANativeWindow_lock(g_nativeWindow, &winBuffer, nullptr) == 0) {
-                    if (header.format == 1) {
-                        convert_uyvy_to_rgba(frameBuffer, header.width, header.height, (uint32_t*)winBuffer.bits, winBuffer.stride);
+                    const int win_w = winBuffer.width;
+                    const int win_h = winBuffer.height;
+                    uint32_t* dst = (uint32_t*)winBuffer.bits;
+                    const int dst_stride = winBuffer.stride;
+                    // Clear so a smaller source never leaves stale pixels around
+                    // the letterboxed region (cabin/DMS native res != 1920x1300).
+                    for (int y = 0; y < win_h; ++y) {
+                        memset(dst + y * dst_stride, 0, (size_t)win_w * 4u);
+                    }
+                    if (header.width == (uint32_t)win_w && header.height == (uint32_t)win_h) {
+                        if (header.format == 1) {
+                            convert_uyvy_to_rgba(frameBuffer, header.width, header.height, dst, dst_stride);
+                        } else {
+                            convert_nv12_to_rgba(frameBuffer, header.width, header.height, dst, dst_stride);
+                        }
                     } else {
-                        convert_nv12_to_rgba(frameBuffer, header.width, header.height, (uint32_t*)winBuffer.bits, winBuffer.stride);
+                        // Belt-and-suspenders: scale any odd-sized frame to fit.
+                        const int src_w = (int)header.width;
+                        const int src_h = (int)header.height;
+                        int tile_w = win_w;
+                        int tile_h = (int)((int64_t)src_h * win_w / src_w);
+                        if (tile_h > win_h) {
+                            tile_h = win_h;
+                            tile_w = (int)((int64_t)src_w * win_h / src_h);
+                        }
+                        const int dst_x = (win_w - tile_w) / 2;
+                        const int dst_y = (win_h - tile_h) / 2;
+                        uint32_t* scratch = (uint32_t*)malloc((size_t)src_w * (size_t)src_h * 4u);
+                        if (scratch) {
+                            if (header.format == 1) {
+                                convert_uyvy_to_rgba(frameBuffer, src_w, src_h, scratch, src_w);
+                            } else {
+                                convert_nv12_to_rgba(frameBuffer, src_w, src_h, scratch, src_w);
+                            }
+                            for (int y = 0; y < tile_h; ++y) {
+                                int sy = y * src_h / tile_h;
+                                uint32_t* drow = dst + (dst_y + y) * dst_stride + dst_x;
+                                const uint32_t* srow = scratch + sy * src_w;
+                                for (int x = 0; x < tile_w; ++x) {
+                                    int sx = x * src_w / tile_w;
+                                    drow[x] = srow[sx];
+                                }
+                            }
+                            free(scratch);
+                        }
                     }
                     ANativeWindow_unlockAndPost(g_nativeWindow);
                 }

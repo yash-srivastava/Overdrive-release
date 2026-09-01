@@ -711,10 +711,10 @@ public class GpuStreamScaler {
      *
      * @param mode 0=Mosaic, 1=Front, 2=Right, 3=Rear, 4=Left,
      *             5=Raw (legacy debug passthrough — pano strip), 6=OEM Dashcam,
-     *             7=BlindSpot L, 8=BlindSpot R
+     *             7=BlindSpot L, 8=BlindSpot R, 9=Cabin/DMS (Shark)
      */
     public void setViewMode(int mode) {
-        if (mode < 0 || mode > 8) return;
+        if (mode < 0 || mode > 9) return;
         if (mode != 6) {
             synchronized (oemViewLock) {
                 oemViewRequested = false;
@@ -1444,6 +1444,13 @@ public class GpuStreamScaler {
             // mosaic while view 6 has no valid external texture.
             "    if (uViewMode == 6) {\n" +
             "        gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);\n" +
+            "        return;\n" +
+            "    }\n" +
+            // Shark cabin/DMS (mode 9): full-texture passthrough. The AIS sidecar
+            // letterboxes non-pano resolutions to the standard buffer before they
+            // reach this sampler, so no quadrant remap is needed.
+            "    if (uViewMode == 9) {\n" +
+            "        gl_FragColor = texture2D(uCameraTex, vTexCoord);\n" +
             "        return;\n" +
             "    }\n" +
             "    vec2 samplePos;\n" +

@@ -19,12 +19,13 @@ import java.util.Set;
 
 public class BatteryChemistryMetadataTest {
     private static final Set<String> EXPECTED_MODELS = new HashSet<>(Arrays.asList(
-            "seal", "sealion7", "seal-u", "seal-u-dmi", "dolphin", "atto3",
+            "seal", "shark6", "sealion7", "seal-u", "seal-u-dmi", "dolphin", "atto3",
             "han", "tang", "m6", "seagull", "destroyer"));
     private static final Map<String, String> EXPECTED_MODEL_SOURCES = new HashMap<>();
 
     static {
         EXPECTED_MODEL_SOURCES.put("seal", "https://media.byd.com/byd-seal-arrives-in-europe-setting-the-standard-in-breakthrough-technology-and-stunning-design/?lang=eng");
+        EXPECTED_MODEL_SOURCES.put("shark6", "https://www.byd.com/material/byd-site/za/product/shark-6/BYD%20SHARK%206%20Specifications%20%20-%20SA.pdf");
         EXPECTED_MODEL_SOURCES.put("sealion7", "https://media.byd.com/all-new-byd-sealion-7-arrives-in-europe/?lang=eng");
         EXPECTED_MODEL_SOURCES.put("seal-u", "https://www.byd.com/content/dam/byd-site/hu/pdfs/seal-u/BYD_SEAL_U_arlista_20250101.pdf");
         EXPECTED_MODEL_SOURCES.put("seal-u-dmi", "https://www.byd.com/material/byd-site/si/pdfs/2026-04/Seal_U_Dmi-0226-BPS-SLO.pdf");
@@ -40,7 +41,7 @@ public class BatteryChemistryMetadataTest {
     @Test
     public void everySupportedConfigurationHasManufacturerEvidenceAndResolvesLfp() throws Exception {
         JSONObject manifest = manifest();
-        assertEquals(9, manifest.getInt("version"));
+        assertEquals(10, manifest.getInt("version"));
 
         JSONArray models = manifest.getJSONArray("models");
         Set<String> actual = new HashSet<>();

@@ -1232,6 +1232,13 @@ public class QualitySettingsApiHandler {
             oem.put("hasOwnQuality", diverged);
             response.put("oemDashcam", oem);
         } catch (Exception ignored) {}
+
+        try {
+            JSONObject dilink5 = new JSONObject();
+            dilink5.put("cabinViewSupported",
+                    com.overdrive.app.camera.dilink5.DiLink5PlatformHelper.isSharkProfile());
+            response.put("dilink5", dilink5);
+        } catch (Exception ignored) {}
         
         // Add codec info for UI
         JSONObject codecInfo = new JSONObject();

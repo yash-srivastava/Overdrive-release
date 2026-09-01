@@ -163,6 +163,14 @@
                                         <div class="hotspot-ring"></div>
                                         <span class="hotspot-label" data-i18n="stream.hotspot_front">FRONT</span>
                                     </div>
+                                    <!-- Shark cabin / driver monitor (data-cam=9). Hidden by default;
+                                         init script unhides when /api/settings/quality reports
+                                         dilink5.cabinViewSupported. AIS camera 0, ~28% from top. -->
+                                    <div class="cam-hotspot cam-cabin" data-cam="9" style="display:none;" onclick="BYD.stream.selectCamera(9)">
+                                        <div class="hotspot-pulse"></div>
+                                        <div class="hotspot-ring"></div>
+                                        <span class="hotspot-label" data-i18n="stream.hotspot_cabin">CABIN</span>
+                                    </div>
                                     <!-- OEM Dashcam (data-cam=6). Hidden by default; the
                                          init script unhides it iff /api/settings/quality
                                          reports oemDashcam.oemDashcamCameraId >= 0. The
@@ -707,6 +715,7 @@
         
         /* Hotspot positions for vertical car (72x150) */
         .cam-hotspot[data-cam="1"] { top: -8px; left: 50%; transform: translateX(-50%); }
+        .cam-hotspot[data-cam="9"] { top: 28%; left: 50%; transform: translate(-50%, -50%); }
         .cam-hotspot[data-cam="3"] { bottom: -8px; left: 50%; transform: translateX(-50%); }
         .cam-hotspot[data-cam="4"] { top: 50%; left: -20px; transform: translateY(-50%); }
         .cam-hotspot[data-cam="2"] { top: 50%; right: -20px; transform: translateY(-50%); }
@@ -758,6 +767,8 @@
         
         /* Front label - above */
         .cam-hotspot[data-cam="1"] .hotspot-label { bottom: calc(100% + 2px); left: 50%; transform: translateX(-50%); top: auto; }
+        /* Cabin label - above in-cabin ring */
+        .cam-hotspot[data-cam="9"] .hotspot-label { bottom: calc(100% + 2px); left: 50%; transform: translateX(-50%); top: auto; }
         /* Rear label - below with more clearance */
         .cam-hotspot[data-cam="3"] .hotspot-label { top: calc(100% + 2px); left: 50%; transform: translateX(-50%); bottom: auto; }
         /* Left label - to the left */
@@ -1140,6 +1151,7 @@
             .hotspot-label { font-size: 9px; padding: 3px 5px; }
             /* DVR sits a touch closer to FRONT on the smaller silhouette. */
             .cam-hotspot[data-cam="6"] { top: 14px; left: 62%; }
+            .cam-hotspot[data-cam="9"] { top: 26%; }
             .idle-icon { width: 48px; height: 48px; }
             .idle-icon svg { width: 24px; height: 24px; }
             .idle-text { font-size: 12px; }
@@ -1437,7 +1449,7 @@
                 return;
             }
             
-            const camKeys = {0: 'pip.title_all_cameras', 1: 'pip.title_front_camera', 2: 'pip.title_right_camera', 3: 'pip.title_rear_camera', 4: 'pip.title_left_camera', 6: 'pip.title_oem_dashcam'};
+            const camKeys = {0: 'pip.title_all_cameras', 1: 'pip.title_front_camera', 2: 'pip.title_right_camera', 3: 'pip.title_rear_camera', 4: 'pip.title_left_camera', 6: 'pip.title_oem_dashcam', 9: 'pip.title_cabin_camera'};
             const labelEl = document.getElementById('currentCameraLabel');
             const overlayEl = document.getElementById('cameraLabelOverlay');
 
@@ -1922,6 +1934,11 @@
                 const hotspot = document.querySelector('.cam-hotspot[data-cam="6"]');
                 if (hotspot) {
                     hotspot.style.display = camId >= 0 ? '' : 'none';
+                }
+                const dilink5 = data && data.dilink5;
+                const cabinHotspot = document.querySelector('.cam-hotspot[data-cam="9"]');
+                if (cabinHotspot) {
+                    cabinHotspot.style.display = (dilink5 && dilink5.cabinViewSupported === true) ? '' : 'none';
                 }
             } catch (e) {
                 // Backend unreachable or response shape changed — leave
