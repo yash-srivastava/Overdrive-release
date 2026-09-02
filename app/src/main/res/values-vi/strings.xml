@@ -780,11 +780,11 @@
     <string name="vehicle_dialog_model_label">Mô hình</string>
     <string name="vehicle_dialog_save">Lưu</string>
     <string name="vehicle_dialog_reset">Đặt lại để tự phát hiện</string>
+    <string name="vehicle_dialog_detection">Phát hiện: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Tự động</string>
+    <string name="vehicle_dialog_detection_manual">Thủ công</string>
     <string name="vehicle_dialog_invalid_capacity">Dung lượng phải từ 15 - 120 kWh</string>
-    <string name="vehicle_dialog_summary_capacity">Dung lượng: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">Hiệu dụng: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">Mô hình: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">Hiệu chỉnh lần cuối: %1$.1f%% vào %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">không có sẵn</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->

@@ -237,8 +237,9 @@
         <item name="buttonBarPositiveButtonStyle">@style/Widget.Overdrive.M3.Button.Dialog.Primary</item>
         <item name="buttonBarNegativeButtonStyle">@style/Widget.Overdrive.M3.Button.Dialog.Neutral</item>
         <item name="buttonBarNeutralButtonStyle">@style/Widget.Overdrive.M3.Button.Dialog.Neutral</item>
-        <item name="dialogCornerRadius">28dp</item>
-        <item name="shapeAppearanceLargeComponent">@style/ShapeAppearance.Overdrive.LargeComponent</item>
+        <item name="dialogCornerRadius">@dimen/card_radius_dialog</item>
+        <item name="shapeAppearanceLargeComponent">@style/ShapeAppearance.Overdrive.Dialog</item>
+        <item name="shapeAppearanceCornerExtraLarge">@style/ShapeAppearance.Overdrive.Dialog</item>
         <!-- Surface tier: M3 spec calls for surfaceContainerHigh on the dialog -->
         <item name="colorSurface">?attr/colorSurfaceContainerHigh</item>
     </style>
@@ -285,7 +286,9 @@
          dialog_update_progress, dialog_roi_drawing). -->
     <style name="Theme.Overdrive.M3.Dialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
         <item name="colorSurface">?attr/colorSurfaceContainerHigh</item>
-        <item name="dialogCornerRadius">28dp</item>
+        <item name="dialogCornerRadius">@dimen/card_radius_dialog</item>
+        <item name="shapeAppearanceLargeComponent">@style/ShapeAppearance.Overdrive.Dialog</item>
+        <item name="shapeAppearanceCornerExtraLarge">@style/ShapeAppearance.Overdrive.Dialog</item>
         <item name="android:windowBackground">@drawable/dialog_m3_background</item>
         <item name="android:windowMinWidthMajor">68%</item>
         <item name="android:windowMinWidthMinor">88%</item>

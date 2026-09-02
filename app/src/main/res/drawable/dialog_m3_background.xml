@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Window background for custom-view dialogs themed via Theme.Overdrive.M3.Dialog.
-  Uses a tonal surfaceContainerHigh fill — no border, no elevation shadow,
-  pure M3 shape. Auto-flips with light/dark via the surface attr.
+  Uses a tonal surfaceContainerHigh fill — no border, no elevation shadow.
+  Auto-flips with light/dark via the surface attr. The radius token is shared
+  with dialogCornerRadius so both halves of the shape agree.
 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <solid android:color="?attr/colorSurfaceContainerHigh" />
-    <corners android:radius="28dp" />
+    <corners android:radius="@dimen/card_radius_dialog" />
 </shape>

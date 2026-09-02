@@ -1390,6 +1390,7 @@ class DashboardFragment : Fragment() {
         val dialogView = layoutInflater.inflate(
             R.layout.dialog_vehicle_capacity, null, false)
 
+        val summaryDetection = dialogView.findViewById<TextView>(R.id.vehicleSummaryDetection)
         val summaryCapacity = dialogView.findViewById<TextView>(R.id.vehicleSummaryCapacity)
         val summarySoh = dialogView.findViewById<TextView>(R.id.vehicleSummarySoh)
         val summaryEffective = dialogView.findViewById<TextView>(R.id.vehicleSummaryEffective)
@@ -1400,14 +1401,20 @@ class DashboardFragment : Fragment() {
         val modelDropdown = dialogView.findViewById<
             com.google.android.material.textfield.MaterialAutoCompleteTextView>(
             R.id.vehicleModelDropdown)
+        val resetButton = dialogView.findViewById<
+            com.google.android.material.button.MaterialButton>(R.id.vehicleResetAuto)
 
-        // These three always resolve to a value, so they carry a placeholder
-        // from the start: the fetch below runs off the main thread, and filling
-        // empty rows on its return would resize the dialog after it is up.
+        // Nothing is known to reset until the fetch lands.
+        resetButton.isEnabled = false
+
+        // These always resolve to a value, so they carry a placeholder from the
+        // start: the fetch below runs off the main thread, and filling empty
+        // rows on its return would resize the dialog after it is up.
         val pendingValue = getString(R.string.vehicle_dialog_value_pending)
-        summaryCapacity.text = getString(R.string.vehicle_dialog_summary_capacity, pendingValue)
-        summarySoh.text = getString(R.string.vehicle_dialog_summary_soh, pendingValue)
-        summaryModel.text = getString(R.string.vehicle_dialog_summary_model, pendingValue)
+        summaryDetection.text = getString(R.string.vehicle_dialog_detection, pendingValue)
+        summaryCapacity.text = pendingValue
+        summarySoh.text = pendingValue
+        summaryModel.text = pendingValue
 
         // Track the selected model's id locally (the dropdown's text holds
         // the user-facing title; the id is what we POST). Each entry also
@@ -1444,7 +1451,6 @@ class DashboardFragment : Fragment() {
             var nominalKwh = 0.0
             var nominalSource = "unset"
             var displaySoh = -1.0
-            var displaySource = "unavailable"
             var estimatedKwh = 0.0
             var statusModelId: String? = null
             var calSoh = 0.0
@@ -1469,7 +1475,6 @@ class DashboardFragment : Fragment() {
                     nominalKwh = json.optDouble("nominalCapacityKwh", 0.0)
                     nominalSource = json.optString("nominalSource", "unset")
                     displaySoh = json.optDouble("displaySoh", -1.0)
-                    displaySource = json.optString("displaySource", "unavailable")
                     val est = json.optDouble("estimatedCapacityKwh", -1.0)
                     if (est > 0) estimatedKwh = est
                     if (!json.isNull("modelId")) {
@@ -1541,7 +1546,6 @@ class DashboardFragment : Fragment() {
             val finalNominalKwh = nominalKwh
             val finalNominalSource = nominalSource
             val finalDisplaySoh = displaySoh
-            val finalDisplaySource = displaySource
             val finalEstimatedKwh = estimatedKwh
             val finalStatusModelId = statusModelId ?: initialModelId
             val finalCalSoh = calSoh
@@ -1572,29 +1576,35 @@ class DashboardFragment : Fragment() {
                     }
                 }
 
-                val capacityText = if (finalNominalKwh > 0) {
-                    val suffix = when (finalNominalSource) {
-                        "user" -> " (" + getString(R.string.soh_dialog_source_user) + ")"
-                        "auto" -> " (" + getString(R.string.soh_dialog_source_auto) + ")"
-                        else -> ""
-                    }
-                    String.format("%.1f kWh", finalNominalKwh) + suffix
+                // A typed capacity or a picked model is an override; either one
+                // takes the pack out of auto-detection, and the reset clears
+                // both. Model state comes from /api/models/selected rather than
+                // the status modelId, which also reports auto-detected models.
+                val manual = finalNominalSource == "user" || initialModelId != null
+                summaryDetection.text = getString(
+                    R.string.vehicle_dialog_detection,
+                    getString(
+                        if (manual) {
+                            R.string.vehicle_dialog_detection_manual
+                        } else {
+                            R.string.vehicle_dialog_detection_auto
+                        }
+                    )
+                )
+                resetButton.isEnabled = manual
+
+                summaryCapacity.text = if (finalNominalKwh > 0) {
+                    String.format("%.1f kWh", finalNominalKwh)
                 } else {
                     getString(R.string.soh_dialog_capacity_not_detected)
                 }
-                summaryCapacity.text =
-                    getString(R.string.vehicle_dialog_summary_capacity, capacityText)
 
-                val sohText = when {
-                    finalDisplaySoh > 0 && finalDisplaySource == "oem" ->
-                        String.format("%.1f%% (vehicle)", finalDisplaySoh)
-                    finalDisplaySoh > 0 && finalDisplaySource == "live" ->
-                        String.format("%.1f%% (live)", finalDisplaySoh)
-                    finalDisplaySoh > 0 && finalDisplaySource == "calibration" ->
-                        String.format("%.1f%% (from last charge)", finalDisplaySoh)
-                    else -> getString(R.string.vehicle_dialog_soh_unavailable)
+                summarySoh.text = if (finalDisplaySoh > 0) {
+                    String.format("%.1f%%", finalDisplaySoh)
+                } else {
+                    getString(R.string.vehicle_dialog_soh_unavailable)
+                        .replaceFirstChar { it.uppercase() }
                 }
-                summarySoh.text = getString(R.string.vehicle_dialog_summary_soh, sohText)
 
                 if (finalEstimatedKwh > 0) {
                     summaryEffective.text = getString(
@@ -1602,9 +1612,11 @@ class DashboardFragment : Fragment() {
                     summaryEffective.visibility = View.VISIBLE
                 }
 
-                val modelText = if (finalStatusModelId != null) modelDisplayName(finalStatusModelId)
-                else getString(R.string.soh_dialog_model_not_selected)
-                summaryModel.text = getString(R.string.vehicle_dialog_summary_model, modelText)
+                summaryModel.text = if (finalStatusModelId != null) {
+                    modelDisplayName(finalStatusModelId)
+                } else {
+                    getString(R.string.soh_dialog_model_not_selected)
+                }
 
                 if (finalCalSoh > 0 && finalCalTs > 0) {
                     val date = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
@@ -1632,9 +1644,17 @@ class DashboardFragment : Fragment() {
             // Install button listeners after show so invalid capacity does not
             // trigger AlertDialog's default auto-dismiss behavior.
             .setPositiveButton(getString(R.string.vehicle_dialog_save), null)
-            .setNeutralButton(getString(R.string.vehicle_dialog_reset), null)
             .setNegativeButton(getString(R.string.action_cancel), null)
             .create()
+        resetButton.setOnClickListener {
+            completionDeferred = true
+            postNominal(
+                kwh = null,
+                clearModelSelection = true,
+                onComplete = { finishOnce() },
+            )
+            dialog.dismiss()
+        }
         dialog.setOnShowListener {
             dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
                 val raw = capInput.text?.toString()?.trim().orEmpty()
@@ -1645,15 +1665,6 @@ class DashboardFragment : Fragment() {
                 }
                 completionDeferred = true
                 postNominalAndModel(kwh, selectedModelId) { finishOnce() }
-                dialog.dismiss()
-            }
-            dialog.getButton(android.content.DialogInterface.BUTTON_NEUTRAL).setOnClickListener {
-                completionDeferred = true
-                postNominal(
-                    kwh = null,
-                    clearModelSelection = true,
-                    onComplete = { finishOnce() },
-                )
                 dialog.dismiss()
             }
             dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).setOnClickListener {

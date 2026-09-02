@@ -780,11 +780,11 @@
     <string name="vehicle_dialog_model_label">모델</string>
     <string name="vehicle_dialog_save">저장</string>
     <string name="vehicle_dialog_reset">자동 탐지 설정</string>
+    <string name="vehicle_dialog_detection">감지: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">자동</string>
+    <string name="vehicle_dialog_detection_manual">수동</string>
     <string name="vehicle_dialog_invalid_capacity">용량은 15 ~ 120 kWh</string>
-    <string name="vehicle_dialog_summary_capacity">용량: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">유효성: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">모델: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">마지막 캘리브레이션: %1$.1f%% %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">사용할 수 없습니다</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->

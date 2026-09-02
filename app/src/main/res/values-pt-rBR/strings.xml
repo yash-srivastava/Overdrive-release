@@ -936,11 +936,11 @@
     <string name="vehicle_model_seagull">BYD Dolphin Mini</string>
     <string name="vehicle_dialog_save">Salvar</string>
     <string name="vehicle_dialog_reset">Redefinir para detecção automática</string>
+    <string name="vehicle_dialog_detection">Detecção: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Automática</string>
+    <string name="vehicle_dialog_detection_manual">Manual</string>
     <string name="vehicle_dialog_invalid_capacity">A capacidade deve ser de 15 a 120 kWh</string>
-    <string name="vehicle_dialog_summary_capacity">Capacidade: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">Efetiva: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">Modelo: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">Última calibração: %1$.1f%% em %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">indisponível</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->

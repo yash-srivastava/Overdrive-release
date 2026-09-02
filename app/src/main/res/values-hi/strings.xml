@@ -783,11 +783,11 @@
     <string name="vehicle_dialog_model_label">मॉडल</string>
     <string name="vehicle_dialog_save">सहेजें</string>
     <string name="vehicle_dialog_reset">ऑटो-डिटेक्ट करने के लिए रीसेट करें</string>
+    <string name="vehicle_dialog_detection">पहछान: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">स्वचालित</string>
+    <string name="vehicle_dialog_detection_manual">मैन्युअल</string>
     <string name="vehicle_dialog_invalid_capacity">क्षमता 15 से 120 kWh होनी चाहिए</string>
-    <string name="vehicle_dialog_summary_capacity">क्षमताः %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">प्रभावी: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">मॉडल: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">अंतिम माप: %1$.1f%% पर %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">अनुपलब्ध</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->

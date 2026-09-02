@@ -929,11 +929,11 @@
     <string name="vehicle_dialog_model_label">Modelo</string>
     <string name="vehicle_dialog_save">Guardar</string>
     <string name="vehicle_dialog_reset">Se restablece a la detección automática</string>
+    <string name="vehicle_dialog_detection">Detección: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Automática</string>
+    <string name="vehicle_dialog_detection_manual">Manual</string>
     <string name="vehicle_dialog_invalid_capacity">La capacidad debe ser de 15 a 120 kWh</string>
-    <string name="vehicle_dialog_summary_capacity">Capacidad: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">Efectivo: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">Modelo: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">Última calibración: %1$.1f%% en %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">no está disponible</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->

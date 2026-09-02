@@ -3,8 +3,9 @@
   Vehicle capacity / model picker dialog.
 
   Two surfaces:
-    - Summary block (read-only): current capacity, SOH, effective kWh, model,
-      last calibration.
+    - Summary panel (read-only): detection mode, current capacity, SOH,
+      effective kWh, model, last calibration, and the reset that returns
+      detection to automatic.
     - Editable controls: M3 outlined capacity input + M3 ExposedDropdownMenu
       for model selection. The dropdown expands like a Material menu, not a
       legacy Spinner.
@@ -25,13 +26,13 @@
         android:paddingTop="8dp"
         android:paddingBottom="8dp">
 
-        <!-- What the daemon currently holds. Recessed into its own panel so the
+        <!-- What the daemon currently holds. On its own raised panel so the
              read-only half is separated from the editable half by a surface
              rather than by a hairline.
 
-             Capacity, SOH and model always end up populated, so they hold a
-             placeholder until the fetch lands rather than appearing into a
-             dialog the user is already looking at. The derived two are
+             Detection, capacity, SOH and model always end up populated, so they
+             hold a placeholder until the fetch lands rather than appearing into
+             a dialog the user is already looking at. The derived two are
              genuinely conditional and stay GONE without data. -->
         <LinearLayout
             android:layout_width="match_parent"
@@ -40,36 +41,129 @@
             android:orientation="vertical"
             android:padding="@dimen/dashboard_modern_card_padding">
 
-            <TextView
-                android:id="@+id/vehicleSummaryCapacity"
+            <!-- Header row: the mode the readings below come from, and the
+                 action that changes it. Paired on one row because the reset is
+                 what flips the mode, and because the mode label is short enough
+                 to leave the button room. -->
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                android:textColor="?attr/colorOnSurface" />
+                android:baselineAligned="false"
+                android:orientation="horizontal">
 
-            <TextView
-                android:id="@+id/vehicleSummarySoh"
+                <TextView
+                    android:id="@+id/vehicleSummaryDetection"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_vertical"
+                    android:layout_weight="1"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
+                    android:textColor="?attr/colorOnSurface" />
+
+                <!-- Clears the manual capacity and model, which is what this
+                     panel reports, so it sits here rather than in the button bar
+                     where it read as a third dismissal. Disabled while detection
+                     is already automatic — see DashboardFragment. -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/vehicleResetAuto"
+                    style="@style/Widget.Overdrive.M3.Button.Outlined"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_vertical"
+                    android:layout_marginStart="16dp"
+                    android:text="@string/vehicle_dialog_reset" />
+            </LinearLayout>
+
+            <!-- Three labelled readings across the panel, same label-over-value
+                 shape as the hero card metrics. A "Label: value" stack reads as
+                 a dump; the label carries the naming so the value can be short
+                 and large enough to scan. Labels are borrowed from the inputs
+                 below and from diagnostics, which is also where "Battery health"
+                 names SOH for users. -->
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                android:textColor="?attr/colorOnSurface" />
+                android:layout_marginTop="20dp"
+                android:baselineAligned="false"
+                android:orientation="horizontal">
 
-            <TextView
-                android:id="@+id/vehicleSummaryModel"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                android:textColor="?attr/colorOnSurface" />
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
 
-            <!-- Derived readings. Smaller and dimmer than the three above: they
-                 report what the daemon worked out, not what is set. -->
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/vehicle_dialog_capacity_label"
+                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <TextView
+                        android:id="@+id/vehicleSummaryCapacity"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:textColor="?attr/colorOnSurface" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="16dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/diagnostics_section_battery"
+                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <TextView
+                        android:id="@+id/vehicleSummarySoh"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:textColor="?attr/colorOnSurface" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="16dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/vehicle_dialog_model_label"
+                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <TextView
+                        android:id="@+id/vehicleSummaryModel"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:textColor="?attr/colorOnSurface" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Footnotes: derived values that only exist once the daemon has
+                 learned something, so they read as sentences rather than taking
+                 a column of their own. -->
             <TextView
                 android:id="@+id/vehicleSummaryEffective"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="16dp"
                 android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                 android:textColor="?attr/colorOnSurfaceVariant"
                 android:visibility="gone" />

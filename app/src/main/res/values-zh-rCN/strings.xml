@@ -926,11 +926,11 @@
     <string name="vehicle_dialog_model_label">模型</string>
     <string name="vehicle_dialog_save">保存</string>
     <string name="vehicle_dialog_reset">重新设置为自动检测</string>
+    <string name="vehicle_dialog_detection">检测：%1$s</string>
+    <string name="vehicle_dialog_detection_auto">自动</string>
+    <string name="vehicle_dialog_detection_manual">手动</string>
     <string name="vehicle_dialog_invalid_capacity">容量必须为15-120kWh</string>
-    <string name="vehicle_dialog_summary_capacity">容量:%1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">有效:%1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">型号:%1$s</string>
     <string name="vehicle_dialog_summary_calibration">最后校准:%1$.1f%% 在%2$s</string>
     <string name="vehicle_dialog_soh_unavailable">无法使用</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->

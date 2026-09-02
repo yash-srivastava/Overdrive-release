@@ -780,11 +780,11 @@
     <string name="vehicle_dialog_model_label">รุ่นรถ</string>
     <string name="vehicle_dialog_save">บันทึก</string>
     <string name="vehicle_dialog_reset">รีเซ็ตเพื่อตรวจจับอัตโนมัติ</string>
+    <string name="vehicle_dialog_detection">การตรวจจับ: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">อัตโนมัติ</string>
+    <string name="vehicle_dialog_detection_manual">กำหนดเอง</string>
     <string name="vehicle_dialog_invalid_capacity">ความจุต้องอยู่ระหว่าง 15 - 120 kWh</string>
-    <string name="vehicle_dialog_summary_capacity">ความจุ: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">ใช้งานได้จริง: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">รุ่น: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">ปรับเทียบล่าสุด: %1$.1f%% เมื่อ %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">ไม่มีข้อมูล</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->

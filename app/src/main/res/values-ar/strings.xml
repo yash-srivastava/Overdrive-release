@@ -794,11 +794,11 @@
     <string name="vehicle_dialog_model_label">الموديل</string>
     <string name="vehicle_dialog_save">حفظ</string>
     <string name="vehicle_dialog_reset">إعادة تعيين للكشف التلقائي</string>
+    <string name="vehicle_dialog_detection">الكشف: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">تلقائي</string>
+    <string name="vehicle_dialog_detection_manual">يدوي</string>
     <string name="vehicle_dialog_invalid_capacity">يجب أن تكون السعة 15-120 كيلو وات ساعة</string>
-    <string name="vehicle_dialog_summary_capacity">القدرة: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">فعالة: %1$.1f kWساعة</string>
-    <string name="vehicle_dialog_summary_model">النموذج: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">آخر معايرة: %1$.1f%% على %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">unavailable</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->

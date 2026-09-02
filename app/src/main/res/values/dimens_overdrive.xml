@@ -28,7 +28,7 @@
     <!-- Card radii -->
     <dimen name="card_radius_standard">8dp</dimen>      <!-- Operational cards and grouped surfaces -->
     <dimen name="card_radius_hero">8dp</dimen>          <!-- Large content surfaces remain restrained -->
-    <dimen name="card_radius_dialog">28dp</dimen>       <!-- M3 dialog spec; already wired via theme -->
+    <dimen name="card_radius_dialog">8dp</dimen>        <!-- Squared off to match the cards and the rail pill -->
     <dimen name="card_radius_accent">8dp</dimen>        <!-- buttons and segmented controls -->
 
     <!-- Card padding -->

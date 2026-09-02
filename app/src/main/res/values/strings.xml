@@ -1282,11 +1282,11 @@
     <string name="vehicle_model_seagull">BYD Seagull</string>
     <string name="vehicle_dialog_save">Save</string>
     <string name="vehicle_dialog_reset">Reset to auto-detect</string>
+    <string name="vehicle_dialog_detection">Detection: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Automatic</string>
+    <string name="vehicle_dialog_detection_manual">Manual</string>
     <string name="vehicle_dialog_invalid_capacity">Capacity must be 15 - 120 kWh</string>
-    <string name="vehicle_dialog_summary_capacity">Capacity: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">Effective: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">Model: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">Last calibrated: %1$.1f%% on %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">unavailable</string>
     <string name="vehicle_dialog_value_pending">—</string>
