@@ -1193,4 +1193,10 @@
     <string name="dialog_cloudflared_settings_message">הגדר אם אתה משתמש ב-Cloudflare בתשלום או ב-trycloudflare. אם אתה משתמש ב-Cloudflare בתשלום, הזן את אסימון המנהרה שלך.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">אם מוגדר לגרסה בתשלום, האסימון לא יכול להיות ריק</string>
     <string name="toast_cloudflared_saved_settings">הגדרות Cloudflared נשמרו</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">מצלמות</string>
+    <string name="rail_section_controls">בקרות</string>
+    <string name="rail_section_driving">נהיגה</string>
+    <string name="rail_section_automation">אוטומציה</string>
+    <string name="rail_section_system">מערכת</string>
 </resources>

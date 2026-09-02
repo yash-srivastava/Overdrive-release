@@ -1369,4 +1369,10 @@
     <string name="projection_preset_right">Moitié droite</string>
     <string name="projection_preset_center">Centrer</string>
     <string name="projection_lock_aspect">Garder l\'aspect du cluster</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Caméras</string>
+    <string name="rail_section_controls">Commandes</string>
+    <string name="rail_section_driving">Conduite</string>
+    <string name="rail_section_automation">Automatisation</string>
+    <string name="rail_section_system">Système</string>
 </resources>

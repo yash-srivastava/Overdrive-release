@@ -1359,4 +1359,10 @@
     <string name="projection_preset_right">右半分</string>
     <string name="projection_preset_center">中央揃え</string>
     <string name="projection_lock_aspect">クラスターの側面を維持する</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">カメラ</string>
+    <string name="rail_section_controls">車両操作</string>
+    <string name="rail_section_driving">走行</string>
+    <string name="rail_section_automation">オートメーション</string>
+    <string name="rail_section_system">システム</string>
 </resources>

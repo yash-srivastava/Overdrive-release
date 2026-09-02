@@ -82,6 +82,11 @@ open class MainActivity : AppCompatActivity() {
     // Chevron's distance from the rail's trailing edge when expanded:
     // 8dp margin + half of the 48dp button.
     private val RAIL_CHEVRON_EDGE_INSET_DP = 32
+    // The always-pinned rows. Every other key lives in NavigationRailCatalog,
+    // which is the set the user can hide.
+    private val RAIL_KEY_DASHBOARD = "dashboard"
+    private val RAIL_KEY_SETTINGS = "settings"
+    private val RAIL_KEY_ABOUT = "about"
     private val KEY_RAIL_EXPANDED = "navigation_rail_expanded"
     // M3 emphasized-decelerate — same curve ZoomableVideoView uses, so the rail
     // shares the app's motion vocabulary instead of a stock Decelerate.
@@ -116,6 +121,48 @@ open class MainActivity : AppCompatActivity() {
     private var navigationRailRowsExpandedForm = false
     private var railItems: List<RailItem> = emptyList()
     private var railActionItems: List<RailActionItem> = emptyList()
+    // Order here must track the include order in both activity_main_new.xml
+    // variants; the layouts are what actually place headers among the rows.
+    private val railSections = listOf(
+        RailSection(
+            R.id.railSectionCameras, R.string.rail_section_cameras,
+            setOf(NavigationRailCatalog.LIVE, NavigationRailCatalog.RECORDINGS)
+        ),
+        RailSection(
+            R.id.railSectionControls, R.string.rail_section_controls,
+            setOf(
+                NavigationRailCatalog.VEHICLE,
+                NavigationRailCatalog.SEAT_POSITIONS,
+                NavigationRailCatalog.PROJECTION,
+                NavigationRailCatalog.CHARGING,
+            )
+        ),
+        RailSection(
+            R.id.railSectionDriving, R.string.rail_section_driving,
+            setOf(
+                NavigationRailCatalog.TRIPS,
+                NavigationRailCatalog.ROAD_SENSE,
+                NavigationRailCatalog.MAP,
+            )
+        ),
+        RailSection(
+            R.id.railSectionAutomation, R.string.rail_section_automation,
+            setOf(
+                NavigationRailCatalog.AUTOMATIONS,
+                NavigationRailCatalog.KEY_MAPPING,
+                NavigationRailCatalog.INTEGRATIONS,
+            )
+        ),
+        RailSection(
+            R.id.railSectionSystem, R.string.rail_section_system,
+            setOf(
+                NavigationRailCatalog.NETWORK,
+                NavigationRailCatalog.DIAGNOSTICS,
+                RAIL_KEY_SETTINGS,
+                RAIL_KEY_ABOUT,
+            )
+        ),
+    )
     private lateinit var tvCurrentUrl: TextView
     private lateinit var urlBar: View
     private lateinit var statusPill: View
@@ -1464,10 +1511,10 @@ open class MainActivity : AppCompatActivity() {
      * code-driven nav also light up the right rail item.
      */
     private fun setupCustomRail(savedInstanceState: Bundle?) {
-        // Order matches the previous rail_menu.xml so user's mental model
-        // stays the same.
+        // Order mirrors the include order in activity_main_new.xml, which is
+        // where the category headers sit between these rows.
         val items = listOf(
-            RailItem("dashboard", R.id.railDestDashboard, R.id.dashboardFragment,
+            RailItem(RAIL_KEY_DASHBOARD, R.id.railDestDashboard, R.id.dashboardFragment,
                 R.drawable.ic_dashboard, R.string.rail_dashboard),
             RailItem(NavigationRailCatalog.ASSISTANT, R.id.railDestAssistant,
                 R.id.genAiFragment, R.drawable.ic_smart_toy, R.string.rail_assistant),
@@ -1489,11 +1536,19 @@ open class MainActivity : AppCompatActivity() {
             RailItem(NavigationRailCatalog.PROJECTION, R.id.railDestProjection,
                 R.id.projectionFragment,
                 R.drawable.ic_projection, R.string.rail_projection),
-            RailItem(NavigationRailCatalog.TRIPS, R.id.railDestTrips, R.id.tripsFragment,
-                R.drawable.ic_trips, R.string.rail_trips),
             RailItem(NavigationRailCatalog.CHARGING, R.id.railDestCharging,
                 R.id.chargingFragment,
                 R.drawable.ic_charging, R.string.rail_charging),
+            RailItem(NavigationRailCatalog.TRIPS, R.id.railDestTrips, R.id.tripsFragment,
+                R.drawable.ic_trips, R.string.rail_trips),
+            RailItem(NavigationRailCatalog.ROAD_SENSE, R.id.railDestRoadSense,
+                R.id.roadSenseFragment,
+                R.drawable.ic_roadsense, R.string.rail_roadsense),
+            // Hazard Map is a standalone Activity, not a nav-graph fragment,
+            // so it launches via startActivity (destinationId = 0).
+            RailItem(NavigationRailCatalog.MAP, R.id.railDestMap, 0,
+                R.drawable.ic_roadsense_map, R.string.rail_hazard_map,
+                launchActivity = com.overdrive.app.navmap.RoadSenseMapActivity::class.java),
             RailItem(NavigationRailCatalog.AUTOMATIONS, R.id.railDestAutomations,
                 R.id.automationsFragment,
                 R.drawable.ic_automations, R.string.rail_automations),
@@ -1509,14 +1564,6 @@ open class MainActivity : AppCompatActivity() {
                     R.id.mqttFragment,
                     R.id.bydCloudFragment,
                 )),
-            RailItem(NavigationRailCatalog.ROAD_SENSE, R.id.railDestRoadSense,
-                R.id.roadSenseFragment,
-                R.drawable.ic_roadsense, R.string.rail_roadsense),
-            // Hazard Map is a standalone Activity, not a nav-graph fragment,
-            // so it launches via startActivity (destinationId = 0).
-            RailItem(NavigationRailCatalog.MAP, R.id.railDestMap, 0,
-                R.drawable.ic_roadsense_map, R.string.rail_hazard_map,
-                launchActivity = com.overdrive.app.navmap.RoadSenseMapActivity::class.java),
             RailItem(NavigationRailCatalog.NETWORK, R.id.railDestNetwork,
                 R.id.networkFragment,
                 R.drawable.ic_hotspot, R.string.rail_network),
@@ -1524,13 +1571,13 @@ open class MainActivity : AppCompatActivity() {
                 R.id.diagnosticsFragment,
                 R.drawable.ic_diagnostics, R.string.rail_diagnostics,
                 ownedDestinationIds = setOf(R.id.adbConsoleFragment)),
-            RailItem("settings", R.id.railDestSettings, R.id.settingsFragment,
+            RailItem(RAIL_KEY_SETTINGS, R.id.railDestSettings, R.id.settingsFragment,
                 R.drawable.ic_settings, R.string.rail_settings,
                 ownedDestinationIds = setOf(
                     R.id.daemonsFragment,
                     R.id.settingsSecurityFragment,
                 )),
-            RailItem("about", R.id.railDestAbout, R.id.settingsAboutFragment,
+            RailItem(RAIL_KEY_ABOUT, R.id.railDestAbout, R.id.settingsAboutFragment,
                 R.drawable.ic_update, R.string.settings_section_about)
         )
         railItems = items
@@ -1583,6 +1630,12 @@ open class MainActivity : AppCompatActivity() {
             row.contentDescription = label
             TooltipCompat.setTooltipText(row, label)
             row.setOnClickListener(item.onClick)
+        }
+
+        railSections.forEach { section ->
+            navigationRail.findViewById<View>(section.headerId)
+                ?.findViewById<TextView>(R.id.railSectionLabel)
+                ?.setText(section.labelRes)
         }
 
         // Portrait keeps these actions in the toolbar. Landscape renders
@@ -1675,11 +1728,19 @@ open class MainActivity : AppCompatActivity() {
     private fun applyNavigationRailVisibility(activeKey: String?) {
         val customizableKeys = NavigationRailCatalog.customizableKeys
         val visibleKeys = PreferencesManager.getVisibleNavigationKeys(customizableKeys)
+        val shownKeys = mutableSetOf<String>()
         railItems.forEach { item ->
             val fixed = item.key !in customizableKeys
             val visible = fixed || item.key in visibleKeys || item.key == activeKey
+            if (visible) shownKeys += item.key
             navigationRail.findViewById<View>(item.rowId)?.visibility =
                 if (visible) View.VISIBLE else View.GONE
+        }
+        // Unpinning every row in a group would otherwise leave its header
+        // titling nothing.
+        railSections.forEach { section ->
+            navigationRail.findViewById<View>(section.headerId)?.visibility =
+                if (section.itemKeys.any { it in shownKeys }) View.VISIBLE else View.GONE
         }
     }
 
@@ -1688,6 +1749,17 @@ open class MainActivity : AppCompatActivity() {
         val iconRes: Int,
         val labelRes: Int,
         val onClick: View.OnClickListener
+    )
+
+    /**
+     * A category header and the destination keys filed under it. [itemKeys]
+     * drives nothing but the header's own visibility — row order lives in the
+     * layouts, so a header and its rows are only associated by position.
+     */
+    private data class RailSection(
+        val headerId: Int,
+        val labelRes: Int,
+        val itemKeys: Set<String>
     )
 
     /**
@@ -1727,6 +1799,7 @@ open class MainActivity : AppCompatActivity() {
             // dp() padding is density-derived and can go stale.
             applyRailItemLayout(expanded, force = true)
             if (expanded) setRailLabelsVisible(true, durationMs = 0L)
+            setRailSectionsExpanded(expanded, durationMs = 0L)
             return
         }
 
@@ -1743,6 +1816,7 @@ open class MainActivity : AppCompatActivity() {
         // Expanded row geometry for the entire slide — see the kdoc above.
         applyRailItemLayout(true)
         setRailLabelsVisible(expanded, durationMs = slideMs)
+        setRailSectionsExpanded(expanded, durationMs = slideMs)
 
         navigationRailAnimator = ValueAnimator.ofInt(startWidth, targetWidth).apply {
             duration = slideMs
@@ -1804,10 +1878,59 @@ open class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Cross-fade each category header between its label and the hairline that
+     * stands in for it at the compact width, where 80dp leaves no room for
+     * text. The header's height is fixed, so neither state relayouts the rail.
+     *
+     * A duration of 0 applies the end state immediately.
+     */
+    private fun setRailSectionsExpanded(expanded: Boolean, durationMs: Long) {
+        railSections.forEach { section ->
+            val header = navigationRail.findViewById<View>(section.headerId)
+                ?: return@forEach
+            val label = header.findViewById<TextView>(R.id.railSectionLabel)
+                ?: return@forEach
+            val rule = header.findViewById<View>(R.id.railSectionRule) ?: return@forEach
+            label.animate().cancel()
+            rule.animate().cancel()
+            if (durationMs <= 0L) {
+                label.alpha = if (expanded) 1f else 0f
+                // INVISIBLE, not GONE: the fixed height stays either way, and
+                // this keeps the hidden label out of the a11y tree.
+                label.visibility = if (expanded) View.VISIBLE else View.INVISIBLE
+                rule.alpha = if (expanded) 0f else 1f
+                return@forEach
+            }
+            label.visibility = View.VISIBLE
+            label.animate()
+                .alpha(if (expanded) 1f else 0f)
+                // Same halves as the row labels: text arrives once the rail has
+                // the width for it, and leaves before the rail narrows.
+                .setStartDelay(if (expanded) durationMs / 2 else 0L)
+                .setDuration(durationMs / 2)
+                .setInterpolator(RAIL_EASING)
+                .withEndAction { if (!expanded) label.visibility = View.INVISIBLE }
+                .start()
+            rule.animate()
+                .alpha(if (expanded) 0f else 1f)
+                .setStartDelay(if (expanded) 0L else durationMs / 2)
+                .setDuration(durationMs / 2)
+                .setInterpolator(RAIL_EASING)
+                .start()
+        }
+    }
+
     /** Drops any queued label / chevron view animations. */
     private fun cancelRailViewAnimations() {
         forEachRailRow { row, _ ->
             row.findViewById<TextView>(R.id.railItemLabel)?.animate()?.cancel()
+        }
+        railSections.forEach { section ->
+            val header = navigationRail.findViewById<View>(section.headerId)
+                ?: return@forEach
+            header.findViewById<TextView>(R.id.railSectionLabel)?.animate()?.cancel()
+            header.findViewById<View>(R.id.railSectionRule)?.animate()?.cancel()
         }
         navigationRail.findViewById<ImageButton>(R.id.railExpandButton)?.animate()?.cancel()
     }

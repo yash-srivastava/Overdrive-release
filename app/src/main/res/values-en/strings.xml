@@ -1175,4 +1175,10 @@
     <string name="dialog_cloudflared_settings_message">Define whether you are using paid Cloudflare or trycloudflare. If you are using paid Cloudflare, enter your tunnel token.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">If you set to paid version the token cannot be empty</string>
     <string name="toast_cloudflared_saved_settings">Cloudflared settings saved</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Cameras</string>
+    <string name="rail_section_controls">Controls</string>
+    <string name="rail_section_driving">Driving</string>
+    <string name="rail_section_automation">Automation</string>
+    <string name="rail_section_system">System</string>
 </resources>

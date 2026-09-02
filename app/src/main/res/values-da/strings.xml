@@ -1173,4 +1173,10 @@
     <string name="dialog_cloudflared_settings_message">Definer om du bruger betalt Cloudflare eller trycloudflare. Hvis du bruger betalt Cloudflare, skal du indtaste dit tunneltoken.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">Hvis den er indstillet til betalt version, må token ikke være tom</string>
     <string name="toast_cloudflared_saved_settings">Cloudflared-indstillinger gemt</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Kameraer</string>
+    <string name="rail_section_controls">Kontrol</string>
+    <string name="rail_section_driving">Kørsel</string>
+    <string name="rail_section_automation">Automatisering</string>
+    <string name="rail_section_system">System</string>
 </resources>

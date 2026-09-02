@@ -1369,4 +1369,10 @@
     <string name="projection_preset_right">Metade direita</string>
     <string name="projection_preset_center">Centro</string>
     <string name="projection_lock_aspect">Manter aspecto do painel</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Câmeras</string>
+    <string name="rail_section_controls">Controles</string>
+    <string name="rail_section_driving">Direção</string>
+    <string name="rail_section_automation">Automação</string>
+    <string name="rail_section_system">Sistema</string>
 </resources>

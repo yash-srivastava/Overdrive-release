@@ -1340,4 +1340,10 @@
     <string name="projection_autostart_conflict_confirm">इस ऐप का उपयोग करें</string>
     <string name="projection_app_uninstalled">वह ऐप अब इंस्टॉल नहीं है।</string>
     <string name="projection_status_service_down">मिरर सेवा तैयार नहीं है — ऐप (या कैमरा डेमन) पुनः आरंभ करें और फिर से प्रयास करें।</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">कैमरे</string>
+    <string name="rail_section_controls">नियंत्रण</string>
+    <string name="rail_section_driving">ड्राइविंग</string>
+    <string name="rail_section_automation">स्वचालन</string>
+    <string name="rail_section_system">सिस्टम</string>
 </resources>

@@ -1369,4 +1369,10 @@
     <string name="projection_preset_right">Rechte Hälfte</string>
     <string name="projection_preset_center">Zentriert</string>
     <string name="projection_lock_aspect">Cluster-Aspekt behalten</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Kameras</string>
+    <string name="rail_section_controls">Steuerung</string>
+    <string name="rail_section_driving">Fahren</string>
+    <string name="rail_section_automation">Automatisierung</string>
+    <string name="rail_section_system">System</string>
 </resources>

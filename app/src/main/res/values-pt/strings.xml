@@ -1173,4 +1173,10 @@
     <string name="dialog_cloudflared_settings_message">Defina se você está usando o Cloudflare pago ou o trycloudflare. Se estiver usando o Cloudflare pago, insira o seu token do túnel.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">Se você definir para a versão paga, o token não pode estar vazio</string>
     <string name="toast_cloudflared_saved_settings">Configurações do Cloudflared salvas</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Câmaras</string>
+    <string name="rail_section_controls">Controlos</string>
+    <string name="rail_section_driving">Condução</string>
+    <string name="rail_section_automation">Automação</string>
+    <string name="rail_section_system">Sistema</string>
 </resources>

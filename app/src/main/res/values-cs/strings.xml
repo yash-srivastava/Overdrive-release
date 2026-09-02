@@ -1193,4 +1193,10 @@
     <string name="dialog_cloudflared_settings_message">Definujte, zda používáte placený Cloudflare nebo trycloudflare. Pokud používáte placený Cloudflare, zadejte svůj token tunelu.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">Pokud je nastavena placená verze, token nemůže být prázdný</string>
     <string name="toast_cloudflared_saved_settings">Nastavení Cloudflared uloženo</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Kamery</string>
+    <string name="rail_section_controls">Ovládání</string>
+    <string name="rail_section_driving">Jízda</string>
+    <string name="rail_section_automation">Automatizace</string>
+    <string name="rail_section_system">Systém</string>
 </resources>

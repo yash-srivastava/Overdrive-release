@@ -1330,4 +1330,10 @@
     <string name="projection_autostart_conflict_confirm">이 앱 사용</string>
     <string name="projection_app_uninstalled">해당 앱이 더 이상 설치되어 있지 않습니다.</string>
     <string name="projection_status_service_down">미러 서비스가 준비되지 않았습니다 — 앱(또는 카메라 데몬)을 다시 시작한 후 다시 시도하세요.</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">카메라</string>
+    <string name="rail_section_controls">제어</string>
+    <string name="rail_section_driving">주행</string>
+    <string name="rail_section_automation">자동화</string>
+    <string name="rail_section_system">시스템</string>
 </resources>

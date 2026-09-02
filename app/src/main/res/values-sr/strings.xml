@@ -1183,4 +1183,10 @@
     <string name="dialog_cloudflared_settings_message">Definišite da li koristite plaćeni Cloudflare ili trycloudflare. Ako koristite plaćeni Cloudflare, unesite svoj token tunela.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">Ako je podešeno na plaćenu verziju, token ne može biti prazan</string>
     <string name="toast_cloudflared_saved_settings">Podešavanja Cloudflared-a su sačuvana</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Kamere</string>
+    <string name="rail_section_controls">Kontrole</string>
+    <string name="rail_section_driving">Vožnja</string>
+    <string name="rail_section_automation">Automatizacija</string>
+    <string name="rail_section_system">Sistem</string>
 </resources>

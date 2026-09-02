@@ -1371,6 +1371,13 @@
     <string name="dialog_tailscale_adb_enable_message">Thao tác này mở rộng phạm vi tailnet cho ADB (cổng 5555) để bạn có thể gỡ lỗi màn hình này từ xa.\n\nTrước khi bật:\n• ADB cấp TOÀN QUYỀN truy cập shell — một thiết bị tailnet có khóa được ủy quyền có thể đọc dữ liệu, cài ứng dụng và thay đổi cài đặt hệ thống\n• Thao tác này thêm tailnet của bạn làm một tuyến; nó không phơi ADB ra internet công cộng\n• ADB vốn đã chấp nhận kết nối từ mạng nội bộ, nên tắt tùy chọn này không đóng hoàn toàn ADB\n• Máy tính kết nối vẫn cần một khóa ADB được ủy quyền\n• Bật điểm phát Wi-Fi sẽ ngắt kết nối Wi-Fi, nên khi đó truy cập từ xa phụ thuộc vào dữ liệu di động\n\nChỉ bật trên tailnet mà bạn kiểm soát. Bạn có thể tắt bất cứ lúc nào.</string>
     <string name="rail_expand">Hiện nhãn điều hướng</string>
     <string name="rail_collapse">Ẩn nhãn điều hướng</string>
+
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Camera</string>
+    <string name="rail_section_controls">Điều khiển</string>
+    <string name="rail_section_driving">Lái xe</string>
+    <string name="rail_section_automation">Tự động hóa</string>
+    <string name="rail_section_system">Hệ thống</string>
     <string name="settings_overlay_replay_title">Chỉ báo phát lại tức thì</string>
     <string name="settings_overlay_replay_subtitle">Hiển thị huy hiệu CLIP: xanh lá khi đang ghi bản phát lại, xanh dương trong 5 giây sau khi lưu, đỏ khi lỗi. Chỉ xuất hiện khi có liên kết hoặc tự động hóa phát lại.</string>
     <string name="settings_overlay_roadsense_title">Lớp phủ RoadSense</string>

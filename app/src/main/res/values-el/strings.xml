@@ -1173,4 +1173,10 @@
     <string name="dialog_cloudflared_settings_message">Καθορίστε εάν χρησιμοποιείτε Cloudflare επί πληρωμή ή trycloudflare. Εάν χρησιμοποιείτε Cloudflare επί πληρωμή, εισαγάγετε το διακριτικό της σήραγγας σας.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">Εάν οριστεί σε έκδοση επί πληρωμή, το διακριτικό δεν μπορεί να είναι κενό</string>
     <string name="toast_cloudflared_saved_settings">Οι ρυθμίσεις του Cloudflared αποθηκεύτηκαν</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Κάμερες</string>
+    <string name="rail_section_controls">Έλεγχοι</string>
+    <string name="rail_section_driving">Οδήγηση</string>
+    <string name="rail_section_automation">Αυτοματισμοί</string>
+    <string name="rail_section_system">Σύστημα</string>
 </resources>

@@ -1320,4 +1320,10 @@
     <string name="toast_cloudflared_token_cannot_be_empty">Hvis du har satt til betalt versjon, kan tokenet ikke være tomt</string>
     <string name="toast_cloudflared_token_invalid">Ugyldig token: bruk bare bokstaver, tall og . _ - = tegn</string>
     <string name="toast_cloudflared_saved_settings">Innstillinger lagret i skyflensen</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Kameraer</string>
+    <string name="rail_section_controls">Kontroller</string>
+    <string name="rail_section_driving">Kjøring</string>
+    <string name="rail_section_automation">Automatisering</string>
+    <string name="rail_section_system">System</string>
 </resources>

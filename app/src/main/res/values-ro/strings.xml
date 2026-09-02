@@ -1183,4 +1183,10 @@
     <string name="dialog_cloudflared_settings_message">Definiți dacă utilizați Cloudflare plătit sau trycloudflare. Dacă utilizați Cloudflare plătit, introduceți jetonul tunelului.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">Dacă este setat pe versiunea plătită, jetonul nu poate fi gol</string>
     <string name="toast_cloudflared_saved_settings">Setările Cloudflared au fost salvate</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Camere</string>
+    <string name="rail_section_controls">Comenzi</string>
+    <string name="rail_section_driving">Conducere</string>
+    <string name="rail_section_automation">Automatizare</string>
+    <string name="rail_section_system">Sistem</string>
 </resources>

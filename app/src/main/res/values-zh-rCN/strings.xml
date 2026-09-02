@@ -1359,4 +1359,10 @@
     <string name="projection_preset_right">右半部</string>
     <string name="projection_preset_center">居中</string>
     <string name="projection_lock_aspect">保留集群视图</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">摄像头</string>
+    <string name="rail_section_controls">控制</string>
+    <string name="rail_section_driving">驾驶</string>
+    <string name="rail_section_automation">自动化</string>
+    <string name="rail_section_system">系统</string>
 </resources>

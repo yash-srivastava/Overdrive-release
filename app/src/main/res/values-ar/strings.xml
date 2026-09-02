@@ -1402,4 +1402,10 @@
     <string name="projection_autostart_need_app">قم بإسقاط تطبيق أولا، ثم قم بتشغيل هذا.</string>
     <string name="projection_autostart_conflict_confirm">استخدم هذا التطبيق</string>
     <string name="projection_app_uninstalled">لم يعد هذا التطبيق مثبّتا.</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">الكاميرات</string>
+    <string name="rail_section_controls">التحكم</string>
+    <string name="rail_section_driving">القيادة</string>
+    <string name="rail_section_automation">التشغيل الآلي</string>
+    <string name="rail_section_system">النظام</string>
 </resources>

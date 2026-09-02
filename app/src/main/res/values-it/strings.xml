@@ -1371,4 +1371,10 @@ Questa azione non puo essere annullata.</string>
     <string name="projection_preset_right">Metà destra</string>
     <string name="projection_preset_center">Centro</string>
     <string name="projection_lock_aspect">Mantieni l\'aspetto del cluster</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Telecamere</string>
+    <string name="rail_section_controls">Comandi</string>
+    <string name="rail_section_driving">Guida</string>
+    <string name="rail_section_automation">Automazione</string>
+    <string name="rail_section_system">Sistema</string>
 </resources>

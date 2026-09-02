@@ -1173,4 +1173,10 @@
     <string name="dialog_cloudflared_settings_message">Definiera om du använder betald Cloudflare eller trycloudflare. Om du använder betald Cloudflare, ange din tunneltoken.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">Om inställd på betalversion får token inte vara tom</string>
     <string name="toast_cloudflared_saved_settings">Cloudflared-inställningar sparade</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Kameror</string>
+    <string name="rail_section_controls">Kontroller</string>
+    <string name="rail_section_driving">Körning</string>
+    <string name="rail_section_automation">Automatisering</string>
+    <string name="rail_section_system">System</string>
 </resources>

@@ -1173,4 +1173,10 @@
     <string name="dialog_cloudflared_settings_message">Definieer of jy betaalde Cloudflare of trycloudflare gebruik. As jy betaalde Cloudflare gebruik, voer jou tonnelteken in.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">As dit op die betaalde weergawe gestel is, mag die teken nie leeg wees nie</string>
     <string name="toast_cloudflared_saved_settings">Cloudflared-instellings gestoor</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Kameras</string>
+    <string name="rail_section_controls">Beheer</string>
+    <string name="rail_section_driving">Bestuur</string>
+    <string name="rail_section_automation">Outomatisering</string>
+    <string name="rail_section_system">Stelsel</string>
 </resources>

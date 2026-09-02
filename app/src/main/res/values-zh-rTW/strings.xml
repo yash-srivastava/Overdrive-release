@@ -1330,4 +1330,10 @@
     <string name="projection_autostart_conflict_confirm">使用此應用程式</string>
     <string name="projection_app_uninstalled">該應用程式已被解除安裝。</string>
     <string name="projection_status_service_down">鏡像服務尚未就緒 — 請重新啟動應用程式（或攝影機守護程序）後再試一次。</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">攝影機</string>
+    <string name="rail_section_controls">控制</string>
+    <string name="rail_section_driving">駕駛</string>
+    <string name="rail_section_automation">自動化</string>
+    <string name="rail_section_system">系統</string>
 </resources>

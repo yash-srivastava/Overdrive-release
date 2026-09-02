@@ -83,6 +83,12 @@
                     layout="@layout/item_rail_destination"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />
+                <!-- Category headers group the rows from here down. Each one
+                     hides when every row under it is unpinned — see
+                     MainActivity.applyNavigationRailVisibility. -->
+                <include
+                    android:id="@+id/railSectionCameras"
+                    layout="@layout/item_rail_section" />
                 <include
                     android:id="@+id/railDestLive"
                     layout="@layout/item_rail_destination"
@@ -93,6 +99,10 @@
                     layout="@layout/item_rail_destination"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />
+
+                <include
+                    android:id="@+id/railSectionControls"
+                    layout="@layout/item_rail_section" />
                 <include
                     android:id="@+id/railDestVehicle"
                     layout="@layout/item_rail_destination"
@@ -109,15 +119,33 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />
                 <include
+                    android:id="@+id/railDestCharging"
+                    layout="@layout/item_rail_destination"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <include
+                    android:id="@+id/railSectionDriving"
+                    layout="@layout/item_rail_section" />
+                <include
                     android:id="@+id/railDestTrips"
                     layout="@layout/item_rail_destination"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />
                 <include
-                    android:id="@+id/railDestCharging"
+                    android:id="@+id/railDestRoadSense"
                     layout="@layout/item_rail_destination"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />
+                <include
+                    android:id="@+id/railDestMap"
+                    layout="@layout/item_rail_destination"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <include
+                    android:id="@+id/railSectionAutomation"
+                    layout="@layout/item_rail_section" />
                 <include
                     android:id="@+id/railDestAutomations"
                     layout="@layout/item_rail_destination"
@@ -133,16 +161,10 @@
                     layout="@layout/item_rail_destination"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />
+
                 <include
-                    android:id="@+id/railDestRoadSense"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <include
-                    android:id="@+id/railDestMap"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
+                    android:id="@+id/railSectionSystem"
+                    layout="@layout/item_rail_section" />
                 <include
                     android:id="@+id/railDestNetwork"
                     layout="@layout/item_rail_destination"
@@ -158,15 +180,6 @@
                     layout="@layout/item_rail_destination"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />
-
-                <!-- Hairline divider separating primary destinations
-                     from the meta entry (About). -->
-                <View
-                    android:layout_width="40dp"
-                    android:layout_height="1dp"
-                    android:layout_marginVertical="4dp"
-                    android:background="?attr/colorOutlineVariant" />
-
                 <include
                     android:id="@+id/railDestAbout"
                     layout="@layout/item_rail_destination"

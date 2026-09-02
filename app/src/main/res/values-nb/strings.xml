@@ -1084,4 +1084,10 @@
     <string name="projection_preset_right">Høyre halvdel</string>
     <string name="projection_preset_center">Midtstilt</string>
     <string name="projection_lock_aspect">Behold cluster aspect</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Kameraer</string>
+    <string name="rail_section_controls">Kontroller</string>
+    <string name="rail_section_driving">Kjøring</string>
+    <string name="rail_section_automation">Automatisering</string>
+    <string name="rail_section_system">System</string>
 </resources>

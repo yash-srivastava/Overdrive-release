@@ -1193,4 +1193,10 @@
     <string name="dialog_cloudflared_settings_message">Визначте, чи використовуєте ви платний Cloudflare або trycloudflare. Якщо ви використовуєте платний Cloudflare, введіть свій токен тунелю.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">Якщо вибрано платну версію, токен не може бути порожнім</string>
     <string name="toast_cloudflared_saved_settings">Налаштування Cloudflared збережено</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Камери</string>
+    <string name="rail_section_controls">Керування</string>
+    <string name="rail_section_driving">Водіння</string>
+    <string name="rail_section_automation">Автоматизація</string>
+    <string name="rail_section_system">Система</string>
 </resources>

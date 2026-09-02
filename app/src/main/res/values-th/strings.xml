@@ -1330,4 +1330,10 @@
     <string name="projection_autostart_conflict_confirm">ใช้แอปนี้</string>
     <string name="projection_app_uninstalled">แอปนั้นไม่ได้ติดตั้งอยู่แล้ว</string>
     <string name="projection_status_service_down">บริการมิเรอร์ยังไม่พร้อม — โปรดรีสตาร์ตแอป (หรือเดมอนกล้อง) แล้วลองอีกครั้ง</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">กล้อง</string>
+    <string name="rail_section_controls">การควบคุม</string>
+    <string name="rail_section_driving">การขับขี่</string>
+    <string name="rail_section_automation">ระบบอัตโนมัติ</string>
+    <string name="rail_section_system">ระบบ</string>
 </resources>

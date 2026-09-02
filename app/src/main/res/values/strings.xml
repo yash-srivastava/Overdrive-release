@@ -941,6 +941,13 @@
     <string name="rail_expand">Show navigation labels</string>
     <string name="rail_collapse">Hide navigation labels</string>
 
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Cameras</string>
+    <string name="rail_section_controls">Controls</string>
+    <string name="rail_section_driving">Driving</string>
+    <string name="rail_section_automation">Automation</string>
+    <string name="rail_section_system">System</string>
+
     <!-- Settings sub-rail -->
     <string name="settings_section_appearance">Appearance</string>
     <string name="settings_section_recording">Recording</string>

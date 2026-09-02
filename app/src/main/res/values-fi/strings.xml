@@ -1173,4 +1173,10 @@
     <string name="dialog_cloudflared_settings_message">Määritä, käytätkö maksullista Cloudflarea vai trycloudflare-palvelua. Jos käytät maksullista Cloudflarea, syötä tunnelitunnuksesi.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">Jos asetettu maksulliseen versioon, tunnus ei voi olla tyhjä</string>
     <string name="toast_cloudflared_saved_settings">Cloudflared-asetukset tallennettu</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Kamerat</string>
+    <string name="rail_section_controls">Hallinta</string>
+    <string name="rail_section_driving">Ajo</string>
+    <string name="rail_section_automation">Automaatio</string>
+    <string name="rail_section_system">Järjestelmä</string>
 </resources>

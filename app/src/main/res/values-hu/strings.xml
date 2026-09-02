@@ -1173,4 +1173,10 @@
     <string name="dialog_cloudflared_settings_message">Határozza meg, hogy fizetős Cloudflare-t vagy trycloudflare-t használ-e. Ha fizetős Cloudflare-t használ, adja meg az alagút tokent.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">Ha fizetős verzióra van állítva, a token nem lehet üres</string>
     <string name="toast_cloudflared_saved_settings">Cloudflared beállítások mentve</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Kamerák</string>
+    <string name="rail_section_controls">Vezérlés</string>
+    <string name="rail_section_driving">Vezetés</string>
+    <string name="rail_section_automation">Automatizálás</string>
+    <string name="rail_section_system">Rendszer</string>
 </resources>

@@ -55,6 +55,10 @@
     <dimen name="rail_item_pill_radius">8dp</dimen>
     <dimen name="rail_item_pill_content_inset">16dp</dimen>   <!-- M3 navigation-drawer item spec -->
 
+    <!-- Category header label inset. Equals the plate's horizontal inset plus
+         its content inset so header text lines up with the row icons. -->
+    <dimen name="rail_section_label_inset">28dp</dimen>
+
     <!-- PIN unlock keypad (PinLockActivity). 72dp keys give a 14.4mm hit
          target on the BYD Seal 15.6" panel — well above Material's 48dp
          minimum and comfortable for cluster-distance interaction. -->

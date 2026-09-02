@@ -1251,6 +1251,13 @@
     <string name="rail_seat_positions">Posicions del seient</string>
     <string name="rail_expand">Mostra les etiquetes de navegació</string>
     <string name="rail_collapse">Amaga les etiquetes de navegació</string>
+
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Càmeres</string>
+    <string name="rail_section_controls">Controls</string>
+    <string name="rail_section_driving">Conducció</string>
+    <string name="rail_section_automation">Automatització</string>
+    <string name="rail_section_system">Sistema</string>
     <string name="settings_overlay_replay_title">Indicador de repetició instantània</string>
     <string name="settings_overlay_roadsense_title">Superposició de RoadSense</string>
     <string name="remote_voice_overlay_title">Veu remota</string>

@@ -1389,4 +1389,10 @@
     <string name="projection_preset_right">Правая половина</string>
     <string name="projection_preset_center">По центру</string>
     <string name="projection_lock_aspect">Сохранять аспект кластера</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Камеры</string>
+    <string name="rail_section_controls">Управление</string>
+    <string name="rail_section_driving">Вождение</string>
+    <string name="rail_section_automation">Автоматизация</string>
+    <string name="rail_section_system">Система</string>
 </resources>
