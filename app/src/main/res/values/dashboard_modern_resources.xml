@@ -31,6 +31,12 @@
          card. Any value under the card's ~216dp shortest content height works. -->
     <dimen name="dashboard_hero_backdrop_measure_cap">40dp</dimen>
 
+    <!-- Ribbon opacity. The art is dark line work, so on the light surface it
+         has to sit well back or it competes with the accent text in the header's
+         trailing corner. values-night runs it at full strength, where it reads
+         as depth against a near-black card instead. -->
+    <item name="dashboard_hero_ribbon_alpha" format="float" type="dimen">0.3</item>
+
     <string name="dashboard_modern_vehicle_now">Vehicle now</string>
     <string name="dashboard_modern_updating">Updating vehicle status</string>
     <string name="dashboard_modern_vehicle_unavailable">Vehicle data unavailable</string>

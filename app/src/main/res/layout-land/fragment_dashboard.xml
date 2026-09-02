@@ -36,6 +36,7 @@
                     android:layout_height="match_parent"
                     android:layout_gravity="bottom|end"
                     android:adjustViewBounds="true"
+                    android:alpha="@dimen/dashboard_hero_ribbon_alpha"
                     android:contentDescription="@null"
                     android:maxHeight="@dimen/dashboard_hero_backdrop_measure_cap"
                     android:scaleType="centerCrop"
