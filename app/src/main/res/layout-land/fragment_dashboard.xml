@@ -11,33 +11,71 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:baselineAligned="false"
-        android:orientation="horizontal"
+        android:orientation="vertical"
         android:paddingStart="@dimen/page_padding_horizontal"
         android:paddingTop="@dimen/page_padding_top"
         android:paddingEnd="@dimen/page_padding_horizontal"
         android:paddingBottom="@dimen/page_padding_bottom">
 
-        <LinearLayout
-            android:layout_width="0dp"
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/heroCard"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginEnd="8dp"
-            android:layout_weight="1.08"
-            android:orientation="vertical">
+            android:layout_marginBottom="@dimen/dashboard_modern_gap"
+            app:cardBackgroundColor="?attr/colorSurfaceContainer"
+            app:cardCornerRadius="@dimen/dashboard_modern_radius"
+            app:cardElevation="0dp">
 
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/heroCard"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="@dimen/dashboard_modern_gap"
-                app:cardBackgroundColor="?attr/colorSurfaceContainer"
-                app:cardCornerRadius="@dimen/dashboard_modern_radius"
-                app:cardElevation="0dp">
+                <!-- Ribbon backdrop. A trailing box rather than the full card,
+                     so the 2.25 wave reads at a usable size behind the car
+                     without filling the header. Declared before the content,
+                     with the render, so metricVehicle's ripple still covers
+                     the whole card. -->
+                <ImageView
+                    android:layout_width="@dimen/dashboard_hero_ribbon_width"
+                    android:layout_height="match_parent"
+                    android:layout_gravity="bottom|end"
+                    android:adjustViewBounds="true"
+                    android:contentDescription="@null"
+                    android:maxHeight="@dimen/dashboard_hero_backdrop_measure_cap"
+                    android:scaleType="centerCrop"
+                    android:src="@drawable/dashboard_hero_ribbon" />
 
+                <!-- Vehicle render. wrap_content + maxHeight so the nodpi
+                     bitmap does not measure at 338dp and stretch the card; the
+                     trailing inset sits it off the edge rather than flush right. -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="bottom"
+                    android:orientation="horizontal">
+
+                    <Space
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1" />
+
+                    <ImageView
+                        android:id="@+id/vehicleArt"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:adjustViewBounds="true"
+                        android:contentDescription="@null"
+                        android:maxHeight="@dimen/dashboard_hero_art_max_height"
+                        android:src="@drawable/vehicle_fallback" />
+
+                    <Space
+                        android:layout_width="@dimen/dashboard_hero_art_inset"
+                        android:layout_height="1dp" />
+                </LinearLayout>
+
+                <!-- The card's touch target, and the only child that sets its
+                     height. match_parent so the ripple reaches the card's edges
+                     even when the backdrop behind it is shorter. -->
                 <LinearLayout
                     android:id="@+id/metricVehicle"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
+                    android:layout_height="match_parent"
                     android:background="?attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true"
@@ -51,17 +89,9 @@
                         android:gravity="center_vertical"
                         android:orientation="horizontal">
 
-                        <ImageView
-                            android:layout_width="24dp"
-                            android:layout_height="24dp"
-                            android:contentDescription="@null"
-                            android:src="@drawable/ic_vehicle_control"
-                            app:tint="?attr/colorPrimary" />
-
                         <LinearLayout
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
-                            android:layout_marginStart="12dp"
                             android:layout_weight="1"
                             android:orientation="vertical">
 
@@ -94,183 +124,209 @@
                             android:maxLines="2"
                             android:text="@string/dashboard_vehicle_tap_to_set"
                             android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                            android:textColor="?attr/colorOnSurfaceVariant" />
+                            android:textColor="?attr/colorPrimary" />
+
+                        <ImageView
+                            android:layout_width="18dp"
+                            android:layout_height="18dp"
+                            android:layout_marginStart="2dp"
+                            android:contentDescription="@null"
+                            android:src="@drawable/ic_chevron_right"
+                            app:tint="?attr/colorPrimary" />
                     </LinearLayout>
 
+                    <!-- Panels are a fixed width so they do not stretch with the
+                         full-bleed card. The header row is not inset, so
+                         "Tap to set" stays in the trailing corner. -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="14dp"
-                        android:baselineAligned="false"
                         android:orientation="horizontal">
 
                         <LinearLayout
-                            android:layout_width="0dp"
+                            android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1"
                             android:orientation="vertical">
 
-                            <TextView
-                                android:id="@+id/vehicleSocValue"
-                                android:layout_width="match_parent"
+                            <LinearLayout
+                                android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="@string/dashboard_metric_value_pending"
-                                android:textAppearance="@style/TextAppearance.Material3.DisplaySmall"
-                                android:textColor="?attr/colorOnSurface"
-                                android:textStyle="bold" />
+                                android:layout_marginTop="14dp"
+                                android:baselineAligned="false"
+                                android:orientation="horizontal">
 
-                            <TextView
+                                <!-- match_parent so the pair stays level when the
+                                     range panel takes its second line. -->
+                                <LinearLayout
+                                    android:layout_width="@dimen/dashboard_hero_metric_width"
+                                    android:layout_height="match_parent"
+                                    android:background="@drawable/dashboard_metric_box"
+                                    android:minHeight="@dimen/dashboard_hero_metric_min_height"
+                                    android:orientation="vertical"
+                                    android:padding="16dp">
+
+                                    <TextView
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:text="@string/dashboard_modern_battery"
+                                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+                                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                                    <TextView
+                                        android:id="@+id/vehicleSocValue"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="4dp"
+                                        android:text="@string/dashboard_metric_value_pending"
+                                        android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
+                                        android:textColor="?attr/colorOnSurface"
+                                        android:textStyle="bold" />
+                                </LinearLayout>
+
+                                <LinearLayout
+                                    android:layout_width="@dimen/dashboard_hero_metric_width"
+                                    android:layout_height="match_parent"
+                                    android:layout_marginStart="@dimen/dashboard_modern_metric_gap"
+                                    android:background="@drawable/dashboard_metric_box"
+                                    android:minHeight="@dimen/dashboard_hero_metric_min_height"
+                                    android:orientation="vertical"
+                                    android:padding="16dp">
+
+                                    <TextView
+                                        android:id="@+id/vehicleRangeLabel"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:text="@string/dashboard_modern_range"
+                                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+                                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                                    <TextView
+                                        android:id="@+id/vehicleRangeValue"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="4dp"
+                                        android:text="@string/dashboard_metric_value_pending"
+                                        android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
+                                        android:textColor="?attr/colorOnSurface"
+                                        android:textStyle="bold" />
+
+                                    <!-- Vehicle's own (HAL) range — visible only
+                                         when a personalized figure headlines this
+                                         panel, so the two estimates read together.
+                                         Inside the panel rather than beside it: a
+                                         third panel in this row leaves ~50dp for a
+                                         figure that wants 78dp. Bound null-safely
+                                         by DashboardFragment. -->
+                                    <LinearLayout
+                                        android:id="@+id/vehicleHalRangeColumn"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="8dp"
+                                        android:orientation="vertical"
+                                        android:visibility="gone">
+
+                                        <TextView
+                                            android:layout_width="match_parent"
+                                            android:layout_height="wrap_content"
+                                            android:text="@string/dashboard_modern_vehicle_range"
+                                            android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                                            android:textColor="?attr/colorOnSurfaceVariant" />
+
+                                        <TextView
+                                            android:id="@+id/vehicleHalRangeValue"
+                                            android:layout_width="match_parent"
+                                            android:layout_height="wrap_content"
+                                            android:layout_marginTop="2dp"
+                                            android:text="@string/dashboard_metric_value_pending"
+                                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                                            android:textColor="?attr/colorOnSurfaceVariant" />
+                                    </LinearLayout>
+                                </LinearLayout>
+                            </LinearLayout>
+
+                            <!-- SOC gauge — visual battery level under the numeric
+                                 SOC. Bound null-safely by
+                                 DashboardFragment.renderVehicleState: INVISIBLE
+                                 while loading/unavailable, colorError at ≤20%. -->
+                            <com.google.android.material.progressindicator.LinearProgressIndicator
+                                android:id="@+id/heroSocProgress"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:text="@string/dashboard_modern_battery"
+                                android:layout_marginTop="12dp"
+                                android:indeterminate="false"
+                                android:max="100"
+                                android:visibility="invisible"
+                                app:indicatorColor="?attr/colorPrimary"
+                                app:trackColor="?attr/colorSurfaceContainerHighest"
+                                app:trackCornerRadius="3dp"
+                                app:trackThickness="6dp" />
+
+                            <!-- PHEV range breakdown — resolved EV / petrol leg
+                                 split (personalized when learned, HAL otherwise)
+                                 plus fuel %. Bound null-safely; GONE on BEVs. -->
+                            <TextView
+                                android:id="@+id/heroRangeBreakdown"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="8dp"
                                 android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                                android:textColor="?attr/colorOnSurfaceVariant" />
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:visibility="gone" />
+
+                            <!-- Resting tone only. refreshHeroChips repaints
+                                 each chip from the status it reports. -->
+                            <com.google.android.material.chip.ChipGroup
+                                android:id="@+id/heroChipGroup"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="12dp"
+                                app:chipSpacingHorizontal="8dp"
+                                app:chipSpacingVertical="4dp"
+                                app:singleLine="false">
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/heroChipTunnel"
+                                    style="@style/Widget.Overdrive.HeroChip"
+                                    android:text="@string/dashboard_tunnel_offline"
+                                    android:textColor="?attr/colorPrimary"
+                                    app:chipBackgroundColor="?attr/colorPrimaryContainer" />
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/heroChipServices"
+                                    style="@style/Widget.Overdrive.HeroChip"
+                                    android:text="@string/dashboard_daemons_running_default"
+                                    android:textColor="?attr/colorPrimary"
+                                    app:chipBackgroundColor="?attr/colorPrimaryContainer" />
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/heroChipRecording"
+                                    style="@style/Widget.Overdrive.HeroChip"
+                                    android:text="@string/dashboard_chip_recording_idle"
+                                    android:textColor="?attr/colorPrimary"
+                                    app:chipBackgroundColor="?attr/colorPrimaryContainer" />
+                            </com.google.android.material.chip.ChipGroup>
                         </LinearLayout>
 
-                        <View
-                            android:layout_width="1dp"
-                            android:layout_height="46dp"
-                            android:layout_marginHorizontal="16dp"
-                            android:background="?attr/colorOutlineVariant" />
-
-                        <LinearLayout
+                        <Space
                             android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
-
-                            <TextView
-                                android:id="@+id/vehicleRangeValue"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="@string/dashboard_metric_value_pending"
-                                android:textAppearance="@style/TextAppearance.Material3.DisplaySmall"
-                                android:textColor="?attr/colorOnSurface"
-                                android:textStyle="bold" />
-
-                            <TextView
-                                android:id="@+id/vehicleRangeLabel"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="@string/dashboard_modern_range"
-                                android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                                android:textColor="?attr/colorOnSurfaceVariant" />
-                        </LinearLayout>
-
-                        <!-- Vehicle's own (HAL) range — visible only when a
-                             personalized figure headlines the range column,
-                             so both estimates read side by side. Bound
-                             null-safely by DashboardFragment. -->
-                        <View
-                            android:id="@+id/vehicleHalRangeDivider"
-                            android:layout_width="1dp"
-                            android:layout_height="46dp"
-                            android:layout_marginHorizontal="16dp"
-                            android:background="?attr/colorOutlineVariant"
-                            android:visibility="gone" />
-
-                        <LinearLayout
-                            android:id="@+id/vehicleHalRangeColumn"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:orientation="vertical"
-                            android:visibility="gone">
-
-                            <TextView
-                                android:id="@+id/vehicleHalRangeValue"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="@string/dashboard_metric_value_pending"
-                                android:textAppearance="@style/TextAppearance.Material3.DisplaySmall"
-                                android:textColor="?attr/colorOnSurface"
-                                android:textStyle="bold" />
-
-                            <TextView
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="@string/dashboard_modern_vehicle_range"
-                                android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                                android:textColor="?attr/colorOnSurfaceVariant" />
-                        </LinearLayout>
+                            android:layout_height="1dp"
+                            android:layout_weight="1" />
                     </LinearLayout>
-
-                    <!-- SOC gauge — visual battery level under the numeric
-                         SOC. Bound null-safely by
-                         DashboardFragment.renderVehicleState: INVISIBLE
-                         while loading/unavailable, colorError at ≤20%. -->
-                    <com.google.android.material.progressindicator.LinearProgressIndicator
-                        android:id="@+id/heroSocProgress"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:indeterminate="false"
-                        android:max="100"
-                        android:visibility="invisible"
-                        app:indicatorColor="?attr/colorPrimary"
-                        app:trackColor="?attr/colorSurfaceContainerHighest"
-                        app:trackCornerRadius="3dp"
-                        app:trackThickness="6dp" />
-
-                    <!-- PHEV range breakdown — resolved EV / petrol leg
-                         split (personalized when learned, HAL otherwise)
-                         plus fuel %. Bound null-safely; GONE on BEVs. -->
-                    <TextView
-                        android:id="@+id/heroRangeBreakdown"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:visibility="gone" />
-
-                    <com.google.android.material.chip.ChipGroup
-                        android:id="@+id/heroChipGroup"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        app:chipSpacingHorizontal="8dp"
-                        app:chipSpacingVertical="4dp"
-                        app:singleLine="false">
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/heroChipTunnel"
-                            style="@style/Widget.Material3.Chip.Assist"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:checkable="false"
-                            android:clickable="false"
-                            android:focusable="false"
-                            android:text="@string/dashboard_tunnel_offline"
-                            app:chipBackgroundColor="?attr/colorSurfaceContainerHigh"
-                            app:chipStrokeWidth="0dp" />
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/heroChipServices"
-                            style="@style/Widget.Material3.Chip.Assist"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:checkable="false"
-                            android:clickable="false"
-                            android:focusable="false"
-                            android:text="@string/dashboard_daemons_running_default"
-                            app:chipBackgroundColor="?attr/colorSurfaceContainerHigh"
-                            app:chipStrokeWidth="0dp" />
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/heroChipRecording"
-                            style="@style/Widget.Material3.Chip.Assist"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:checkable="false"
-                            android:clickable="false"
-                            android:focusable="false"
-                            android:text="@string/dashboard_chip_recording_idle"
-                            app:chipBackgroundColor="?attr/colorSurfaceContainerHigh"
-                            app:chipStrokeWidth="0dp" />
-                    </com.google.android.material.chip.ChipGroup>
                 </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
+        </com.google.android.material.card.MaterialCardView>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1.08"
+                android:orientation="vertical">
 
             <include layout="@layout/include_dashboard_ai_insight" />
 
@@ -965,6 +1021,7 @@
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>

@@ -3,6 +3,7 @@ package com.overdrive.app.ui.fragment
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.res.ColorStateList
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -17,6 +18,7 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.Observer
@@ -42,6 +44,7 @@ import com.overdrive.app.ui.model.localizedName
 import com.overdrive.app.ui.util.QrCodeGenerator
 import com.overdrive.app.ui.util.RecordingScanner
 import com.overdrive.app.ui.util.RecordingsApiClient
+import com.overdrive.app.ui.vehicle.VehicleArt
 import com.overdrive.app.ui.viewmodel.DaemonsViewModel
 import com.overdrive.app.ui.viewmodel.MainViewModel
 import com.overdrive.app.ui.viewmodel.RecordingViewModel
@@ -58,7 +61,6 @@ class DashboardFragment : Fragment() {
     private val recordingViewModel: RecordingViewModel by activityViewModels()
 
     // Hero
-    private lateinit var heroCard: MaterialCardView
     private lateinit var heroGreeting: TextView
     private lateinit var heroSubtitle: TextView
     private lateinit var heroChipTunnel: Chip
@@ -139,8 +141,8 @@ class DashboardFragment : Fragment() {
     // Side-by-side HAL range column — visible only while a personalized
     // figure occupies the main range column.
     private var vehicleHalRangeColumn: View? = null
-    private var vehicleHalRangeDivider: View? = null
     private var vehicleHalRangeValue: TextView? = null
+    private var vehicleArt: ImageView? = null
     private var quickTrips: View? = null
     private var quickVehicleControl: View? = null
 
@@ -239,7 +241,6 @@ class DashboardFragment : Fragment() {
     }
 
     private fun bindViews(view: View) {
-        heroCard = view.findViewById(R.id.heroCard)
         heroGreeting = view.findViewById(R.id.heroGreeting)
         heroSubtitle = view.findViewById(R.id.heroSubtitle)
         heroChipTunnel = view.findViewById(R.id.heroChipTunnel)
@@ -296,8 +297,8 @@ class DashboardFragment : Fragment() {
         vehicleRangeLabel = view.findViewById(R.id.vehicleRangeLabel)
         heroRangeBreakdown = view.findViewById(R.id.heroRangeBreakdown)
         vehicleHalRangeColumn = view.findViewById(R.id.vehicleHalRangeColumn)
-        vehicleHalRangeDivider = view.findViewById(R.id.vehicleHalRangeDivider)
         vehicleHalRangeValue = view.findViewById(R.id.vehicleHalRangeValue)
+        vehicleArt = view.findViewById(R.id.vehicleArt)
 
         // Vehicle tile present in both portrait and landscape layouts.
         metricVehicle = view.findViewById(R.id.metricVehicle)
@@ -351,11 +352,6 @@ class DashboardFragment : Fragment() {
             val running = states.values.count { it.status == DaemonStatus.RUNNING }
             val total = states.size
             tvDaemonsStatus.text = getString(R.string.dashboard_daemons_running, running, total)
-            // Hero tile alert vs. ok is driven only by *core* daemons — tunnels
-            // and bots are opt-in services and missing them shouldn't paint the
-            // dashboard red. STARTING counts as ok so the hero flips green the
-            // moment a daemon is being launched, without waiting for RUNNING.
-            updateHeroSubtitle(computeCoreHealth(states))
             rebuildTunnelChips()
             updateTunnelTile()
             refreshHeroChips()
@@ -408,6 +404,46 @@ class DashboardFragment : Fragment() {
         } else {
             getString(R.string.dashboard_chip_recording_idle)
         }
+
+        // Each chip's tone comes from the same source its text does, never from
+        // parsing the text back out — these strings are localized.
+        tintStatusChip(
+            heroChipTunnel,
+            if (collectAvailableTunnels().isEmpty()) StatusTone.DOWN else StatusTone.LIVE
+        )
+        tintStatusChip(
+            heroChipServices,
+            when (computeCoreHealth(daemonsViewModel.daemonStates.value)) {
+                CoreHealth.OK -> StatusTone.LIVE
+                CoreHealth.ALERT -> StatusTone.DOWN
+                CoreHealth.UNKNOWN -> StatusTone.IDLE
+            }
+        )
+        tintStatusChip(heroChipRecording, if (recording) StatusTone.LIVE else StatusTone.IDLE)
+    }
+
+    private enum class StatusTone { LIVE, IDLE, DOWN }
+
+    /**
+     * Paint a hero chip by what it is reporting — green live, amber idle, red
+     * down — so the row is readable without reading it.
+     *
+     * The fills are set here rather than in the layout because a chip's tone
+     * follows runtime state. The layout still carries the resting tone so the
+     * card looks finished before the first daemon poll lands.
+     */
+    private fun tintStatusChip(chip: Chip, tone: StatusTone) {
+        val ctx = context ?: return
+        val (fill, label) = when (tone) {
+            StatusTone.LIVE ->
+                R.color.overdrive_status_success_container to R.color.overdrive_status_success
+            StatusTone.IDLE ->
+                R.color.overdrive_status_warning_container to R.color.overdrive_status_warning
+            StatusTone.DOWN ->
+                R.color.overdrive_status_danger_container to R.color.overdrive_status_danger
+        }
+        chip.chipBackgroundColor = ColorStateList.valueOf(ContextCompat.getColor(ctx, fill))
+        chip.setTextColor(ContextCompat.getColor(ctx, label))
     }
 
     // ============== Metric tiles (storage + today's recordings) ==============
@@ -680,11 +716,9 @@ class DashboardFragment : Fragment() {
         }
     }
 
-    /** Show/hide the side-by-side HAL range column and its divider together. */
+    /** Show/hide the vehicle's own range estimate under the range figure. */
     private fun setHalRangeColumnVisible(visible: Boolean) {
-        val visibility = if (visible) View.VISIBLE else View.GONE
-        vehicleHalRangeColumn?.visibility = visibility
-        vehicleHalRangeDivider?.visibility = visibility
+        vehicleHalRangeColumn?.visibility = if (visible) View.VISIBLE else View.GONE
     }
 
     /**
@@ -830,53 +864,10 @@ class DashboardFragment : Fragment() {
         }
     }
 
-    private fun updateHeroSubtitle(coreHealth: CoreHealth) {
-        applyGreetingTint(coreHealth)
-    }
-
-    /**
-     * Tint the hero card by *core* daemon health. Uses M3 Container tones so
-     * the wash is soft rather than the saturated colorPrimary/Error.
-     *
-     * - OK   → primaryContainer (green wash, On*Container fg).
-     * - ALERT → errorContainer (red wash) — only when at least one CORE daemon
-     *           is in a hard-failed state. Tunnels (cloudflared/zrok/tailscale)
-     *           and the Telegram bot are opt-in and never trigger ALERT.
-     * - UNKNOWN → neutral surface — used pre-bind / before the daemon-states
-     *           LiveData has fired so a fresh install doesn't flash red.
-     *
-     * STARTING is treated as OK (not ALERT) so the hero flips green the
-     * instant a daemon is being launched, instead of waiting for RUNNING.
-     */
-    private fun applyGreetingTint(coreHealth: CoreHealth) {
-        if (!::heroCard.isInitialized) return
-        val ctx = context ?: return
-        val (bgAttr, fgAttr, subAttr) = when (coreHealth) {
-            CoreHealth.UNKNOWN -> Triple(
-                com.google.android.material.R.attr.colorSurfaceContainer,
-                com.google.android.material.R.attr.colorOnSurface,
-                com.google.android.material.R.attr.colorOnSurfaceVariant
-            )
-            CoreHealth.OK -> Triple(
-                com.google.android.material.R.attr.colorPrimaryContainer,
-                com.google.android.material.R.attr.colorOnPrimaryContainer,
-                com.google.android.material.R.attr.colorOnPrimaryContainer
-            )
-            CoreHealth.ALERT -> Triple(
-                com.google.android.material.R.attr.colorErrorContainer,
-                com.google.android.material.R.attr.colorOnErrorContainer,
-                com.google.android.material.R.attr.colorOnErrorContainer
-            )
-        }
-        resolveAttrColor(ctx, bgAttr)?.let { heroCard.setCardBackgroundColor(it) }
-        resolveAttrColor(ctx, fgAttr)?.let { heroGreeting.setTextColor(it) }
-        resolveAttrColor(ctx, subAttr)?.let { heroSubtitle.setTextColor(it) }
-    }
-
     private enum class CoreHealth { UNKNOWN, OK, ALERT }
 
     /**
-     * Reduce the daemon-state map to a tri-state for the hero tint.
+     * Reduce the daemon-state map to a tri-state for the services chip.
      *
      * Rule: green when every core daemon is started (RUNNING / STARTING /
      * STOPPING — anything that means a process exists or is being managed),
@@ -885,7 +876,7 @@ class DashboardFragment : Fragment() {
      * doing its job.
      *
      * "Core" = Camera + Sentry + ACC Sentry. Sing-box, tunnels, and the
-     * Telegram bot are all opt-in — they don't gate the hero tint.
+     * Telegram bot are all opt-in — they don't turn the chip red.
      */
     private fun computeCoreHealth(states: Map<DaemonType, DaemonState>?): CoreHealth {
         if (states.isNullOrEmpty()) return CoreHealth.UNKNOWN
@@ -903,11 +894,6 @@ class DashboardFragment : Fragment() {
             }
         }
         return if (sawCore) CoreHealth.OK else CoreHealth.UNKNOWN
-    }
-
-    private fun resolveAttrColor(ctx: Context, attr: Int): Int? {
-        val tv = android.util.TypedValue()
-        return if (ctx.theme.resolveAttribute(attr, tv, true)) tv.data else null
     }
 
     // ============== Stable recent activity ==============
@@ -1386,6 +1372,9 @@ class DashboardFragment : Fragment() {
                 } else {
                     tile.text = getString(R.string.dashboard_vehicle_tap_to_set)
                 }
+                // Follows the model, not nominalKwh — a model can be selected
+                // before a capacity is entered.
+                vehicleArt?.setImageResource(VehicleArt.drawableFor(modelId))
             }
         }
     }

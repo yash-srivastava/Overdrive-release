@@ -36,6 +36,7 @@ class DashboardLayoutContractTest {
             "ivQrCode",
             "vehicleSocValue",
             "vehicleRangeValue",
+            "vehicleArt",
             "chargingCard",
             "recordingStorageProgress",
             "activityRow1",
