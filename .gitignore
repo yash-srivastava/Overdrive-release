@@ -1,21 +1,47 @@
-/.gradle
-/.idea
-/.kotlin
-/local.properties
-/build
+# Gradle / build output
+.gradle/
+build/
+captures/
 
-/app/build
-/app/.cxx
+# Native build (NDK / CMake)
+.cxx/
+.externalNativeBuild/
+
+# Vendored native dependencies, fetched by CMake at configure time
 /app/src/main/cpp/opencv
 /app/src/main/cpp/openh264
 
-/dilink-probe/build
-/dilink-probe/.cxx
+# Local machine config — SDK and NDK paths differ per checkout
+/local.properties
+
+# IDE
+.idea/
+.kotlin/
+*.iml
+.cursor
+
+# Signing material. Never commit these.
+*.jks
+*.keystore
+keystore.properties
+
+# Packaged artifacts
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Camera and daemon capture dumps. `*.png` is blanket-ignored because dumps
+# land as PNG anywhere in the tree; committed raster art is WebP for this
+# reason as much as for size.
 /scratch
+ref/
+design-lab/
+dilink5_camera_dump*
 *.raw
 *.zip
 *.png
-dilink5_camera_dump*
-.DS_Store
 
-ref
+# OS
+.DS_Store
+Thumbs.db
