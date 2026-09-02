@@ -14,7 +14,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
@@ -114,7 +113,7 @@ class DashboardFragment : Fragment() {
     private lateinit var tvDeviceId: TextView
     private lateinit var chipGroupTunnels: ChipGroup
     private lateinit var remoteDetails: View
-    private lateinit var btnExpandRemote: ImageButton
+    private lateinit var btnExpandRemote: ImageView
     private var selectedTunnel: DaemonType? = null
     private var lastRenderedQrUrl: String? = null
     private var hasRenderedQrForView = false
@@ -313,9 +312,6 @@ class DashboardFragment : Fragment() {
         metricRecordings.setOnClickListener {
             findNavController().navigate(R.id.recordingsFragment, null, fadeThrough)
         }
-        metricTunnel.setOnClickListener {
-            findNavController().navigate(R.id.daemonsFragment, null, fadeThrough)
-        }
         cardDaemons.setOnClickListener {
             findNavController().navigate(R.id.daemonsFragment, null, fadeThrough)
         }
@@ -332,18 +328,19 @@ class DashboardFragment : Fragment() {
             aiInsightExpanded = !aiInsightExpanded
             renderAiInsightExpansion()
         }
-        metricVehicle?.setOnClickListener { showVehicleCapacityDialog() }
-
-        btnToggleToken.setOnClickListener { toggleTokenVisibility() }
-        btnCopyToken.setOnClickListener { copyTokenToClipboard() }
-        btnRegenerateToken.setOnClickListener { showRegenerateConfirmation() }
-        btnExpandRemote.setOnClickListener {
+        // The whole row expands, so the chevron stays a plain indicator.
+        metricTunnel.setOnClickListener {
             dashboardState = DashboardStateReducer.remoteExpanded(
                 dashboardState,
                 !dashboardState.remoteExpanded,
             )
             renderRemoteExpansion()
         }
+        metricVehicle?.setOnClickListener { showVehicleCapacityDialog() }
+
+        btnToggleToken.setOnClickListener { toggleTokenVisibility() }
+        btnCopyToken.setOnClickListener { copyTokenToClipboard() }
+        btnRegenerateToken.setOnClickListener { showRegenerateConfirmation() }
     }
 
     private fun observeViewModels() {
@@ -1167,7 +1164,7 @@ class DashboardFragment : Fragment() {
         val expanded = dashboardState.remoteExpanded
         remoteDetails.visibility = if (expanded) View.VISIBLE else View.GONE
         btnExpandRemote.rotation = if (expanded) 180f else 0f
-        btnExpandRemote.contentDescription = getString(
+        metricTunnel.contentDescription = getString(
             if (expanded) {
                 R.string.dashboard_modern_collapse_remote
             } else {
