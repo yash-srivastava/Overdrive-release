@@ -4,7 +4,7 @@
 
   Two surfaces:
     - Summary block (read-only): current capacity, SOH, effective kWh, model,
-      last calibration. Each line shows itself only when its data is real.
+      last calibration.
     - Editable controls: M3 outlined capacity input + M3 ExposedDropdownMenu
       for model selection. The dropdown expands like a Material menu, not a
       legacy Spinner.
@@ -25,15 +25,16 @@
         android:paddingTop="8dp"
         android:paddingBottom="8dp">
 
-        <!-- Summary block. Each TextView is GONE by default and gets populated +
-             revealed by the fragment when its source data is meaningful. -->
+        <!-- Summary block. Capacity, SOH and model always end up populated, so
+             they hold a placeholder until the fetch lands rather than appearing
+             into a dialog the user is already looking at. The two below them are
+             genuinely conditional and stay GONE without data. -->
         <TextView
             android:id="@+id/vehicleSummaryCapacity"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-            android:textColor="?attr/colorOnSurface"
-            android:visibility="gone" />
+            android:textColor="?attr/colorOnSurface" />
 
         <TextView
             android:id="@+id/vehicleSummarySoh"
@@ -41,8 +42,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-            android:textColor="?attr/colorOnSurface"
-            android:visibility="gone" />
+            android:textColor="?attr/colorOnSurface" />
 
         <TextView
             android:id="@+id/vehicleSummaryEffective"
@@ -59,8 +59,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-            android:textColor="?attr/colorOnSurfaceVariant"
-            android:visibility="gone" />
+            android:textColor="?attr/colorOnSurfaceVariant" />
 
         <TextView
             android:id="@+id/vehicleSummaryCalibration"
@@ -77,8 +76,7 @@
             android:layout_height="1dp"
             android:layout_marginTop="16dp"
             android:layout_marginBottom="20dp"
-            android:background="?attr/colorOutlineVariant"
-            android:visibility="gone" />
+            android:background="?attr/colorOutlineVariant" />
 
         <!-- Model dropdown — M3 ExposedDropdownMenu. The MaterialAutoCompleteTextView
              is non-editable so users tap the field and pick from the menu rather

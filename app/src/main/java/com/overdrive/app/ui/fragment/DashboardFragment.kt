@@ -1395,12 +1395,19 @@ class DashboardFragment : Fragment() {
         val summaryEffective = dialogView.findViewById<TextView>(R.id.vehicleSummaryEffective)
         val summaryModel = dialogView.findViewById<TextView>(R.id.vehicleSummaryModel)
         val summaryCalibration = dialogView.findViewById<TextView>(R.id.vehicleSummaryCalibration)
-        val summaryDivider = dialogView.findViewById<View>(R.id.vehicleSummaryDivider)
         val capInput = dialogView.findViewById<
             com.google.android.material.textfield.TextInputEditText>(R.id.vehicleCapacityInput)
         val modelDropdown = dialogView.findViewById<
             com.google.android.material.textfield.MaterialAutoCompleteTextView>(
             R.id.vehicleModelDropdown)
+
+        // These three always resolve to a value, so they carry a placeholder
+        // from the start: the fetch below runs off the main thread, and filling
+        // empty rows on its return would resize the dialog after it is up.
+        val pendingValue = getString(R.string.vehicle_dialog_value_pending)
+        summaryCapacity.text = getString(R.string.vehicle_dialog_summary_capacity, pendingValue)
+        summarySoh.text = getString(R.string.vehicle_dialog_summary_soh, pendingValue)
+        summaryModel.text = getString(R.string.vehicle_dialog_summary_model, pendingValue)
 
         // Track the selected model's id locally (the dropdown's text holds
         // the user-facing title; the id is what we POST). Each entry also
@@ -1565,9 +1572,6 @@ class DashboardFragment : Fragment() {
                     }
                 }
 
-                // Populate summary section. Each line shows only when its data
-                // is meaningful — keeps the dialog tight when the daemon is
-                // still seeding.
                 val capacityText = if (finalNominalKwh > 0) {
                     val suffix = when (finalNominalSource) {
                         "user" -> " (" + getString(R.string.soh_dialog_source_user) + ")"
@@ -1578,8 +1582,8 @@ class DashboardFragment : Fragment() {
                 } else {
                     getString(R.string.soh_dialog_capacity_not_detected)
                 }
-                summaryCapacity.text = getString(R.string.vehicle_dialog_summary_capacity, capacityText)
-                summaryCapacity.visibility = View.VISIBLE
+                summaryCapacity.text =
+                    getString(R.string.vehicle_dialog_summary_capacity, capacityText)
 
                 val sohText = when {
                     finalDisplaySoh > 0 && finalDisplaySource == "oem" ->
@@ -1591,7 +1595,6 @@ class DashboardFragment : Fragment() {
                     else -> getString(R.string.vehicle_dialog_soh_unavailable)
                 }
                 summarySoh.text = getString(R.string.vehicle_dialog_summary_soh, sohText)
-                summarySoh.visibility = View.VISIBLE
 
                 if (finalEstimatedKwh > 0) {
                     summaryEffective.text = getString(
@@ -1602,7 +1605,6 @@ class DashboardFragment : Fragment() {
                 val modelText = if (finalStatusModelId != null) modelDisplayName(finalStatusModelId)
                 else getString(R.string.soh_dialog_model_not_selected)
                 summaryModel.text = getString(R.string.vehicle_dialog_summary_model, modelText)
-                summaryModel.visibility = View.VISIBLE
 
                 if (finalCalSoh > 0 && finalCalTs > 0) {
                     val date = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
@@ -1611,8 +1613,6 @@ class DashboardFragment : Fragment() {
                         R.string.vehicle_dialog_summary_calibration, finalCalSoh, date)
                     summaryCalibration.visibility = View.VISIBLE
                 }
-
-                summaryDivider.visibility = View.VISIBLE
             }
         }
 
