@@ -47,6 +47,14 @@
     <dimen name="section_overline_top">12dp</dimen>
     <dimen name="section_overline_bottom">8dp</dimen>
 
+    <!-- Navigation rail row plate. Shared by rail_item_indicator.xml, which
+         paints it, and MainActivity.applyRailRowLayout, which pads the row's
+         content inside it. -->
+    <dimen name="rail_item_pill_inset_horizontal">12dp</dimen>
+    <dimen name="rail_item_pill_inset_vertical">4dp</dimen>
+    <dimen name="rail_item_pill_radius">8dp</dimen>
+    <dimen name="rail_item_pill_content_inset">16dp</dimen>   <!-- M3 navigation-drawer item spec -->
+
     <!-- PIN unlock keypad (PinLockActivity). 72dp keys give a 14.4mm hit
          target on the BYD Seal 15.6" panel — well above Material's 48dp
          minimum and comfortable for cluster-distance interaction. -->

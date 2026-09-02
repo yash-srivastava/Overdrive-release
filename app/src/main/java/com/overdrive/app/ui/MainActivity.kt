@@ -1844,7 +1844,15 @@ open class MainActivity : AppCompatActivity() {
 
     private fun applyRailRowLayout(row: LinearLayout, labelRes: Int, expanded: Boolean) {
         val label = row.findViewById<TextView>(R.id.railItemLabel) ?: return
-        val horizontalPadding = if (expanded) dp(12) else 0
+        // Content sits inside the selected plate, not the rail, so these stay
+        // the tokens rail_item_indicator.xml insets by. With the 24dp icon this
+        // also holds the icon centre on the 40dp line at both rail widths.
+        val horizontalPadding = if (expanded) {
+            resources.getDimensionPixelSize(R.dimen.rail_item_pill_inset_horizontal) +
+                resources.getDimensionPixelSize(R.dimen.rail_item_pill_content_inset)
+        } else {
+            0
+        }
         val verticalPadding = dp(6)
 
         row.orientation =
