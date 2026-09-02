@@ -25,58 +25,64 @@
         android:paddingTop="8dp"
         android:paddingBottom="8dp">
 
-        <!-- Summary block. Capacity, SOH and model always end up populated, so
-             they hold a placeholder until the fetch lands rather than appearing
-             into a dialog the user is already looking at. The two below them are
+        <!-- What the daemon currently holds. Recessed into its own panel so the
+             read-only half is separated from the editable half by a surface
+             rather than by a hairline.
+
+             Capacity, SOH and model always end up populated, so they hold a
+             placeholder until the fetch lands rather than appearing into a
+             dialog the user is already looking at. The derived two are
              genuinely conditional and stay GONE without data. -->
-        <TextView
-            android:id="@+id/vehicleSummaryCapacity"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-            android:textColor="?attr/colorOnSurface" />
+            android:background="@drawable/dialog_inset_panel"
+            android:orientation="vertical"
+            android:padding="@dimen/dashboard_modern_card_padding">
 
-        <TextView
-            android:id="@+id/vehicleSummarySoh"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-            android:textColor="?attr/colorOnSurface" />
+            <TextView
+                android:id="@+id/vehicleSummaryCapacity"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                android:textColor="?attr/colorOnSurface" />
 
-        <TextView
-            android:id="@+id/vehicleSummaryEffective"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-            android:textColor="?attr/colorOnSurfaceVariant"
-            android:visibility="gone" />
+            <TextView
+                android:id="@+id/vehicleSummarySoh"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                android:textColor="?attr/colorOnSurface" />
 
-        <TextView
-            android:id="@+id/vehicleSummaryModel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-            android:textColor="?attr/colorOnSurfaceVariant" />
+            <TextView
+                android:id="@+id/vehicleSummaryModel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                android:textColor="?attr/colorOnSurface" />
 
-        <TextView
-            android:id="@+id/vehicleSummaryCalibration"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-            android:textColor="?attr/colorOnSurfaceVariant"
-            android:visibility="gone" />
+            <!-- Derived readings. Smaller and dimmer than the three above: they
+                 report what the daemon worked out, not what is set. -->
+            <TextView
+                android:id="@+id/vehicleSummaryEffective"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:visibility="gone" />
 
-        <View
-            android:id="@+id/vehicleSummaryDivider"
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:layout_marginTop="16dp"
-            android:layout_marginBottom="20dp"
-            android:background="?attr/colorOutlineVariant" />
+            <TextView
+                android:id="@+id/vehicleSummaryCalibration"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:visibility="gone" />
+        </LinearLayout>
 
         <!-- Model dropdown — M3 ExposedDropdownMenu. The MaterialAutoCompleteTextView
              is non-editable so users tap the field and pick from the menu rather
@@ -86,6 +92,7 @@
             style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
             android:hint="@string/vehicle_dialog_model_label">
 
             <com.google.android.material.textfield.MaterialAutoCompleteTextView
