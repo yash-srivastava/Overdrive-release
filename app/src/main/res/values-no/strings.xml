@@ -1326,4 +1326,5 @@
     <string name="rail_section_driving">Kjøring</string>
     <string name="rail_section_automation">Automatisering</string>
     <string name="rail_section_system">System</string>
+    <string name="rail_collapse_label">Skjul</string>
 </resources>

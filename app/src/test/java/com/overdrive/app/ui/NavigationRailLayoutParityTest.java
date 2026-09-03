@@ -73,6 +73,32 @@ public class NavigationRailLayoutParityTest {
         ), new ArrayList<>(matches(SECTION_ID, portrait)));
     }
 
+    /**
+     * The wordmark and the collapse row frame the scroller rather than riding
+     * inside it: a long destination list would otherwise scroll the collapse
+     * affordance out of reach.
+     */
+    @Test
+    public void bothOrientationsFrameTheScrollerWithBrandAndCollapseRow()
+            throws Exception {
+        String[] layouts = {
+                "src/main/res/layout/activity_main_new.xml",
+                "src/main/res/layout-land/activity_main_new.xml"
+        };
+        for (String layout : layouts) {
+            String xml = readProjectFile(layout);
+            int brand = xml.indexOf("android:id=\"@+id/railBrand\"");
+            int scroller = xml.indexOf("android:id=\"@+id/navigationRailScroll\"");
+            int scrollerEnd = xml.indexOf(
+                    "</com.overdrive.app.ui.widget.SwipeExpandableRailScrollView>");
+            int collapseRow = xml.indexOf("android:id=\"@+id/railCollapseRow\"");
+
+            assertTrue(layout, xml.contains("android:id=\"@+id/navigationRailContainer\""));
+            assertTrue(layout, brand >= 0 && brand < scroller);
+            assertTrue(layout, collapseRow > scrollerEnd && scrollerEnd > 0);
+        }
+    }
+
     private static Set<String> destinationIds(String xml) {
         return matches(DESTINATION_ID, xml);
     }

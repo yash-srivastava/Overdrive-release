@@ -1179,4 +1179,5 @@
     <string name="rail_section_driving">Ajo</string>
     <string name="rail_section_automation">Automaatio</string>
     <string name="rail_section_system">Järjestelmä</string>
+    <string name="rail_collapse_label">Kutista</string>
 </resources>

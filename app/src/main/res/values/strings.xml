@@ -940,6 +940,7 @@
     <string name="rail_settings">Settings</string>
     <string name="rail_expand">Show navigation labels</string>
     <string name="rail_collapse">Hide navigation labels</string>
+    <string name="rail_collapse_label">Collapse</string>
 
     <!-- Rail category headers -->
     <string name="rail_section_cameras">Cameras</string>

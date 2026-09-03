@@ -1346,4 +1346,5 @@
     <string name="rail_section_driving">Sürüş</string>
     <string name="rail_section_automation">Otomasyon</string>
     <string name="rail_section_system">Sistem</string>
+    <string name="rail_collapse_label">Daralt</string>
 </resources>

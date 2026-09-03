@@ -1346,4 +1346,5 @@
     <string name="rail_section_driving">ड्राइविंग</string>
     <string name="rail_section_automation">स्वचालन</string>
     <string name="rail_section_system">सिस्टम</string>
+    <string name="rail_collapse_label">समेटें</string>
 </resources>

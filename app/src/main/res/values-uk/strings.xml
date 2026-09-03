@@ -1199,4 +1199,5 @@
     <string name="rail_section_driving">Водіння</string>
     <string name="rail_section_automation">Автоматизація</string>
     <string name="rail_section_system">Система</string>
+    <string name="rail_collapse_label">Згорнути</string>
 </resources>

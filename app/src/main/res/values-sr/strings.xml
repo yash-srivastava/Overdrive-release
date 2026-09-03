@@ -1189,4 +1189,5 @@
     <string name="rail_section_driving">Vožnja</string>
     <string name="rail_section_automation">Automatizacija</string>
     <string name="rail_section_system">Sistem</string>
+    <string name="rail_collapse_label">Скупи</string>
 </resources>

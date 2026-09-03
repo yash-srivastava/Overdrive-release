@@ -1395,4 +1395,5 @@
     <string name="rail_section_driving">Вождение</string>
     <string name="rail_section_automation">Автоматизация</string>
     <string name="rail_section_system">Система</string>
+    <string name="rail_collapse_label">Свернуть</string>
 </resources>

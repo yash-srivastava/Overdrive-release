@@ -1179,4 +1179,5 @@
     <string name="rail_section_driving">Οδήγηση</string>
     <string name="rail_section_automation">Αυτοματισμοί</string>
     <string name="rail_section_system">Σύστημα</string>
+    <string name="rail_collapse_label">Σύμπτυξη</string>
 </resources>

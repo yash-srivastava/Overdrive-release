@@ -1179,4 +1179,5 @@
     <string name="rail_section_driving">Bestuur</string>
     <string name="rail_section_automation">Outomatisering</string>
     <string name="rail_section_system">Stelsel</string>
+    <string name="rail_collapse_label">Vou toe</string>
 </resources>

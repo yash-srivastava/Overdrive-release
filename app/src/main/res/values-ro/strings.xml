@@ -1189,4 +1189,5 @@
     <string name="rail_section_driving">Conducere</string>
     <string name="rail_section_automation">Automatizare</string>
     <string name="rail_section_system">Sistem</string>
+    <string name="rail_collapse_label">Restrânge</string>
 </resources>

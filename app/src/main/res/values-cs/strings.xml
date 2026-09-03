@@ -1199,4 +1199,5 @@
     <string name="rail_section_driving">Jízda</string>
     <string name="rail_section_automation">Automatizace</string>
     <string name="rail_section_system">Systém</string>
+    <string name="rail_collapse_label">Sbalit</string>
 </resources>

@@ -79,9 +79,6 @@ open class MainActivity : AppCompatActivity() {
     // Floor for a re-toggle that interrupts a slide part-way: the duration
     // scales with the distance left, but never gets so short it reads as a snap.
     private val RAIL_ANIMATION_MIN_MS = 140L
-    // Chevron's distance from the rail's trailing edge when expanded:
-    // 8dp margin + half of the 48dp button.
-    private val RAIL_CHEVRON_EDGE_INSET_DP = 32
     // The always-pinned rows. Every other key lives in NavigationRailCatalog,
     // which is the set the user can hide.
     private val RAIL_KEY_DASHBOARD = "dashboard"
@@ -112,6 +109,11 @@ open class MainActivity : AppCompatActivity() {
     private lateinit var toolbar: MaterialToolbar
     private lateinit var navigationRail: LinearLayout
     private lateinit var navigationRailScroll: SwipeExpandableRailScrollView
+    // The rail's outer column: wordmark, scrolling destinations, pinned
+    // collapse row. Width animates here, not on the scroller.
+    private lateinit var navigationRailContainer: LinearLayout
+    private var navigationRailBrand: TextView? = null
+    private var navigationRailCollapseRow: LinearLayout? = null
     private var navigationRailExpanded = false
     private var navigationRailAnimator: ValueAnimator? = null
     // Which form the rows currently hold. Rows sit in expanded form for the
@@ -1451,6 +1453,9 @@ open class MainActivity : AppCompatActivity() {
         toolbar = findViewById(R.id.toolbar)
         navigationRail = findViewById(R.id.navigationRail)
         navigationRailScroll = findViewById(R.id.navigationRailScroll)
+        navigationRailContainer = findViewById(R.id.navigationRailContainer)
+        navigationRailBrand = findViewById(R.id.railBrand)
+        navigationRailCollapseRow = findViewById(R.id.railCollapseRow)
         tvCurrentUrl = findViewById(R.id.tvCurrentUrl)
         urlBar = findViewById(R.id.urlBar)
         statusPill = findViewById(R.id.statusPill)
@@ -1643,9 +1648,17 @@ open class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.toolbarLanguageButton)?.setOnClickListener(languageClick)
         findViewById<View>(R.id.toolbarHelpButton)?.setOnClickListener(helpClick)
 
-        val expandButton = navigationRail.findViewById<ImageButton>(R.id.railExpandButton)
-        expandButton?.setOnClickListener {
-            setNavigationRailExpanded(!navigationRailExpanded, animate = true)
+        navigationRailCollapseRow?.let { row ->
+            row.findViewById<ImageView>(R.id.railItemIcon)
+                ?.setImageResource(R.drawable.ic_chevron_right)
+            // The visible label only ever shows while the rail is expanded, so
+            // it names the action available there. The collapsed state gets the
+            // other direction through the tooltip and contentDescription.
+            row.findViewById<TextView>(R.id.railItemLabel)
+                ?.setText(R.string.rail_collapse_label)
+            row.setOnClickListener {
+                setNavigationRailExpanded(!navigationRailExpanded, animate = true)
+            }
         }
         navigationRailScroll.onRailSwipe = { action ->
             when (action) {
@@ -1778,8 +1791,8 @@ open class MainActivity : AppCompatActivity() {
         navigationRailExpanded = expanded
         // Capture the in-flight width before cancelling so an interrupted slide
         // resumes from where it is rather than jumping to a stale edge.
-        val startWidth = navigationRailScroll.width
-            .takeIf { it > 0 } ?: navigationRailScroll.layoutParams.width
+        val startWidth = navigationRailContainer.width
+            .takeIf { it > 0 } ?: navigationRailContainer.layoutParams.width
         // Clear the field BEFORE cancelling: cancel() delivers onAnimationEnd
         // synchronously, and the identity check there is what stops the outgoing
         // slide from settling rows to a state this call is about to replace.
@@ -1790,10 +1803,10 @@ open class MainActivity : AppCompatActivity() {
         val targetWidth = dp(
             if (expanded) RAIL_EXPANDED_WIDTH_DP else RAIL_COMPACT_WIDTH_DP
         )
-        if (!animate || !stateChanged || !navigationRailScroll.isLaidOut) {
+        if (!animate || !stateChanged || !navigationRailContainer.isLaidOut) {
             updateRailExpandButton(expanded, animate = false, durationMs = 0L)
-            navigationRailScroll.layoutParams =
-                navigationRailScroll.layoutParams.apply { width = targetWidth }
+            navigationRailContainer.layoutParams =
+                navigationRailContainer.layoutParams.apply { width = targetWidth }
             // force: this is the assert-the-truth path (first bind, rotation,
             // density change), so it must re-apply even if the memo agrees —
             // dp() padding is density-derived and can go stale.
@@ -1822,8 +1835,8 @@ open class MainActivity : AppCompatActivity() {
             duration = slideMs
             interpolator = RAIL_EASING
             addUpdateListener { animator ->
-                navigationRailScroll.layoutParams =
-                    navigationRailScroll.layoutParams.apply {
+                navigationRailContainer.layoutParams =
+                    navigationRailContainer.layoutParams.apply {
                         width = animator.animatedValue as Int
                     }
             }
@@ -1932,10 +1945,18 @@ open class MainActivity : AppCompatActivity() {
             header.findViewById<TextView>(R.id.railSectionLabel)?.animate()?.cancel()
             header.findViewById<View>(R.id.railSectionRule)?.animate()?.cancel()
         }
-        navigationRail.findViewById<ImageButton>(R.id.railExpandButton)?.animate()?.cancel()
+        navigationRailCollapseRow
+            ?.findViewById<ImageView>(R.id.railItemIcon)
+            ?.animate()
+            ?.cancel()
     }
 
-    /** Walks every rail row — destinations then secondary actions. */
+    /**
+     * Walks every rail row — destinations, secondary actions, then the pinned
+     * collapse row, which lives outside [navigationRail] but takes the same
+     * compact/expanded treatment. Its label res is the collapsed-state one,
+     * because that is the state where the tooltip stands in for the label.
+     */
     private inline fun forEachRailRow(action: (LinearLayout, Int) -> Unit) {
         railItems.forEach { item ->
             navigationRail.findViewById<LinearLayout>(item.rowId)?.let {
@@ -1947,6 +1968,7 @@ open class MainActivity : AppCompatActivity() {
                 action(it, item.labelRes)
             }
         }
+        navigationRailCollapseRow?.let { action(it, R.string.rail_expand) }
     }
 
     /**
@@ -1963,6 +1985,19 @@ open class MainActivity : AppCompatActivity() {
         if (!force && navigationRailRowsExpandedForm == expanded) return
         navigationRailRowsExpandedForm = expanded
         forEachRailRow { row, labelRes -> applyRailRowLayout(row, labelRes, expanded) }
+        // The wordmark tracks the rows: centred in the 80dp strip, left-aligned
+        // on the same inset as the row labels once there is width for it.
+        navigationRailBrand?.let { brand ->
+            val inset = resources.getDimensionPixelSize(
+                R.dimen.rail_item_pill_inset_horizontal
+            ) + resources.getDimensionPixelSize(R.dimen.rail_item_pill_content_inset)
+            brand.gravity = if (expanded) {
+                Gravity.START or Gravity.CENTER_VERTICAL
+            } else {
+                Gravity.CENTER
+            }
+            brand.setPadding(if (expanded) inset else dp(8), 0, dp(8), 0)
+        }
     }
 
     private fun applyRailRowLayout(row: LinearLayout, labelRes: Int, expanded: Boolean) {
@@ -2017,47 +2052,30 @@ open class MainActivity : AppCompatActivity() {
      * Chevron points right when collapsed, left when expanded. Rotating one
      * drawable rather than swapping two keeps the affordance continuous with
      * the slide instead of blinking to a different asset mid-motion.
+     *
+     * The row it lives in is a normal rail row, so [applyRailRowLayout] already
+     * holds the icon on the 40dp line at both widths — only rotation moves.
      */
     private fun updateRailExpandButton(
         expanded: Boolean,
         animate: Boolean,
         durationMs: Long
     ) {
-        val button = navigationRail.findViewById<ImageButton>(R.id.railExpandButton)
-            ?: return
+        val row = navigationRailCollapseRow ?: return
+        val icon = row.findViewById<ImageView>(R.id.railItemIcon) ?: return
         val descriptionRes = if (expanded) R.string.rail_collapse else R.string.rail_expand
         val description = getString(descriptionRes)
-        button.contentDescription = description
-        TooltipCompat.setTooltipText(button, description)
+        row.contentDescription = description
 
-        button.animate().cancel()
+        icon.animate().cancel()
         // The vector auto-mirrors in RTL, so expansion alone controls rotation.
-        // Translation still mirrors because the rail grows from the other edge.
-        //
-        // Read the direction off the Configuration, not the View: this first runs
-        // from onCreate, and a View resolves its layoutDirection during layout —
-        // until then it reports LTR, which left the collapsed chevron pointing
-        // into the rail in RTL locales until the first toggle.
-        val rtl = resources.configuration.layoutDirection == View.LAYOUT_DIRECTION_RTL
         val targetRotation = if (expanded) 180f else 0f
-        // Translate rather than re-gravity: the button is centred by the rail's
-        // own gravity, so a gravity flip would jump. Offset runs from where the
-        // expanded rail centres it (half of 216dp) out to the trailing inset.
-        val trailingOffset =
-            dp(RAIL_EXPANDED_WIDTH_DP / 2 - RAIL_CHEVRON_EDGE_INSET_DP).toFloat()
-        val targetTranslation = when {
-            !expanded -> 0f
-            rtl -> -trailingOffset
-            else -> trailingOffset
-        }
         if (!animate) {
-            button.rotation = targetRotation
-            button.translationX = targetTranslation
+            icon.rotation = targetRotation
             return
         }
-        button.animate()
+        icon.animate()
             .rotation(targetRotation)
-            .translationX(targetTranslation)
             .setDuration(durationMs)
             .setInterpolator(RAIL_EASING)
             .start()

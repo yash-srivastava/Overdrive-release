@@ -1336,4 +1336,5 @@
     <string name="rail_section_driving">การขับขี่</string>
     <string name="rail_section_automation">ระบบอัตโนมัติ</string>
     <string name="rail_section_system">ระบบ</string>
+    <string name="rail_collapse_label">ย่อ</string>
 </resources>

@@ -1179,4 +1179,5 @@
     <string name="rail_section_driving">Vezetés</string>
     <string name="rail_section_automation">Automatizálás</string>
     <string name="rail_section_system">Rendszer</string>
+    <string name="rail_collapse_label">Összecsukás</string>
 </resources>

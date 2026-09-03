@@ -1375,4 +1375,5 @@
     <string name="rail_section_driving">Conducción</string>
     <string name="rail_section_automation">Automatización</string>
     <string name="rail_section_system">Sistema</string>
+    <string name="rail_collapse_label">Contraer</string>
 </resources>

@@ -1251,6 +1251,7 @@
     <string name="rail_seat_positions">Posicions del seient</string>
     <string name="rail_expand">Mostra les etiquetes de navegació</string>
     <string name="rail_collapse">Amaga les etiquetes de navegació</string>
+    <string name="rail_collapse_label">Replega</string>
 
     <!-- Rail category headers -->
     <string name="rail_section_cameras">Càmeres</string>

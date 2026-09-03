@@ -1377,4 +1377,5 @@ Questa azione non puo essere annullata.</string>
     <string name="rail_section_driving">Guida</string>
     <string name="rail_section_automation">Automazione</string>
     <string name="rail_section_system">Sistema</string>
+    <string name="rail_collapse_label">Comprimi</string>
 </resources>

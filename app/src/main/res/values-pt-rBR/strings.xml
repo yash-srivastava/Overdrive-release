@@ -1375,4 +1375,5 @@
     <string name="rail_section_driving">Direção</string>
     <string name="rail_section_automation">Automação</string>
     <string name="rail_section_system">Sistema</string>
+    <string name="rail_collapse_label">Recolher</string>
 </resources>
