@@ -23,7 +23,7 @@ import androidx.navigation.NavController
 import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.ui.AppBarConfiguration
 import androidx.navigation.ui.navigateUp
-import androidx.navigation.ui.setupWithNavController
+import androidx.navigation.ui.setupActionBarWithNavController
 import com.overdrive.app.logging.LogLevel
 import com.overdrive.app.logging.LogManager
 // import com.overdrive.app.shell.PrivilegedShellSetup
@@ -1501,7 +1501,10 @@ open class MainActivity : AppCompatActivity() {
             )
         )
 
-        toolbar.setupWithNavController(navController, appBarConfiguration)
+        // Titles go through the ActionBar rather than Toolbar.setTitle: the
+        // wrapper marks the title as explicitly set, so AppCompat stops
+        // re-applying the activity label over the destination label.
+        setupActionBarWithNavController(navController, appBarConfiguration)
 
         setupCustomRail(savedInstanceState)
     }
