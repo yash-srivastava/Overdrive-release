@@ -100,7 +100,7 @@
                                 android:id="@+id/heroGreeting"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:text="@string/dashboard_modern_vehicle_now"
+                                android:text="@string/dashboard_modern_vehicle_status"
                                 android:textAppearance="@style/TextAppearance.Material3.TitleLarge"
                                 android:textColor="?attr/colorOnSurface"
                                 android:textStyle="bold" />

@@ -661,7 +661,7 @@ class DashboardFragment : Fragment() {
         if (!::vehicleSocValue.isInitialized) return
         when (val vehicle = dashboardState.vehicle) {
             DashboardUiState.VehicleState.Loading -> {
-                heroGreeting.setText(R.string.dashboard_modern_vehicle_now)
+                heroGreeting.setText(R.string.dashboard_modern_vehicle_status)
                 heroSubtitle.setText(R.string.dashboard_modern_updating)
                 vehicleSocValue.setText(R.string.dashboard_metric_value_pending)
                 vehicleRangeValue.setText(R.string.dashboard_metric_value_pending)
@@ -672,7 +672,7 @@ class DashboardFragment : Fragment() {
                 renderRangeBreakdown(null)
             }
             is DashboardUiState.VehicleState.Unavailable -> {
-                heroGreeting.setText(R.string.dashboard_modern_vehicle_now)
+                heroGreeting.setText(R.string.dashboard_modern_vehicle_status)
                 heroSubtitle.setText(R.string.dashboard_modern_vehicle_unavailable)
                 vehicleSocValue.setText(R.string.dashboard_metric_value_pending)
                 vehicleRangeValue.setText(R.string.dashboard_metric_value_pending)
@@ -684,7 +684,7 @@ class DashboardFragment : Fragment() {
             }
             is DashboardUiState.VehicleState.Ready -> {
                 val snapshot = vehicle.snapshot
-                heroGreeting.setText(R.string.dashboard_modern_vehicle_now)
+                heroGreeting.setText(R.string.dashboard_modern_vehicle_status)
                 val isPowerOn = snapshot.isAccOn == true
                 val gear = snapshot.gear
                 val speed = snapshot.speedKmh
