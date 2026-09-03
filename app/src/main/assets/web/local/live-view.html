@@ -352,7 +352,9 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 16px 20px;
+            /* Equal on both axes: the status dot is corner-placed against this
+               padding, so an asymmetric inset reads as a misplaced dot. */
+            padding: 16px;
             background: var(--lv-top-overlay);
             position: absolute;
             top: 0; left: 0; right: 0;
@@ -365,7 +367,10 @@
         .top-bar-left > * + *, .top-bar-right > * + * { margin-left: 10px; }
         [dir="rtl"] .top-bar-left > * + *,
         [dir="rtl"] .top-bar-right > * + * { margin-left: 0; margin-right: 10px; }
-        .top-bar-left { min-width: 0; }
+        /* Pinned to the top, not centred: the row's height comes from the
+           quality menu opposite it, which would push the dot far below its
+           own left inset. */
+        .top-bar-left { min-width: 0; align-self: flex-start; }
         .top-bar-right { flex: 0 0 auto; }
 
         /* Stream state is a bare dot. The stage in the middle of the video

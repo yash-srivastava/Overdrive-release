@@ -226,9 +226,10 @@ class WebViewFragment : Fragment() {
         // the destination and the button's request would be denied here.
         '[data-app-shell="1"] .top-bar-btn { display: none !important; }',
         // Pull the absolute-positioned camera top bar in by a hair so the
-        // connection-status pill and quality dropdown breathe at narrow
-        // landscape widths (head-unit windowed mode, ~600-900px wide).
-        '[data-app-shell="1"] .camera-top-bar { padding: 12px 14px !important; }',
+        // status dot and quality dropdown breathe at narrow landscape widths
+        // (head-unit windowed mode, ~600-900px wide). Equal on both axes so
+        // the corner-placed dot keeps matching gaps.
+        '[data-app-shell="1"] .camera-top-bar { padding: 14px !important; }',
         '[data-app-shell="1"] .camera-top-bar .top-bar-left,',
         '[data-app-shell="1"] .camera-top-bar .top-bar-right { min-width: 0; flex-wrap: nowrap; }',
         '[data-app-shell="1"] .quality-menu__trigger { min-width: 96px; max-width: 140px; }',
