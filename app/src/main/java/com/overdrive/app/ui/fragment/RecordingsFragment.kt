@@ -1703,16 +1703,6 @@ class RecordingsFragment : Fragment() {
                     else -> baseSummary
                 }
 
-                v.findViewById<TextView>(R.id.tvTitleCountBadge)?.let { badge ->
-                    // Hide rather than show "0" while the index is down — the
-                    // count is unknown, not zero.
-                    if (totalCount > 0 && !indexDown) {
-                        badge.visibility = View.VISIBLE
-                        badge.text = totalCount.toString()
-                    } else {
-                        badge.visibility = View.GONE
-                    }
-                }
                 // While the index is down the per-segment counts are unknown,
                 // so drop the "· N" suffix instead of asserting zero.
                 v.findViewById<MaterialButton>(R.id.segmentDashcam)?.text =

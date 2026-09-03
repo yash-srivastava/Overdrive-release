@@ -41,7 +41,7 @@
     android:background="?android:attr/colorBackground"
     android:orientation="vertical">
 
-    <!-- ============ Hero header ============ -->
+    <!-- ============ Header: counts + page actions ============ -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -57,56 +57,38 @@
             android:orientation="horizontal"
             android:baselineAligned="false">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/recordings_title"
-                android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
-                android:textColor="?attr/colorOnSurface"
-                android:textStyle="bold"
-                android:singleLine="true"
-                android:ellipsize="end" />
-
             <!--
-              Total-count badge next to the title. Reads like the small
-              counter on events.html's top bar; populated by the parent's
-              refreshCounts() executor. Hidden until the first scan lands
-              so the title doesn't briefly flicker "0".
+              The app bar already names this screen, so the header carries
+              the counts instead. Populated by refreshCounts(); the pending
+              string holds the line's height until the first scan lands.
             -->
             <TextView
-                android:id="@+id/tvTitleCountBadge"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="10dp"
-                android:background="@drawable/recording_lib_count_pill"
-                android:fontFamily="sans-serif-medium"
-                android:paddingHorizontal="10dp"
-                android:paddingVertical="3dp"
-                android:textColor="?attr/colorOnSurface"
-                android:textSize="11sp"
-                android:visibility="gone"
-                tools:text="320"
-                tools:visibility="visible" />
-
-            <!-- spacer pushes Settings to the trailing edge -->
-            <View
+                android:id="@+id/tvRecordingsSummary"
                 android:layout_width="0dp"
-                android:layout_height="0dp"
-                android:layout_weight="1" />
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:text="@string/recordings_summary_pending"
+                android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                tools:text="12 today · 320 total · 42 GB" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnSelectRecordings"
-                style="@style/Widget.Material3.Button.IconButton"
-                android:layout_width="48dp"
+                style="@style/Widget.Overdrive.M3.Button.Outlined"
+                android:layout_width="wrap_content"
                 android:layout_height="48dp"
                 android:contentDescription="@string/recording_library_select"
+                android:text="@string/recording_library_select"
+                android:textAllCaps="false"
                 app:icon="@drawable/ic_check_circle"
-                app:iconSize="22dp"
-                app:iconTint="?attr/colorOnSurfaceVariant" />
+                app:iconGravity="textStart"
+                app:iconSize="20dp" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnRecordingsSettings"
-                style="@style/Widget.Material3.Button.TonalButton.Icon"
+                style="@style/Widget.Overdrive.M3.Button.Tonal.Icon"
                 android:layout_width="wrap_content"
                 android:layout_height="48dp"
                 android:layout_marginStart="12dp"
@@ -116,18 +98,6 @@
                 app:icon="@drawable/ic_settings"
                 app:iconGravity="textStart" />
         </LinearLayout>
-
-        <TextView
-            android:id="@+id/tvRecordingsSummary"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:singleLine="true"
-            android:ellipsize="end"
-            android:text="@string/recordings_summary_pending"
-            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-            android:textColor="?attr/colorOnSurfaceVariant"
-            tools:text="12 today · 320 total · 42 GB" />
     </LinearLayout>
 
     <!-- ============ Top filter strip ============
