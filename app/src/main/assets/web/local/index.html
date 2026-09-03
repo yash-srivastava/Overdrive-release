@@ -2297,7 +2297,7 @@
                     stateFallback = 'Charge fault';
                     detailKey = 'dashboard.drive_detail_fault';
                     detailFallback = 'Charging system needs attention';
-                } else if (charging.charging === true) {
+                } else if (charging.charging === true && (Number(charging.powerKw || charging.chargingPowerKW || 0) > 0 || charging.gunConnected === true || charging.gunState > 0)) {
                     mode = 'charging';
                     stateKey = 'dashboard.drive_state_charging';
                     stateFallback = 'Charging';

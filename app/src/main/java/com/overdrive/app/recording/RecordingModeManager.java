@@ -272,6 +272,17 @@ public class RecordingModeManager {
                     + signalled + ")");
                 return;
             }
+
+            boolean isChargingNow = false;
+            try {
+                isChargingNow = com.overdrive.app.monitor.ChargingDetector.getInstance().isCharging();
+            } catch (Throwable ignored) {}
+
+            if (isChargingNow && (targetMode == Mode.CONTINUOUS || targetMode == Mode.DRIVE_MODE)) {
+                logger.info("Boot auto-activate skipped — vehicle is CHARGING (signalled="
+                    + signalled + ")");
+                return;
+            }
             if (targetMode == Mode.CONTINUOUS) {
                 logger.info("Boot auto-activate: CONTINUOUS (signalled=" + signalled + ")");
                 activateModeWithWarmup(targetMode, "boot-auto-activate");
@@ -297,6 +308,29 @@ public class RecordingModeManager {
         // a few seconds after construction; idempotent if mode is already
         // active (modeActive guard in onAccStateChanged + onGearChanged).
         scheduleColdStartResync();
+
+        // Hardware interlock: listen for charging state to stop driving dashcam immediately
+        try {
+            com.overdrive.app.monitor.ChargingDetector.getInstance().addFusedStateListener((isCharging, source) -> {
+                if (isCharging) {
+                    logger.info("Charging started (source=" + source + ") — forcing gear P and stopping driving recording");
+                    onGearChanged(com.overdrive.app.monitor.GearMonitor.GEAR_P);
+                    synchronized (lifecycleSerializer) {
+                        Mode toStop = null;
+                        synchronized (RecordingModeManager.this) {
+                            if (modeActive && (currentMode == Mode.CONTINUOUS || currentMode == Mode.DRIVE_MODE)) {
+                                toStop = currentMode;
+                            }
+                        }
+                        if (toStop != null) {
+                            runDeactivateGuarded(toStop);
+                        }
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            logger.warn("Could not register ChargingDetector listener: " + t.getMessage());
+        }
     }
 
     // Hard upper bound on the boot auto-activate wait. The latch is released
@@ -444,12 +478,9 @@ public class RecordingModeManager {
         int hwGear;
         boolean accChanged;
         boolean gearChanged;
+        boolean isCharging = false;
         boolean shouldRetryActivation;
         Mode retryMode = null;
-        // Wedge-driven retry: when true, the resync-retry call below must
-        // bypass activateModeWithWarmup's "already active" supplier guard
-        // so the embedded stopRecording+startRecording cycle that unwedges
-        // a stalled encoder / stuck pendingRecordingPrefix actually runs.
         boolean wedgeRetryDriven = false;
 
         // Try to (re)start GearMonitor before reading. If GearMonitor.start()
@@ -526,6 +557,24 @@ public class RecordingModeManager {
                 }
             } catch (Exception ignored) {
                 // GearMonitor unavailable — keep our current value
+            }
+
+            // Hardware interlock: check if vehicle is charging
+            isCharging = false;
+            try {
+                isCharging = com.overdrive.app.monitor.ChargingDetector.getInstance().isCharging();
+            } catch (Throwable ignored) {}
+
+            if (isCharging) {
+                hwGear = com.overdrive.app.monitor.GearMonitor.GEAR_P;
+            } else if (hwAcc && (hwGear == com.overdrive.app.monitor.GearMonitor.GEAR_P || hwGear == com.overdrive.app.monitor.GearMonitor.GEAR_N)) {
+                // Fallback: If ACC is ON and GPS speed >= 3 km/h or moving, promote gear to D
+                try {
+                    com.overdrive.app.monitor.GpsMonitor gps = com.overdrive.app.monitor.GpsMonitor.getInstance();
+                    if (gps != null && (gps.getSpeed() * 3.6f >= 3.0f || gps.isMoving())) {
+                        hwGear = com.overdrive.app.monitor.GearMonitor.GEAR_D;
+                    }
+                } catch (Throwable ignored) {}
             }
 
             accChanged = hwAcc != accIsOn;
@@ -720,6 +769,7 @@ public class RecordingModeManager {
 
             shouldRetryActivation = !accChanged && !gearChanged && accIsOn
                     && (!modeActive || (wedgeDetected && wedgeRetryAllowed))
+                    && !isCharging
                     && (currentMode == Mode.CONTINUOUS
                         || (currentMode == Mode.DRIVE_MODE && isDrivingGear(currentGear))
                         // PROXIMITY_GUARD is ACC-gated in ALL gears (incl P) — retry
@@ -824,6 +874,20 @@ public class RecordingModeManager {
         // No ACC edge on this tick — drop any stale handoff marker so it can
         // never suppress a genuine future edge.
         probeEdgeHandedOffToDaemon = null;
+
+        // If vehicle is charging, driving recordings must be deactivated
+        if (isCharging) {
+            Mode deactCharging = null;
+            synchronized (this) {
+                if (modeActive && (currentMode == Mode.CONTINUOUS || currentMode == Mode.DRIVE_MODE)) {
+                    logger.info("Re-sync (" + reason + "): vehicle is CHARGING — deactivating driving recording (" + currentMode + ")");
+                    deactCharging = currentMode;
+                }
+            }
+            if (deactCharging != null) {
+                runDeactivateGuarded(deactCharging);
+            }
+        }
 
         // ACC state unchanged but mode might have failed to start at construction.
         // Retry activation if conditions are met and modeActive is false. Use
@@ -1779,6 +1843,16 @@ public class RecordingModeManager {
             accIsOn = isOn;
 
             if (isOn) {
+                boolean isChargingNow = false;
+                try {
+                    isChargingNow = com.overdrive.app.monitor.ChargingDetector.getInstance().isCharging();
+                } catch (Throwable ignored) {}
+
+                if (isChargingNow && (currentMode == Mode.CONTINUOUS || currentMode == Mode.DRIVE_MODE)) {
+                    logger.info("ACC ON edge but vehicle is CHARGING — suppressing driving recording (" + currentMode + ")");
+                    return;
+                }
+
                 if (wasOn && modeActive) {
                     logger.debug("ACC already ON and mode active, ignoring duplicate notification");
                     return;

@@ -706,9 +706,10 @@ public class TelegramBotDaemon {
         lastProxyCheckTime = System.currentTimeMillis();
 
         OkHttpClient.Builder builder = new OkHttpClient.Builder()
-                .connectTimeout(30, TimeUnit.SECONDS)
-                .readTimeout(60, TimeUnit.SECONDS)
-                .writeTimeout(30, TimeUnit.SECONDS);
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(45, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true);
 
         // Check for global proxy settings
         java.net.Proxy proxy = getGlobalProxy();
@@ -735,6 +736,7 @@ public class TelegramBotDaemon {
         uploadHttpClient = base.newBuilder()
                 .writeTimeout(UPLOAD_WRITE_TIMEOUT_SEC, TimeUnit.SECONDS)
                 .readTimeout(UPLOAD_READ_TIMEOUT_SEC, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
                 .build();
     }
 
@@ -751,15 +753,21 @@ public class TelegramBotDaemon {
     private static final long UPLOAD_READ_TIMEOUT_SEC = 120L;
 
     /**
-     * Invalidate HTTP client so next request re-checks proxy.
+     * Invalidate HTTP client so next request re-checks proxy and flushes stale pool.
      * Called on connection failures.
      */
     private static synchronized void onHttpFailure() {
-        // Re-check proxy if last check was more than 10 seconds ago. synchronized
-        // (same monitor as refreshHttpClient) so the elapsed-check + rebuild is
-        // atomic across the poll thread and IPC workers — no double rebuild.
+        try {
+            if (httpClient != null) {
+                httpClient.connectionPool().evictAll();
+            }
+            if (uploadHttpClient != null) {
+                uploadHttpClient.connectionPool().evictAll();
+            }
+        } catch (Throwable ignored) {}
+
         long elapsed = System.currentTimeMillis() - lastProxyCheckTime;
-        if (elapsed > 10_000) {
+        if (elapsed > 5_000) {
             refreshHttpClient();
         }
     }
@@ -844,6 +852,18 @@ public class TelegramBotDaemon {
      * Reads from: settings get global http_proxy (format: host:port)
      */
     private static java.net.Proxy getGlobalProxy() {
+        try {
+            if (com.overdrive.app.mqtt.ProxyHelper.isProxyAvailable()) {
+                java.net.Proxy proxy = com.overdrive.app.mqtt.ProxyHelper.getHttpProxy();
+                if (proxy != null) {
+                    log("Using sing-box/Tailscale proxy for Telegram: " + proxy.address());
+                    return proxy;
+                }
+            }
+        } catch (Throwable t) {
+            log("ProxyHelper probe error: " + t.getMessage());
+        }
+
         try {
             String proxyStr = execShell("settings get global http_proxy 2>/dev/null");
             if (proxyStr == null || proxyStr.trim().isEmpty() || proxyStr.trim().equals("null") || proxyStr.trim().equals(":0")) {

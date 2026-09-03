@@ -30,12 +30,10 @@ public final class TelegramDaemonLauncher {
 
     private TelegramDaemonLauncher() {}
 
-    /** Returns true if a process named {@code DAEMON_PROCESS} is running. */
+    /** Returns true if a process named {@code DAEMON_PROCESS} or watchdog script is running. */
     public static boolean isRunning() {
-        // grep -F = fixed-string match (no regex); avoids matching the grep
-        // process itself, log-file paths in argv, or stray characters in
-        // commands of unrelated processes.
-        String out = execShell("ps -A | grep -F " + DAEMON_PROCESS + " | grep -v grep");
+        // Check if either the daemon process itself or its watchdog script is alive
+        String out = execShell("ps -A -o ARGS | grep -E 'telegram_bot_daemon|start_telegram\\.sh' | grep -v grep");
         return out != null && !out.trim().isEmpty();
     }
 

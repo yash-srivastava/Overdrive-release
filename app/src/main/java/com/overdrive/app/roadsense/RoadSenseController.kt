@@ -36,6 +36,7 @@ import com.overdrive.app.roadsense.sync.CloudflareEdgeSyncProvider
 import com.overdrive.app.roadsense.sync.DeviceId
 import com.overdrive.app.roadsense.sync.RoadSenseSyncProvider
 import com.overdrive.app.roadsense.sync.TileCursor
+import com.overdrive.app.monitor.AccMonitor
 import com.overdrive.app.roadsense.warn.OverlayState
 import kotlin.math.abs
 
@@ -662,8 +663,8 @@ class RoadSenseController @JvmOverloads constructor(
         // lost in-flight event. Same off-the-100-Hz-path cadence as the yaw rebuild.
         maybeApplyDetectionSensitivity(cfgSnap)
         val dyn = vehicleSource.latest(now)
-        val accOn = com.overdrive.app.monitor.AccMonitor.isAccOn()
-        val accAuth = com.overdrive.app.monitor.AccMonitor.isAccStateAuthoritative()
+        val accOn = AccMonitor.isAccOn()
+        val accAuth = AccMonitor.isAccStateAuthoritative()
         // Gear for the regime gate: prefer the AUTHORITATIVE GearMonitor (200 ms poll)
         // ONLY while it's actually running, else fall back to the collector snapshot.
         // CRITICAL (audit): GearMonitor.currentGear defaults to GEAR_P(1) and is never

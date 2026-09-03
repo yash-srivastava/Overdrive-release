@@ -857,8 +857,8 @@ public class ChargingApiHandler {
             boolean isCloudCharging = cloudSnap != null && cloudSnap.getChargingStateAsSdk() == 1;
             boolean isCloudPlugged = isCloudCharging || (cloudSnap != null && cloudSnap.chargingState == 15);
 
-            boolean hasLocalDetector = after != null;
-            boolean effectiveCharging = hasLocalDetector ? after.charging : isCloudCharging;
+            boolean hasLocalDetector = after != null && after.observedAtMs > 0;
+            boolean effectiveCharging = hasLocalDetector ? after.charging : (isCloudCharging && gunState != 1 && gunState != BydVehicleData.UNAVAILABLE);
 
             ChargingStateData.ChargingStatus status = state != null
                     ? state.status : (effectiveCharging ? ChargingStateData.ChargingStatus.CHARGING : ChargingStateData.ChargingStatus.UNKNOWN);

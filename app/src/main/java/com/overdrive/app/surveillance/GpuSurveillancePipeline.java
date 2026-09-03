@@ -321,8 +321,8 @@ public class GpuSurveillancePipeline {
     // Configuration
     private final int cameraWidth;
     private final int cameraHeight;
-    private final int encoderWidth;
-    private final int encoderHeight;
+    private int encoderWidth;
+    private int encoderHeight;
     private final File eventOutputDir;
     private GpuPipelineConfig config;
     
@@ -423,8 +423,21 @@ public class GpuSurveillancePipeline {
         com.overdrive.app.camera.ResolvedCameraConfig resolved =
             com.overdrive.app.camera.CameraConfigResolver.resolve();
         if (isDilink5) {
-            this.encoderWidth = 1920;
-            this.encoderHeight = 1080;
+            String q = "STANDARD";
+            try {
+                org.json.JSONObject rec = com.overdrive.app.config.UnifiedConfigManager.loadConfig().optJSONObject("recording");
+                if (rec != null) {
+                    q = rec.optString("recordingQuality", "STANDARD");
+                }
+            } catch (Throwable ignored) {}
+            boolean want4K = "ULTRA_4K".equalsIgnoreCase(q);
+            if (want4K) {
+                this.encoderWidth = 3840;
+                this.encoderHeight = 2160;
+            } else {
+                this.encoderWidth = 1920;
+                this.encoderHeight = 1080;
+            }
         } else if (resolved != null && resolved.getProfile() != null) {
             this.encoderWidth = resolved.getProfile().getEncoderWidth();
             this.encoderHeight = resolved.getProfile().getEncoderHeight();
@@ -1657,8 +1670,23 @@ public class GpuSurveillancePipeline {
         int bitrate = config.getEffectiveBitrate();
         int fps = loadTargetFps();
 
+        boolean isDilink5 = com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported();
+        if (isDilink5) {
+            if (config != null && config.is4K()) {
+                this.encoderWidth = 3840;
+                this.encoderHeight = 2160;
+                codecMimeType = "video/hevc";
+                com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.set4KUltraEnabled(true);
+            } else {
+                this.encoderWidth = 1920;
+                this.encoderHeight = 1080;
+                com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.set4KUltraEnabled(false);
+            }
+        }
+
         logger.info("Creating new encoder: " +
             (codecMimeType.contains("hevc") ? "H.265" : "H.264") +
+            " " + encoderWidth + "x" + encoderHeight +
             " @ " + fps + "fps, " + (bitrate / 1_000_000) + " Mbps");
 
         // FIX (audit R4, Findings 1+2): on encoder allocation failure, ensure
@@ -1955,8 +1983,24 @@ public class GpuSurveillancePipeline {
         String codecMimeType = config.getCodecMimeType();
         int bitrate = config.getEffectiveBitrate();
         int fps = loadTargetFps();
+
+        boolean isDilink5 = com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported();
+        if (isDilink5) {
+            if (config != null && config.is4K()) {
+                this.encoderWidth = 3840;
+                this.encoderHeight = 2160;
+                codecMimeType = "video/hevc";
+                com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.set4KUltraEnabled(true);
+            } else {
+                this.encoderWidth = 1920;
+                this.encoderHeight = 1080;
+                com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.set4KUltraEnabled(false);
+            }
+        }
+
         logger.info("Creating encoder with config: " +
             (codecMimeType.contains("hevc") ? "H.265" : "H.264") +
+            " " + encoderWidth + "x" + encoderHeight +
             " @ " + fps + "fps, " + (bitrate / 1_000_000) + " Mbps");
         encoder = new HardwareEventRecorderGpu(encoderWidth, encoderHeight, fps, bitrate, codecMimeType);
         encoder.setManualClipRetentionDuration(

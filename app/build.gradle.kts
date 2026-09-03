@@ -56,7 +56,7 @@ tasks.register("downloadOpenH264") {
 }
 
 tasks.matching { it.name.contains("CMake") || it.name.contains("ExternalNative") }.configureEach {
-    dependsOn("downloadOpenH264", "downloadOpenCV")
+    dependsOn("downloadOpenH264", "downloadOpenCV", "downloadFastCam")
 }
 
 // OpenCV-mobile version for surveillance module (minimal build, ~3MB vs ~20MB)
@@ -149,7 +149,90 @@ tasks.register("downloadOpenCV") {
 
 // Check surveillance dependencies before build
 tasks.register("checkSurveillanceDeps") {
-    dependsOn("downloadOpenCV")
+    dependsOn("downloadOpenCV", "downloadFastCam")
+}
+
+// Ensure fast_cam precompiled binaries are present before CMake build
+tasks.register("downloadFastCam") {
+    val jniLib = file("src/main/jniLibs/arm64-v8a/libfast_cam_client.so")
+    val assetBin = file("src/main/assets/dilink5/fast_cam_capture")
+    val header = file("src/main/cpp/include/fast_cam_bridge.h")
+
+    doLast {
+        if (!jniLib.exists() || !assetBin.exists() || !header.exists()) {
+            val relArchive = rootProject.file("releases/overdrive_fast_cam_release.tar.gz")
+            val localArchive = if (relArchive.exists()) relArchive else rootProject.file("frame_grabber_light/release/overdrive_fast_cam_release.tar.gz")
+            val altLocal = rootProject.file("frame_grabber_light/fast_cam_capture")
+
+            if (localArchive.exists()) {
+                println("Extracting fast_cam binaries from local release archive: ${localArchive.absolutePath}")
+                ant.invokeMethod("untar", mapOf(
+                    "src" to localArchive.absolutePath,
+                    "dest" to layout.buildDirectory.dir("fast_cam_unpack").get().asFile.absolutePath,
+                    "compression" to "gzip"
+                ))
+                val tempDir = layout.buildDirectory.dir("fast_cam_unpack").get().asFile
+                val unpackedLib = file("${tempDir}/jniLibs/arm64-v8a/libfast_cam_client.so")
+                if (unpackedLib.exists()) {
+                    jniLib.parentFile.mkdirs()
+                    unpackedLib.copyTo(jniLib, overwrite = true)
+                }
+                val unpackedBin = file("${tempDir}/bin/fast_cam_capture")
+                if (unpackedBin.exists()) {
+                    assetBin.parentFile.mkdirs()
+                    unpackedBin.copyTo(assetBin, overwrite = true)
+                }
+                val unpackedH = file("${tempDir}/include/fast_cam_bridge.h")
+                if (unpackedH.exists()) {
+                    header.parentFile.mkdirs()
+                    unpackedH.copyTo(header, overwrite = true)
+                }
+                println("✓ fast_cam binaries unpacked and configured successfully")
+            } else if (altLocal.exists()) {
+                println("Copying fast_cam binaries from local fast_cam_capture directory...")
+                val libSrc = file("${altLocal}/jniLibs/arm64-v8a/libfast_cam_client.so")
+                val binSrc = file("${altLocal}/bin/fast_cam_capture")
+                val hSrc = file("${altLocal}/include/fast_cam_bridge.h")
+                if (libSrc.exists()) {
+                    jniLib.parentFile.mkdirs()
+                    libSrc.copyTo(jniLib, overwrite = true)
+                }
+                if (binSrc.exists()) {
+                    assetBin.parentFile.mkdirs()
+                    binSrc.copyTo(assetBin, overwrite = true)
+                }
+                if (hSrc.exists()) {
+                    header.parentFile.mkdirs()
+                    hSrc.copyTo(header, overwrite = true)
+                }
+                println("✓ fast_cam binaries synchronized from source project")
+            } else {
+                println("Downloading fast_cam binaries from GitHub release...")
+                val releaseUrl = "https://github.com/francescodoffizi/Overdrive-release/releases/download/fast_cam_v1.0/overdrive_fast_cam_release.tar.gz"
+                val dlFile = layout.buildDirectory.file("overdrive_fast_cam_release.tar.gz").get().asFile
+                dlFile.parentFile.mkdirs()
+                try {
+                    ant.invokeMethod("get", mapOf("src" to releaseUrl, "dest" to dlFile.absolutePath))
+                    if (dlFile.exists() && dlFile.length() > 1000) {
+                        ant.invokeMethod("untar", mapOf(
+                            "src" to dlFile.absolutePath,
+                            "dest" to layout.buildDirectory.dir("fast_cam_unpack").get().asFile.absolutePath,
+                            "compression" to "gzip"
+                        ))
+                        val tempDir = layout.buildDirectory.dir("fast_cam_unpack").get().asFile
+                        file("${tempDir}/jniLibs/arm64-v8a/libfast_cam_client.so").copyTo(jniLib, overwrite = true)
+                        file("${tempDir}/bin/fast_cam_capture").copyTo(assetBin, overwrite = true)
+                        file("${tempDir}/include/fast_cam_bridge.h").copyTo(header, overwrite = true)
+                        println("✓ fast_cam binaries downloaded and configured successfully")
+                    }
+                } catch (e: Exception) {
+                    println("⚠ Could not download fast_cam binaries: ${e.message}")
+                }
+            }
+        } else {
+            println("✓ fast_cam precompiled binaries present")
+        }
+    }
 }
 
 
@@ -201,6 +284,7 @@ android {
     }
     namespace = "com.overdrive.app"
     compileSdk = 36
+    buildToolsVersion = "36.0.0"
     ndkVersion = "26.1.10909125"
 
     defaultConfig {
@@ -221,7 +305,7 @@ android {
         // value (e.g. `-PoverdriveVersionName=27.4 -PoverdriveVersionCode=12`)
         // without a source edit per release; the defaults track the current
         // rolling head so a plain local build is still accurate.
-        versionCode = (project.findProperty("overdriveVersionCode") as? String)?.toIntOrNull() ?: 66
+        versionCode = (project.findProperty("overdriveVersionCode") as? String)?.toIntOrNull() ?: 102
         versionName = (project.findProperty("overdriveVersionName") as? String) ?: "50.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         

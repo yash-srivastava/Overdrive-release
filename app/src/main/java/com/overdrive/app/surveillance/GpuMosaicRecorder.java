@@ -855,11 +855,9 @@ public class GpuMosaicRecorder {
         // frames pay zero uniform uploads + zero lock acquisitions.
         if (uniformsDirty.compareAndSet(true, false)) {
             if (uApplyManualYFlipLocation >= 0) {
-                // Layouts 1 and 3 consume SurfaceTexture output, whose matrix
-                // already contains the producer Y-flip. Layouts 0 and 2 use
-                // the legacy orientation and still need the manual flip. DiLink 5 is upright.
+                // Layouts 1 and 3 consume SurfaceTexture output. Layouts 0, 2 and DiLink 5 need the manual flip.
                 GLES20.glUniform1f(uApplyManualYFlipLocation,
-                    (cameraLayout == 1 || cameraLayout == 3 || com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) ? 0.0f : 1.0f);
+                    (cameraLayout == 1 || cameraLayout == 3) ? 0.0f : 1.0f);
             }
             if (uProducerForFrontLocation >= 0) {
                 synchronized (producerCornerMapLock) {

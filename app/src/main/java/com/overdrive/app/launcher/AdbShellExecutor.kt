@@ -72,6 +72,19 @@ class AdbShellExecutor(private val context: Context) {
         }
         
         fun isAuthPending(): Boolean = isAuthPending.get()
+
+        fun enforceGlobalAdbSettings(context: Context) {
+            try {
+                val cr = context.contentResolver
+                android.provider.Settings.Global.putInt(cr, "adb_enabled", 1)
+                android.provider.Settings.Global.putInt(cr, "adb_wifi_enabled", 1)
+                android.provider.Settings.Global.putInt(cr, "adb_allowed_connection_time", 0)
+                android.provider.Settings.Global.putInt(cr, "development_settings_enabled", 1)
+                android.provider.Settings.Global.putInt(cr, "stay_on_while_plugged_in", 7)
+            } catch (t: Throwable) {
+                LogManager.getInstance().warn(TAG, "enforceGlobalAdbSettings failed: ${t.message}")
+            }
+        }
     }
     
     interface AdbAuthCallback {
@@ -319,8 +332,13 @@ class AdbShellExecutor(private val context: Context) {
             
             // Check if ADB port is even listening before trying to connect
             if (!isAdbPortOpen()) {
-                logger.warn(TAG, "ADB port $ADB_PORT not open - ADB not enabled?")
-                throw Exception("ADB port not open")
+                logger.warn(TAG, "ADB port $ADB_PORT not open - attempting self-healing via Settings.Global...")
+                enforceGlobalAdbSettings(context)
+                try { Thread.sleep(1000) } catch (ignored: InterruptedException) {}
+                if (!isAdbPortOpen()) {
+                    logger.warn(TAG, "ADB port $ADB_PORT still not open after self-healing attempt")
+                    throw Exception("ADB port not open")
+                }
             }
             
             val adbKeyPair = getOrCreateAdbKeyPair()

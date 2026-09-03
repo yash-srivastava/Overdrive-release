@@ -4,12 +4,91 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
 
 ## [In corso / Unreleased]
 
-- **Ottimizzazione CPU & Prevenzione Latenza Pad (YOLO AI Threading)**:
-  - `YoloDetector.kt`: Ridotti i thread CPU del motore TFLite da 4 a 2 (`cpuOptions.setNumThreads(2)`), lasciando sempre liberi e prioritari i core dedicati al sottosistema grafico/touch di Android Automotive (`SurfaceFlinger` e UI del pad).
+- **Allineamento con Upstream `origin/main` & Risoluzione Conflitti PR**:
+  - Eseguito il merge dei commit più recenti di `origin/main` (`ead978a4`).
+  - Risolto il conflitto `modify/delete` causato dalla dismissione upstream della cartella `dilink-probe/`.
+  - Verificata la completa compatibilità di compilazione con Gradle e Corretto 17 (`BUILD SUCCESSFUL`).
 
-- **Correzione Falso Rilevamento Ricarica ("Charging in progress") da Cloud BYD**:
-  - `ChargingApiHandler.java`: Risolto il bug in cui `cloudSnap.chargingState > 0` interpretava il valore sentinella/inattivo `15` (`CONNECTED`) di BYD Cloud come ricarica attiva (`charging = true`), mostrando erroneamente *"Charging in progress"* sulla dashboard a cavo scollegato e potenza 0 kW.
-  - La condizione verifica ora esclusivamente lo stato effettivo di ricarica (`cloudSnap.getChargingStateAsSdk() == 1`) e assegna sempre priorità autoritativa alle letture del `ChargingDetector` locale del veicolo.
+- **Architettura Ibrida Dual-Pipeline 4K Ultra-HD & Streaming Web 720p (`video_Improve.md`, `qcarcam_bridge.cpp`, `GpuPipelineConfig.java`, `GpuSurveillancePipeline.java`, `DiLink5QCarCamBackend.java`, `CMakeLists.txt`)**:
+  - **Integrazione Nuovi Binari Precompilati `fast_cam_capture` & `libfast_cam_client.so`**: Sostituiti gli asset e le librerie native con la build ARM64 compilata da `frame_grabber_light/fast_cam_capture/` (binario 21.912 bytes con supporto `--all --time 0` e libreria client da 8.344 bytes con `SONAME: libfast_cam_client.so`).
+  - **Doppia Pipeline Indipendente & Zero-Copy**:
+    - **Storage Locale Dashcam/Sentinella (4K Ultra-HD HEVC)**: Implementata la codifica hardware a piena risoluzione nativa dei sensori ($3840 \times 2600$ o $3840 \times 2160$ a 30 FPS) tramite encoder hardware `c2.qti.hevc.encoder` (H.265) a 12 Mbps, garantendo il 100% dei pixel nativi senza downsampling per targhe e dettagli forensi.
+    - **Streaming Remoto Web & Display Pad (720p H.264)**: Mantenuta in parallelo la pipeline `streamEncoder` a 720p ($1280 \times 720$) H.264 a 1.5 Mbps per la fruizione fluida via WebSocket/JMuxer su reti 4G/Web a basso consumo dati.
+  - **Compositore Nativo Mosaico 4K & Geometria Dinamica (`qcarcam_bridge.cpp`)**: Aggiornato il thread client IPC per invocare `FastCamClient::compose4K` (Mode 5) su buffer 4K dedicati e `FastCamClient::compose2x2` (Mode 4 per 1080p), con adattamento dinamico runtime della geometria del buffer `ANativeWindow` (`ANativeWindow_setBuffersGeometry`).
+  - **Supporto Configurazione & Profilo `ULTRA_4K` (`GpuPipelineConfig.java`, `GpuSurveillancePipeline.java`, `DiLink5QCarCamBackend.java`)**: Aggiunto l'enum `RecordingQuality.ULTRA_4K` (12 Mbps HEVC / 18 Mbps H.264) e il metodo `is4K()`. All'attivazione del profilo, la pipeline alloca dinamicamente il canvas 4K e attiva la modalità 4K sul backend nativo (`DiLink5QCarCamBackend.set4KUltraEnabled(true)`).
+  - **Archivio Release & Task Gradle `downloadFastCam` per Gestione PR (`app/build.gradle.kts`, `overdrive_fast_cam_release.tar.gz`, `PR_DESCRIPTION.md`)**: Posizionato l'archivio precompilato in `frame_grabber_light/release/overdrive_fast_cam_release.tar.gz` (SHA-256: `ec116567243135e9d2fcea58386e1483920cb1248f00cda60b2f2bfd81d9e7ba`) e registrato il task automatico `:app:downloadFastCam` in Gradle, garantendo a chiunque effettui il clone della PR o la build in CI/CD l'estrazione automatica di `libfast_cam_client.so`, `fast_cam_capture` e `fast_cam_bridge.h` per una compilazione out-of-the-box immediata.
+
+- **Interblocco Ricarica Hardware & Soppressione Falso Movimento GPS in Ricarica (`GearMonitor.java`, `RecordingModeManager.java`)**:
+  - **Blocco Hardware Marcia in Ricarica (`GearMonitor.java`)**: Integrato il controllo prioritario `ChargingDetector.getInstance().isCharging()`. Quando la vettura è in ricarica (cavo inserito / potenza attiva), la marcia viene bloccata tassativamente su `GEAR_P` (Park), eliminando all'origine qualsiasi lettura spuria.
+  - **Soppressione Promozione Marcia da Drift/Jitter GPS (`RecordingModeManager.java`)**: Inibito il fallback di velocità GPS in caso di ricarica attiva, impedendo che le oscillazioni delle coordinate GPS all'interno del box/garage promuovano erroneamente la marcia da `P` a `D`.
+  - **Disattivazione Automatica Registrazione di Guida in Carica (`RecordingModeManager.java`)**: Sottoscritto `FusedStateListener` di `ChargingDetector`. All'avvio della sessione di ricarica o al risveglio del display, le modalità di registrazione di guida (`CONTINUOUS` e `DRIVE_MODE`) vengono automaticamente disattivate e soppresse, evitando sprechi di memoria, cicli di scrittura inutili su SD e falsi allarmi di guida a vettura parcheggiata alla colonnina/wallbox.
+
+- **Integrazione Demone Nativo Zero-Copy `fast_cam_capture` & `libfast_cam_client.so` su DiLink 5.0 (`qcarcam_bridge.cpp`, `DiLink5QCarCamBackend.java`, `DiLink5PowerDiagnostics.java`, `CMakeLists.txt`)**:
+  - **Sostituzione Pipeline Hardware Legacy (`qcarcam_test` + `libhook_qcarcam.so`)**: Dismesso l'utilizzo del binario diagnostico vendor `/vendor/bin/qcarcam_test`, dell'iniezione LD_PRELOAD `libhook_qcarcam.so` e dei file di configurazione XML (`4cam.xml`, `1cam.xml`).
+  - **Composizione Nativa Mosaico 2x2 & Switch Canali (`qcarcam_bridge.cpp`)**: Implementato in C++ l'algoritmo di composizione 2x2 grid in UYVY (`compose_2x2_uyvy`), assemblando contemporaneamente le 4 telecamere (Front, Right, Rear, Left) in un unico frame 1920x1300 a 30 FPS quando la pipeline richiede la modalità mosaico (`desired_cam == 4`), oltre al routing istantaneo a singola camera a piena risoluzione per i canali 0, 1, 2, 3.
+  - **Supporto Abstract Socket UNIX (`@fast_cam.sock`)**: Superata la restrizione di sicurezza di Android SELinux (che blocca con `Permission denied (13)` i socket di tipo filesystem creati in `/data/local/tmp/`), introducendo il binding e la connessione ad abstract domain socket (`@fast_cam.sock`) sia nel server daemon nativo che nel client bridge C++.
+  - **Link Diretto e Autonomo `fast_cam_bridge.cpp` in `libsurveillance.so`**: Eliminata la dipendenza dinamica esterna `DT_NEEDED` e i potenziali conflitti di soname compilando direttamente il codice del client IPC nel target `surveillance`, rendendo la libreria totalmente autonoma e priva di path host.
+  - **Supervisore Hardware & Auto-Deploy (`DiLink5QCarCamBackend.java`)**: Confezionato il binario `fast_cam_capture` in `assets/dilink5/` con estrazione in `/data/local/tmp/fast_cam_capture` (`chmod 755`), flag `--all --time 0` per acquisizione continuativa senza timeout e drain asincrono dello stdout.
+  - **Allineamento Diagnostica (`DiLink5PowerDiagnostics.java`)**: Monitoraggio runtime del processo `fast_cam_capture` al posto di `qcarcam_test`.
+
+- **Fix Priorità Rilevamento ACC / Sentinella & Integrazione `CarBodyManager.getShiftMode()` su DiLink 5.0 (`AccMonitor.java`, `GearMonitor.java`, `BydDataCollector.java`)**:
+  - **Inversione Priorità nel Probe ACC (`AccMonitor.java`)**: Assegnata priorità primaria all'enum hardware `dumpsys car_service PowerMode` (`4=PowerMode Standby`, `8=PowerMode Sleep`, `5=PowerMode Str`, `0=PowerMode Off`, `9=PowerMode Str Suspending`, `1=PowerMode Pre StartUp`) e allo stato interattivo del display. Il controllo di velocità telemetrica ora interviene solo se il veicolo non è in Standby/Sleep e non è in marcia P (`GEAR_P`), eliminando i falsi positivi da jitter del sensore GPS/velocità a vettura spenta e ferma che bloccavano l'attivazione della modalità Sentinella.
+  - **Integrazione `CarBodyManager.getShiftMode()` (`GearMonitor.java`, `BydDataCollector.java`)**: Allineata la lettura della marcia su DiLink 5.0 (BYD Sealion 7) al pattern di `abrp-telemetry-sl7`, interrogando il manager `"body"` (`CarBodyManager`) e la proprietà `getShiftMode()` (`1=P`, `2=R`, `3=N`, `4=D`, `0=Charging/Park`) con gestione del reset di connessione `isCarServiceBound()`.
+
+- **Fix Crash Loop TelegramBotDaemon, Watchdog Guard & Self-Healing Case Sensitivity (`DaemonLauncher.kt`, `TelegramDaemonLauncher.java`, `AccSentryDaemon.java`)**:
+  - **Risoluzione Dinamica APK & Watchdog PID Guard (`DaemonLauncher.kt`)**: Introdotta la query runtime `pm path com.overdrive.app` ad ogni ciclo watchdog (`start_telegram.sh`) e aggiunto il controllo di processo attivo su `/data/local/tmp/telegram_watchdog.pid` per impedire a priori lo spawn di watchdog concorrenti.
+  - **Fix Case Sensitivity in Self-Healing (`AccSentryDaemon.java`)**: Corretto il controllo `isProcessRunning("telegram_bot_daemon")` (precedentemente cercava con case errato `"TelegramBotDaemon"`, fallendo sistematicamente su Linux `pgrep` e scatenando il rilancio continuo del watchdog ogni 60 secondi).
+  - **Rafforzamento `isRunning()` (`TelegramDaemonLauncher.java`)**: Verifica congiunta del processo e dello script supervisore per evitare duplicati.
+
+- **Fix Rilevamento Marcia (D/R), Dashcam Automatica a 30 FPS & Dashboard di Guida in Tempo Reale (`GearMonitor.java`, `RecordingModeManager.java`, `DashboardStatusParser.kt`, `DashboardFragment.kt`, `DiLink5QCarCamBackend.java`)**:
+  - **Bypass Sicurezza Android 11 per `GearMonitor`**: Corretta l'istanziazione di `BYDAutoGearboxDevice` tramite `BydDeviceHelper.getDevice(...)` e `callGetter(...)`, risolvendo il `SecurityException` (UID 2000 mismatch) su DiLink 5.0 e consentendo la lettura istantanea delle marce `D`, `R`, `P`, `N`.
+  - **Promozione Automatica Dashcam su Movimento GPS**: Integrato in `RecordingModeManager` il fallback di movimento (`speed >= 3 km/h` o `isMoving = true`), garantendo l'attivazione immediata della registrazione continua a 30 FPS ad alta risoluzione anche durante la marcia.
+  - **Auto-Sovrascrittura Automatica Librerie Native**: `DiLink5QCarCamBackend` verifica la corrispondenza di dimensione/versione e sovrascrive automaticamente file obsoleti o corrotti in `/data/local/tmp/libhook_qcarcam.so` impostando permessi `755`, eliminando la necessità di interventi manuali via ADB per i tester.
+  - **Dashboard Dinamica in Tempo Reale**: Aggiornato `DashboardFragment` e `DashboardStatusParser` per mostrare sul display centrale lo stato reale del veicolo (`In Guida (D) · XX km/h (REC)`, `In Retromarcia (R)`, `Pronta / Parcheggiata (P)`, `In Ricarica (X.X kW)`, `Sentinella Attiva`).
+
+- **Hardening Persistenza ADB Wireless & Self-Healing h24 dei Demoni (`AccSentryDaemon.java`, `AdbShellExecutor.kt`, `BootReceiver.kt`)**:
+  - **Auto-Enforcement Periodico Impostazioni Globali**: Implementato in `AccSentryDaemon` (UID 2000 shell) l'aggiornamento forzato e continuo ogni 60 secondi di `adb_enabled = 1`, `adb_wifi_enabled = 1`, `adb_allowed_connection_time = 0`, `development_settings_enabled = 1` e `stay_on_while_plugged_in = 7` tramite `SettingsProvider`, impedendo a BYD di disattivare il debug wireless durante i cicli di standby o le soste prolungate.
+  - **Self-Healing Nativo dei Demoni Compagni**: `AccSentryDaemon` monitora costantemente i processi `CameraDaemon` (`byd_cam_daemon`) e `TelegramBotDaemon`; in caso di morte inattesa o crash, ne esegue il respawn automatico tramite gli script watchdog in `/data/local/tmp/` senza richiedere alcun comando ADB esterno o riapertura dell'app.
+  - **Auto-Recovery in Avvio & Boot**: Integrato l'auto-ripristino preventivo delle chiavi di debug in `BootReceiver` e in `AdbShellExecutor` su tentativi di connessione locale a `127.0.0.1:5555`, eliminando la necessità di riattivare manualmente ADB tramite la procedura degli 8 tap.
+
+- **Risoluzione Blocco "Connecting" Telecamere & Estrazione Nativa Multi-Livello `libhook_qcarcam.so` su DiLink 5.0 (`DiLink5QCarCamBackend.java`, `UnifiedConfigManager.kt`)**:
+  - **Risoluzione Bug Ricerca APK in `app_process`**: Sostituita la lettura di `System.getProperty("java.class.path")` con `System.getenv("CLASSPATH")`, garantendo che il demone autonomo individui sempre `base.apk` per estrarre la libreria nativa `libhook_qcarcam.so` in `/data/local/tmp/`.
+  - **Supporto Struttura Cartelle Android 11 (`~~hash/`)**: Implementata la scansione ricorsiva di `/data/app` fino a 3 livelli e il fallback su `pm path com.overdrive.app` e `Context.getPackageCodePath()`, superando le directory con hash casuali tipiche di Android 11 Automotive (`msmnile`).
+  - **Prevenzione Deadlock Pipe Processo Hardware (`qcarcam-test-drainer`)**: Aggiunto un thread di background per consumare e registrare in tempo reale lo stream combinato di `stdout/stderr` di `/vendor/bin/qcarcam_test`, evitando il riempimento del buffer di pipe (64 KB) e il conseguente stallo del demone.
+  - **Auto-Rilevamento Modello `sealion7` su Piattaforme DiLink 5.0**: Configurato il default del modello veicolo in `UnifiedConfigManager.kt` su `"sealion7"` (invece del generico `"seal"`) quando viene rilevata la presenza dell'architettura hardware DiLink 5.0 (`DiLink5QCarCamBackend.isSupported()`).
+
+- **Ottimizzazione Failover Rete 4G / LTE & Instradamento Proxy `sing-box` (`TelegramBotDaemon.java`)**:
+  - Integrato il rilevamento automatico del proxy `sing-box` (porta 8119) e `Tailscale` (porta 8539) tramite `ProxyHelper` in `TelegramBotDaemon`, instradando tutto il traffico Telegram e gli alert attraverso il tunnel VLESS quando la connettività 4G del veicolo è attiva a display spento.
+  - Abilitato `retryOnConnectionFailure(true)` su tutti i client HTTP e ridotti i timeout di connessione (15s connect) per accelerare il failover da Wi-Fi locale a rete cellulare 4G.
+  - Implementata l'eviction automatica e immediata del connection pool (`httpClient.connectionPool().evictAll()`) al primo errore di socket/rete, eliminando le socket orfane dell'interfaccia Wi-Fi spenta e consentendo al bot Telegram di riaprire istantaneamente le connessioni sul modem 4G LTE permanente del veicolo.
+
+- **Sentry Keep-Awake h24 & Supporto `WifiLock` per DiLink 5.0 / Android 11 (`AccSentryDaemon.java`)**:
+  - Eliminato l'invio di `KEYCODE_SLEEP` (223) e `goToSleep` nello spegnimento dello schermo in Sentry Mode, prevenendo la transizione di `mWakefulness` ad `Asleep` e la conseguente attivazione di `mHalAutoSuspendModeEnabled`.
+  - Implementato lo spegnimento display via Backlight-Off puro (`screen_brightness 0` / `StealthPanel.turnOff()`) con mantenimento dei `Suspend Blockers` del kernel (`mWakefulness=Awake`).
+  - Implementata la reflection per il metodo a 3 argomenti `PowerManager.userActivity(long when, int event, int flags)` di Android 11+ con flag `USER_ACTIVITY_FLAG_NO_CHANGE_LIGHTS = 1`, azzerando il timer di inattività a schermo spento.
+  - Integrato `WifiLock` (`WIFI_MODE_FULL_HIGH_PERF`) coordinato con il `PARTIAL_WAKE_LOCK` di sistema in `AccSentryDaemon`, prevenendo la disattivazione della scheda Wi-Fi/4G e garantendo la raggiungibilità h24 del tunnel Cloudflare, dei bot Telegram e della Dashboard Web a veicolo spento.
+
+- **Risoluzione Crash Loop `acc_sentry_daemon` & Stabilizzazione Connessione Veicolo (`AccSentryDaemon.java`)**:
+  - Risolto il crash fatale ricorrente (`FATAL EXCEPTION: BodyworkRegistration-1` causato da `NoClassDefFoundError: AbsBYDAutoBodyworkListener` / `AbsBYDAutoPowerListener`) sui sistemi DiLink dove le classi listener dell'SDK non sono esposte nel classpath shell.
+  - Implementato il controllo runtime preventivo `isBodyworkSupported()` / `isPowerListenerSupported()` e l'isolamento dell'istanziazione dei listener in registrar dedicati (`BodyworkListenerRegistrar` / `PowerListenerRegistrar`), con gestione sicura di `LinkageError` / `Throwable`.
+  - Abilitato il fallback immediato sull'heartbeat ACC per garantire il mantenimento ininterrotto dei WakeLock e del monitoraggio energetico, impedendo il deep-sleep non controllato dell'headunit e le conseguenti disconnessioni dell'interfaccia Wi-Fi / ADB (`device offline`).
+
+- **Correzione Mappatura Hardware Stato Blocco Porte (`VehicleControlApiHandler.java`, `LauncherApiHandler.java`, `AccMonitor.java`)**:
+  - Risolta l'inversione dello stato delle portiere tra la convenzione BYD SDK (`1 = UNLOCKED, 2 = LOCKED`) e l'API/Frontend Web (`1 = LOCKED, 2 = UNLOCKED`).
+  - Mappati correttamente i valori telemetrici hardware tramite `cloudLockToApi()`, ripristinando la visualizzazione immediata di vettura **Bloccata** (`overall = 1`) con lucchetto chiuso.
+
+- **Risoluzione Falso Blocco "Veicolo in movimento" sui Comandi Rapidi (`DrivingSafetyGuard.java`)**:
+  - Aggiunto il fallback sul canale telemetrico `BydVehicleData.gearMode` in `resolveGear()` nel caso in cui `GearMonitor` sia inattivo o in sosta prolungata, impedendo che lo stato marcia sconosciuto blocchi erroneamente i comandi di controllo con l'avviso *"Questa azione non è disponibile mentre il veicolo è in movimento"*.
+
+- **Prevenzione Falsi Stati di Ricarica al Boot & Sanity Check Dashboard (`ChargingApiHandler.java`, `index.html`)**:
+  - `ChargingApiHandler.java`: `effectiveCharging` richiede ora un campionamento live validato nel ciclo di vita corrente del processo (`after.observedAtMs > 0`), impedendo che vecchi stati di carica salvati nella cache SQLite o su disco prima del riavvio/crash dei servizi vengano serviti come attivi.
+  - `index.html`: La card della Dashboard richiede potenza attiva (>0 kW) o connettore fisicamente inserito (`plugged === true`) prima di attivare la modalità *"Charging in progress"*, prevenendo sfarfallii o stati incoerenti all'apertura della pagina.
+
+- **Auto-Estrazione Nativa `libhook_qcarcam.so` su Nuove Installazioni DiLink 5.0 (`DiLink5QCarCamBackend.java`)**:
+  - Aggiunta la funzione `ensureHookLibraryExtracted()` che su qualsiasi nuova installazione pulita dell'app estrae automaticamente la libreria `libhook_qcarcam.so` da `base.apk` o dalla directory native-libs dell'APK verso `/data/local/tmp/` e ne imposta i permessi di esecuzione (`chmod 755`), eliminando il problema dello schermo nero per i nuovi utenti/tester senza richiedere interventi manuali da ADB.
+
+- **Orientamento Video Dritto su Pipeline GPU Shader (`GpuStreamScaler.java`, `GpuMosaicRecorder.java`)**:
+  - Abilitato il parametro `uApplyManualYFlip = 1.0f` nello shader fragment OpenGL per DiLink 5.0 in modo da eseguire l'orientamento verticale corretto in un unico passaggio su GPU a costo zero di CPU, preservando al contempo `qcarcam_bridge.cpp` con l'indirizzamento lineare sequenziale standard `y * stride`.
 
 - **Risoluzione Rilevamento Stato ACC su DiLink 5.0 (Sealion 7) & Sicurezza Screen Deterrent in Guida**:
   - `AccMonitor.java`: Risolto il bug di parsing su `dumpsys car_service PowerMode` che matchava la stringa statica `All items` (contenente sempre i termini `Standby`/`Sleep`/`4=`), causando un perenne falso positivo `accOn=false / sentryMode=true` durante la marcia. Il comando ora isola la riga specifica `current` (riconoscendo correttamente `Pre StartUp`, `StartUp`, `DisPlay on`).

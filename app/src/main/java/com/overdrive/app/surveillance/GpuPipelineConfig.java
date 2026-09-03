@@ -51,7 +51,9 @@ public class GpuPipelineConfig {
         // ~45 MB/min @ H.265, evidence-grade
         PREMIUM (6_000_000,  9_000_000, "Premium"),
         // ~75 MB/min @ H.265, hardware ceiling
-        MAX     (10_000_000, 15_000_000, "Max");
+        MAX     (10_000_000, 15_000_000, "Max"),
+        // ~90 MB/min @ H.265, 4K Ultra-HD native sensor resolution (100% native pixels)
+        ULTRA_4K(12_000_000, 18_000_000, "Ultra 4K");
 
         public final int bitrateH265;
         public final int bitrateH264;
@@ -120,6 +122,11 @@ public class GpuPipelineConfig {
                 case "HIGH": return HIGH;
                 case "PREMIUM": return PREMIUM;
                 case "MAX": return MAX;
+                case "ULTRA_4K":
+                case "ULTRA":
+                case "4K":
+                case "ULTRA_4K_HEVC":
+                    return ULTRA_4K;
                 default: return STANDARD;
             }
         }
@@ -143,6 +150,7 @@ public class GpuPipelineConfig {
          * equivalent shifts down one tier when going from 15 → 30 fps.
          */
         public String getQualityEquivalent(VideoCodec codec, int fps) {
+            if (this == ULTRA_4K) return "4K UHD";
             int br = getBitrateForCodec(codec);
             // Frame size: mosaic is 2560×1920 = 4.92 MP per frame.
             double bpp = (double) br / (2560.0 * 1920.0 * Math.max(1, fps));
@@ -392,6 +400,11 @@ public class GpuPipelineConfig {
             case STANDARD: this.bitratePreset = BitratePreset.MEDIUM; break;
             default:       this.bitratePreset = BitratePreset.HIGH; break;
         }
+    }
+
+    /** Checks if 4K Ultra-HD native sensor recording quality is selected. */
+    public boolean is4K() {
+        return recordingQuality == RecordingQuality.ULTRA_4K;
     }
     
     /**

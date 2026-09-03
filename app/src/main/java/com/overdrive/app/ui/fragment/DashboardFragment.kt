@@ -582,7 +582,9 @@ class DashboardFragment : Fragment() {
                 dashboardState = DashboardStateReducer.status(dashboardState, result)
                 renderVehicleState()
                 if (dashboardResumed) {
-                    mainHandler.postDelayed(statusRefreshRunnable, STATUS_REFRESH_MS)
+                    val isAccOn = (dashboardState.vehicle as? DashboardUiState.VehicleState.Ready)?.snapshot?.isAccOn == true
+                    val refreshMs = if (isAccOn) STATUS_REFRESH_ACTIVE_MS else STATUS_REFRESH_IDLE_MS
+                    mainHandler.postDelayed(statusRefreshRunnable, refreshMs)
                 }
             }
         }
@@ -682,13 +684,38 @@ class DashboardFragment : Fragment() {
             is DashboardUiState.VehicleState.Ready -> {
                 val snapshot = vehicle.snapshot
                 heroGreeting.setText(R.string.dashboard_modern_vehicle_now)
+                val isPowerOn = snapshot.isAccOn == true
+                val gear = snapshot.gear
+                val speed = snapshot.speedKmh
+                val isRecording = snapshot.isRecording == true
+                val isSentry = snapshot.isGpuSurveillance == true
+
                 heroSubtitle.text = when {
                     snapshot.charging?.fault == true ->
                         getString(R.string.dashboard_modern_charge_fault)
+                    snapshot.charging?.charging == true -> {
+                        val kw = snapshot.charging.powerKw
+                        if (kw != null && kw > 0.0) {
+                            "In Ricarica (${String.format(java.util.Locale.US, "%.1f", kw)} kW)"
+                        } else {
+                            getString(R.string.dashboard_modern_charging)
+                        }
+                    }
                     snapshot.charging?.full == true ->
                         getString(R.string.dashboard_modern_charge_complete)
-                    snapshot.charging?.charging == true ->
-                        getString(R.string.dashboard_modern_charging)
+                    isPowerOn && (gear == "D" || gear == "M" || gear == "S" || (speed != null && speed >= 3.0)) -> {
+                        val spdText = if (speed != null && speed >= 1.0) " · ${Math.round(speed)} km/h" else ""
+                        val recText = if (isRecording) " (REC)" else ""
+                        "In Guida (${gear ?: "D"})$spdText$recText"
+                    }
+                    isPowerOn && gear == "R" -> {
+                        val recText = if (isRecording) " (REC)" else ""
+                        "In Retromarcia (R)$recText"
+                    }
+                    isPowerOn && gear == "N" -> "In Folle (N)"
+                    isPowerOn && (gear == "P" || gear == null) -> "Pronta / Parcheggiata (P)"
+                    !isPowerOn && isSentry -> "Sentinella Attiva"
+                    snapshot.charging?.plugged == true -> "Collegata alla colonnina"
                     else -> getString(R.string.dashboard_modern_vehicle_connected)
                 }
                 vehicleSocValue.text = snapshot.socPercent?.let {
@@ -1824,7 +1851,8 @@ class DashboardFragment : Fragment() {
         private const val STATE_AI_INSIGHT_EXPANDED =
             "dashboard.ai_insight_expanded"
         private const val STATE_SELECTED_TUNNEL = "dashboard.selected_tunnel"
-        private const val STATUS_REFRESH_MS = 15_000L
+        private const val STATUS_REFRESH_ACTIVE_MS = 2_000L
+        private const val STATUS_REFRESH_IDLE_MS = 15_000L
         private const val RECORDING_STATS_RETRY_MS = 1_500L
         private const val MAX_RECORDING_STATS_RETRIES = 3
         private const val STATUS_CONNECT_TIMEOUT_MS = 2_000

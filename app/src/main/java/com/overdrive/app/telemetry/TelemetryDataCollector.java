@@ -53,6 +53,10 @@ public class TelemetryDataCollector {
     private Method getGearboxAutoModeTypeMethod;
     private Method getBrakePedalStateMethod;
 
+    // DiLink 5.0 / TS CarAdapterManager
+    private Object carBodyManager;
+    private Method getShiftModeMethod;
+
     // Turn signal detection via getTurnLightFlashState()
     // Returns: 0=off, 1=left, 2=right, 3=hazard (model-dependent)
     private Object lightDevice;
@@ -261,6 +265,23 @@ public class TelemetryDataCollector {
             logger.info("BYDAutoGearboxDevice initialized");
         } catch (Exception e) {
             logger.warn("BYDAutoGearboxDevice unavailable: " + e.getMessage());
+        }
+
+        // DiLink 5.0 / TS CarAdapterManager — CarBodyManager.getShiftMode()
+        try {
+            Class<?> camCls = Class.forName("com.ts.lib.caradapter.CarAdapterManager");
+            Method getInst = camCls.getMethod("getInstance", Context.class);
+            Object cam = getInst.invoke(null, permissiveContext);
+            if (cam != null) {
+                Method getMgr = camCls.getMethod("getCarAdapterManager", String.class);
+                carBodyManager = getMgr.invoke(cam, "body");
+                if (carBodyManager != null) {
+                    getShiftModeMethod = carBodyManager.getClass().getMethod("getShiftMode");
+                    logger.info("CarBodyManager.getShiftMode initialized for DiLink 5.0 gear telemetry");
+                }
+            }
+        } catch (Throwable t) {
+            logger.debug("CarBodyManager reflection unavailable: " + t.getMessage());
         }
 
         // BYDAutoLightDevice — getTurnLightFlashState() (more reliable than getLightStatus)
@@ -700,7 +721,37 @@ public class TelemetryDataCollector {
         }
 
         // Gearbox: gear mode (every poll — changes on shift)
-        if (gearboxDevice != null
+        boolean gearAcquired = false;
+        if (carBodyManager != null && getShiftModeMethod != null) {
+            try {
+                Object shiftObj = getShiftModeMethod.invoke(carBodyManager);
+                if (shiftObj instanceof Number) {
+                    int shift = ((Number) shiftObj).intValue();
+                    // Shift values: 0=parked/charging, 1=P, 2=R, 3=N, 4=D, 5=M, 6=S
+                    int mapped = -1;
+                    switch (shift) {
+                        case 0:
+                        case 1: mapped = 1; break; // GEAR_P
+                        case 2: mapped = 2; break; // GEAR_R
+                        case 3: mapped = 3; break; // GEAR_N
+                        case 4: mapped = 4; break; // GEAR_D
+                        case 5: mapped = 5; break; // GEAR_M
+                        case 6: mapped = 6; break; // GEAR_S
+                    }
+                    if (isValidGearMode(mapped)) {
+                        gearMode = mapped;
+                        lastGearMode = mapped;
+                        lastGearValid = true;
+                        lastGearReadElapsedRealtimeMs = pollElapsedRealtimeMs;
+                        gearAcquired = true;
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("Failed to read shift mode from CarBodyManager: " + e.getMessage());
+            }
+        }
+
+        if (!gearAcquired && gearboxDevice != null
                 && getGearboxAutoModeTypeMethod != null) {
             try {
                 int candidate =

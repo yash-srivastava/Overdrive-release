@@ -267,6 +267,9 @@ class BootReceiver : BroadcastReceiver() {
         lastStartTime = System.currentTimeMillis()
 
         try {
+            // Enforce persistent global ADB settings on boot/wakeup
+            com.overdrive.app.launcher.AdbShellExecutor.enforceGlobalAdbSettings(context.applicationContext)
+
             // Start DaemonKeepaliveService (foreground + sticky + wakelock)
             DaemonKeepaliveService.start(context.applicationContext)
 

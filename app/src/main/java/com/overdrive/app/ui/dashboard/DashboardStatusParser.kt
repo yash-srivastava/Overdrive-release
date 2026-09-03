@@ -22,6 +22,11 @@ data class DashboardVehicleSnapshot(
     val charging: DashboardChargingSnapshot?,
     val activeRecordingCameras: Int?,
     val rangeDetails: DashboardRangeDetails? = null,
+    val gear: String? = null,
+    val speedKmh: Double? = null,
+    val isAccOn: Boolean? = null,
+    val isRecording: Boolean? = null,
+    val isGpuSurveillance: Boolean? = null,
 )
 
 /**
@@ -126,6 +131,14 @@ object DashboardStatusParser {
         val charging = root.optJSONObject("charging")?.toChargingSnapshot()
         val recordingCount = root.optJSONArray("recording")?.validItemCount()
 
+        val recordingStatus = root.optJSONObject("recordingStatus")
+        val gear = recordingStatus?.optString("gear")?.takeIf { it.isNotBlank() }
+        val isRecording = recordingStatus?.optBoolean("isRecording", false) ?: false
+        val isAccOn = root.optBoolean("acc", false)
+        val isGpuSurveillance = root.optBoolean("gpuSurveillance", false)
+        val gps = root.optJSONObject("gps")
+        val speedKmh = gps?.finiteDouble("speed")?.let { it * 3.6 }?.takeIf { it >= 0.0 }
+
         val hasVehicleData = soc != null || distance != null || charging != null
         if (!hasVehicleData) {
             return DashboardStatusResult.Unavailable(
@@ -140,6 +153,11 @@ object DashboardStatusParser {
                 charging = charging,
                 activeRecordingCameras = recordingCount,
                 rangeDetails = rangeDetails,
+                gear = gear,
+                speedKmh = speedKmh,
+                isAccOn = isAccOn,
+                isRecording = isRecording,
+                isGpuSurveillance = isGpuSurveillance,
             )
         )
     }

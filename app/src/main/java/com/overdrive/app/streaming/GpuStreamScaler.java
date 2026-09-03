@@ -541,9 +541,9 @@ public class GpuStreamScaler {
                 if (uBsRectifyAspectLocation >= 0) GLES20.glUniform1f(uBsRectifyAspectLocation, bsRectifyAspect);
             }
             if (uApplyManualYFlipLocation >= 0) {
-                // SurfaceTexture layouts 1/3 use the matrix's Y-flip. DiLink 5 is also upright.
+                // SurfaceTexture layouts 1/3 use the matrix's Y-flip. Layout 0 / DiLink 5 needs manual Y-flip.
                 GLES20.glUniform1f(uApplyManualYFlipLocation,
-                    (cameraLayout == 1 || cameraLayout == 3 || com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) ? 0.0f : 1.0f);
+                    (cameraLayout == 1 || cameraLayout == 3) ? 0.0f : 1.0f);
             }
             if (uRedMaskStrengthLocation >= 0) {
                 GLES20.glUniform1f(uRedMaskStrengthLocation, redMaskEnabled ? 1.0f : 0.0f);

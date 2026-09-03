@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">OverDrive</string>
     <!-- Accessibility Service -->
     <string name="accessibility_service_description">Manté actiu el seguiment del vehicle OverDrive en segon pla. Aquest servei no llegeix ni interactua amb el contingut de la pantalla.</string>
@@ -1541,4 +1541,77 @@
     <string name="settings_about_vehicle_vin_hidden_a11y">VIN ocult</string>
     <string name="settings_about_vehicle_loading">S\'està carregant…</string>
     <string name="settings_about_vehicle_unavailable">No disponible</string>
+    <string name="camera_dilink4_passive_apa_label">Usa el port APA passiu 0</string>
+    <string name="camera_dilink4_passive_apa_subtitle">Deixa la sortida del panorama OEM intacta i registra el port de vista prèvia 0 tal com s\'ha subministrat. Useu quan el control de panorama forçat obre la pantalla vermella de calibratge. Alguns models exposen dues vistes en lloc de quatre.</string>
+    <string name="setup_autostart_enabling">S\'està activant l\'inici automàtic...</string>
+    <string name="setup_autostart_enabled">Inici automàtic activat</string>
+    <string name="setup_autostart_failed">No s\'ha pogut habilitar automàticament l\'inici automàtic — s\'obre l\'inici automàtic de BYD perquè pugueu fer-ho a mà.</string>
+    <string name="toast_traffic_monitor_persist_failed">Aplicat, però la preferència no s\'ha pogut desar — no sobreviurà a una actualització de microprogramari.</string>
+    <string name="nav_page_assistant">Assistent</string>
+    <string name="rail_assistant">Assistent</string>
+    <string name="settings_remote_listener_title" tools:ignore="MissingTranslation">Habilita l\'escolta de cabina</string>
+    <string name="settings_remote_listener_subtitle" tools:ignore="MissingTranslation">Permet sessions autenticades de vista en directe i comunicacions per a escoltar el micròfon de cabina mentre el cotxe està activat.</string>
+    <string name="settings_remote_audio_channel_title" tools:ignore="MissingTranslation">Compatibilitat amb la veu</string>
+    <string name="settings_remote_audio_channel_subtitle" tools:ignore="MissingTranslation">El mitjà manté els camins existents de l\'altaveu i del micròfon. La navegació coincideix amb l\'encaminament Di+ i la captura del micròfon de 8 kHz.</string>
+    <string name="settings_remote_audio_channel_media" tools:ignore="MissingTranslation">Multimèdia</string>
+    <string name="settings_remote_audio_channel_navigation" tools:ignore="MissingTranslation">Navegació</string>
+    <string name="cabin_audio_notification_channel" tools:ignore="MissingTranslation">Escolta de cabina</string>
+    <string name="cabin_audio_notification_title" tools:ignore="MissingTranslation">Escolta de cabina actiu</string>
+    <string name="cabin_audio_notification_text" tools:ignore="MissingTranslation">La consola web està rebent àudio del micròfon de cabina.</string>
+    <string name="recordings_segment_all">Tots</string>
+    <string name="recordings_segment_all_count">Tots · %d</string>
+    <string name="recording_preview_detected">Detectat</string>
+    <string name="recording_preview_no_detection">Sense detecció</string>
+    <string name="recording_preview_not_available">—</string>
+    <string name="recording_preview_distance">Distància</string>
+    <string name="recording_preview_recorded">S\'ha enregistrat</string>
+    <string name="recording_preview_duration">Durada</string>
+    <string name="recording_preview_storage">Emmagatzematge</string>
+    <string name="recording_preview_file_size">Mida del fitxer</string>
+    <string name="recording_preview_storage_internal">Intern</string>
+    <string name="recording_preview_storage_sd">Targeta SD</string>
+    <string name="recording_preview_storage_usb">USB</string>
+    <string name="recording_preview_storage_unknown">Desconegut</string>
+    <string name="recording_headline_activity">Activitat detectada</string>
+    <string name="recording_headline_motion">S\'ha detectat un moviment</string>
+    <string name="recording_headline_dashcam">Enregistrament de la càmera de davantal</string>
+    <string name="recording_headline_forward_camera">Enregistrament de la càmera frontal</string>
+    <string name="recording_headline_replay">Reproducció instantània</string>
+    <plurals name="recording_headline_person">
+        <item quantity="one">Persona detectada</item>
+        <item quantity="other">%1$d persones detectades</item>
+    </plurals>
+    <plurals name="recording_headline_vehicle">
+        <item quantity="one">S\'ha detectat un vehicle</item>
+        <item quantity="other">%1$d vehicles detectats</item>
+    </plurals>
+    <plurals name="recording_headline_bike">
+        <item quantity="one">S\'ha detectat una bicicleta</item>
+        <item quantity="other">S\'han detectat %1$d bicicletes</item>
+    </plurals>
+    <plurals name="recording_headline_animal">
+        <item quantity="one">Animal detectat</item>
+        <item quantity="other">%1$d animals detectats</item>
+    </plurals>
+    <plurals name="recording_actor_person">
+        <item quantity="one">%1$d persona</item>
+        <item quantity="other">%1$d persones</item>
+    </plurals>
+    <plurals name="recording_actor_vehicle">
+        <item quantity="one">%1$d vehicle</item>
+        <item quantity="other">%1$d vehicles</item>
+    </plurals>
+    <plurals name="recording_actor_bike">
+        <item quantity="one">%1$d bicicleta</item>
+        <item quantity="other">%1$d bicicletes</item>
+    </plurals>
+    <plurals name="recording_actor_animal">
+        <item quantity="one">%1$d animal</item>
+        <item quantity="other">%1$d animals</item>
+    </plurals>
+    <string name="recording_distance_very_close">Molt a prop</string>
+    <string name="recording_distance_close">Tanca</string>
+    <string name="recording_distance_mid">Interval mitjà</string>
+    <string name="recording_distance_far">Lluny</string>
+    <string name="cd_recording_more_actions">Més accions d\'enregistrament</string>
 </resources>

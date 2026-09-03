@@ -1087,7 +1087,8 @@ object UnifiedConfigManager {
         // to camera/SOH logic as a selected physical model on fresh installs.
         // Existing configs predate provenance, so preserve their prior model
         // behavior with the legacy source.
-        if (!vehicle.has("modelId")) vehicle.put("modelId", "seal")
+        val defaultModel = if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) "sealion7" else "seal"
+        if (!vehicle.has("modelId")) vehicle.put("modelId", defaultModel)
         if (!vehicle.has("modelSource")) {
             vehicle.put(
                 "modelSource",
@@ -3159,8 +3160,9 @@ object UnifiedConfigManager {
             }
             return stored
         }
+        val defaultModel = if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) "sealion7" else "seal"
         return JSONObject().apply {
-            put("modelId", "seal")
+            put("modelId", defaultModel)
             put("modelSource", VehicleModelSelection.SOURCE_UNSET)
             put("color", "#E8E8EC")
             put("driveSide", "rhd")

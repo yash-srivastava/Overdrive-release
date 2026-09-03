@@ -45,3 +45,10 @@ dilink5_camera_dump*
 # OS
 .DS_Store
 Thumbs.db
+
+# Pulled device data and local scratch dirs
+ref
+device_backup
+logs_debug
+downloaded_logs
+frame_grabber_light

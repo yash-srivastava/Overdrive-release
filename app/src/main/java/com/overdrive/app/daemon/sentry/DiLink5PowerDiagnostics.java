@@ -152,7 +152,7 @@ public class DiLink5PowerDiagnostics {
                 }
 
                 // 3. Hardware Camera Status
-                String qcarcamPid = execShell("pgrep -f qcarcam_test").trim();
+                String qcarcamPid = execShell("pgrep -f fast_cam_capture").trim();
                 boolean qcarcamRunning = !qcarcamPid.isEmpty();
                 boolean backendSupported = DiLink5QCarCamBackend.isSupported();
 
@@ -161,7 +161,7 @@ public class DiLink5PowerDiagnostics {
 
                 // Format entry
                 String entry = String.format(Locale.US,
-                        "[%s] ACC: '%s' | Screen: [%s, %s] | Wi-Fi: [Connected=%b, IP=%s, SSID=%s, RSSI=%d] | QCarCam: [Running=%b, PID=%s, Supported=%b] | AVM Alive: %b\n",
+                        "[%s] ACC: '%s' | Screen: [%s, %s] | Wi-Fi: [Connected=%b, IP=%s, SSID=%s, RSSI=%d] | FastCam: [Running=%b, PID=%s, Supported=%b] | AVM Alive: %b\n",
                         timestamp,
                         accAnimStatus.isEmpty() ? "0 (ON)" : accAnimStatus,
                         screenPower.isEmpty() ? "UNKNOWN" : screenPower,

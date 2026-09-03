@@ -305,37 +305,12 @@ public class AccMonitor {
         // We probe dumpsys car_service PowerMode, Android PowerManager/Display power state and doorLockStatus.
         if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
             try {
-                // 0. Check Vehicle Active Telemetry (Speed > 0 or in Gear = definitely ACC ON / Driving)
-                com.overdrive.app.byd.BydDataCollector collector = com.overdrive.app.byd.BydDataCollector.getInstance();
-                if (collector != null) {
-                    com.overdrive.app.byd.BydVehicleData vd = collector.getData();
-                    if (vd != null) {
-                        if (vd.speedKmh > 0 && vd.speedKmh != com.overdrive.app.byd.BydVehicleData.UNAVAILABLE) {
-                            accOn = true;
-                            inSentryMode = false;
-                            lastProbeTrustworthy = true;
-                            accOnAuthoritative = true;
-                            notifyAccEdge(true);
-                            CameraDaemon.log("AccMonitor [DiLink5]: Vehicle is MOVING (speed=" + vd.speedKmh + " km/h) -> accOn=true, sentryMode=false");
-                            return false;
-                        }
-                        if (vd.gearMode > com.overdrive.app.monitor.GearMonitor.GEAR_P && vd.gearMode <= com.overdrive.app.monitor.GearMonitor.GEAR_S) {
-                            accOn = true;
-                            inSentryMode = false;
-                            lastProbeTrustworthy = true;
-                            accOnAuthoritative = true;
-                            notifyAccEdge(true);
-                            CameraDaemon.log("AccMonitor [DiLink5]: Vehicle is IN GEAR (" + vd.gearMode + ") -> accOn=true, sentryMode=false");
-                            return false;
-                        }
-                    }
-                }
-
-                // 1. Check Automotive BYD PowerMode enum (Standby=4, Sleep=8, Str=5, Off=0 vs StartUp=2, Pre StartUp=1)
+                // 1. Check Automotive BYD PowerMode enum (Standby=4, Sleep=8, Str=5, Off=0, Pre StartUp=1 vs StartUp=2, DisPlay on=10)
                 String carServicePower = execShell("dumpsys car_service 2>/dev/null | grep -i 'Power Mute State' -A 3 | grep 'current' | head -1");
                 if (!carServicePower.isEmpty()) {
                     if (carServicePower.contains("4=PowerMode Standby") || carServicePower.contains("8=PowerMode Sleep") ||
                         carServicePower.contains("5=PowerMode Str") || carServicePower.contains("0=PowerMode Off") ||
+                        carServicePower.contains("1=PowerMode Pre StartUp") || carServicePower.contains("12=PowerMode Tod") ||
                         carServicePower.contains("9=PowerMode Str Suspending")) {
                         accOn = false;
                         inSentryMode = true;
@@ -344,7 +319,7 @@ public class AccMonitor {
                         notifyAccEdge(false);
                         CameraDaemon.log("AccMonitor [DiLink5]: Vehicle PowerMode is STANDBY/OFF (" + carServicePower.trim() + ") -> accOn=false, sentryMode=true");
                         return true;
-                    } else if (carServicePower.contains("2=PowerMode StartUp") || carServicePower.contains("1=PowerMode Pre StartUp") ||
+                    } else if (carServicePower.contains("2=PowerMode StartUp") ||
                                carServicePower.contains("10=PowerMode DisPlay on") || carServicePower.contains("3=PowerMode Degraded")) {
                         accOn = true;
                         inSentryMode = false;
@@ -371,6 +346,7 @@ public class AccMonitor {
                 }
 
                 // 3. Check Lock State (Vehicle Locked = ACC OFF)
+                com.overdrive.app.byd.BydDataCollector collector = com.overdrive.app.byd.BydDataCollector.getInstance();
                 if (collector != null) {
                     com.overdrive.app.byd.BydVehicleData vd = collector.getData();
                     if (vd != null && vd.doorLockStatus != null && vd.doorLockStatus.length > 0) {
@@ -385,9 +361,32 @@ public class AccMonitor {
                             return true;
                         }
                     }
+
+                    // 4. Check Vehicle Active Telemetry ONLY if not parked (Gear != P and Speed >= 3 km/h)
+                    if (vd != null) {
+                        if (vd.gearMode > com.overdrive.app.monitor.GearMonitor.GEAR_P && vd.gearMode <= com.overdrive.app.monitor.GearMonitor.GEAR_S) {
+                            accOn = true;
+                            inSentryMode = false;
+                            lastProbeTrustworthy = true;
+                            accOnAuthoritative = true;
+                            notifyAccEdge(true);
+                            CameraDaemon.log("AccMonitor [DiLink5]: Vehicle is IN GEAR (" + vd.gearMode + ") -> accOn=true, sentryMode=false");
+                            return false;
+                        }
+                        if (vd.gearMode != com.overdrive.app.monitor.GearMonitor.GEAR_P
+                                && vd.speedKmh >= 3.0f && vd.speedKmh != com.overdrive.app.byd.BydVehicleData.UNAVAILABLE) {
+                            accOn = true;
+                            inSentryMode = false;
+                            lastProbeTrustworthy = true;
+                            accOnAuthoritative = true;
+                            notifyAccEdge(true);
+                            CameraDaemon.log("AccMonitor [DiLink5]: Vehicle is MOVING in non-P gear (speed=" + vd.speedKmh + " km/h) -> accOn=true, sentryMode=false");
+                            return false;
+                        }
+                    }
                 }
 
-                // 4. Fallback: check sys.accanim.status if explicitly set to "1" (OFF)
+                // 5. Fallback: check sys.accanim.status if explicitly set to "1" (OFF)
                 String accAnim = getSystemProperty("sys.accanim.status", "");
                 if ("1".equals(accAnim)) {
                     accOn = false;

@@ -228,8 +228,8 @@ public final class LauncherApiHandler {
                         com.overdrive.app.byd.BydDataCollector.getInstance().getData();
                 if (vd != null && vd.doorLockStatus != null && vd.doorLockStatus.length >= 7) {
                     int overall = vd.doorLockStatus[6];
-                    if (overall == 1) locked = Boolean.TRUE;
-                    else if (overall == 2) locked = Boolean.FALSE;
+                    if (overall == 2) locked = Boolean.TRUE;
+                    else if (overall == 1) locked = Boolean.FALSE;
                 }
             } catch (Throwable ignored) {}
             o.put("locked", locked);

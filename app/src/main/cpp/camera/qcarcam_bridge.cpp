@@ -1,6 +1,6 @@
 // qcarcam_bridge.cpp — BYD DiLink 5.0 (Snapdragon SA8155P) Sidecar Bridge.
-// Connects to the native dilink5_cam_sidecar daemon via high-speed abstract UNIX socket (@dilink5_cam),
-// receives hardware frames, and posts them to Android's ANativeWindow / Surface.
+// Connects to the high-performance fast_cam_capture daemon via FastCamClient IPC,
+// receives zero-copy hardware frames, and posts them to Android's ANativeWindow / Surface.
 
 #include <jni.h>
 #include <android/log.h>
@@ -11,30 +11,17 @@
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
-#include <sys/socket.h>
-#include <sys/un.h>
 #include <atomic>
 #include <mutex>
+#include "fast_cam_bridge.h"
 
 #define TAG "QCarCamBridge"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN,  TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
-#define SOCKET_NAME "dilink5_cam"
 #define FRAME_WIDTH 1920
 #define FRAME_HEIGHT 1300
-#define MAX_RAW_FRAME_SIZE (FRAME_WIDTH * FRAME_HEIGHT * 2)
-#define MAGIC_HEADER 0x44494C35
-
-struct FrameHeader {
-    uint32_t magic;
-    uint32_t width;
-    uint32_t height;
-    uint32_t format; // 1 = UYVY, 2 = NV12
-    uint32_t data_size;
-    uint64_t timestamp;
-};
 
 namespace {
 
@@ -154,136 +141,124 @@ void convert_uyvy_to_rgba(const uint8_t* __restrict__ uyvy, int width, int heigh
     }
 }
 
-void convert_nv12_to_rgba(const uint8_t* nv12, int width, int height, uint32_t* dst_rgba, int dst_stride) {
-    int stride = (dst_stride > 0 ? dst_stride : width);
-    const uint8_t* y_plane = nv12;
-    const uint8_t* uv_plane = nv12 + (width * height);
-
-    for (int y = 0; y < height; y++) {
-        int src_y = y;
-        uint32_t* row = dst_rgba + y * stride;
-        for (int x = 0; x < width; x++) {
-            int y_val = y_plane[src_y * width + x];
-            int uv_idx = (src_y / 2) * width + (x & ~1);
-            float u = (float)uv_plane[uv_idx] - 128.0f;
-            float v = (float)uv_plane[uv_idx + 1] - 128.0f;
-
-            int r = (int)(y_val + 1.402f * v);
-            int g = (int)(y_val - 0.344136f * u - 0.714136f * v);
-            int b = (int)(y_val + 1.772f * u);
-
-            r = r < 0 ? 0 : (r > 255 ? 255 : r);
-            g = g < 0 ? 0 : (g > 255 ? 255 : g);
-            b = b < 0 ? 0 : (b > 255 ? 255 : b);
-
-            row[x] = (uint32_t)(0xFF000000 | (b << 16) | (g << 8) | r);
-        }
-    }
-}
-
-ssize_t read_all(int fd, void* buf, size_t count) {
-    size_t total = 0;
-    uint8_t* ptr = (uint8_t*)buf;
-    while (total < count) {
-        ssize_t r = recv(fd, ptr + total, count - total, 0);
-        if (r <= 0) return -1;
-        total += r;
-    }
-    return total;
-}
+#define FRAME_WIDTH_1080P 1920
+#define FRAME_HEIGHT_1080P 1300
+#define FRAME_WIDTH_4K 3840
+#define FRAME_HEIGHT_4K 2600
 
 void* streamClientLoop(void* arg) {
-    LOGI("DiLink 5 UNIX Socket Client thread started.");
+    LOGI("FastCamClient thread started.");
 
-    uint8_t* frameBuffer = (uint8_t*)malloc(MAX_RAW_FRAME_SIZE);
+    FastCamClient client;
 
-    while (g_streaming.load()) {
-        int sock = socket(AF_UNIX, SOCK_STREAM, 0);
-        if (sock < 0) {
-            usleep(500000);
-            continue;
+    // Connect to the abstract domain socket @fast_cam.sock (SELinux-safe)
+    while (g_streaming.load() && !client.connect("@fast_cam.sock")) {
+        // Fallback check to filesystem socket if abstract is not yet up
+        if (client.connect("/data/local/tmp/fast_cam.sock")) {
+            break;
         }
-
-        struct sockaddr_un serv_addr;
-        memset(&serv_addr, 0, sizeof(serv_addr));
-        serv_addr.sun_family = AF_UNIX;
-        serv_addr.sun_path[0] = '\0';
-        memcpy(serv_addr.sun_path + 1, SOCKET_NAME, strlen(SOCKET_NAME));
-        socklen_t addr_len = sizeof(sa_family_t) + strlen(SOCKET_NAME) + 1;
-
-        if (connect(sock, (struct sockaddr*)&serv_addr, addr_len) < 0) {
-            close(sock);
-            usleep(300000); // retry connect
-            continue;
-        }
-
-        int curCam = -1;
-        while (g_streaming.load()) {
-            int reqCam = g_active_camera.load();
-            if (reqCam != curCam && reqCam >= 0) {
-                uint8_t cmd = (uint8_t)reqCam;
-                send(sock, &cmd, 1, MSG_NOSIGNAL);
-                curCam = reqCam;
-            }
-
-            FrameHeader header;
-            if (read_all(sock, &header, sizeof(header)) != sizeof(header)) {
-                LOGW("Sidecar disconnected (header read failed)");
-                break;
-            }
-
-            if (header.magic != MAGIC_HEADER) {
-                // Resynchronization: byte-scan until MAGIC_HEADER is found
-                uint32_t magic_window = header.magic;
-                bool synced = false;
-                while (g_streaming.load()) {
-                    uint8_t next_b = 0;
-                    if (recv(sock, &next_b, 1, 0) <= 0) break;
-                    magic_window = (magic_window >> 8) | ((uint32_t)next_b << 24);
-                    if (magic_window == MAGIC_HEADER) {
-                        // Read rest of header
-                        if (read_all(sock, ((uint8_t*)&header) + 4, sizeof(header) - 4) == (ssize_t)(sizeof(header) - 4)) {
-                            header.magic = MAGIC_HEADER;
-                            synced = true;
-                        }
-                        break;
-                    }
-                }
-                if (!synced) {
-                    LOGW("Sidecar resync failed / socket closed");
-                    break;
-                }
-            }
-
-            if (header.data_size > MAX_RAW_FRAME_SIZE) {
-                LOGE("Invalid frame data size: %u", header.data_size);
-                break;
-            }
-
-            if (read_all(sock, frameBuffer, header.data_size) != (ssize_t)header.data_size) {
-                LOGW("Sidecar disconnected (payload read failed)");
-                break;
-            }
-
-            std::lock_guard<std::mutex> lock(g_winMutex);
-            if (g_nativeWindow) {
-                ANativeWindow_Buffer winBuffer;
-                if (ANativeWindow_lock(g_nativeWindow, &winBuffer, nullptr) == 0) {
-                    if (header.format == 1) {
-                        convert_uyvy_to_rgba(frameBuffer, header.width, header.height, (uint32_t*)winBuffer.bits, winBuffer.stride);
-                    } else {
-                        convert_nv12_to_rgba(frameBuffer, header.width, header.height, (uint32_t*)winBuffer.bits, winBuffer.stride);
-                    }
-                    ANativeWindow_unlockAndPost(g_nativeWindow);
-                }
-            }
-        }
-
-        close(sock);
+        usleep(300000); // Retry connection every 300ms
     }
 
-    free(frameBuffer);
-    LOGI("DiLink 5 UNIX Socket Client thread terminated.");
+    if (!g_streaming.load()) {
+        client.disconnect();
+        LOGI("FastCamClient thread terminated before stream start.");
+        return nullptr;
+    }
+
+    LOGI("FastCamClient connected successfully to fast_cam IPC stream (@fast_cam.sock)!");
+
+    FastCamFrame frame;
+    const uint8_t* cam_ptrs[4] = { nullptr, nullptr, nullptr, nullptr };
+    static uint8_t mosaic_buf_2x2[FRAME_WIDTH_1080P * FRAME_HEIGHT_1080P * 2];
+    std::unique_ptr<uint8_t[]> mosaic_buf_4k;
+    int current_win_w = 0;
+    int current_win_h = 0;
+    uint32_t rendered_frames = 0;
+
+    while (g_streaming.load()) {
+        // Wait for next available hardware frame (timeout 100ms)
+        if (!client.waitForFrame(&frame, 100)) {
+            continue;
+        }
+
+        if (frame.cam_id < 4 && frame.pixels) {
+            cam_ptrs[frame.cam_id] = frame.pixels;
+        }
+
+        int desired_cam = g_active_camera.load();
+        const uint8_t* render_pixels = nullptr;
+        int target_w = FRAME_WIDTH_1080P;
+        int target_h = FRAME_HEIGHT_1080P;
+
+        if (desired_cam == 5) {
+            // Mode 5 = 4K Ultra-HD Native Grid (3840x2600, 100% native sensor pixels)
+            if (!mosaic_buf_4k) {
+                mosaic_buf_4k = std::make_unique<uint8_t[]>(FRAME_WIDTH_4K * FRAME_HEIGHT_4K * 2);
+            }
+            const uint8_t* p0 = cam_ptrs[0] ? cam_ptrs[0] : frame.pixels;
+            const uint8_t* p1 = cam_ptrs[1] ? cam_ptrs[1] : p0;
+            const uint8_t* p2 = cam_ptrs[2] ? cam_ptrs[2] : p0;
+            const uint8_t* p3 = cam_ptrs[3] ? cam_ptrs[3] : p0;
+
+            FastCamClient::compose4K(p0, p1, p3, p2, mosaic_buf_4k.get());
+            render_pixels = mosaic_buf_4k.get();
+            target_w = FRAME_WIDTH_4K;
+            target_h = FRAME_HEIGHT_4K;
+        } else if (desired_cam == 4) {
+            // Mode 4 = 2x2 Decimated Mosaic (1920x1300)
+            const uint8_t* p0 = cam_ptrs[0] ? cam_ptrs[0] : frame.pixels;
+            const uint8_t* p1 = cam_ptrs[1] ? cam_ptrs[1] : p0;
+            const uint8_t* p2 = cam_ptrs[2] ? cam_ptrs[2] : p0;
+            const uint8_t* p3 = cam_ptrs[3] ? cam_ptrs[3] : p0;
+
+            FastCamClient::compose2x2(p0, p1, p3, p2, mosaic_buf_2x2);
+            render_pixels = mosaic_buf_2x2;
+            target_w = FRAME_WIDTH_1080P;
+            target_h = FRAME_HEIGHT_1080P;
+        } else if (desired_cam >= 0 && desired_cam < 4) {
+            // Specific single camera channel requested
+            if ((int)frame.cam_id == desired_cam) {
+                render_pixels = frame.pixels;
+            }
+            target_w = FRAME_WIDTH_1080P;
+            target_h = FRAME_HEIGHT_1080P;
+        } else {
+            // Desired cam < 0: render whatever frame arrives
+            render_pixels = frame.pixels;
+            target_w = FRAME_WIDTH_1080P;
+            target_h = FRAME_HEIGHT_1080P;
+        }
+
+        if (render_pixels) {
+            std::lock_guard<std::mutex> lock(g_winMutex);
+            if (g_nativeWindow) {
+                // Dynamically reconfigure window buffer geometry if resolution changed
+                if (current_win_w != target_w || current_win_h != target_h) {
+                    ANativeWindow_setBuffersGeometry(g_nativeWindow, target_w, target_h, WINDOW_FORMAT_RGBA_8888);
+                    current_win_w = target_w;
+                    current_win_h = target_h;
+                    LOGI("ANativeWindow buffer geometry adapted: %dx%d RGBA8888 (mode=%d)", target_w, target_h, desired_cam);
+                }
+
+                ANativeWindow_Buffer winBuffer;
+                if (ANativeWindow_lock(g_nativeWindow, &winBuffer, nullptr) == 0) {
+                    // Color conversion UYVY to RGBA8888 onto Android Surface buffer
+                    convert_uyvy_to_rgba(render_pixels, target_w, target_h,
+                                         (uint32_t*)winBuffer.bits, winBuffer.stride);
+                    ANativeWindow_unlockAndPost(g_nativeWindow);
+                    rendered_frames++;
+                    if (rendered_frames % 300 == 1) {
+                        LOGI("Rendered %u frames to Surface (mode=%d, res=%dx%d, lastCamId=%u)",
+                             rendered_frames, desired_cam, target_w, target_h, frame.cam_id);
+                    }
+                }
+            }
+        }
+    }
+
+    client.disconnect();
+    LOGI("FastCamClient thread terminated.");
     return nullptr;
 }
 

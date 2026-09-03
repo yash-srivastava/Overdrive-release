@@ -638,15 +638,16 @@ public class VehicleControlApiHandler {
         JSONObject doors = new JSONObject();
         int sdkOverall = -1;
         if (data.doorLockStatus != null && data.doorLockStatus.length >= 7) {
-            doors.put("rf", data.doorLockStatus[0]);
-            doors.put("lf", data.doorLockStatus[1]);
-            doors.put("rr", data.doorLockStatus[2]);
-            doors.put("lr", data.doorLockStatus[3]);
-            doors.put("trunk", data.doorLockStatus[4]);
-            doors.put("hood", data.doorLockStatus[5]);
-            doors.put("overall", data.doorLockStatus[6]);
-            if (data.doorLockStatus[6] == 1 || data.doorLockStatus[6] == 2) {
-                sdkOverall = data.doorLockStatus[6];
+            doors.put("rf", cloudLockToApi(data.doorLockStatus[0]));
+            doors.put("lf", cloudLockToApi(data.doorLockStatus[1]));
+            doors.put("rr", cloudLockToApi(data.doorLockStatus[2]));
+            doors.put("lr", cloudLockToApi(data.doorLockStatus[3]));
+            doors.put("trunk", cloudLockToApi(data.doorLockStatus[4]));
+            doors.put("hood", cloudLockToApi(data.doorLockStatus[5]));
+            int mappedOverall = cloudLockToApi(data.doorLockStatus[6]);
+            doors.put("overall", mappedOverall);
+            if (mappedOverall != -1) {
+                sdkOverall = mappedOverall;
                 doors.put("source", "sdk");
                 doors.put("scope", "vehicle");
             }
@@ -974,7 +975,7 @@ public class VehicleControlApiHandler {
                 JSONObject t = new JSONObject();
                 int kPa = (data.tyrePressure != null && i < data.tyrePressure.length)
                         ? data.tyrePressure[i] : BydVehicleData.UNAVAILABLE;
-                if (kPa != BydVehicleData.UNAVAILABLE && kPa > 0) {
+                if (kPa != BydVehicleData.UNAVAILABLE && kPa > 0 && kPa < 1000 && kPa != 4095 && kPa != 2047 && kPa != 255) {
                     t.put("kPa", kPa);
                     // PSI = kPa * 0.1450377 (matches the OEM vehicle-control app
                     // UnitFormatter conversion). One decimal place is
