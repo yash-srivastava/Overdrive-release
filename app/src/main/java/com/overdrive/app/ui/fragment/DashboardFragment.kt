@@ -93,10 +93,15 @@ class DashboardFragment : Fragment() {
     private lateinit var recordingStorageProgress:
         com.google.android.material.progressindicator.LinearProgressIndicator
 
-    // Stable activity rows.
-    private lateinit var activityRow1: TextView
-    private lateinit var activityRow2: TextView
-    private lateinit var activityRow3: TextView
+    // Stable activity rows. Each row is an icon beside its text, so the three
+    // views travel together.
+    private class ActivityRowViews(
+        val container: View,
+        val icon: ImageView,
+        val text: TextView,
+    )
+
+    private var activityRows: List<ActivityRowViews> = emptyList()
 
     // Existing operational actions.
     private lateinit var metricTunnel: MaterialCardView
@@ -266,9 +271,17 @@ class DashboardFragment : Fragment() {
         metricRecordingsValue = view.findViewById(R.id.metricRecordingsValue)
         metricStorageValue = view.findViewById(R.id.metricStorageValue)
         recordingStorageProgress = view.findViewById(R.id.recordingStorageProgress)
-        activityRow1 = view.findViewById(R.id.activityRow1)
-        activityRow2 = view.findViewById(R.id.activityRow2)
-        activityRow3 = view.findViewById(R.id.activityRow3)
+        activityRows = listOf(
+            Triple(R.id.activityItem1, R.id.activityIcon1, R.id.activityRow1),
+            Triple(R.id.activityItem2, R.id.activityIcon2, R.id.activityRow2),
+            Triple(R.id.activityItem3, R.id.activityIcon3, R.id.activityRow3),
+        ).map { (containerId, iconId, textId) ->
+            ActivityRowViews(
+                view.findViewById(containerId),
+                view.findViewById(iconId),
+                view.findViewById(textId),
+            )
+        }
         metricTunnel = view.findViewById(R.id.metricTunnel)
         metricTunnelValue = view.findViewById(R.id.metricTunnelValue)
         tunnelStateDot = view.findViewById(R.id.tunnelStateDot)
@@ -924,7 +937,7 @@ class DashboardFragment : Fragment() {
         val rows = built
             ?.asSequence()
             ?.filter { it.priority < WELCOME_INSIGHT_PRIORITY }
-            ?.map { it.text.toString() }
+            ?.map { DashboardUiState.ActivityRow(it.text, it.icon) }
             ?.toList()
         dashboardState = DashboardStateReducer.activity(dashboardState, rows)
         renderActivityState()
@@ -969,20 +982,49 @@ class DashboardFragment : Fragment() {
     }
 
     private fun renderActivityState() {
-        if (!::activityRow1.isInitialized) return
+        if (activityRows.isEmpty()) return
         val rows = when (val activity = dashboardState.activity) {
-            DashboardUiState.ActivityState.Loading ->
-                listOf(getString(R.string.dashboard_modern_activity_loading))
-            DashboardUiState.ActivityState.Unavailable ->
-                listOf(getString(R.string.dashboard_modern_activity_unavailable))
-            is DashboardUiState.ActivityState.Ready ->
-                activity.rows.ifEmpty { listOf(getString(R.string.dashboard_modern_no_activity)) }
+            DashboardUiState.ActivityState.Loading -> listOf(
+                DashboardUiState.ActivityRow(
+                    getString(R.string.dashboard_modern_activity_loading))
+            )
+            DashboardUiState.ActivityState.Unavailable -> listOf(
+                DashboardUiState.ActivityRow(
+                    getString(R.string.dashboard_modern_activity_unavailable))
+            )
+            is DashboardUiState.ActivityState.Ready -> activity.rows.ifEmpty {
+                listOf(
+                    DashboardUiState.ActivityRow(
+                        getString(R.string.dashboard_modern_no_activity))
+                )
+            }
         }
-        val views = listOf(activityRow1, activityRow2, activityRow3)
-        views.forEachIndexed { index, textView ->
-            val text = rows.getOrNull(index)
-            textView.visibility = if (text == null) View.GONE else View.VISIBLE
-            if (text != null) textView.text = text
+        activityRows.forEachIndexed { index, views ->
+            val row = rows.getOrNull(index)
+            views.container.visibility = if (row == null) View.GONE else View.VISIBLE
+            if (row == null) return@forEachIndexed
+            views.text.text = row.text
+            // Placeholder rows carry no icon; keep the slot so their text stays
+            // on the same left edge as the real ones, and dim it so it doesn't
+            // read as a real event.
+            val placeholder = row.icon == 0
+            if (placeholder) {
+                views.icon.visibility = View.INVISIBLE
+            } else {
+                views.icon.setImageResource(row.icon)
+                views.icon.visibility = View.VISIBLE
+            }
+            val textAttr = if (placeholder) {
+                com.google.android.material.R.attr.colorOnSurfaceVariant
+            } else {
+                com.google.android.material.R.attr.colorOnSurface
+            }
+            views.text.setTextColor(
+                com.google.android.material.color.MaterialColors.getColor(
+                    views.text,
+                    textAttr
+                )
+            )
         }
     }
 

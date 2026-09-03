@@ -13,6 +13,7 @@ import android.text.style.StyleSpan
 import android.text.style.ForegroundColorSpan
 import android.util.TypedValue
 import androidx.annotation.AttrRes
+import androidx.annotation.DrawableRes
 import androidx.annotation.WorkerThread
 import com.overdrive.app.R
 import com.overdrive.app.genai.GenAiConfig
@@ -28,10 +29,14 @@ import java.net.HttpURLConnection
  * `text` is a CharSequence so callers can pass either a plain String or a
  * Spanned with bolded numbers / accented colors. Higher `priority` wins in
  * sort order; ties shuffle to keep the rotation feeling alive across visits.
+ *
+ * `icon` names the kind of thing the row reports, so the activity card can
+ * render a feed rather than a block of sentences. 0 leaves the row iconless.
  */
 data class DashboardInsight(
     val text: CharSequence,
-    val priority: Int = 0
+    val priority: Int = 0,
+    @DrawableRes val icon: Int = 0
 )
 
 data class DashboardAiInsight(
@@ -138,7 +143,8 @@ class DashboardInsightProvider(appContext: Context) {
         if (visitCountBefore != 0) return null
         return DashboardInsight(
             text = ctx.getString(R.string.dashboard_insight_welcome),
-            priority = 100
+            priority = 100,
+            icon = R.drawable.ic_star
         )
     }
 
@@ -191,7 +197,8 @@ class DashboardInsightProvider(appContext: Context) {
         }
         return DashboardInsight(
             text = emphasizeNumbers(template, emphasisColor),
-            priority = 75
+            priority = 75,
+            icon = R.drawable.ic_battery_health
         )
     }
 
@@ -214,7 +221,8 @@ class DashboardInsightProvider(appContext: Context) {
         val template = ctx.getString(R.string.dashboard_insight_last_alert, rel)
         return DashboardInsight(
             text = emphasizeSubstring(template, rel, emphasisColor),
-            priority = 70
+            priority = 70,
+            icon = R.drawable.ic_sentry
         )
     }
 
@@ -240,7 +248,8 @@ class DashboardInsightProvider(appContext: Context) {
         )
         return DashboardInsight(
             text = emphasizeNumbers(template, emphasisColor),
-            priority = 65
+            priority = 65,
+            icon = R.drawable.ic_charging
         )
     }
 
@@ -257,7 +266,8 @@ class DashboardInsightProvider(appContext: Context) {
         )
         return DashboardInsight(
             text = emphasizeNumbers(template, emphasisColor),
-            priority = 55
+            priority = 55,
+            icon = R.drawable.ic_recording
         )
     }
 
@@ -276,7 +286,8 @@ class DashboardInsightProvider(appContext: Context) {
         )
         return DashboardInsight(
             text = emphasizeNumbers(template, emphasisColor),
-            priority = 50
+            priority = 50,
+            icon = R.drawable.ic_recording_storage
         )
     }
 
@@ -303,7 +314,8 @@ class DashboardInsightProvider(appContext: Context) {
         }
         return DashboardInsight(
             text = emphasizeNumbers(template, emphasisColor),
-            priority = 45
+            priority = 45,
+            icon = R.drawable.ic_services
         )
     }
 

@@ -42,6 +42,13 @@ class DashboardLayoutContractTest {
             "activityRow1",
             "activityRow2",
             "activityRow3",
+            "activityItem1",
+            "activityItem2",
+            "activityItem3",
+            "activityIcon1",
+            "activityIcon2",
+            "activityIcon3",
+            "quickActionsCard",
             "remoteDetails",
             "btnExpandRemote",
         )
