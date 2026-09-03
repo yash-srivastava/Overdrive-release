@@ -580,7 +580,7 @@
     <string name="setup_traffic_body">BYD Traffic Monitor blockerar appar från tredje part från att nå internet. Inaktivera det låter OverDrive och andra appar du installerar faktiskt använda nätverket. En hård omstart krävs efteråt.</string>
     <string name="setup_traffic_button">Öppna trafikövervakning</string>
     <string name="setup_camera_fix_title">Kameraflöden svarta eller felaktiga?</string>
-    <string name="setup_camera_fix_body">Öppna diagnostik → Kamerasond, sätt KameraID till 0, tryck på Spara, starta sedan om kamerans demon. Om flödena fortfarande är fel, upprepa med kamera-ID 1. Lämna kartavsnittet orörd.</string>
+    <string name="setup_camera_fix_body">Kamerasond, sätt KameraID till 0, tryck på Spara, starta sedan om kamerans demon. Om flödena fortfarande är fel, upprepa med kamera-ID 1. Lämna kartavsnittet orörd.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Aktuellt: Kamera %1$d (Manuell)</string>
@@ -759,6 +759,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">På klocka</string>
+    <string name="dashboard_modern_vehicle_status">Fordonsstatus</string>
     <string name="dashboard_subtitle_all_systems">Alla system online</string>
     <string name="dashboard_subtitle_some_offline">%1$d av %2$d tjänster online</string>
     <string name="dashboard_subtitle_no_tunnel">Fjärråtkomst offline</string>

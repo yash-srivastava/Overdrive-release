@@ -580,7 +580,7 @@
     <string name="setup_traffic_body">Το BYD Traffic Monitor εμποδίζει εφαρμογές τρίτων να φτάσουν στο διαδίκτυο. Η απενεργοποίηση του επιτρέπει την εφαρμογή OverDrive και οποιαδήποτε άλλη εφαρμογή εγκαθιστάτε πραγματικά χρήση του δικτύου. Απαιτείται μετά μια σκληρή επανεκκίνηση.</string>
     <string name="setup_traffic_button">Άνοιγμα Παρακολούθησης Κυκλοφορίας</string>
     <string name="setup_camera_fix_title">Κάμερα feeds μαύρο ή λανθασμένο?</string>
-    <string name="setup_camera_fix_body">Ανοίξτε Διαγνωστικά → Κάμερα ανιχνευτή, ορίστε την κάμερα ID στο 0, αγγίξτε Αποθήκευση και, στη συνέχεια, επανεκκινήστε τον δαίμονα κάμερας. Εάν οι ροές εξακολουθούν να είναι λάθος, επαναλάβετε με την κάμερα ID 1. Αφήστε το τμήμα χαρτογράφησης ανέγγιχτο.</string>
+    <string name="setup_camera_fix_body">Κάμερα ανιχνευτή, ορίστε την κάμερα ID στο 0, αγγίξτε Αποθήκευση και, στη συνέχεια, επανεκκινήστε τον δαίμονα κάμερας. Εάν οι ροές εξακολουθούν να είναι λάθος, επαναλάβετε με την κάμερα ID 1. Αφήστε το τμήμα χαρτογράφησης ανέγγιχτο.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Τρέχουσα: Φωτογραφική Μηχανή %1$d (Χειροκίνητο)</string>
@@ -759,6 +759,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">Στο ρολόι</string>
+    <string name="dashboard_modern_vehicle_status">Κατάσταση οχήματος</string>
     <string name="dashboard_subtitle_all_systems">Όλα τα συστήματα online</string>
     <string name="dashboard_subtitle_some_offline">%1$d από %2$d online υπηρεσίες</string>
     <string name="dashboard_subtitle_no_tunnel">Απομακρυσμένη πρόσβαση εκτός σύνδεσης</string>

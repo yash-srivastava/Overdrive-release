@@ -577,7 +577,7 @@
     <string name="setup_traffic_body">BYD 交通監測器阻止第三方應用程序進入網路. 禁用它,讓 OverDrive 和您安裝的任何其他應用程式實際上使用網路.</string>
     <string name="setup_traffic_button">公開的交通監測器</string>
     <string name="setup_camera_fix_title">攝影機提供黑色或不正确的訊息?</string>
-    <string name="setup_camera_fix_body">打開診斷 → 攝影機探測器,設定攝影機ID為0,按 Save,然後重新啟動攝影機模擬器. 如果傳遞仍錯誤,請使用攝影機ID重複.</string>
+    <string name="setup_camera_fix_body">攝影機探測器,設定攝影機ID為0,按 Save,然後重新啟動攝影機模擬器. 如果傳遞仍錯誤,請使用攝影機ID重複.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">目前:%1$d相機 (手動)</string>
@@ -757,6 +757,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">守望中</string>
+    <string name="dashboard_modern_vehicle_status">車輛狀態</string>
     <string name="dashboard_subtitle_all_systems">所有系統都在網路上</string>
     <string name="dashboard_subtitle_some_offline">在網路上提供%1$d的%2$d服務</string>
     <string name="dashboard_subtitle_no_tunnel">遠端接入無線</string>

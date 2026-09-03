@@ -696,7 +696,7 @@
     <string name="setup_traffic_body">De BYD Traffic Monitor blokkeert dat apps van derden internet bereiken. Het uitschakelen ervan stelt OverDrive en alle andere apps die u installeert in staat het netwerk daadwerkelijk te gebruiken.</string>
     <string name="setup_traffic_button">Open verkeersmonitor</string>
     <string name="setup_camera_fix_title">Is de camera zwart of onjuist?</string>
-    <string name="setup_camera_fix_body">Open Diagnostics → Camera probe, stel Camera ID op 0, tik op Save, en start dan de camera daemon opnieuw. Als de feeds nog steeds verkeerd zijn, herhaal met Camera ID 1. Laat het mapping-gedeelte ongerept.</string>
+    <string name="setup_camera_fix_body">Camera probe, stel Camera ID op 0, tik op Save, en start dan de camera daemon opnieuw. Als de feeds nog steeds verkeerd zijn, herhaal met Camera ID 1. Laat het mapping-gedeelte ongerept.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Stroom: camera %1$d (handleiding)</string>
@@ -906,6 +906,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">Op wacht</string>
+    <string name="dashboard_modern_vehicle_status">Voertuigstatus</string>
     <string name="dashboard_subtitle_all_systems">Alle systemen online</string>
     <string name="dashboard_subtitle_some_offline">%1$d van %2$d diensten online</string>
     <string name="dashboard_subtitle_no_tunnel">Afgelegen toegang offline</string>

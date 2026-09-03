@@ -580,7 +580,7 @@
     <string name="setup_traffic_body">BYD Traffic Monitor üçüncü taraf uygulamaların internet\'e ulaşmasını engeller. Bu uygulamayı devre dışı bırakmak, OverDrive ve yüklediğiniz diğer uygulamaların ağı kullanmasına izin verir.</string>
     <string name="setup_traffic_button">Açık Trafik İzleyici</string>
     <string name="setup_camera_fix_title">Kamera siyah mı yanlış mı?</string>
-    <string name="setup_camera_fix_body">Açık Diagnostics → Kamera sondası, Camera ID\'yi 0 olarak ayarlayın, Save\'e dokunun ve sonra kamera demonu yeniden başlatın.</string>
+    <string name="setup_camera_fix_body">Kamera sondası, Camera ID\'yi 0 olarak ayarlayın, Save\'e dokunun ve sonra kamera demonu yeniden başlatın.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Şimdiki: Kamera %1$d (Manual)</string>
@@ -760,6 +760,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">Nöbette</string>
+    <string name="dashboard_modern_vehicle_status">Araç durumu</string>
     <string name="dashboard_subtitle_all_systems">Tüm sistemler çevrimiçi</string>
     <string name="dashboard_subtitle_some_offline">%1$d of %2$d online hizmetleri</string>
     <string name="dashboard_subtitle_no_tunnel">Uzaktan erişim çevrimdışı</string>

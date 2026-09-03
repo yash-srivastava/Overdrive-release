@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- First-launch setup guide dialog (M3).
+
+     Three numbered steps carry the setup; the troubleshooting notes below the
+     divider are deliberately plain rows so they never read as a fourth gate.
+
      Wrapped in ScrollView so the content + buttons are always reachable
      on landscape BYD head units (720p, ~604dp usable height). -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
@@ -14,22 +18,10 @@
         android:layout_height="wrap_content"
         android:background="?attr/colorSurfaceContainerHigh"
         android:orientation="vertical"
-        android:padding="24dp">
-
-        <!-- Version banner (shown only after an update, hidden on first install) -->
-        <TextView
-            android:id="@+id/tvVersionBanner"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            android:background="@drawable/dialog_setup_step_pill"
-            android:paddingHorizontal="14dp"
-            android:paddingVertical="8dp"
-            android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-            android:textColor="?attr/colorOnPrimaryContainer"
-            android:visibility="gone"
-            tools:text="Updated — re-confirm autostart"
-            tools:visibility="visible" />
+        android:paddingStart="24dp"
+        android:paddingTop="24dp"
+        android:paddingEnd="24dp"
+        android:paddingBottom="20dp">
 
         <!-- Title -->
         <TextView
@@ -42,88 +34,104 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="6dp"
             android:text="@string/setup_guide_subtitle"
             android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
             android:textColor="?attr/colorOnSurfaceVariant" />
 
-        <!-- Step 1: Language -->
+        <!-- Post-update notice. Sits under the title rather than above it so the
+             dialog still opens on its own name, and stays neutral because it
+             reports a fact — step 2 below is the thing to act on. -->
+        <TextView
+            android:id="@+id/tvVersionBanner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/dialog_inset_panel"
+            android:drawableStart="@drawable/ic_update"
+            android:drawablePadding="12dp"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="12dp"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:visibility="gone"
+            app:drawableTint="?attr/colorPrimary"
+            tools:text="Updated — re-confirm autostart"
+            tools:visibility="visible" />
+
+        <!-- Step 1: Language. Complete from the start — Auto is a valid
+             selection out of the box — so it carries the check and a compact
+             action instead of the full-width button the open steps use. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
             android:background="@drawable/dialog_setup_step_card"
-            android:orientation="vertical"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
             android:padding="16dp">
 
+            <TextView
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:background="@drawable/dialog_setup_step_pill"
+                android:gravity="center"
+                android:text="@string/setup_step_one_label"
+                android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+                android:textColor="?attr/colorOnPrimaryContainer"
+                android:textStyle="bold" />
+
             <LinearLayout
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
+                android:layout_marginStart="14dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
 
                 <TextView
-                    android:layout_width="32dp"
-                    android:layout_height="32dp"
-                    android:background="@drawable/dialog_setup_step_pill"
-                    android:gravity="center"
-                    android:text="@string/setup_step_one_label"
-                    android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                    android:textColor="?attr/colorOnPrimaryContainer"
-                    android:textStyle="bold" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="14dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
+                    android:text="@string/setup_language_title"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
 
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/setup_language_title"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                        android:textColor="?attr/colorOnSurface" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="@string/setup_language_body"
-                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
-
-                </LinearLayout>
-
-                <ImageView
-                    android:id="@+id/ivLanguageCheck"
-                    android:layout_width="24dp"
-                    android:layout_height="24dp"
-                    android:layout_marginStart="8dp"
-                    android:contentDescription="@string/cd_step_completed"
-                    android:src="@drawable/ic_check"
-                    android:visibility="visible"
-                    app:tint="?attr/colorPrimary" />
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/setup_language_body"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
 
             </LinearLayout>
+
+            <ImageView
+                android:id="@+id/ivLanguageCheck"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_marginStart="12dp"
+                android:contentDescription="@string/cd_step_completed"
+                android:src="@drawable/ic_check"
+                app:tint="?attr/colorPrimary" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnOpenLanguage"
                 style="?attr/materialButtonOutlinedStyle"
-                android:layout_width="match_parent"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
+                android:layout_marginStart="12dp"
                 android:text="@string/setup_language_button"
                 android:textAppearance="@style/TextAppearance.Material3.LabelLarge" />
 
         </LinearLayout>
 
-        <!-- Step 2: Auto-start -->
+        <!-- Step 2: Auto-start. Title, body and button all switch to the
+             completed treatment in SetupGuideDialog once BYD's switch is set. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="10dp"
             android:background="@drawable/dialog_setup_step_card"
             android:orientation="vertical"
             android:padding="16dp">
@@ -135,12 +143,12 @@
                 android:orientation="horizontal">
 
                 <TextView
-                    android:layout_width="32dp"
-                    android:layout_height="32dp"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
                     android:background="@drawable/dialog_setup_step_pill"
                     android:gravity="center"
                     android:text="@string/setup_step_two_label"
-                    android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
                     android:textColor="?attr/colorOnPrimaryContainer"
                     android:textStyle="bold" />
 
@@ -152,6 +160,7 @@
                     android:orientation="vertical">
 
                     <TextView
+                        android:id="@+id/tvAutoStartTitle"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/setup_autostart_title"
@@ -159,6 +168,7 @@
                         android:textColor="?attr/colorOnSurface" />
 
                     <TextView
+                        android:id="@+id/tvAutoStartBody"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
@@ -172,7 +182,7 @@
                     android:id="@+id/ivAutoStartCheck"
                     android:layout_width="24dp"
                     android:layout_height="24dp"
-                    android:layout_marginStart="8dp"
+                    android:layout_marginStart="12dp"
                     android:contentDescription="@string/cd_step_completed"
                     android:src="@drawable/ic_check"
                     android:visibility="invisible"
@@ -191,11 +201,12 @@
 
         </LinearLayout>
 
-        <!-- Step 3: Overlay Permission -->
+        <!-- Step 3: Overlay permission. Re-rendered every time the dialog
+             regains window focus, since the grant happens in Settings. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="10dp"
             android:background="@drawable/dialog_setup_step_card"
             android:orientation="vertical"
             android:padding="16dp">
@@ -207,12 +218,12 @@
                 android:orientation="horizontal">
 
                 <TextView
-                    android:layout_width="32dp"
-                    android:layout_height="32dp"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
                     android:background="@drawable/dialog_setup_step_pill"
                     android:gravity="center"
                     android:text="@string/setup_step_three_label"
-                    android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
                     android:textColor="?attr/colorOnPrimaryContainer"
                     android:textStyle="bold" />
 
@@ -224,6 +235,7 @@
                     android:orientation="vertical">
 
                     <TextView
+                        android:id="@+id/tvOverlayTitle"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/setup_overlay_title"
@@ -231,6 +243,7 @@
                         android:textColor="?attr/colorOnSurface" />
 
                     <TextView
+                        android:id="@+id/tvOverlayBody"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
@@ -244,7 +257,7 @@
                     android:id="@+id/ivOverlayCheck"
                     android:layout_width="24dp"
                     android:layout_height="24dp"
-                    android:layout_marginStart="8dp"
+                    android:layout_marginStart="12dp"
                     android:contentDescription="@string/cd_permission_granted"
                     android:src="@drawable/ic_check"
                     android:visibility="invisible"
@@ -263,98 +276,90 @@
 
         </LinearLayout>
 
-        <!-- Tips & troubleshooting — non-checklist follow-ups. Same M3
-             surfaceContainer card as the steps above, but the leading pill
-             holds an icon (not a number) and there's no "completed" check
-             so the row never reads as a setup gate. -->
+        <!-- Troubleshooting — optional follow-ups, not setup gates. No card, no
+             badge and no checkmark, so the three steps above stay the only
+             things that look like a checklist. -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="24dp"
+            android:background="?attr/colorOutlineVariant" />
+
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:layout_marginBottom="8dp"
+            android:layout_marginTop="16dp"
+            android:letterSpacing="0.08"
             android:text="@string/setup_tips_header"
-            android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-            android:textColor="?attr/colorPrimary"
             android:textAllCaps="true"
-            android:letterSpacing="0.08" />
+            android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+            android:textColor="?attr/colorOnSurfaceVariant" />
 
-        <!-- Tip: disable BYD Traffic Monitor -->
+        <!-- Tip: disable BYD Traffic Monitor. The action sits on the title row
+             rather than under the body — a row of its own per tip pushed the
+             dialog past the head unit's usable height. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@drawable/dialog_setup_step_card"
-            android:orientation="vertical"
-            android:padding="16dp">
+            android:layout_marginTop="12dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_traffic_monitor"
+                app:tint="?attr/colorOnSurfaceVariant" />
 
             <LinearLayout
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
+                android:layout_marginStart="14dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
 
-                <ImageView
-                    android:layout_width="32dp"
-                    android:layout_height="32dp"
-                    android:background="@drawable/dialog_setup_step_pill"
-                    android:contentDescription="@null"
-                    android:padding="6dp"
-                    android:src="@drawable/ic_traffic_monitor"
-                    app:tint="?attr/colorOnPrimaryContainer" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
+                <TextView
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="14dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
+                    android:text="@string/setup_traffic_title"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+                    android:textColor="?attr/colorOnSurface" />
 
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/setup_traffic_title"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                        android:textColor="?attr/colorOnSurface" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="@string/setup_traffic_body"
-                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
-
-                </LinearLayout>
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/setup_traffic_body"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
 
             </LinearLayout>
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnOpenTrafficMonitor"
-                style="?attr/materialButtonOutlinedStyle"
-                android:layout_width="match_parent"
+                style="@style/Widget.Overdrive.M3.Button.Text"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:text="@string/setup_traffic_button"
-                android:textAppearance="@style/TextAppearance.Material3.LabelLarge" />
+                android:layout_marginStart="12dp"
+                android:text="@string/setup_traffic_button" />
 
         </LinearLayout>
 
-        <!-- Tip: black / incorrect camera feeds — instructional only. -->
+        <!-- Tip: black / incorrect camera feeds. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:background="@drawable/dialog_setup_step_card"
-            android:orientation="horizontal"
-            android:padding="16dp">
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
             <ImageView
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:background="@drawable/dialog_setup_step_pill"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
                 android:contentDescription="@null"
-                android:padding="6dp"
                 android:src="@drawable/ic_camera_probe"
-                app:tint="?attr/colorOnPrimaryContainer" />
+                app:tint="?attr/colorOnSurfaceVariant" />
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -367,7 +372,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/setup_camera_fix_title"
-                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
                     android:textColor="?attr/colorOnSurface" />
 
                 <TextView
@@ -380,10 +385,25 @@
 
             </LinearLayout>
 
+            <!-- Names the screen the steps above happen on, and takes the user
+                 there. Labelled with the rail's own word for it so the two
+                 always agree. -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnOpenDiagnostics"
+                style="@style/Widget.Overdrive.M3.Button.Text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:text="@string/rail_diagnostics"
+                app:icon="@drawable/ic_arrow_outward"
+                app:iconGravity="textEnd"
+                app:iconPadding="8dp"
+                app:iconSize="18dp" />
+
         </LinearLayout>
 
-        <!-- Action buttons — M3 dialog button bar:
-             text button on the left (neutral), filled button on the right (positive). -->
+        <!-- Action buttons — same filled pair as the other Overdrive dialogs:
+             grey neutral on the left, primary on the right. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -393,20 +413,18 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnSkip"
-                style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="0dp"
+                style="@style/Widget.Overdrive.M3.Button.Dialog.Neutral"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
                 android:ellipsize="end"
                 android:singleLine="true"
                 android:text="@string/action_remind_me_later" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnDone"
+                style="@style/Widget.Overdrive.M3.Button.Dialog.Primary"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:minWidth="96dp"
                 android:singleLine="true"
                 android:text="@string/action_done" />
 

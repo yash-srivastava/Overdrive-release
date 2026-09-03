@@ -692,7 +692,7 @@
     <string name="setup_traffic_body">BYD-trafikken blokkerer tredjepartsapper fra å nå Internett. Deaktivering av den lar OverDrive og andre apper som du installerer faktisk bruker nettverket. En hard-omstart er nødvendig etterpå.</string>
     <string name="setup_traffic_button">Åpne trafikkmonitor</string>
     <string name="setup_camera_fix_title">Kamera feeds svart eller feil?</string>
-    <string name="setup_camera_fix_body">Åpne Diagnostikk → Kamerasonen, sett Kamera-ID til 0, trykk på Lagre, og start deretter kameraet på nytt med meddelelse Hvis tilbakemeldingene fortsatt er feil, gjenta med kamera-ID 1. La kartleggingsdelen være uberørt.</string>
+    <string name="setup_camera_fix_body">Kamerasonen, sett Kamera-ID til 0, trykk på Lagre, og start deretter kameraet på nytt med meddelelse Hvis tilbakemeldingene fortsatt er feil, gjenta med kamera-ID 1. La kartleggingsdelen være uberørt.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Current: Camera %1$d (Manual)</string>
@@ -901,6 +901,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">På klokken</string>
+    <string name="dashboard_modern_vehicle_status">Kjøretøystatus</string>
     <string name="dashboard_subtitle_all_systems">Alle systemer pålogget</string>
     <string name="dashboard_subtitle_some_offline">%1$d av %2$d tjenester online</string>
     <string name="dashboard_subtitle_no_tunnel">Ekstern tilgang frakoblet</string>

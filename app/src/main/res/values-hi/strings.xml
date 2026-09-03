@@ -580,7 +580,7 @@
     <string name="setup_traffic_body">BYD ट्रैफिक मॉनिटर इंटरनेट तक पहुंचने से तृतीय-पक्ष ऐप्स को ब्लॉक करता है। इसे अक्षम करने से OverDrive और आपके द्वारा स्थापित किए जाने वाले किसी भी अन्य ऐप को वास्तव में नेटवर्क का उपयोग करने की अनुमति मिलती है। इसके बाद हार्ड रीबूट की आवश्यकता होती है।</string>
     <string name="setup_traffic_button">खुले यातायात मॉनिटर</string>
     <string name="setup_camera_fix_title">कैमरा काली या गलत फीड करता है?</string>
-    <string name="setup_camera_fix_body">खोलें डायग्नोस्टिक्स → कैमरा जांच, कैमरा आईडी को 0 पर सेट करें, सहेजें टैप करें, फिर कैमरा डेमन को पुनरारंभ करें। यदि फ़ीड अभी भी गलत हैं, तो कैमरा आईडी 1 के साथ दोहराएं। मानचित्रण अनुभाग को छुआ हुआ छोड़ दें।</string>
+    <string name="setup_camera_fix_body">कैमरा जांच, कैमरा आईडी को 0 पर सेट करें, सहेजें टैप करें, फिर कैमरा डेमन को पुनरारंभ करें। यदि फ़ीड अभी भी गलत हैं, तो कैमरा आईडी 1 के साथ दोहराएं। मानचित्रण अनुभाग को छुआ हुआ छोड़ दें।</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">वर्तमानः कैमरा %1$d (मैनुअल)</string>
@@ -760,6 +760,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">निगरानी पर</string>
+    <string name="dashboard_modern_vehicle_status">वाहन की स्थिति</string>
     <string name="dashboard_subtitle_all_systems">सभी प्रणाली ऑनलाइन</string>
     <string name="dashboard_subtitle_some_offline">%1$d की %2$d सेवाएं ऑनलाइन</string>
     <string name="dashboard_subtitle_no_tunnel">दूरस्थ पहुँच ऑफ़लाइन</string>

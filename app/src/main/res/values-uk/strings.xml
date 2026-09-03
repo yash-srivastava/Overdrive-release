@@ -586,7 +586,7 @@
     <string name="setup_traffic_body">Монітор BYD блокує сторонні програми від досягнення Інтернету. Вимкнення дозволяє OverDrive та будь-які інші додатки, які ви встановлюєте, дійсно використовують мережу. Жорстке перезавантаження потрібно після цього.</string>
     <string name="setup_traffic_button">Відкрити монітор трафіку</string>
     <string name="setup_camera_fix_title">Камера подає чорне чи некоректне?</string>
-    <string name="setup_camera_fix_body">Відкрийте діагностику → Зупинка камери, встановіть ID камери на 0, натисніть Зберегти, а потім перезавантажте демон камери. Якщо стрічки помилилися, повторити з камерою ID 1. Залиште розділ зіставлення без змін.</string>
+    <string name="setup_camera_fix_body">Зупинка камери, встановіть ID камери на 0, натисніть Зберегти, а потім перезавантажте демон камери. Якщо стрічки помилилися, повторити з камерою ID 1. Залиште розділ зіставлення без змін.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Current: Camera %1$d (Manual)</string>
@@ -765,6 +765,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">На годиннику</string>
+    <string name="dashboard_modern_vehicle_status">Стан автомобіля</string>
     <string name="dashboard_subtitle_all_systems">Всі системи онлайн</string>
     <string name="dashboard_subtitle_some_offline">%1$d of %2$d services online</string>
     <string name="dashboard_subtitle_no_tunnel">Дистанційний доступ офлайн</string>

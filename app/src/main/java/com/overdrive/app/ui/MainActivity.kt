@@ -4567,6 +4567,9 @@ open class MainActivity : AppCompatActivity() {
         try { navController.navigate(R.id.diagnosticsFragment) } catch (_: Throwable) {}
     }
 
+    /** Setup-guide camera tip: land the user on Diagnostics, where the camera probe lives. */
+    fun invokeDiagnosticsScreen() = navigateToRailDestination(R.id.diagnosticsFragment)
+
     /**
      * A nav-rail ROW view by id (e.g. R.id.railDestMap), for the Expert tour to spotlight
      * entries that aren't nav destinations — notably the Hazard Map row, which launches a

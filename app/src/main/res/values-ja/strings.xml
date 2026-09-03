@@ -903,6 +903,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">監視中</string>
+    <string name="dashboard_modern_vehicle_status">車両ステータス</string>
     <string name="dashboard_subtitle_all_systems">すべてのシステムはオンライン</string>
     <string name="dashboard_subtitle_some_offline">オンラインでの%1$dの%2$dサービス</string>
     <string name="dashboard_subtitle_no_tunnel">遠隔アクセスオフライン</string>

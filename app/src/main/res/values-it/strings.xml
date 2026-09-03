@@ -698,7 +698,7 @@ Questa azione non puo essere annullata.</string>
     <string name="setup_traffic_body">Il Traffic Monitor BYD blocca le app di terze parti dall\'accesso a Internet. Disattivarlo consente a OverDrive e a tutte le altre app installate di utilizzare effettivamente la rete.</string>
     <string name="setup_traffic_button">Monitore di traffico aperto</string>
     <string name="setup_camera_fix_title">La fotocamera è nera o sbagliata?</string>
-    <string name="setup_camera_fix_body">Open Diagnostics → Camera probe, impostare l\'ID della fotocamera a 0, toccare Salvare, quindi riavviare il daemon della fotocamera. Se i feed sono ancora sbagliati, ripetere con l\'ID della fotocamera 1. Lasciare la sezione di mappatura intatta.</string>
+    <string name="setup_camera_fix_body">Camera probe, impostare l\'ID della fotocamera a 0, toccare Salvare, quindi riavviare il daemon della fotocamera. Se i feed sono ancora sbagliati, ripetere con l\'ID della fotocamera 1. Lasciare la sezione di mappatura intatta.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Attuale: Telecamera %1$d (manuale)</string>
@@ -908,6 +908,7 @@ Questa azione non puo essere annullata.</string>
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">In sorveglianza</string>
+    <string name="dashboard_modern_vehicle_status">Stato del veicolo</string>
     <string name="dashboard_subtitle_all_systems">Tutti i sistemi online</string>
     <string name="dashboard_subtitle_some_offline">%1$d di %2$d servizi online</string>
     <string name="dashboard_subtitle_no_tunnel">Accesso remoto offline</string>

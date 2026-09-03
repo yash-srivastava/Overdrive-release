@@ -586,7 +586,7 @@
     <string name="setup_traffic_body">Monitor ruchu BYD blokuje dostęp do internetu aplikacjom firm trzecich. Wyłączenie tego pozwala na OverDrive i inne aplikacje, które zainstalujesz, w rzeczywistości korzystają z sieci. Następnie potrzebny jest trudny restart systemu.</string>
     <string name="setup_traffic_button">Otwórz Monitor ruchu</string>
     <string name="setup_camera_fix_title">Kamera kanalizuje czarne czy niepoprawne?</string>
-    <string name="setup_camera_fix_body">Otwórz Diagnostykę → sonda aparatu, ustaw ID aparatu na 0, stuknij Zapisz, a następnie zrestartuj demon aparatu. Jeśli kanały są nadal niepoprawne, powtórz kamerę ID 1. Pozostaw sekcję mapowania bez dotknięcia.</string>
+    <string name="setup_camera_fix_body">Sonda aparatu, ustaw ID aparatu na 0, stuknij Zapisz, a następnie zrestartuj demon aparatu. Jeśli kanały są nadal niepoprawne, powtórz kamerę ID 1. Pozostaw sekcję mapowania bez dotknięcia.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Aktualnie: Aparat %1$d (Manualne)</string>
@@ -765,6 +765,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">Na zegarku</string>
+    <string name="dashboard_modern_vehicle_status">Stan pojazdu</string>
     <string name="dashboard_subtitle_all_systems">Wszystkie systemy online</string>
     <string name="dashboard_subtitle_some_offline">%1$d of %2$d services online</string>
     <string name="dashboard_subtitle_no_tunnel">Dostęp zdalny offline</string>

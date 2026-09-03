@@ -580,7 +580,7 @@
     <string name="setup_traffic_body">The BYD Traffic Monitor blocks third-party apps from reaching the internet. Disabling it lets OverDrive and any other apps you install actually use the network. A hard reboot is required afterwards.</string>
     <string name="setup_traffic_button">Open Traffic Monitor</string>
     <string name="setup_camera_fix_title">Camera feeds black or incorrect?</string>
-    <string name="setup_camera_fix_body">Open Diagnostics → Camera probe, set Camera ID to 0, tap Save, then restart the camera daemon. If the feeds are still wrong, repeat with Camera ID 1. Leave the mapping section untouched.</string>
+    <string name="setup_camera_fix_body">Camera probe, set Camera ID to 0, tap Save, then restart the camera daemon. If the feeds are still wrong, repeat with Camera ID 1. Leave the mapping section untouched.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Current: Camera %1$d (Manual)</string>
@@ -759,6 +759,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">On watch</string>
+    <string name="dashboard_modern_vehicle_status">Vehicle status</string>
     <string name="dashboard_subtitle_all_systems">All systems online</string>
     <string name="dashboard_subtitle_some_offline">%1$d of %2$d services online</string>
     <string name="dashboard_subtitle_no_tunnel">Remote access offline</string>

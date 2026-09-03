@@ -586,7 +586,7 @@
     <string name="setup_traffic_body">BYD Traffic Monitor blokuje aplikace třetích stran v přístupu k internetu. Zakázání umožňuje OverDrive a všem dalším aplikacím, které skutečně instalujete, používat síť. Poté je nutný tvrdý restart.</string>
     <string name="setup_traffic_button">Otevřít sledování provozu</string>
     <string name="setup_camera_fix_title">Kamera je černá nebo nesprávná?</string>
-    <string name="setup_camera_fix_body">Otevřete Diagnostiku → Sonda kamery, nastavte ID kamery na 0, klepněte na Uložit, poté restartujte daemon. Pokud jsou zdroje stále špatné, opakujte s ID kamery 1. Nechte sekci mapování nedotčeno.</string>
+    <string name="setup_camera_fix_body">Sonda kamery, nastavte ID kamery na 0, klepněte na Uložit, poté restartujte daemon. Pokud jsou zdroje stále špatné, opakujte s ID kamery 1. Nechte sekci mapování nedotčeno.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Aktuální: Kamera %1$d (Manual)</string>
@@ -765,6 +765,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">Na hodinkách</string>
+    <string name="dashboard_modern_vehicle_status">Stav vozidla</string>
     <string name="dashboard_subtitle_all_systems">Všechny systémy online</string>
     <string name="dashboard_subtitle_some_offline">%1$d služeb %2$d online</string>
     <string name="dashboard_subtitle_no_tunnel">Vzdálený přístup offline</string>

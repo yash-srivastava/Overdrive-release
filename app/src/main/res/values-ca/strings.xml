@@ -580,7 +580,7 @@
     <string name="setup_traffic_body">El Monitor de Trànsit BYD bloqueja que les aplicacions de tercers arribin a Internet. Desactivar-lo permet que OverDrive i qualsevol altra aplicació que instal·leu realment utilitzin la xarxa. Després es requereix un reinici dur.</string>
     <string name="setup_traffic_button">Obre el monitor de trànsit</string>
     <string name="setup_camera_fix_title">El canal de la càmera és en nengre o incorrecte?</string>
-    <string name="setup_camera_fix_body">Obriu Diagnòstics → Sonda de càmera, establiu l\'ID de la càmera a 0, feu clic a Desa i, a continuació, reinicieu el dimoni de la càmera. Si els canals encara són incorrectes, repetiu amb l\'ID de la càmera 1. Deixeu intacta la secció de mapatge.</string>
+    <string name="setup_camera_fix_body">Sonda de càmera, establiu l\'ID de la càmera a 0, feu clic a Desa i, a continuació, reinicieu el dimoni de la càmera. Si els canals encara són incorrectes, repetiu amb l\'ID de la càmera 1. Deixeu intacta la secció de mapatge.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Actual: càmera %1$d (manual)</string>
@@ -759,6 +759,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">Durant la vigilància</string>
+    <string name="dashboard_modern_vehicle_status">Estat del vehicle</string>
     <string name="dashboard_subtitle_all_systems">Tots els sistemes en línia</string>
     <string name="dashboard_subtitle_some_offline">%1$d de %2$d serveis en línia</string>
     <string name="dashboard_subtitle_no_tunnel">Accés remot fora de línia</string>

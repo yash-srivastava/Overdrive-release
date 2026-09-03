@@ -580,7 +580,7 @@
     <string name="setup_traffic_body">O Monitor de Tráfego BYD bloqueia apps de terceiros de acessar a internet. Desativação permite que o OverDrive e quaisquer outros aplicativos que você instalar realmente usem a rede. É necessário reiniciar mais tarde.</string>
     <string name="setup_traffic_button">Abrir Monitor de Tráfego</string>
     <string name="setup_camera_fix_title">Transações da câmera pretas ou incorretas?</string>
-    <string name="setup_camera_fix_body">Abra os Diagnósticos → Teste de câmera, defina o ID da Câmera para 0, toque em Salvar, e então reinicie o daemon da câmera. Se os feeds ainda estiverem errados, repita com o ID da Câmera 1. Deixe a seção de mapeamento intocada.</string>
+    <string name="setup_camera_fix_body">Teste de câmera, defina o ID da Câmera para 0, toque em Salvar, e então reinicie o daemon da câmera. Se os feeds ainda estiverem errados, repita com o ID da Câmera 1. Deixe a seção de mapeamento intocada.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Atual: Câmera %1$d (Manual)</string>
@@ -759,6 +759,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">No relógio</string>
+    <string name="dashboard_modern_vehicle_status">Estado do veículo</string>
     <string name="dashboard_subtitle_all_systems">Todos os sistemas online</string>
     <string name="dashboard_subtitle_some_offline">%1$d dos serviços %2$d online</string>
     <string name="dashboard_subtitle_no_tunnel">Acesso remoto offline</string>

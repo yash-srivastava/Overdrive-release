@@ -37,8 +37,7 @@ public class OverlayPermissionAssetContractTest {
         String source = read(
                 "src/main/java/com/overdrive/app/overlay/SetupGuideDialog.java");
         assertTrue(source.contains("addOnWindowFocusChangeListener"));
-        assertTrue(source.contains(
-                "renderOverlayPermission(context, btnOverlay, stepOverlayCheck)"));
+        assertTrue(source.contains("renderOverlayPermission(context, overlayStep)"));
     }
 
     @Test

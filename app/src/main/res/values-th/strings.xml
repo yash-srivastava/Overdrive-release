@@ -577,7 +577,7 @@
     <string name="setup_traffic_body">แอปพลิเคชัน BYD Traffic Monitor อาจปิดกั้นการเชื่อมต่อเครือข่ายของแอปพลิเคชันอื่น การปิดใช้งานจะช่วยให้ OverDrive และแอปพลิเคชันอื่นสามารถใช้งานเครือข่ายได้ตามปกติ หลังจากการปิดใช้งาน จำเป็นต้องรีสตาร์ทหน้าจอรถ</string>
     <string name="setup_traffic_button">เปิด Traffic Monitor</string>
     <string name="setup_camera_fix_title">ภาพกล้องมืดหรือไม่ถูกต้อง?</string>
-    <string name="setup_camera_fix_body">ไปที่เมนู วิเคราะห์ระบบ → ตรวจสอบกล้อง กำหนดค่า Camera ID เป็น 0 แล้วกดบันทึก จากนั้นให้ทำการรีสตาร์ทระบบกล้อง หากภาพยังคงผิดปกติ กรุณาลองเปลี่ยนเป็น Camera ID 1 โดยไม่ต้องปรับการจับคู่ (Mapping)</string>
+    <string name="setup_camera_fix_body">ตรวจสอบกล้อง กำหนดค่า Camera ID เป็น 0 แล้วกดบันทึก จากนั้นให้ทำการรีสตาร์ทระบบกล้อง หากภาพยังคงผิดปกติ กรุณาลองเปลี่ยนเป็น Camera ID 1 โดยไม่ต้องปรับการจับคู่ (Mapping)</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">ปัจจุบัน: กล้อง %1$d (กำหนดเอง)</string>
@@ -757,6 +757,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">พร้อมทำงาน</string>
+    <string name="dashboard_modern_vehicle_status">สถานะรถ</string>
     <string name="dashboard_subtitle_all_systems">ระบบทั้งหมดออนไลน์</string>
     <string name="dashboard_subtitle_some_offline">ออนไลน์ %1$d จาก %2$d บริการ</string>
     <string name="dashboard_subtitle_no_tunnel">ระบบควบคุมจากระยะไกลออฟไลน์</string>

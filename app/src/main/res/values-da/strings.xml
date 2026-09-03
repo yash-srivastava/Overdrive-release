@@ -580,7 +580,7 @@
     <string name="setup_traffic_body">BYD Traffic Monitor blokerer tredjeparts-apps fra at nå internettet. Deaktivering af det giver OverDrive og alle andre apps, du installerer, faktisk bruger netværket. En harddisk genstart er påkrævet bagefter.</string>
     <string name="setup_traffic_button">Åben Trafik Overvågning</string>
     <string name="setup_camera_fix_title">Kamera feeds sort eller forkert?</string>
-    <string name="setup_camera_fix_body">Åbn Diagnostik → Kameraprobe, sæt Kamera-id til 0, tryk Gem og genstart derefter kameradæmonen. Hvis feeds stadig er forkert, gentag med Kamera ID 1. Efterlad mapping sektionen uberørt.</string>
+    <string name="setup_camera_fix_body">Kameraprobe, sæt Kamera-id til 0, tryk Gem og genstart derefter kameradæmonen. Hvis feeds stadig er forkert, gentag med Kamera ID 1. Efterlad mapping sektionen uberørt.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Nuværende: Kamera %1$d (Manual)</string>
@@ -759,6 +759,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">På ur</string>
+    <string name="dashboard_modern_vehicle_status">Køretøjsstatus</string>
     <string name="dashboard_subtitle_all_systems">Alle systemer online</string>
     <string name="dashboard_subtitle_some_offline">%1$d af %2$d tjenester online</string>
     <string name="dashboard_subtitle_no_tunnel">Fjernadgang offline</string>

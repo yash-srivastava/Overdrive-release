@@ -577,7 +577,7 @@
     <string name="setup_traffic_body">BYD 트래픽 모니터는 인터넷에 접속하는 제3자 앱을 차단합니다. 이를 비활성화하면 OverDrive 및 설치하는 다른 앱이 실제로 네트워크를 사용할 수 있습니다. 이후 하드 리부팅이 필요합니다.</string>
     <string name="setup_traffic_button">개방형 교통 모니터</string>
     <string name="setup_camera_fix_title">카메라가 검정색이나 틀렸나요?</string>
-    <string name="setup_camera_fix_body">진단을 열 → 카메라 탐사선, 카메라 ID를 0으로 설정하고 저장 버튼을 누르면 카메라 데이몬을 다시 시작하십시오. 피드가 여전히 잘못되면 카메라 ID 1으로 반복하십시오. 지도 섹션을 손상시키지 마십시오.</string>
+    <string name="setup_camera_fix_body">카메라 탐사선, 카메라 ID를 0으로 설정하고 저장 버튼을 누르면 카메라 데이몬을 다시 시작하십시오. 피드가 여전히 잘못되면 카메라 ID 1으로 반복하십시오. 지도 섹션을 손상시키지 마십시오.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">현재: 카메라 %1$d (동동)</string>
@@ -757,6 +757,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">감시 중</string>
+    <string name="dashboard_modern_vehicle_status">차량 상태</string>
     <string name="dashboard_subtitle_all_systems">모든 시스템 온라인</string>
     <string name="dashboard_subtitle_some_offline">%1$d의 %2$d 온라인 서비스</string>
     <string name="dashboard_subtitle_no_tunnel">오프라인에서 원격 액세스</string>

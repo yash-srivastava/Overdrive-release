@@ -696,7 +696,7 @@
     <string name="setup_traffic_body">Der BYD Traffic Monitor blockiert Apps von Drittanbietern, das Internet zu erreichen. Das Deaktivieren erlaubt OverDrive und alle anderen Apps, die Sie installieren, das Netzwerk tatsächlich zu nutzen. Ein harter Neustart ist anschließend erforderlich.</string>
     <string name="setup_traffic_button">Öffneten Verkehrsmonitor</string>
     <string name="setup_camera_fix_title">Kamera füttert schwarz oder falsch?</string>
-    <string name="setup_camera_fix_body">Öffnen Sie Diagnostik → Kamera-Sonde, setzen Sie die Kamera-ID auf 0, tippen Sie auf Speichern und starten Sie dann den Kamera-Demon neu. Wenn die Feeds immer noch falsch sind, wiederholen Sie mit der Kamera-ID 1. Lassen Sie den Kartenabschnitt unberührt.</string>
+    <string name="setup_camera_fix_body">Kamera-Sonde, setzen Sie die Kamera-ID auf 0, tippen Sie auf Speichern und starten Sie dann den Kamera-Demon neu. Wenn die Feeds immer noch falsch sind, wiederholen Sie mit der Kamera-ID 1. Lassen Sie den Kartenabschnitt unberührt.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Aktueller: Kamera %1$d (Manual)</string>
@@ -906,6 +906,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">Auf Wache</string>
+    <string name="dashboard_modern_vehicle_status">Fahrzeugstatus</string>
     <string name="dashboard_subtitle_all_systems">Alle Systeme online</string>
     <string name="dashboard_subtitle_some_offline">%1$d von %2$d Online-Dienste</string>
     <string name="dashboard_subtitle_no_tunnel">Fernzugriff offline</string>

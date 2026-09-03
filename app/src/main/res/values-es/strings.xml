@@ -696,7 +696,7 @@
     <string name="setup_traffic_body">El monitor de tráfico BYD bloquea que las aplicaciones de terceros accedan a Internet. Desactivarlo permite que OverDrive y cualquier otra aplicación que instale utilice realmente la red. Se requiere un reinicio duro después.</string>
     <string name="setup_traffic_button">Monitoreo de tráfico abierto</string>
     <string name="setup_camera_fix_title">¿La cámara se alimenta de negro o incorrecto?</string>
-    <string name="setup_camera_fix_body">Abre diagnósticos → sonda de cámara, establece el ID de cámara a 0, pulsa Guardar, y luego reinicie el demonio de la cámara. Si las entradas siguen equivocadas, repita con el ID de cámara 1. Deja la sección de mapeo intacta.</string>
+    <string name="setup_camera_fix_body">Sonda de cámara, establece el ID de cámara a 0, pulsa Guardar, y luego reinicie el demonio de la cámara. Si las entradas siguen equivocadas, repita con el ID de cámara 1. Deja la sección de mapeo intacta.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Corriente: cámara %1$d (Manual)</string>
@@ -906,6 +906,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">En vigilancia</string>
+    <string name="dashboard_modern_vehicle_status">Estado del vehículo</string>
     <string name="dashboard_subtitle_all_systems">Todos los sistemas en línea</string>
     <string name="dashboard_subtitle_some_offline">%1$d de los servicios %2$d en línea</string>
     <string name="dashboard_subtitle_no_tunnel">Acceso remoto fuera de línea</string>

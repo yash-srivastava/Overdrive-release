@@ -105,25 +105,26 @@ public class SetupGuideDialog {
         // Wait briefly for the asynchronously bound KeepAlive AccessibilityService,
         // then drive BYD's "Deaktiver Autostart" switch. A fast tap during app
         // startup previously raced the bind and went straight to the manual screen.
-        final TextView btnAutoStart = view.findViewById(R.id.btnOpenAutoStart);
-        final View ivAutoStartCheck = view.findViewById(R.id.ivAutoStartCheck);
-        btnAutoStart.setOnClickListener(v -> {
-            btnAutoStart.setEnabled(false);
-            btnAutoStart.setText(context.getString(R.string.setup_autostart_enabling));
+        final StepRow autoStartStep = new StepRow(view,
+                R.id.tvAutoStartTitle, R.id.tvAutoStartBody,
+                R.id.btnOpenAutoStart, R.id.ivAutoStartCheck);
+        autoStartStep.button.setOnClickListener(v -> {
+            autoStartStep.button.setEnabled(false);
+            autoStartStep.button.setText(context.getString(R.string.setup_autostart_enabling));
             runAutoStartWhenServiceReady(
                     context,
-                    btnAutoStart,
-                    ivAutoStartCheck,
+                    autoStartStep,
                     SystemClock.elapsedRealtime() + AUTOSTART_SERVICE_WAIT_MS);
         });
 
         // Step 3: Overlay permission
-        TextView btnOverlay = view.findViewById(R.id.btnOpenOverlay);
-        View stepOverlayCheck = view.findViewById(R.id.ivOverlayCheck);
+        final StepRow overlayStep = new StepRow(view,
+                R.id.tvOverlayTitle, R.id.tvOverlayBody,
+                R.id.btnOpenOverlay, R.id.ivOverlayCheck);
 
-        renderOverlayPermission(context, btnOverlay, stepOverlayCheck);
+        renderOverlayPermission(context, overlayStep);
 
-        btnOverlay.setOnClickListener(v -> {
+        overlayStep.button.setOnClickListener(v -> {
             try {
                 Intent intent = new Intent(
                         Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -161,12 +162,11 @@ public class SetupGuideDialog {
                 .create();
 
         dialog.setOnShowListener(ignored -> {
-            renderOverlayPermission(context, btnOverlay, stepOverlayCheck);
+            renderOverlayPermission(context, overlayStep);
             dialog.getWindow().getDecorView().getViewTreeObserver()
                     .addOnWindowFocusChangeListener(hasFocus -> {
                         if (hasFocus) {
-                            renderOverlayPermission(
-                                    context, btnOverlay, stepOverlayCheck);
+                            renderOverlayPermission(context, overlayStep);
                         }
                     });
         });
@@ -181,6 +181,19 @@ public class SetupGuideDialog {
             dialog.dismiss();
         });
 
+        // Camera tip: the fix happens on Diagnostics, so hand the user over and
+        // close the guide. Left open when the host cannot navigate, matching the
+        // Traffic Monitor tip above — the written steps still stand on their own.
+        View btnDiagnostics = view.findViewById(R.id.btnOpenDiagnostics);
+        if (btnDiagnostics != null) {
+            btnDiagnostics.setOnClickListener(v -> {
+                if (context instanceof com.overdrive.app.ui.MainActivity) {
+                    ((com.overdrive.app.ui.MainActivity) context).invokeDiagnosticsScreen();
+                    dialog.dismiss();
+                }
+            });
+        }
+
         // "Remind me later" — soft nag: do NOT update the seen marker, so the
         // dialog reappears on next launch. Autostart is load-bearing; a single
         // accidental dismiss shouldn't permanently silence the reminder.
@@ -189,57 +202,95 @@ public class SetupGuideDialog {
         dialog.show();
     }
 
+    /**
+     * The views one guided step owns. A step is either pending — instructions
+     * plus a full-width action — or complete, where the action is gone and the
+     * check, the muted title and the body carry the confirmation instead.
+     */
+    private static final class StepRow {
+        private final TextView title;
+        private final TextView body;
+        private final TextView button;
+        private final View check;
+
+        StepRow(View root, int titleId, int bodyId, int buttonId, int checkId) {
+            this.title = root.findViewById(titleId);
+            this.body = root.findViewById(bodyId);
+            this.button = root.findViewById(buttonId);
+            this.check = root.findViewById(checkId);
+        }
+
+        void markComplete(Context context, int bodyRes) {
+            if (check != null) check.setVisibility(View.VISIBLE);
+            if (button != null) button.setVisibility(View.GONE);
+            if (body != null) body.setText(context.getString(bodyRes));
+            tintTitle(com.google.android.material.R.attr.colorOnSurfaceVariant);
+        }
+
+        void markPending(Context context, int bodyRes, int buttonRes) {
+            if (check != null) check.setVisibility(View.INVISIBLE);
+            if (button != null) {
+                button.setVisibility(View.VISIBLE);
+                button.setEnabled(true);
+                button.setText(context.getString(buttonRes));
+            }
+            if (body != null) body.setText(context.getString(bodyRes));
+            tintTitle(com.google.android.material.R.attr.colorOnSurface);
+        }
+
+        private void tintTitle(int colorAttr) {
+            if (title == null) return;
+            title.setTextColor(com.google.android.material.color.MaterialColors.getColor(
+                    title, colorAttr));
+        }
+    }
+
     private static void runAutoStartWhenServiceReady(
-            Context context, TextView button, View check, long deadline) {
+            Context context, StepRow step, long deadline) {
         KeepAliveAccessibilityService service = KeepAliveAccessibilityService.getInstance();
         if (service != null) {
             service.runAutoStartEnabler((success, result) ->
-                    finishAutoStartAttempt(context, button, check, success, result));
+                    finishAutoStartAttempt(context, step, success, result));
             return;
         }
         if (SystemClock.elapsedRealtime() < deadline) {
-            button.postDelayed(
-                    () -> runAutoStartWhenServiceReady(context, button, check, deadline),
+            step.button.postDelayed(
+                    () -> runAutoStartWhenServiceReady(context, step, deadline),
                     AUTOSTART_SERVICE_POLL_MS);
             return;
         }
         Log.w(TAG, "a11y service did not bind within " + AUTOSTART_SERVICE_WAIT_MS
                 + "ms — falling back to manual settings");
-        finishAutoStartAttempt(context, button, check, false, null);
+        finishAutoStartAttempt(context, step, false, null);
     }
 
     private static void finishAutoStartAttempt(
             Context context,
-            TextView button,
-            View check,
+            StepRow step,
             boolean success,
             com.overdrive.app.services.AutoStartEnabler.Result result) {
         if (success) {
             Log.i(TAG, "autostart auto-enable done (result=" + result + ")");
-            button.setText(context.getString(R.string.setup_autostart_enabled));
-            button.setEnabled(false);
-            if (check != null) check.setVisibility(View.VISIBLE);
+            step.markComplete(context, R.string.setup_autostart_enabled);
             return;
         }
         Log.w(TAG, "autostart auto-enable failed (result=" + result
                 + ") — falling back to manual settings");
-        button.setEnabled(true);
-        button.setText(context.getString(R.string.setup_autostart_button));
+        step.markPending(context,
+                R.string.setup_autostart_body, R.string.setup_autostart_button);
         Toast.makeText(context,
                 context.getString(R.string.setup_autostart_failed),
                 Toast.LENGTH_LONG).show();
         openAutoStartSettings(context);
     }
 
-    private static void renderOverlayPermission(
-            Context context, TextView button, View check) {
-        boolean granted = OverlayPermissionChecker.isGranted(context);
-        check.setVisibility(granted ? View.VISIBLE : View.GONE);
-        button.setText(context.getString(
-                granted
-                        ? R.string.setup_overlay_already_granted
-                        : R.string.setup_overlay_button));
-        button.setEnabled(!granted);
+    private static void renderOverlayPermission(Context context, StepRow step) {
+        if (OverlayPermissionChecker.isGranted(context)) {
+            step.markComplete(context, R.string.setup_overlay_already_granted);
+        } else {
+            step.markPending(context,
+                    R.string.setup_overlay_body, R.string.setup_overlay_button);
+        }
     }
 
     /**
