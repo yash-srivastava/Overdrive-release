@@ -24,6 +24,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.google.android.material.button.MaterialButton
 import com.overdrive.app.R
+import com.overdrive.app.ui.util.navigateDrillDown
 import com.overdrive.app.daemon.CameraDaemon
 
 /**
@@ -1292,6 +1293,37 @@ class WebViewFragment : Fragment() {
                 "ok"
             } catch (e: Exception) {
                 android.util.Log.w("WebViewFragment", "openHazardMap bridge failed: ${e.message}")
+                "error"
+            }
+        }
+
+        /**
+         * Navigate to a native destination named by the page. `dest` is matched
+         * against an allowlist — a page must never be able to name an arbitrary
+         * navigation id. Posted to the UI thread because bridge calls arrive on
+         * a WebView worker thread.
+         */
+        @android.webkit.JavascriptInterface
+        fun navigate(dest: String): String {
+            val destinationId = when (dest) {
+                "bydCloud" -> R.id.bydCloudFragment
+                else -> return "unknown_destination"
+            }
+            return try {
+                val act = activity ?: return "no_context"
+                act.runOnUiThread {
+                    try {
+                        if (!isAdded || isDetached || view == null) return@runOnUiThread
+                        androidx.navigation.fragment.NavHostFragment
+                            .findNavController(this@WebViewFragment)
+                            .navigateDrillDown(destinationId)
+                    } catch (e: Exception) {
+                        android.util.Log.w("WebViewFragment", "navigate($dest) failed: ${e.message}")
+                    }
+                }
+                "ok"
+            } catch (e: Exception) {
+                android.util.Log.w("WebViewFragment", "navigate bridge failed: ${e.message}")
                 "error"
             }
         }

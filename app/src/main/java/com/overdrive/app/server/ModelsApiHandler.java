@@ -129,6 +129,12 @@ public class ModelsApiHandler {
             handleSetSelected(out, body);
             return true;
         }
+        // Vehicle render for a model id — the same drawable the native
+        // Dashboard hero uses, so both surfaces show one car.
+        if (pathOnly.equals("/api/models/art") && method.equals("GET")) {
+            handleGetArt(out, queryParam(path, "id"));
+            return true;
+        }
         // Effective manifest (cached-remote if newer, else bundled). The JS calls this
         // instead of reading the bundled .json directly so users with a remote-cached
         // copy see the up-to-date model list across reloads.
@@ -296,6 +302,33 @@ public class ModelsApiHandler {
         // notifications page reads this field to paint the LHD/RHD picker.
         response.put("driveSide", vehicle.optString("driveSide", "rhd"));
         HttpResponse.sendJson(out, response.toString());
+    }
+
+    /**
+     * Stream the vehicle render for {@code id} as image/webp. VehicleArt maps
+     * every id it doesn't recognise (including null) onto a generic drawable,
+     * so this only 404s when the app context isn't up yet.
+     */
+    private static void handleGetArt(OutputStream out, String id) throws Exception {
+        android.content.Context ctx = com.overdrive.app.daemon.CameraDaemon.getAppContext();
+        if (ctx == null) {
+            HttpResponse.sendError(out, 503, "App context unavailable");
+            return;
+        }
+        int drawableId = com.overdrive.app.ui.vehicle.VehicleArt.INSTANCE.drawableFor(id);
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        try (InputStream in = ctx.getResources().openRawResource(drawableId)) {
+            byte[] chunk = new byte[8192];
+            int count;
+            while ((count = in.read(chunk)) != -1) {
+                buffer.write(chunk, 0, count);
+            }
+        } catch (Exception e) {
+            logger.warn(TAG + ": art read failed for id=" + id + ": " + e.getMessage());
+            HttpResponse.sendError(out, 404, "Art not found");
+            return;
+        }
+        HttpResponse.sendImageBytes(out, buffer.toByteArray(), "image/webp");
     }
 
     private static void handleSetSelected(OutputStream out, String body) throws Exception {

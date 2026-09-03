@@ -163,11 +163,7 @@ var VC = {
         if (this.liteMode) {
             this.initLiteMode();
         } else {
-            // Default: Aurora White (converted to linear so it matches the rest
-            // of the colour pipeline; see applyColor() for the rationale).
-            this.baseColor = new THREE.Color(0xE8E8EC).convertSRGBToLinear();
-            this.initThreeJS();
-            this.initColorPicker();
+            this._startImmersiveScene();
         }
         this.bindControls();
         this.startStateSync();
@@ -175,16 +171,26 @@ var VC = {
         this.startCloudStatusSync();
         this.requestCloudLockRefresh();
         this.startCloudLockSync();
-        if (!this.liteMode) {
-            this.animate();
-            this.init3dButton();
-        }
         this.initCloudModal();
         this.initVisibilitySync();
         this.initViewModeToggle();
-        // Lite stops here: no appearance manifest, no persisted-model fetch,
-        // no GLB download — the entire block below belongs to the 3D scene.
-        if (this.liteMode) return;
+    },
+
+    /**
+     * Bring up the GL scene and everything that only exists alongside it.
+     * Called from init() in immersive mode and from the view-mode toggle when
+     * the user switches into 3D, so both paths build the same scene.
+     * Requires the vendor stack (THREE, GSAP) to already be present.
+     */
+    _startImmersiveScene: function() {
+        var self = this;
+        // Default: Aurora White (converted to linear so it matches the rest
+        // of the colour pipeline; see applyColor() for the rationale).
+        this.baseColor = new THREE.Color(0xE8E8EC).convertSRGBToLinear();
+        this.initThreeJS();
+        this.initColorPicker();
+        this.animate();
+        this.init3dButton();
 
         // Vehicle appearance (model + color) is stored unified server-side so AVN
         // and phone-over-tunnel access show the same car. Fetch manifest + persisted
@@ -210,6 +216,7 @@ var VC = {
             var chosenId = (selected && selected.modelId) || self.manifest['default'] || 'seal';
             var sel = document.getElementById('modelPicker');
             if (sel) sel.value = chosenId;
+            self.syncModelMenu();
             self.loadModel(chosenId);
         }
 
@@ -239,38 +246,246 @@ var VC = {
     initLiteMode: function() {
         var loading = document.getElementById('vcLoading');
         if (loading) loading.style.display = 'none';
-        var hide = ['colorPicker', 'modelPicker', 'btn3dView'];
+        var hide = ['colorPicker', 'modelMenu', 'btn3dView'];
         for (var i = 0; i < hide.length; i++) {
             var el = document.getElementById(hide[i]);
             if (el) el.style.display = 'none';
         }
+        this.loadLiteHeroArt();
     },
 
     /**
-     * Lite ↔ immersive switcher. Persists to localStorage 'vc.viewMode'
-     * (read by the vehicle-control.html bootstrap on every load) then does
-     * a full reload — the honest switch: the vendor bundle is loaded (or
-     * dropped) and the page boots cleanly in the target mode, with no
-     * half-torn GL context or injected-script ordering races. Null-safe:
-     * without the button (older cached HTML) nothing binds and both modes
-     * keep working.
+     * Point the lite hero at the selected model's render. Goes through fetch()
+     * rather than setting img.src directly so auth.js can attach the bearer
+     * token — over a tunnel the session cookie is stripped and a bare <img>
+     * request would come back 401.
+     */
+    loadLiteHeroArt: function() {
+        var hero = document.getElementById('vcLiteHero');
+        var img = document.getElementById('vcLiteHeroImg');
+        if (!hero || !img || typeof fetch !== 'function') return;
+        // Already resolved on an earlier lite pass — re-fetching would only
+        // blank the hero for a beat on every 3D → lite switch.
+        if (hero.classList.contains('has-art')) return;
+        this._fetchSelected(function(selected) {
+            var id = (selected && selected.modelId) || '';
+            fetch('/api/models/art?id=' + encodeURIComponent(id))
+                .then(function(resp) {
+                    if (!resp.ok) throw new Error('art ' + resp.status);
+                    return resp.blob();
+                })
+                .then(function(blob) {
+                    img.src = URL.createObjectURL(blob);
+                    hero.classList.add('has-art');
+                })
+                .catch(function() { /* silhouette fallback stays up */ });
+        });
+    },
+
+    /**
+     * Lite ↔ immersive switcher. The choice persists to localStorage
+     * 'vc.viewMode' (read by the vehicle-control.html bootstrap on every
+     * load), but the switch itself only rebuilds the stage — the controls,
+     * pollers and status chrome keep running. Null-safe: without the button
+     * (older cached HTML) nothing binds and both modes keep working.
      */
     initViewModeToggle: function() {
         var self = this;
         var btn = document.getElementById('btnViewMode');
         if (!btn) return;
-        var label = document.getElementById('btnViewModeLabel');
-        if (label) label.textContent = this.liteMode ? 'Immersive' : 'Lite';
-        btn.title = this.liteMode
-            ? 'Switch to immersive 3D view'
-            : 'Switch to lightweight view';
+        this._syncViewModeChip();
         btn.addEventListener('click', function() {
-            try {
-                localStorage.setItem(
-                    'vc.viewMode', self.liteMode ? 'immersive' : 'lite');
-            } catch (e) {}
-            location.reload();
+            self.switchViewMode();
         });
+    },
+
+    /**
+     * Visible label is CSS-driven (html.vc-mode-*) because writing t() here
+     * used to blank the chip: the catalog is often still loading, and t()
+     * returns null, which textContent stores as "".
+     */
+    _syncViewModeChip: function() {
+        var btn = document.getElementById('btnViewMode');
+        if (!btn) return;
+        btn.title = this.liteMode
+            ? this.translatedText('vehicle.view_mode_3d', '3D')
+            : this.translatedText('vehicle.view_mode_lite', 'Lite');
+        var root = document.documentElement;
+        root.className = root.className
+            .replace(/\bvc-mode-(lite|immersive)\b/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        root.className += (root.className ? ' ' : '')
+            + (this.liteMode ? 'vc-mode-lite' : 'vc-mode-immersive');
+    },
+
+    /** Swap the stage between the static hero and the GL scene, in place. */
+    switchViewMode: function() {
+        var self = this;
+        if (this._viewModeSwitching) return;
+        this._viewModeSwitching = true;
+        var toImmersive = this.liteMode;
+        try {
+            localStorage.setItem('vc.viewMode', toImmersive ? 'immersive' : 'lite');
+        } catch (e) {}
+
+        if (!toImmersive) {
+            this._enterLiteMode();
+            this._viewModeSwitching = false;
+            return;
+        }
+        // Reveal the immersive stage before the vendor stack lands so the
+        // loading overlay (hidden by html.vc-mode-lite) is the thing the user
+        // watches during the ~820 KB download.
+        this._showImmersiveStage();
+        this._showStageSpinner(this.translatedText(
+            'vehicle.loading_model', 'Loading model...'));
+        this._ensureImmersiveVendors(function(ok) {
+            if (!ok) {
+                try { localStorage.setItem('vc.viewMode', 'lite'); } catch (e) {}
+                self._enterLiteMode();
+                self.toast(self.translatedText(
+                    'vehicle.engine_load_failed', '3D engine failed to load.'), 'error');
+                self._viewModeSwitching = false;
+                return;
+            }
+            self._startImmersiveScene();
+            self._viewModeSwitching = false;
+        });
+    },
+
+    _showStageSpinner: function(message) {
+        var loading = document.getElementById('vcLoading');
+        if (!loading) return;
+        loading.style.display = '';
+        loading.classList.remove('hidden');
+        var spinner = loading.querySelector('.vc-loading-spinner');
+        if (spinner) spinner.style.display = '';
+        var retry = document.getElementById('vcLoadingRetry');
+        if (retry) retry.style.display = 'none';
+        var text = loading.querySelector('.vc-loading-text');
+        if (text && message) text.textContent = message;
+    },
+
+    /**
+     * Load the immersive vendor stack once, in the order the page's bootstrap
+     * uses. `VC_VENDOR_CHAIN` is published by vehicle-control.html so the URLs
+     * and their cache-busting versions live in exactly one place.
+     */
+    _ensureImmersiveVendors: function(done) {
+        if (typeof THREE !== 'undefined' && THREE.GLTFLoader && typeof gsap !== 'undefined') {
+            done(true);
+            return;
+        }
+        if (this._vendorLoadWaiters) {
+            this._vendorLoadWaiters.push(done);
+            return;
+        }
+        this._vendorLoadWaiters = [done];
+
+        var self = this;
+        var chain = window.VC_VENDOR_CHAIN || [];
+        // The lite-mode Color stub would otherwise shadow the real library.
+        if (window.THREE && window.THREE._vcLiteStub) delete window.THREE;
+
+        var finish = function(ok) {
+            var waiters = self._vendorLoadWaiters || [];
+            self._vendorLoadWaiters = null;
+            for (var i = 0; i < waiters.length; i++) waiters[i](ok);
+        };
+
+        var index = 0;
+        var next = function() {
+            if (index >= chain.length) {
+                finish(typeof THREE !== 'undefined' && !!THREE.GLTFLoader);
+                return;
+            }
+            var tag = document.createElement('script');
+            tag.src = chain[index++];
+            tag.async = false;
+            tag.onload = next;
+            tag.onerror = function() { finish(false); };
+            document.body.appendChild(tag);
+        };
+        next();
+    },
+
+    /**
+     * Chrome-only half of the switch: canvas and appearance controls in. The
+     * hero stays loaded but hidden by the mode class, so switching back does
+     * not re-fetch the render.
+     */
+    _showImmersiveStage: function() {
+        this.liteMode = false;
+        this._syncViewModeChip();
+        // initLiteMode hid these inline; the CSS mode class alone can't win
+        // against an inline display:none.
+        var show = ['colorPicker', 'modelMenu', 'btn3dView'];
+        for (var i = 0; i < show.length; i++) {
+            var el = document.getElementById(show[i]);
+            if (el) el.style.display = '';
+        }
+    },
+
+    _enterLiteMode: function() {
+        this.liteMode = true;
+        this._syncViewModeChip();
+        this._teardownImmersiveScene();
+        this.initLiteMode();
+    },
+
+    /**
+     * Release the GL context and everything bound to it. The canvas element
+     * itself stays in the DOM — a WebGLRenderer cannot be re-created against a
+     * canvas that already has a context, so `initThreeJS` gets a fresh one via
+     * canvas replacement here.
+     */
+    _teardownImmersiveScene: function() {
+        if (this._3dViewActive) this.stop3dView(true);
+        this._renderLoopActive = false;
+
+        if (this._modelLoadTimeout) {
+            clearTimeout(this._modelLoadTimeout);
+            this._modelLoadTimeout = null;
+        }
+        // Any in-flight GLB load must not paint into the scene we are dropping.
+        this._loadGen++;
+
+        if (this._canvasResizeObserver) {
+            this._canvasResizeObserver.disconnect();
+            this._canvasResizeObserver = null;
+        }
+        if (this._themeObserver) {
+            this._themeObserver.disconnect();
+            this._themeObserver = null;
+        }
+        if (this._onWindowResize) {
+            window.removeEventListener('resize', this._onWindowResize);
+            this._onWindowResize = null;
+        }
+
+        this._disposeCarModel();
+        if (this.controls && this.controls.dispose) this.controls.dispose();
+        this.controls = null;
+        if (this.renderer) {
+            var old = this.renderer.domElement;
+            this.renderer.dispose();
+            if (old && old.parentNode) {
+                var fresh = document.createElement('canvas');
+                fresh.id = old.id;
+                fresh.className = old.className;
+                old.parentNode.replaceChild(fresh, old);
+            }
+            this.renderer = null;
+        }
+        this.scene = null;
+        this.camera = null;
+        this._sceneLights = null;
+        this._groundGrid = null;
+        this._contactShadow = null;
+        this.bodyPaintMeshes = [];
+        this._canvasCssW = 0;
+        this._canvasCssH = 0;
     },
 
     _kickManifestRefresh: function() {
@@ -283,6 +498,7 @@ var VC = {
                 // first entry; restore the dropdown's active value.
                 var sel = document.getElementById('modelPicker');
                 if (sel && self.activeModelId) sel.value = self.activeModelId;
+                self.syncModelMenu();
             },
             function onResult(stale) {
                 self._setStale(stale);
@@ -298,9 +514,15 @@ var VC = {
      */
     _setStale: function(stale) {
         var sel = document.getElementById('modelPicker');
-        if (!sel) return;
-        if (stale) sel.classList.add('stale');
-        else sel.classList.remove('stale');
+        if (sel) {
+            if (stale) sel.classList.add('stale');
+            else sel.classList.remove('stale');
+        }
+        var menu = document.getElementById('modelMenu');
+        if (menu) {
+            if (stale) menu.classList.add('stale');
+            else menu.classList.remove('stale');
+        }
     },
 
     _fetchSelected: function(cb) {
@@ -415,7 +637,10 @@ var VC = {
         this.addLighting();
         this.addGroundGrid();
 
-        window.addEventListener('resize', function() { self.onResize(); });
+        // Kept on `this` so a switch to lite can detach it — the handler
+        // dereferences the renderer, which is disposed by then.
+        this._onWindowResize = function() { self.onResize(); };
+        window.addEventListener('resize', this._onWindowResize);
         this._watchCanvasSize();
 
         // React to theme changes so the renderer's clear colour stays in
@@ -576,9 +801,12 @@ var VC = {
         }
     },
 
+    /** Y of the ground grid; loaded models are seated on this plane. */
+    GROUND_Y: -0.01,
+
     addGroundGrid: function() {
         var gridHelper = new THREE.GridHelper(20, 40, 0x1a1a2e, 0x1a1a2e);
-        gridHelper.position.y = -0.01;
+        gridHelper.position.y = this.GROUND_Y;
         gridHelper.material.opacity = 0.15;
         gridHelper.material.transparent = true;
         this.scene.add(gridHelper);
@@ -734,7 +962,11 @@ var VC = {
         box.setFromObject(this.carModel);
         var center = box.getCenter(new THREE.Vector3());
         this.carModel.position.sub(center);
-        this.carModel.position.y += 0.1;
+        // Seat the wheels on the grid. Centring the bounding box puts the
+        // model's vertical midpoint on the ground plane, which sinks the lower
+        // half of every model below the floor.
+        box.setFromObject(this.carModel);
+        this.carModel.position.y += this.GROUND_Y - box.min.y;
     },
 
     _loadModelFromPath: function(modelPath, gen) {
@@ -871,6 +1103,7 @@ var VC = {
     },
 
     onResize: function() {
+        if (!this.renderer || !this.camera) return;
         // Match the responsive lens used at initialisation.
         this.camera.fov = window.innerWidth < 768 && !window.AndroidBridge ? 50 : 45;
         // Re-measure the canvas's CSS box, not the window — the sidebar
@@ -890,7 +1123,18 @@ var VC = {
 
     animate: function(frameTime) {
         var self = this;
-        requestAnimationFrame(function(nextFrameTime) { self.animate(nextFrameTime); });
+        // Entry with no frame time is a fresh start; re-entry after the scene
+        // was torn down (lite switch) must end the loop rather than render
+        // against a disposed context.
+        if (typeof frameTime !== 'number') {
+            if (this._renderLoopActive) return;
+            this._renderLoopActive = true;
+        } else if (!this._renderLoopActive) {
+            return;
+        }
+        requestAnimationFrame(function(nextFrameTime) {
+            self.animate(typeof nextFrameTime === 'number' ? nextFrameTime : 0);
+        });
         // 30fps is smooth for this fixed automotive display. Together with
         // the 1x backing buffer it removes most continuous AVN GPU load;
         // standalone phone/browser clients retain their native refresh rate.
@@ -1142,6 +1386,9 @@ var VC = {
         var self = this;
         var container = document.getElementById('colorPicker');
         if (!container) return;
+        // Switching lite → 3D re-runs this; start from an empty row so the
+        // swatches are not appended a second time.
+        container.innerHTML = '';
 
         for (var i = 0; i < this.colorPresets.length; i++) {
             (function(preset, idx) {
@@ -1164,27 +1411,122 @@ var VC = {
             })(this.colorPresets[i], i);
         }
 
-        // Custom color — use a text hex input fallback for WebView compatibility
-        // (input type="color" doesn't work on Android 7.1 WebView / Chrome 58)
-        var custom = document.createElement('div');
+        // Custom color opens an in-app dialog. <input type="color"> would open
+        // the OS picker, which arrives with chrome this page cannot style (and
+        // on Android 7.1 WebView / Chrome 58 often does not open at all).
+        var custom = document.createElement('button');
+        custom.type = 'button';
         custom.className = 'vc-swatch-custom';
+        custom.id = 'colorSwatchCustom';
         custom.title = BYD.i18n.t('vehicle.color_custom');
-        custom.style.position = 'relative';
-        
-        // Try native color picker first, fall back gracefully
-        var input = document.createElement('input');
-        input.type = 'color';
-        input.value = '#E8E8EC';
-        input.addEventListener('input', function(e) {
-            self.setColor(e.target.value, null);
-            custom.style.backgroundColor = e.target.value;
+        custom.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+            'stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+        custom.addEventListener('click', function(e) {
+            e.stopPropagation();
+            self.openColorModal();
         });
-        input.addEventListener('change', function(e) {
-            self.setColor(e.target.value, null);
-            custom.style.backgroundColor = e.target.value;
-        });
-        custom.appendChild(input);
         container.appendChild(custom);
+
+        this.initColorModal();
+    },
+
+    /**
+     * Custom-paint dialog: preset grid plus a hex field. Nothing is applied to
+     * the scene until Apply, so a mistyped hex cannot leave the body painted a
+     * colour the user never chose.
+     */
+    initColorModal: function() {
+        var self = this;
+        var overlay = document.getElementById('colorModal');
+        var grid = document.getElementById('colorModalGrid');
+        var hex = document.getElementById('colorModalHex');
+        if (!overlay || !grid || !hex || overlay._vcBound) return;
+        overlay._vcBound = true;
+
+        for (var i = 0; i < this.colorPresets.length; i++) {
+            (function(preset) {
+                var cell = document.createElement('button');
+                cell.type = 'button';
+                cell.className = 'vc-color-cell';
+                cell.style.backgroundColor = preset.hex;
+                cell.title = preset.name;
+                cell.setAttribute('data-hex', preset.hex);
+                cell.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    self._setColorModalDraft(preset.hex);
+                });
+                grid.appendChild(cell);
+            })(this.colorPresets[i]);
+        }
+
+        hex.addEventListener('input', function() {
+            self._setColorModalDraft(hex.value, true);
+        });
+        overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) self.closeColorModal();
+        });
+        var cancel = document.getElementById('colorModalCancel');
+        if (cancel) cancel.addEventListener('click', function() { self.closeColorModal(); });
+        var apply = document.getElementById('colorModalApply');
+        if (apply) {
+            apply.addEventListener('click', function() {
+                var value = self._normalizeHex(hex.value);
+                if (!value) { hex.classList.add('invalid'); return; }
+                self.setColor(value, document.getElementById('colorSwatchCustom'));
+                self.closeColorModal();
+            });
+        }
+    },
+
+    openColorModal: function() {
+        var overlay = document.getElementById('colorModal');
+        if (!overlay) return;
+        this._setColorModalDraft(
+            '#' + this.baseColor.clone().convertLinearToSRGB().getHexString());
+        overlay.classList.add('visible');
+    },
+
+    closeColorModal: function() {
+        var overlay = document.getElementById('colorModal');
+        if (overlay) overlay.classList.remove('visible');
+    },
+
+    /**
+     * @param hex        candidate value, valid or not
+     * @param fromTyping skips rewriting the field so a half-typed hex isn't
+     *                   yanked out from under the caret
+     */
+    _setColorModalDraft: function(hex, fromTyping) {
+        var field = document.getElementById('colorModalHex');
+        var preview = document.getElementById('colorModalPreview');
+        if (!field) return;
+        var value = this._normalizeHex(hex);
+        if (!fromTyping) field.value = value || hex;
+        if (value) {
+            field.classList.remove('invalid');
+            if (preview) preview.style.backgroundColor = value;
+        } else {
+            field.classList.add('invalid');
+        }
+        var cells = document.querySelectorAll('.vc-color-cell');
+        for (var i = 0; i < cells.length; i++) {
+            var cellHex = cells[i].getAttribute('data-hex');
+            var match = !!value && cellHex && cellHex.toLowerCase() === value.toLowerCase();
+            if (match) cells[i].classList.add('active');
+            else cells[i].classList.remove('active');
+        }
+    },
+
+    /** Returns a canonical #RRGGBB, or null when the input isn't a hex colour. */
+    _normalizeHex: function(hex) {
+        if (!hex) return null;
+        var raw = String(hex).trim().replace(/^#/, '');
+        if (/^[0-9a-fA-F]{3}$/.test(raw)) {
+            raw = raw.charAt(0) + raw.charAt(0) + raw.charAt(1) + raw.charAt(1) +
+                raw.charAt(2) + raw.charAt(2);
+        }
+        if (!/^[0-9a-fA-F]{6}$/.test(raw)) return null;
+        return '#' + raw.toUpperCase();
     },
 
     /**
@@ -1476,6 +1818,15 @@ var VC = {
             sel.appendChild(opt);
         }
 
+        // Options are rebuilt on every manifest refresh and on a lite → 3D
+        // switch; the listeners below outlive them, so bind once.
+        if (sel._vcBound) {
+            this.initModelMenu();
+            this.syncModelMenu();
+            return;
+        }
+        sel._vcBound = true;
+
         sel.addEventListener('change', function() {
             self.setModel(sel.value);
         });
@@ -1492,6 +1843,86 @@ var VC = {
             self._lastStaleRetryMs = now;
             self._kickManifestRefresh();
         });
+
+        this.initModelMenu();
+        this.syncModelMenu();
+    },
+
+    /**
+     * Visible half of the model selector. The <select> above stays the value
+     * and option source of truth; this listbox is what the user sees, because
+     * the WebView draws native popups with its own highlight colour that no
+     * page style can reach.
+     */
+    initModelMenu: function() {
+        var self = this;
+        var menu = document.getElementById('modelMenu');
+        var trigger = document.getElementById('modelMenuTrigger');
+        if (!menu || !trigger || menu._vcBound) return;
+        menu._vcBound = true;
+
+        trigger.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var opening = !menu.classList.contains('open');
+            self.closeModelMenu();
+            if (!opening) return;
+            menu.classList.add('open');
+            trigger.setAttribute('aria-expanded', 'true');
+            // Same tap-to-retry as the <select>: by the time the user picks,
+            // a fresh manifest may already have landed.
+            if (menu.classList.contains('stale')) {
+                var now = Date.now();
+                if (!self._lastStaleRetryMs || now - self._lastStaleRetryMs >= 1000) {
+                    self._lastStaleRetryMs = now;
+                    self._kickManifestRefresh();
+                }
+            }
+        });
+        document.addEventListener('click', function(e) {
+            if (!menu.contains(e.target)) self.closeModelMenu();
+        });
+        document.addEventListener('keydown', function(e) {
+            if (e.keyCode === 27) self.closeModelMenu();
+        });
+    },
+
+    closeModelMenu: function() {
+        var menu = document.getElementById('modelMenu');
+        if (!menu) return;
+        menu.classList.remove('open');
+        var trigger = document.getElementById('modelMenuTrigger');
+        if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    },
+
+    /** Mirror the <select>'s options and current value into the visible menu. */
+    syncModelMenu: function() {
+        var self = this;
+        var sel = document.getElementById('modelPicker');
+        var list = document.getElementById('modelMenuList');
+        var value = document.getElementById('modelMenuValue');
+        if (!sel || !list || !value) return;
+
+        list.innerHTML = '';
+        for (var i = 0; i < sel.options.length; i++) {
+            (function(opt) {
+                var row = document.createElement('button');
+                row.type = 'button';
+                row.className = 'vc-model-menu__option';
+                row.setAttribute('role', 'option');
+                row.setAttribute('aria-selected', opt.value === sel.value ? 'true' : 'false');
+                row.textContent = opt.textContent;
+                row.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    sel.value = opt.value;
+                    self.closeModelMenu();
+                    self.syncModelMenu();
+                    self.setModel(opt.value);
+                });
+                list.appendChild(row);
+            })(sel.options[i]);
+        }
+        var current = sel.options[sel.selectedIndex];
+        value.textContent = current ? current.textContent : '';
     },
 
     /** Re-label the existing options without rebuilding listeners/selection. */
@@ -1504,11 +1935,16 @@ var VC = {
                 sel.options[i].textContent = BYD.i18n.modelName(m.id, m.name);
             }
         }
+        this.syncModelMenu();
     },
 
     setModel: function(id) {
         if (!id || id === this.activeModelId) return;
         this._saveSelected({ modelId: id });
+        // The lite hero caches the previous model's render; drop it so a later
+        // switch back to lite fetches art for the car now selected.
+        var hero = document.getElementById('vcLiteHero');
+        if (hero) hero.classList.remove('has-art');
         this.loadModel(id);
     },
 
@@ -1523,9 +1959,11 @@ var VC = {
         var target = document.getElementById(panelId);
 
         // If tapping the already-active tab, collapse
+        var dock = document.getElementById('vcDock');
         if (this._activePanel === panelId) {
             panel.classList.remove('open');
             panel.classList.remove('vc-panel-tall');
+            if (dock) dock.classList.remove('is-open');
             this._activePanel = null;
             for (var i = 0; i < allTabs.length; i++) allTabs[i].classList.remove('active');
             for (var j = 0; j < allPanels.length; j++) allPanels[j].style.display = 'none';
@@ -1543,6 +1981,7 @@ var VC = {
         // Open the panel container — Windows needs extra vertical space for
         // the per-window preset rows.
         panel.classList.add('open');
+        if (dock) dock.classList.add('is-open');
         // Tall panels: Windows (4×5 preset grid), Charging (schedule + cap stacked),
         // Climate (controls + remote preconditioning row).
         if (panelId === 'panelWindows' || panelId === 'panelCharging'
@@ -3182,6 +3621,13 @@ var VC = {
         if (dismissBtn) {
             dismissBtn.addEventListener('click', function() { self.hideCloudModal(); });
         }
+        var connectBtn = document.getElementById('cloudModalConnect');
+        if (connectBtn) {
+            connectBtn.addEventListener('click', function() {
+                self.hideCloudModal();
+                self.openCloudSettings();
+            });
+        }
         var statusPill = document.getElementById('cloudStatus');
         if (statusPill) {
             statusPill.setAttribute('role', 'button');
@@ -3222,6 +3668,22 @@ var VC = {
     hideCloudModal: function() {
         var overlay = document.getElementById('cloudModal');
         if (overlay) overlay.classList.remove('visible');
+    },
+
+    /**
+     * Take the user to BYD Cloud credentials. In the car this is a native
+     * fragment reached through the bridge; over a tunnel/browser there is no
+     * bridge, so fall back to the web page that serves the same settings.
+     */
+    openCloudSettings: function() {
+        if (typeof window.AndroidBridge !== 'undefined'
+                && typeof AndroidBridge.navigate === 'function') {
+            try {
+                AndroidBridge.navigate('bydCloud');
+                return;
+            } catch (e) { /* fall through to the web route */ }
+        }
+        window.location.href = 'byd-cloud.html';
     },
 
     // ==================== UI UPDATES ====================
@@ -4219,6 +4681,11 @@ var VC = {
             if (btn) btn.style.display = 'none';
             return;
         }
+        // Re-entered on a lite → 3D switch; a second binding would toggle the
+        // surround view twice per tap.
+        var toggle = document.getElementById('btn3dView');
+        if (!toggle || toggle._vcBound) return;
+        toggle._vcBound = true;
         this.bindBtn('btn3dView', function() {
             if (self._3dViewActive) {
                 self.stop3dView();
@@ -4458,7 +4925,9 @@ var VC = {
         var geo = new THREE.PlaneGeometry(2.6, 4.2);
         var mesh = new THREE.Mesh(geo, mat);
         mesh.rotation.x = -Math.PI / 2;
-        mesh.position.y = -0.39;
+        // Just above the grid so it reads as contact under the wheels; the plane
+        // renders first with depthWrite off, so the offset only avoids z-fighting.
+        mesh.position.y = this.GROUND_Y + 0.005;
         mesh.renderOrder = -1;
         this.scene.add(mesh);
         this._contactShadow = mesh;
@@ -5624,19 +6093,17 @@ var VC = {
     //      warn / alert / muted) onto each box. CSS does the colouring.
     //
     // To add a new overlay (e.g. coolant): add anchors in _cacheCarBounds,
-    // add a DOM container next to vcTyreOverlay in the HTML, write
+    // add a DOM container inside .vc-viewport in the HTML, write
     // _updateXxxOverlayPositions / updateXxxOverlay methods, and call them
     // from animate() and fetchState() respectively.
     //
-    // ---- Tyre callouts -----------------------------------------------------
+    // ---- Tyre corners ------------------------------------------------------
 
-    // Static-layout approach. We tried per-frame 3D wheel projection but
-    // the alignment is unreliable across BYD models, camera angles, and
-    // the AndroidBridge scale bump. Instead the callouts are pinned to
-    // fixed screen slots — front pair above the car render area, rear
-    // pair below — with short decorative leader lines pointing inward
-    // toward the general wheel zone. This trades spatial fidelity for
-    // SOTA-grade visual stability: nothing jitters as the camera orbits.
+    // The corners are a four-cell strip in the bottom bar, laid out by CSS.
+    // Per-frame 3D wheel projection was tried first and its alignment is
+    // unreliable across BYD models, camera angles, and the AndroidBridge scale
+    // bump; corner-pinned cards were tried after that and collided with the
+    // floating chrome at head-unit aspect ratios.
     _cacheCarBounds: function() {
         // Mark "ready to lay out" — actual positioning is screen-space,
         // not model-space, so we don't need to compute world anchors.
@@ -5668,11 +6135,10 @@ var VC = {
     // Reusable scratch vectors so the per-frame projection allocates nothing.
     _tyreScratchVec: null,
 
-    // Layout is now pure CSS (see vehicle-control.css — .vc-tyre-callout
-     // pins itself to the appropriate corner of .vc-tyre-overlay, which
-     // covers the visible viewport). The per-frame call from animate()
-     // becomes a no-op so we never touch DOM layout properties on the
-     // BYD WebView's hot path.
+    // Layout is pure CSS (see vehicle-control.css — .vc-tyre-cell is a flex
+     // child of the strip in the bottom bar). The per-frame call from animate()
+     // is a no-op so we never touch DOM layout properties on the BYD WebView's
+     // hot path.
     _updateTyreCalloutPositions: function() { /* no-op — CSS handles it */ },
 
     // User-configured kPa limits from /api/vehicle/state (tyres.limits), kept

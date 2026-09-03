@@ -27,13 +27,162 @@ public class VehicleControlAssetTest {
         assertTrue(ruleFor(css, ".vc-tyre-psi-unit").contains("margin-left: 7px"));
     }
 
+    /**
+     * The corners are a strip in the bottom bar, not cards floating over the
+     * render: fixed-width cards pinned to the viewport corners collided with
+     * the floating chrome at head-unit aspect ratios.
+     */
     @Test
-    public void tyreCardsHaveReadableDashboardSizingAndHealthyState() throws IOException {
+    public void tyreCornersRenderAsAStripInTheControlBar() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
         String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
 
-        assertTrue(ruleFor(css, ".vc-tyre-callout").contains("width: 168px"));
-        assertTrue(ruleFor(css, ".vc-tyre-psi-val").contains("font-size: 28px"));
-        assertTrue(css.contains("rgba(0, 212, 170, 0.28)"));
+        assertEquals(4, count(html, "class=\"vc-tyre-cell\""));
+        assertFalse(html.contains("vc-tyre-callout"));
+        assertFalse(css.contains(".vc-tyre-callout"));
+        // The strip is a bar sibling of the stage, so the 3D-surround flag
+        // on .vc-viewport must reach it as a sibling. Model load must not
+        // hide it — tyre data does not wait on the GLB.
+        assertTrue(css.contains(".vc-viewport[data-3d-on=\"true\"] ~ .vc-bar .vc-tyre-strip"));
+        assertFalse(css.contains(".vc-viewport[data-model-loading=\"true\"] ~ .vc-bar .vc-tyre-strip"));
+        assertTrue(ruleFor(css, ".vc-tyre-cell").contains("flex: 1"));
+        // Chrome 58 ignores flex `gap`, so the gutters must be margins.
+        assertTrue(css.contains(".vc-tyre-cell + .vc-tyre-cell { margin-left: 4px; }"));
+        assertFalse(ruleFor(css, ".vc-tyre-strip").contains("gap:"));
+    }
+
+    /** No glow shadows or raw colour literals on the corners. */
+    @Test
+    public void tyreCellsUseSemanticStatusTokens() throws IOException {
+        String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
+
+        assertFalse(css.contains("rgba(0, 212, 170, 0.28)"));
+        assertFalse(css.contains("rgba(0,212,170,0.82)"));
+        assertTrue(css.contains(
+                ".vc-tyre-cell[data-state=\"alert\"]   { background: var(--status-danger-container); }"));
+        assertFalse(ruleFor(css, ".vc-tyre-dot").contains("box-shadow"));
+    }
+
+    /**
+     * The cloud gate has to offer a way out of itself. Reading a "go to
+     * Settings" sentence is not an action, so the modal carries a CTA that the
+     * bridge turns into real navigation, with a web route for tunnel sessions.
+     */
+    @Test
+    public void cloudGateOffersNavigationRatherThanInstructions() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
+        String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
+        String fragment = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/ui/fragment/WebViewFragment.kt");
+
+        assertTrue(html.contains("id=\"cloudModalConnect\""));
+        assertTrue(html.contains("data-i18n=\"vehicle.cloud_connect_cta\""));
+        assertFalse("the gate must not tell the user to go hunting in Settings",
+                html.contains("Go to Surveillance Settings"));
+        assertTrue(script.contains("AndroidBridge.navigate('bydCloud');"));
+        assertTrue(script.contains("window.location.href = 'byd-cloud.html';"));
+        // The page names a destination; the allowlist decides what that means.
+        assertTrue(fragment.contains("\"bydCloud\" -> R.id.bydCloudFragment"));
+        assertTrue(fragment.contains("else -> return \"unknown_destination\""));
+    }
+
+    /**
+     * Panels have to be readable at head-unit width. The Chrome 58 WebView
+     * ignores flex `gap`, so every gutter in these layouts is a margin.
+     */
+    @Test
+    public void categoryPanelsStackInsteadOfOverflowingOneRow() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
+        String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
+
+        // Windows: a card per aperture with a full label, not an abbreviation.
+        assertTrue(html.contains("data-i18n=\"vehicle.pos_front_left\""));
+        assertTrue(ruleFor(css, ".vc-window-row").contains("width: calc(50% - 8px)"));
+        assertFalse(ruleFor(css, ".vc-window-grid").contains("gap:"));
+        assertFalse(ruleFor(css, ".vc-window-presets").contains("gap:"));
+        // Lights: ambient ramp on its own full-width row under the DRL tile.
+        assertTrue(html.contains("class=\"vc-panel-row vc-stack-grid\" id=\"panelLights\""));
+        assertTrue(ruleFor(css, ".ambient-wrapper").contains("width: 100%"));
+        assertTrue(ruleFor(css, ".vc-ambient-slider").contains("width: 100%"));
+        // Charging: stacked labelled rows rather than one horizontal overflow.
+        assertTrue(html.contains("data-i18n=\"vehicle_control.window\""));
+        assertTrue(html.contains("data-i18n=\"vehicle_control.repeat\""));
+        assertFalse(ruleFor(css, ".vc-schedule-bar").contains("gap:"));
+        assertFalse(ruleFor(css, ".vc-schedule-grid").contains("gap:"));
+        assertTrue(css.contains(".vc-schedule-bar + .vc-schedule-bar { margin-top: 8px; }"));
+    }
+
+    /**
+     * A centred bounding box puts the model's midpoint on the ground plane,
+     * which buries the lower half of every GLB under the floor.
+     */
+    @Test
+    public void dockClipsTheSheetInsteadOfASecondRoundedLid() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
+        String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
+
+        assertTrue(html.contains("class=\"vc-dock\" id=\"vcDock\""));
+        assertTrue(ruleFor(css, ".vc-dock").contains("overflow: hidden"));
+        assertTrue(ruleFor(css, ".vc-panel").contains("border: none"));
+        assertFalse(ruleFor(css, ".vc-panel").contains("border-radius: var(--radius-md)"));
+    }
+
+    @Test
+    public void viewModeChipKeepsALabelWithoutWaitingForI18n() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
+        String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
+
+        assertTrue(html.contains("class=\"vc-view-to-3d\" data-i18n=\"vehicle.view_mode_3d\""));
+        assertTrue(html.contains("class=\"vc-view-to-lite\" data-i18n=\"vehicle.view_mode_lite\""));
+        assertFalse(script.contains("label.textContent = this.liteMode"));
+        assertTrue(script.contains("if (this._viewModeSwitching) return;"));
+    }
+
+    @Test
+    public void viewModeSwitchRebuildsTheStageWithoutReloadingThePage() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
+        String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
+
+        assertFalse(script.contains("location.reload();"));
+        assertTrue(script.contains("switchViewMode: function()"));
+        assertTrue(script.contains("_startImmersiveScene: function()"));
+        assertTrue(script.contains("_teardownImmersiveScene: function()"));
+
+        // The toggle loads the vendor stack from the page's own list rather
+        // than a second copy of the URLs.
+        assertTrue(html.contains("window.VC_VENDOR_CHAIN = ["));
+        assertTrue(script.contains("var chain = window.VC_VENDOR_CHAIN || [];"));
+        assertFalse(script.contains("vendor/three.min.js"));
+
+        // Teardown has to end the render loop and release the GL context,
+        // otherwise lite keeps a disposed scene animating.
+        assertTrue(script.contains("this._renderLoopActive = false;"));
+        assertTrue(script.contains("this.renderer.dispose();"));
+        assertTrue(script.contains("window.removeEventListener('resize', this._onWindowResize)"));
+
+        // Re-entrant init paths must not stack listeners or duplicate nodes.
+        assertTrue(script.contains("if (sel._vcBound) {"));
+        assertTrue(script.contains("if (!toggle || toggle._vcBound) return;"));
+        assertTrue(script.contains("container.innerHTML = '';"));
+    }
+
+    @Test
+    public void categoryPanelsDoNotShowACloudAccountBanner() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
+        String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
+
+        assertFalse(html.contains("id=\"vcCloudHint\""));
+        assertFalse(script.contains("updateCloudHint"));
+    }
+
+    @Test
+    public void loadedModelSitsOnTheGroundGrid() throws IOException {
+        String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
+
+        assertTrue(script.contains("GROUND_Y: -0.01,"));
+        assertTrue(script.contains("gridHelper.position.y = this.GROUND_Y;"));
+        assertTrue(script.contains("this.carModel.position.y += this.GROUND_Y - box.min.y;"));
+        assertFalse(script.contains("this.carModel.position.y += 0.1;"));
     }
 
     @Test
@@ -140,7 +289,7 @@ public class VehicleControlAssetTest {
                 + count(html, "data-state=\"3\" disabled")
                 + count(html, "data-state=\"4\" disabled")
                 + count(html, "data-state=\"5\" disabled"));
-        assertTrue(html.contains("vehicle-control.js?v=vclite7"));
+        assertTrue(html.contains("vehicle-control.js?v=vclite12"));
         assertTrue(script.contains("fetch('/api/vehicle/ac-charge-current-limit')"));
         assertTrue(script.contains("self.apiPost('/api/vehicle/ac-charge-current-limit'"));
         assertTrue(script.contains("startAcChargeCurrentSync: function()"));
