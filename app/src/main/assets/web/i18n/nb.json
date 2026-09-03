@@ -2104,6 +2104,7 @@
     "quality_set": "Kvalitet: {name}",
     "quality_failed": "Kan ikke angi kvalitet",
     "view_unavailable": "Visningsmodus ikke tilgjengelig",
+    "start_failed": "Kameraet startet ikke",
     "start_timeout": "Strømmen start ble tidsavbrutt",
     "view_name_0": "Alle kameraer",
     "view_name_1": "Foran",

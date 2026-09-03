@@ -1883,6 +1883,7 @@
     "quality_set": "Kwaliteit: {name}",
     "quality_failed": "Kon nie kwaliteit instel nie",
     "view_unavailable": "Aansigmodus nie beskikbaar nie",
+    "start_failed": "Kamera het nie begin nie",
     "start_timeout": "Stroombegin-tyduit",
     "view_name_0": "Alle kameras",
     "view_name_1": "Voor",

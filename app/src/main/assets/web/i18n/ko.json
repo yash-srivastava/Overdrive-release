@@ -2250,6 +2250,7 @@
     "quality_set": "Quality: {name}",
     "quality_failed": "화질 설정 실패",
     "view_unavailable": "보기 모드를 사용할 수 없습니다",
+    "start_failed": "카메라를 시작하지 못했습니다",
     "start_timeout": "스트림 시작 시간 초과",
     "view_name_0": "모든 카메라",
     "view_name_1": "전방",

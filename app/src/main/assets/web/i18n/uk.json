@@ -1883,6 +1883,7 @@
     "quality_set": "Quality: {name}",
     "quality_failed": "Не вдалося встановити якість",
     "view_unavailable": "Режим перегляду недоступний",
+    "start_failed": "Камера не запустилася",
     "start_timeout": "Час очікування минув",
     "view_name_0": "Всі камери",
     "view_name_1": "Фронт",

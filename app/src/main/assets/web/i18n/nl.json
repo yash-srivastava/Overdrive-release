@@ -2535,6 +2535,7 @@
     "quality_set": "Kwaliteit: {name}",
     "quality_failed": "Kwaliteit instellen mislukt",
     "view_unavailable": "Weergave modus niet beschikbaar",
+    "start_failed": "Camera is niet gestart",
     "start_timeout": "Stream start time-out",
     "view_name_0": "Alle camera's",
     "view_name_1": "Voorzijde",

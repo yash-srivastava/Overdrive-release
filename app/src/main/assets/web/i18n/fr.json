@@ -2530,6 +2530,7 @@
     "quality_set": "Qualité: {name}",
     "quality_failed": "Impossible de définir la qualité",
     "view_unavailable": "Mode d'affichage non disponible",
+    "start_failed": "La caméra n'a pas démarré",
     "start_timeout": "Délai de début du flux expiré",
     "view_name_0": "Toutes les caméras",
     "view_name_1": "Devant",

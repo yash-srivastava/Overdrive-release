@@ -2146,6 +2146,7 @@
     "quality_set": "الجودة: {name}",
     "quality_failed": "فشل في تعيين الجودة",
     "view_unavailable": "وضع العرض غير متوفر",
+    "start_failed": "لم تبدأ الكاميرا",
     "start_timeout": "انتهت مهلة بدء البث",
     "view_name_0": "كل الكاميرات",
     "view_name_1": "الأمامي",

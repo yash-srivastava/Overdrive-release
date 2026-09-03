@@ -2534,6 +2534,7 @@
     "quality_set": "Qualità: {name}",
     "quality_failed": "Impossibile impostare la qualità",
     "view_unavailable": "Modalità di visualizzazione non disponibile",
+    "start_failed": "La fotocamera non si è avviata",
     "start_timeout": "Inizio flusso scaduto",
     "view_name_0": "Tutte Le Telecamere",
     "view_name_1": "Anteriore",

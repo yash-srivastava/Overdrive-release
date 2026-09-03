@@ -20,7 +20,7 @@
     <style>
         html.is-app-webview .cabin-listen-btn { display: none !important; }
     </style>
-    <link rel="stylesheet" href="../shared/styles.css?v=23">
+    <link rel="stylesheet" href="../shared/styles.css?v=27">
     <link rel="stylesheet" href="../shared/leaflet.css" />
     <script src="../shared/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jmuxer@2.0.4/dist/jmuxer.min.js"></script>
@@ -64,15 +64,32 @@
                                     <div class="decoder-chip" id="decoderChip" style="display:none;">GPU</div>
                                 </div>
                                 <div class="top-bar-right">
-                                    <select id="qualitySelector" class="quality-select-sota" onchange="BYD.stream.setQuality(this.value)">
-                                        <option value="ULTRA_LOW"  data-i18n="stream.quality_ultra_low">Ultra Low (400k)</option>
-                                        <option value="LOW"        data-i18n="stream.quality_low">Low (600k)</option>
-                                        <option value="MEDIUM"     selected data-i18n="stream.quality_medium">Medium (1M)</option>
-                                        <option value="HIGH"       data-i18n="stream.quality_high">High (1.5M)</option>
-                                        <option value="ULTRA_HIGH" data-i18n="stream.quality_ultra_high">Ultra High (2.5M)</option>
-                                        <option value="SMOOTH"     data-i18n="stream.quality_smooth">Smooth (3.5M, 25 fps)</option>
-                                        <option value="MAX"        data-i18n="stream.quality_max">Max (5M, 30 fps)</option>
-                                    </select>
+                                    <!-- The <select> stays the source of truth for the
+                                         quality value and its localized labels; the
+                                         trigger and list mirror it because a native
+                                         option popup can't be themed. -->
+                                    <div class="quality-menu" id="qualityMenu">
+                                        <select id="qualitySelector" class="quality-menu__native" onchange="BYD.stream.setQuality(this.value)">
+                                            <option value="ULTRA_LOW"  data-i18n="stream.quality_ultra_low">Ultra Low (400k)</option>
+                                            <option value="LOW"        data-i18n="stream.quality_low">Low (600k)</option>
+                                            <option value="MEDIUM"     selected data-i18n="stream.quality_medium">Medium (1M)</option>
+                                            <option value="HIGH"       data-i18n="stream.quality_high">High (1.5M)</option>
+                                            <option value="ULTRA_HIGH" data-i18n="stream.quality_ultra_high">Ultra High (2.5M)</option>
+                                            <option value="SMOOTH"     data-i18n="stream.quality_smooth">Smooth (3.5M, 25 fps)</option>
+                                            <option value="MAX"        data-i18n="stream.quality_max">Max (5M, 30 fps)</option>
+                                        </select>
+                                        <button type="button" class="quality-menu__trigger" id="qualityMenuTrigger"
+                                                aria-haspopup="listbox" aria-expanded="false"
+                                                data-i18n-attr="aria-label:recording.video_quality_title"
+                                                aria-label="Video Quality">
+                                            <span class="quality-menu__value" id="qualityMenuValue">Medium (1M)</span>
+                                            <svg class="quality-menu__chevron" viewBox="0 0 24 24" fill="none"
+                                                 stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                                <path d="m6 9 6 6 6-6"/>
+                                            </svg>
+                                        </button>
+                                        <div class="quality-menu__list" id="qualityMenuList" role="listbox"></div>
+                                    </div>
                                     <button class="top-bar-btn cabin-listen-btn"
                                             id="cabinListenButton"
                                             type="button"
@@ -103,11 +120,18 @@
                                 <canvas id="sota_canvas"></canvas>
                                 <div class="video-idle-state" id="videoIdleState">
                                     <div class="idle-icon">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <svg class="idle-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                                             <path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/>
                                         </svg>
+                                        <svg class="idle-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                             stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+                                            <path d="M12 9v4"/><path d="M12 17h.01"/>
+                                            <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>
+                                        </svg>
+                                        <span class="idle-spinner" aria-hidden="true"></span>
                                     </div>
                                     <span class="idle-text" data-i18n="stream.idle_hint">Tap a camera on the car below</span>
+                                    <span class="idle-subtext" id="videoIdleSubtext"></span>
                                 </div>
                                 <div class="camera-label-overlay" id="cameraLabelOverlay" style="display:none;">
                                     <span id="currentCameraLabel" data-i18n="stream.front_camera">Front Camera</span>
@@ -149,6 +173,9 @@
                             <aside class="live-utility-rail" id="liveUtilityRail">
                             <section class="camera-selector-card" aria-label="Camera selector">
                             <!-- Camera selector — first card in the landscape utility rail. -->
+                            <div class="selector-card-header">
+                                <h2 data-i18n="liveview.cameras">Cameras</h2>
+                            </div>
                             <div class="car-selector-bottom">
                                 <div class="car-image-container">
                                     <img class="car-image-fallback"
@@ -215,7 +242,7 @@
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <path d="m15 18-6-6 6-6"/>
                                         </svg>
-                                        <span data-i18n="liveview.back_to_cameras">Back to cameras</span>
+                                        <span data-i18n="common.back">Back</span>
                                     </button>
                                 </div>
 
@@ -268,27 +295,21 @@
     <div id="toastContainer" class="toast-container"></div>
 
     <style>
-        /* Theme tokens for the Live View page. The panel itself stays dark
-           where video is letterboxed (black bars look correct), but the
-           floating chrome (top bar pills, quality select, car selector,
-           hotspot labels) flips with the active theme so it reads on a
-           light cabin display as well as a night-mode one. Brand teal stays
-           identical across themes. */
+        /* Theme tokens for the Live View page. The chrome (top bar chips,
+           quality select, rail cards) resolves to the shared M3 surface
+           tokens so it matches the rest of the app in both schemes; only the
+           video stage and its scrim need page-local values. */
         .live-view-page {
-            --lv-panel-bg: linear-gradient(180deg, #080810 0%, #0c0c14 50%, #080810 100%);
-            --lv-top-overlay: linear-gradient(180deg, rgba(0,0,0,0.95) 0%, transparent 100%);
-            --lv-pill-bg: rgba(255,255,255,0.05);
-            --lv-pill-bg-hover: rgba(255,255,255,0.10);
-            --lv-pill-border: rgba(255,255,255,0.10);
-            --lv-pill-border-soft: rgba(255,255,255,0.08);
-            --lv-overlay-text: rgba(255,255,255,0.95);
-            --lv-overlay-shadow: 0 1px 4px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.5);
-            --lv-label-overlay-bg: rgba(0,0,0,0.7);
-            --lv-car-bg: linear-gradient(0deg, #000000 0%, rgba(8,8,16,0.9) 60%, transparent 100%);
-            --lv-quality-option-bg: #1a1a2e;
-            --lv-quality-option-color: #ffffff;
-            --lv-idle-icon-bg: rgba(255,255,255,0.03);
-            --lv-idle-icon-border: rgba(255,255,255,0.06);
+            --lv-panel-bg: var(--surface);
+            --lv-top-overlay: linear-gradient(180deg, rgba(0,0,0,0.55) 0%, transparent 100%);
+            --lv-pill-bg: var(--surface-container);
+            --lv-pill-bg-hover: var(--surface-container-high);
+            --lv-pill-border: var(--outline-variant);
+            --lv-pill-border-soft: var(--outline-variant);
+            --lv-overlay-text: var(--on-surface);
+            --lv-label-overlay-bg: var(--surface-container);
+            --lv-idle-icon-bg: var(--surface-container);
+            --lv-idle-icon-border: var(--outline-variant);
             /* Camera controls sit over user-selected vehicle paint, so their
                contrast must not depend on either paint colour or app theme.
                A light edge + dark halo remains visible on white and black. */
@@ -299,9 +320,6 @@
             --lv-hotspot-label-border: rgba(255,255,255,0.24);
             --lv-hotspot-label-text: #ffffff;
             --lv-hotspot-active-text: #72f4d9;
-            --lv-floor-spotlight: rgba(255,255,255,0.12);
-            --lv-shadow-strong: rgba(0,0,0,0.6);
-            --lv-shadow-soft: rgba(0,0,0,0.7);
             /* Video stage / letterbox background. Dark theme keeps the
                classic black-bars look; light theme flips to the page surface
                so the camera tab isn't a giant black slab on a light cabin
@@ -311,27 +329,10 @@
             --lv-video-bg: #000;
         }
         :root[data-theme="light"] .live-view-page {
-            /* The surrounding chrome flips to a light tinted glass with
-               darker text and softer shadows. The video stage itself also
-               flips (see --lv-video-bg) so the idle state and letterbox
-               match the rest of the light palette. */
-            --lv-panel-bg: linear-gradient(180deg, #F7FAF7 0%, #ECEFEC 50%, #F7FAF7 100%);
-            --lv-top-overlay: linear-gradient(180deg, rgba(247,250,247,0.95) 0%, transparent 100%);
-            --lv-pill-bg: rgba(0,0,0,0.04);
-            --lv-pill-bg-hover: rgba(0,0,0,0.08);
-            --lv-pill-border: rgba(0,0,0,0.10);
-            --lv-pill-border-soft: rgba(0,0,0,0.08);
-            --lv-overlay-text: #181C1A;
-            --lv-overlay-shadow: 0 1px 2px rgba(255,255,255,0.6);
-            --lv-label-overlay-bg: rgba(247,250,247,0.85);
-            --lv-car-bg: linear-gradient(0deg, rgba(236,239,236,0.96) 0%, rgba(236,239,236,0.7) 60%, transparent 100%);
-            --lv-quality-option-bg: #ECEFEC;
-            --lv-quality-option-color: #181C1A;
-            --lv-idle-icon-bg: rgba(0,0,0,0.04);
-            --lv-idle-icon-border: rgba(0,0,0,0.08);
-            --lv-floor-spotlight: rgba(0,0,0,0.10);
-            --lv-shadow-strong: rgba(0,0,0,0.18);
-            --lv-shadow-soft: rgba(0,0,0,0.22);
+            /* Everything else already flips with the shared tokens. The scrim
+               and the letterbox are the two values that cannot: both sit over
+               decoded video rather than over a themed surface. */
+            --lv-top-overlay: linear-gradient(180deg, rgba(247,250,247,0.85) 0%, transparent 100%);
             --lv-video-bg: var(--bg-base);
         }
 
@@ -357,18 +358,22 @@
             z-index: 20;
         }
 
-        .top-bar-left, .top-bar-right { display: flex; align-items: center; gap: 10px; }
+        /* Margin, NOT flex `gap`: gap is Chrome 84+ and this page runs in a
+           Chrome 58 WebView on the head unit. */
+        .top-bar-left, .top-bar-right { display: flex; align-items: center; }
+        .top-bar-left > * + *, .top-bar-right > * + * { margin-left: 10px; }
+        [dir="rtl"] .top-bar-left > * + *,
+        [dir="rtl"] .top-bar-right > * + * { margin-left: 0; margin-right: 10px; }
         .top-bar-left { min-width: 0; }
         .top-bar-right { flex: 0 0 auto; }
 
         .connection-status {
             display: inline-flex;
             align-items: center;
-            padding: 8px 16px;
+            padding: 8px 14px;
             background: var(--lv-pill-bg);
-            backdrop-filter: blur(20px);
             border: 1px solid var(--lv-pill-border-soft);
-            border-radius: 20px;
+            border-radius: var(--radius-md);
             font-size: 12px;
             font-weight: 600;
             color: var(--lv-overlay-text);
@@ -390,55 +395,110 @@
         }
         
         .connection-status.live .conn-dot {
-            background: #22c55e;
-            box-shadow: 0 0 12px #22c55e;
+            background: var(--status-success);
             animation: pulse 1.5s infinite;
         }
         
         .connection-status.connecting .conn-dot {
-            background: #fbbf24;
+            background: var(--status-warning);
             animation: pulse 0.6s infinite;
+        }
+
+        .connection-status.disconnected .conn-dot {
+            background: var(--status-danger);
         }
         
         .decoder-chip {
-            padding: 6px 12px;
-            background: rgba(0,212,170,0.15);
-            border: 1px solid rgba(0,212,170,0.3);
-            border-radius: 16px;
+            padding: 6px 10px;
+            background: var(--primary-container);
+            border-radius: var(--radius-md);
             font-size: 10px;
             font-weight: 700;
-            color: var(--brand-primary);
+            color: var(--on-primary-container);
             letter-spacing: 0.05em;
         }
-        
-        .quality-select-sota {
-            padding: 8px 32px 8px 14px;
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--text-primary);
-            background: var(--lv-pill-bg);
-            backdrop-filter: blur(20px);
-            border: 1px solid var(--lv-pill-border);
-            border-radius: 10px;
-            cursor: pointer;
-            outline: none;
-            -webkit-appearance: none;
-            -moz-appearance: none;
-            appearance: none;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2300D4AA' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
-            background-repeat: no-repeat;
-            background-position: right 10px center;
-            transition: all 0.2s;
-            position: relative;
-            min-width: 80px;
+
+        /* Decoder path: the tonal default reads as "expected", warning as
+           "degraded". Set from JS as the player resolves a decoder. */
+        .decoder-chip.is-native {
+            background: var(--status-success-container);
+            color: var(--status-success);
         }
 
-        .quality-select-sota:hover { border-color: var(--brand-primary); }
-        .quality-select-sota option {
-            background: var(--lv-quality-option-bg);
-            color: var(--lv-quality-option-color);
-            padding: 10px;
-            font-size: 14px;
+        .decoder-chip.is-fallback {
+            background: var(--status-warning-container);
+            color: var(--status-warning);
+        }
+        
+        .quality-menu { position: relative; }
+        .quality-menu__native { display: none; }
+
+        .quality-menu__trigger {
+            display: flex;
+            align-items: center;
+            min-width: 80px;
+            padding: 8px 10px 8px 14px;
+            font-size: 12px;
+            font-weight: 600;
+            font-family: inherit;
+            color: var(--text-primary);
+            background: var(--lv-pill-bg);
+            border: 1px solid var(--lv-pill-border);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            outline: none;
+        }
+
+        .quality-menu__trigger:hover { background: var(--lv-pill-bg-hover); }
+
+        .quality-menu__value {
+            flex: 1 1 auto;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            text-align: left;
+        }
+
+        .quality-menu__chevron {
+            flex: 0 0 auto;
+            width: 14px;
+            height: 14px;
+            margin-left: 8px;
+            color: var(--on-surface-variant);
+        }
+
+        /* Fixed, so the panel escapes the stage's overflow clipping; JS anchors
+           it to the trigger and flips it above when the viewport is short. */
+        .quality-menu__list {
+            display: none;
+            position: fixed;
+            z-index: 120;
+            max-height: 320px;
+            padding: 4px;
+            overflow-y: auto;
+            background: var(--surface-container-high);
+            border: 1px solid var(--outline-variant);
+            border-radius: var(--radius-md);
+        }
+
+        .quality-menu__list.is-open { display: block; }
+
+        .quality-menu__option {
+            padding: 9px 12px;
+            border-radius: var(--radius-sm);
+            color: var(--on-surface);
+            font-size: 13px;
+            font-weight: 500;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+
+        .quality-menu__option:hover { background: var(--surface-container-highest); }
+
+        .quality-menu__option[aria-selected="true"] {
+            background: var(--secondary-container);
+            color: var(--on-secondary-container);
+            font-weight: 600;
         }
 
         .top-bar-btn {
@@ -447,9 +507,8 @@
             align-items: center;
             justify-content: center;
             background: var(--lv-pill-bg);
-            backdrop-filter: blur(20px);
             border: 1px solid var(--lv-pill-border);
-            border-radius: 10px;
+            border-radius: var(--radius-md);
             color: var(--text-secondary);
             cursor: pointer;
             transition: all 0.2s;
@@ -458,9 +517,9 @@
         .top-bar-btn:hover { background: var(--lv-pill-bg-hover); color: var(--text-primary); }
         .top-bar-btn svg { width: 18px; height: 18px; }
         .cabin-listen-btn.is-active {
-            color: var(--brand-primary);
-            border-color: var(--brand-primary);
-            background: rgba(0, 212, 170, 0.14);
+            color: var(--on-primary-container);
+            border-color: var(--primary-container);
+            background: var(--primary-container);
         }
         .cabin-listen-btn.is-connecting {
             color: var(--status-warning);
@@ -496,8 +555,6 @@
             max-width: 100%; max-height: 100%;
             width: 100%; height: 100%;
             object-fit: contain;
-            border-radius: 12px;
-            box-shadow: 0 8px 40px var(--lv-shadow-strong);
             display: none;
             background: var(--lv-video-bg);
         }
@@ -507,8 +564,6 @@
             max-width: 100%; max-height: 100%;
             width: 100%; height: 100%;
             object-fit: contain;
-            border-radius: 12px;
-            box-shadow: 0 8px 40px var(--lv-shadow-strong);
             display: none;
             background: var(--lv-video-bg);
             z-index: 10;
@@ -521,7 +576,6 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 16px;
             color: var(--text-muted);
             transition: opacity 0.3s;
         }
@@ -530,42 +584,91 @@
         
         .idle-icon {
             width: 64px; height: 64px;
+            margin-bottom: 16px;
             display: flex;
             align-items: center;
             justify-content: center;
             background: var(--lv-idle-icon-bg);
             border: 1px solid var(--lv-idle-icon-border);
-            border-radius: 20px;
+            border-radius: var(--radius-md);
         }
 
         .idle-icon svg { width: 32px; height: 32px; opacity: 0.5; }
+        .idle-alert { display: none; }
         .idle-text { font-size: 14px; font-weight: 500; }
+
+        .idle-subtext {
+            display: none;
+            margin-top: 6px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* Start-up progress belongs on the stage the user is waiting on. The
+           toast container is fixed to the viewport, so on the wide head-unit
+           layout it floated near the bottom edge, off-centre from the video. */
+        .idle-spinner {
+            display: none;
+            width: 26px;
+            height: 26px;
+            border: 2px solid var(--outline-variant);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: idleSpin 0.9s linear infinite;
+        }
+
+        .video-idle-state.is-busy .idle-glyph { display: none; }
+        .video-idle-state.is-busy .idle-spinner { display: block; }
+
+        /* The tinted tile carries the failure; the reason itself stays in body
+           colour so it reads as a state of the stage, not an alarm. */
+        .video-idle-state.is-error .idle-glyph { display: none; }
+        .video-idle-state.is-error .idle-alert { display: block; opacity: 1; }
+        .video-idle-state.is-error .idle-subtext { display: block; }
+
+        .video-idle-state.is-error .idle-icon {
+            background: var(--status-danger-container);
+            border-color: transparent;
+            color: var(--status-danger);
+        }
+
+        .video-idle-state.is-error .idle-text { color: var(--on-surface); }
+
+        /* The spinner carries its own shape; the tile that frames the idle
+           glyph would only box it in. */
+        .video-idle-state.is-busy .idle-icon {
+            width: auto;
+            height: auto;
+            margin-bottom: 14px;
+            background: none;
+            border: 0;
+        }
+
+        @keyframes idleSpin { to { transform: rotate(360deg); } }
 
         .camera-label-overlay {
             position: absolute;
             top: 70px;
             left: 50%;
             transform: translateX(-50%);
-            padding: 8px 20px;
+            padding: 8px 16px;
             background: var(--lv-label-overlay-bg);
-            backdrop-filter: blur(12px);
             border: 1px solid var(--lv-pill-border);
-            border-radius: 20px;
+            border-radius: var(--radius-md);
             font-size: 13px;
             font-weight: 600;
             z-index: 10;
         }
 
-        /* Deterrent controls — bottom-right glass buttons layered over the
-           video stage. Anchored to the video-display-area (not the top bar)
-           so they sit within reach of the thumb over the live feed and never
-           collide with the connection pill / quality select up top or the
-           camera label overlay (top-centre). z-index 15 keeps them above the
-           decoded video (z 10) and idle state, below the top-bar chrome
-           (z 20) so a quality-select dropdown still overlays them.
+        /* Deterrent controls — bottom-right buttons layered over the video
+           stage. Anchored to the video-display-area (not the top bar) so they
+           sit within reach of the thumb over the live feed and never collide
+           with the connection pill / quality select up top or the camera label
+           overlay (top-centre). z-index 15 keeps them above the decoded video
+           (z 10) and idle state, below the top-bar chrome (z 20) so a
+           quality-select dropdown still overlays them.
 
            Chrome-58 (BYD in-app WebView) notes:
-             - -webkit-backdrop-filter prefix required for the glass blur.
              - No flex `gap` in this old engine; buttons are spaced with a
                sibling margin instead.
              - safe-bottom inset keeps the cluster clear of the gesture bar
@@ -588,16 +691,13 @@
             min-width: 108px;
             padding: 10px 16px;
             background: var(--lv-pill-bg);
-            -webkit-backdrop-filter: blur(20px);
-            backdrop-filter: blur(20px);
             border: 1px solid var(--lv-pill-border);
-            border-radius: 14px;
+            border-radius: var(--radius-md);
             color: var(--lv-overlay-text);
             font-size: 13px;
             font-weight: 700;
             letter-spacing: 0.02em;
             cursor: pointer;
-            box-shadow: 0 4px 18px var(--lv-shadow-strong);
             transition: transform 0.15s ease, background 0.2s ease, border-color 0.2s ease;
             -webkit-tap-highlight-color: transparent;
         }
@@ -606,11 +706,11 @@
         .deterrent-btn:hover { background: var(--lv-pill-bg-hover); border-color: var(--brand-primary); }
         .deterrent-btn:active { transform: scale(0.96); }
 
-        /* Horn = amber (attention / alert). Flash = brand teal (lights).
+        /* Horn = warning (attention / alert). Flash = brand teal (lights).
            Coloured icon + border keep the two actions distinct at a glance;
-           the glass body stays theme-neutral so both read on light + dark. */
-        .deterrent-horn svg { color: #fbbf24; }
-        .deterrent-horn:hover { border-color: #fbbf24; }
+           the body stays theme-neutral so both read on light + dark. */
+        .deterrent-horn svg { color: var(--status-warning); }
+        .deterrent-horn:hover { border-color: var(--status-warning); }
         .deterrent-flash svg { color: var(--brand-primary); }
 
         /* Pending state while the cloud round-trip is in flight — dim +
@@ -625,40 +725,33 @@
             flex-shrink: 0;
             padding: 20px 16px 24px 16px;
             padding-bottom: calc(30px + var(--safe-bottom));
-            background: var(--lv-car-bg);
+            background: transparent;
             display: flex;
             justify-content: center;
         }
         
+        /* The silhouette fills its card, and the FRONT / REAR labels hang
+           outside the box — so the gutters that reserve room for them are the
+           same values subtracted from max-height. Overriding one without the
+           other clips the labels on a short card. */
         .car-image-container {
+            --car-gutter-top: 22px;
+            --car-gutter-bottom: 30px;
             position: relative;
-            width: 72px;
-            height: 150px;
-            margin: 25px auto 35px auto; /* Extra margin for labels */
+            width: 112px;
+            height: 230px;
+            max-width: 100%;
+            max-height: calc(100% - var(--car-gutter-top) - var(--car-gutter-bottom));
+            margin: var(--car-gutter-top) auto var(--car-gutter-bottom) auto;
             display: flex;
             justify-content: center;
             align-items: center;
         }
         
-        /* Floor spotlight effect under the car */
-        .car-image-container::after {
-            content: '';
-            position: absolute;
-            bottom: -5px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 80%;
-            height: 20px;
-            background: radial-gradient(ellipse at center, var(--lv-floor-spotlight) 0%, transparent 70%);
-            border-radius: 50%;
-            z-index: 1;
-            pointer-events: none;
-        }
-        
         .car-image-fallback,
         .car-image {
-            width: 72px;
-            height: 150px;
+            width: 100%;
+            height: 100%;
             display: block;
         }
 
@@ -668,7 +761,6 @@
             z-index: 2;
             object-fit: contain;
             opacity: 0.72;
-            filter: drop-shadow(0 8px 16px var(--lv-shadow-soft));
             transition: opacity 0.18s ease;
         }
 
@@ -676,7 +768,6 @@
             position: relative;
             z-index: 3;
             opacity: 0;
-            filter: drop-shadow(0 8px 16px var(--lv-shadow-soft));
             transition:
                 opacity 0.18s ease,
                 transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -693,7 +784,7 @@
         /* Camera Hotspots */
         .cam-hotspot {
             position: absolute;
-            width: 36px; height: 36px;
+            width: 40px; height: 40px;
             cursor: pointer;
             display: flex;
             flex-direction: column;
@@ -705,7 +796,7 @@
         
         .cam-hotspot:hover { transform: scale(1.15); }
         
-        /* Hotspot positions for vertical car (72x150) */
+        /* Hotspot positions for vertical car (112x230) */
         .cam-hotspot[data-cam="1"] { top: -8px; left: 50%; transform: translateX(-50%); }
         .cam-hotspot[data-cam="3"] { bottom: -8px; left: 50%; transform: translateX(-50%); }
         .cam-hotspot[data-cam="4"] { top: 50%; left: -20px; transform: translateY(-50%); }
@@ -716,10 +807,10 @@
            and FRONT ring read as two distinct sensors. The "DVR" label
            is anchored to the right side of its hotspot to avoid colliding
            with the FRONT label that sits directly above the same column. */
-        .cam-hotspot[data-cam="6"] { top: 18px; left: 62%; transform: translateX(-50%); }
+        .cam-hotspot[data-cam="6"] { top: 30px; left: 62%; transform: translateX(-50%); }
         
         .hotspot-ring {
-            width: 22px; height: 22px;
+            width: 26px; height: 26px;
             box-sizing: border-box;
             border: 2px solid var(--lv-hotspot-ring-border);
             border-radius: 50%;
@@ -732,7 +823,7 @@
         
         .hotspot-pulse {
             position: absolute;
-            width: 22px; height: 22px;
+            width: 26px; height: 26px;
             border-radius: 50%;
             background: transparent;
             pointer-events: none;
@@ -765,7 +856,7 @@
         /* Right label - to the right */
         .cam-hotspot[data-cam="2"] .hotspot-label { left: calc(100% + 4px); right: auto; top: 50%; transform: translateY(-50%); bottom: auto; }
         /* All label - below center */
-        .cam-hotspot.cam-all .hotspot-label { top: calc(50% + 14px); left: 50%; transform: translateX(-50%); bottom: auto; }
+        .cam-hotspot.cam-all .hotspot-label { top: calc(50% + 16px); left: 50%; transform: translateX(-50%); bottom: auto; }
         /* OEM Dashcam label — anchored to the right of the ring so it
            floats outside the car silhouette and never overlaps the FRONT
            label that sits directly above the centre column. */
@@ -781,8 +872,7 @@
             background: rgba(0,42,36,0.9);
             box-shadow:
                 0 0 0 2px var(--lv-hotspot-ring-halo),
-                0 0 0 4px rgba(0,212,170,0.2),
-                0 0 16px rgba(0,212,170,0.42);
+                0 0 0 4px rgba(0,212,170,0.2);
         }
         
         .cam-hotspot:hover .hotspot-label {
@@ -806,9 +896,7 @@
             color: var(--lv-hotspot-active-text);
             background: rgba(0,35,31,0.96);
             border-color: rgba(0,212,170,0.72);
-            box-shadow:
-                0 2px 6px rgba(0,0,0,0.68),
-                0 0 8px rgba(0,212,170,0.28);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.68);
         }
         
         @keyframes hotspotPulse {
@@ -820,14 +908,12 @@
             0%, 100% {
                 box-shadow:
                     0 0 0 2px var(--lv-hotspot-ring-halo),
-                    0 0 0 4px rgba(0,212,170,0.2),
-                    0 0 12px rgba(0,212,170,0.42);
+                    0 0 0 4px rgba(0,212,170,0.2);
             }
             50% {
                 box-shadow:
                     0 0 0 2px var(--lv-hotspot-ring-halo),
-                    0 0 0 5px rgba(0,212,170,0.28),
-                    0 0 20px rgba(0,212,170,0.68);
+                    0 0 0 6px rgba(0,212,170,0.32);
             }
         }
 
@@ -855,15 +941,21 @@
         .camera-selector-card,
         .live-location-card {
             border: 1px solid var(--lv-pill-border-soft);
-            border-radius: 14px;
-            background: var(--lv-pill-bg);
+            border-radius: var(--radius-md);
+            background: var(--surface-container-low);
             overflow: hidden;
         }
 
         .camera-selector-card {
             display: flex;
             flex: 1 1 54%;
+            flex-direction: column;
             min-height: 210px;
+        }
+
+        .selector-card-header {
+            flex: 0 0 auto;
+            padding: 12px 14px 0;
         }
 
         .camera-selector-card .car-selector-bottom {
@@ -892,6 +984,7 @@
             padding: 12px 14px 10px;
         }
 
+        .selector-card-header h2,
         .location-card-header h2 {
             margin: 0;
             color: var(--text-primary);
@@ -914,8 +1007,7 @@
             height: 7px;
             margin-right: 6px;
             border-radius: 50%;
-            background: #22c55e;
-            box-shadow: 0 0 8px rgba(34,197,94,0.55);
+            background: var(--status-success);
         }
 
         .location-map-frame {
@@ -925,8 +1017,8 @@
             margin: 0 12px;
             overflow: hidden;
             border: 1px solid var(--lv-pill-border-soft);
-            border-radius: 10px;
-            background: #0a0f0f;
+            border-radius: var(--radius-md);
+            background: var(--surface-container-lowest);
         }
 
         .location-map-frame .map-container,
@@ -943,21 +1035,19 @@
             display: flex;
             align-items: center;
             padding: 6px 9px;
-            border: 1px solid rgba(0,212,170,0.22);
-            border-radius: 14px;
-            background: rgba(8,16,16,0.82);
-            color: rgba(255,255,255,0.88);
+            border: 1px solid var(--outline-variant);
+            border-radius: var(--radius-md);
+            background: var(--surface-container);
+            color: var(--on-surface-variant);
             font-size: 10px;
             font-weight: 600;
-            -webkit-backdrop-filter: blur(10px);
-            backdrop-filter: blur(10px);
         }
 
         .location-distance-chip svg {
             width: 13px;
             height: 13px;
             margin-right: 5px;
-            color: var(--brand-primary);
+            color: var(--on-surface-variant);
         }
 
         .location-expand-button {
@@ -966,10 +1056,10 @@
             align-items: center;
             justify-content: center;
             margin: 10px 12px 12px;
-            border: 1px solid var(--brand-primary);
-            border-radius: 10px;
-            background: transparent;
-            color: var(--brand-primary);
+            border: 0;
+            border-radius: var(--radius-md);
+            background: var(--secondary-container);
+            color: var(--on-secondary-container);
             font-size: 12px;
             font-weight: 700;
             cursor: pointer;
@@ -981,29 +1071,35 @@
             margin-right: 8px;
         }
 
-        /* Labelled, not a bare icon: an unlabelled chevron pinned to the far
-           right edge reads as decoration, so the map looked like a dead end. */
+        /* Labelled rather than a bare chevron: on a full-bleed map this is the
+           only way back, and an unlabelled glyph reads as decoration. Quiet by
+           default — navigating back shouldn't outrank the map's own actions. */
         .location-close-button {
             display: none;
             flex: 0 0 auto;
-            height: 44px;
-            padding: 0 16px 0 12px;
+            height: 32px;
+            padding: 0 10px 0 6px;
             align-items: center;
             justify-content: center;
-            border: 1px solid var(--brand-primary);
-            border-radius: 12px;
-            background: var(--lv-pill-bg);
-            color: var(--brand-primary);
+            border: 0;
+            border-radius: var(--radius-sm);
+            background: transparent;
+            color: var(--on-surface-variant);
             font-size: 13px;
-            font-weight: 700;
+            font-weight: 600;
             white-space: nowrap;
             cursor: pointer;
         }
 
+        .location-close-button:hover {
+            background: var(--surface-container-high);
+            color: var(--on-surface);
+        }
+
         .location-close-button svg {
-            width: 20px;
-            height: 20px;
-            margin-right: 6px;
+            width: 16px;
+            height: 16px;
+            margin-right: 4px;
         }
 
         /* Compact preview is deliberately passive: map controls and the
@@ -1026,28 +1122,38 @@
             margin: 0;
             border: 0;
             border-radius: 0;
-            background: var(--bg-base);
+            background: var(--surface);
         }
 
         #panelCameras.map-expanded .location-card-header {
+            justify-content: flex-start;
             padding: 12px 16px;
-            border-bottom: 1px solid var(--border-subtle);
-            background: var(--bg-surface);
-            /* The title block must be able to shrink/ellipsize: this is a nowrap
-               flex row, and with a long localized title (or a narrow 320px phone)
-               its intrinsic width exceeded the header, pushing "Back to cameras"
-               off-screen to the right — measured scrollWidth 459px in a 320px box,
-               button left edge at x=236. min-width:0 lets the title yield first so
-               the button always stays inside the viewport. */
+            border-bottom: 1px solid var(--outline-variant);
+            background: var(--surface-container);
         }
 
-        /* Margin, NOT flex `gap`: gap on a flex container is Chrome 84+, and BYD's
+        /* Back leads the header rather than trailing it: the trailing corner is
+           where the map floats its own action buttons, so a control there stacked
+           on top of them and sat hard against the viewport edge.
+           Margin, NOT flex `gap`: gap on a flex container is Chrome 84+, and BYD's
            in-app WebView is Chrome 58 (see the decoder notes further down), where it
            would be ignored and the title would butt against the button. */
         #panelCameras.map-expanded .location-close-button {
-            margin-left: 12px;
+            display: flex;
+            order: -1;
+            margin-right: 6px;
         }
 
+        [dir="rtl"] #panelCameras.map-expanded .location-close-button {
+            margin-right: 0;
+            margin-left: 6px;
+        }
+
+        /* The title block must be able to shrink/ellipsize: this is a nowrap flex
+           row, and with a long localized title (or a narrow 320px phone) its
+           intrinsic width exceeded the header — measured scrollWidth 459px in a
+           320px box. min-width:0 lets the title yield first so the row always
+           stays inside the viewport. */
         #panelCameras.map-expanded .location-card-header > div:first-child {
             min-width: 0;
             overflow: hidden;
@@ -1058,10 +1164,6 @@
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-        }
-
-        #panelCameras.map-expanded .location-close-button {
-            display: flex;
         }
 
         #panelCameras.map-expanded .location-map-frame {
@@ -1108,7 +1210,9 @@
         /* Mobile */
         @media (max-width: 768px) {
             .camera-top-bar { padding: 12px; }
-            .top-bar-left, .top-bar-right { gap: 6px; }
+            .top-bar-left > * + *, .top-bar-right > * + * { margin-left: 6px; }
+            [dir="rtl"] .top-bar-left > * + *,
+            [dir="rtl"] .top-bar-right > * + * { margin-right: 6px; }
             .top-bar-left { flex: 1 1 auto; }
             .connection-status {
                 max-width: 92px;
@@ -1116,37 +1220,35 @@
                 font-size: 11px;
             }
             .decoder-chip { padding: 4px 8px; font-size: 9px; }
-            .quality-select-sota {
+            .quality-menu__trigger {
                 width: 108px;
                 min-width: 108px;
                 max-width: 108px;
-                padding: 6px 26px 6px 10px;
+                padding: 6px 8px 6px 10px;
                 font-size: 11px;
-                /* Use native appearance on mobile for better dropdown rendering */
-                -webkit-appearance: menulist;
-                -moz-appearance: menulist;
-                appearance: menulist;
-                background-image: none;
-                background-color: var(--lv-quality-option-bg);
-                border-radius: 8px;
             }
+            .quality-menu__option { padding: 11px 12px; font-size: 12px; }
             .top-bar-btn { width: 34px; height: 34px; }
             .car-selector-bottom { padding: 10px; padding-bottom: calc(14px + 60px + var(--safe-bottom)); }
-            .car-image-container { width: 60px; height: 125px; margin: 20px auto 30px auto; }
-            .car-image-fallback, .car-image { width: 60px; height: 125px; }
-            .cam-hotspot { width: 32px; height: 32px; }
-            .hotspot-ring { width: 20px; height: 20px; }
-            .hotspot-pulse { width: 20px; height: 20px; }
+            .car-image-container {
+                --car-gutter-top: 20px;
+                --car-gutter-bottom: 28px;
+                width: 96px;
+                height: 200px;
+            }
+            .cam-hotspot { width: 36px; height: 36px; }
+            .hotspot-ring { width: 24px; height: 24px; }
+            .hotspot-pulse { width: 24px; height: 24px; }
             .hotspot-label { font-size: 9px; padding: 3px 5px; }
             /* DVR sits a touch closer to FRONT on the smaller silhouette. */
-            .cam-hotspot[data-cam="6"] { top: 14px; left: 62%; }
+            .cam-hotspot[data-cam="6"] { top: 24px; left: 62%; }
             .idle-icon { width: 48px; height: 48px; }
             .idle-icon svg { width: 24px; height: 24px; }
             .idle-text { font-size: 12px; }
             /* Tighter deterrent buttons on phones so the pair doesn't crowd
                the bottom-right of a small video stage. */
             .deterrent-controls { right: 12px; bottom: calc(12px + var(--safe-bottom, 0px)); }
-            .deterrent-btn { min-width: 96px; padding: 9px 12px; font-size: 12px; border-radius: 12px; }
+            .deterrent-btn { min-width: 96px; padding: 9px 12px; font-size: 12px; }
             .deterrent-btn svg { width: 16px; height: 16px; flex: 0 0 16px; margin-right: 6px; }
             .deterrent-controls .deterrent-btn + .deterrent-btn { margin-top: 8px; }
 
@@ -1233,7 +1335,8 @@
                 padding-bottom: 10px;
             }
             #panelCameras .camera-selector-card .car-image-container {
-                margin: 18px auto;
+                --car-gutter-top: 18px;
+                --car-gutter-bottom: 18px;
             }
             #panelCameras.map-expanded .live-utility-rail {
                 border-left: 0;
@@ -1246,7 +1349,7 @@
     <script src="../shared/core.js?v=20"></script>
     <script src="../shared/update-flow.js"></script>
     <script src="../shared/cabin-audio.js?v=1"></script>
-    <script src="../shared/stream.js?v=index3"></script>
+    <script src="../shared/stream.js?v=index4"></script>
     <script src="../shared/map.js?v=1"></script>
     <script src="../shared/surveillance.js?v=survtoggle1"></script>
     <script>
@@ -1311,6 +1414,133 @@
             }
         };
         
+        /**
+         * Themed replacement for the quality <select>'s option popup. The
+         * native <select> remains the value holder, so `.value` reads and
+         * writes elsewhere keep working; picking an item writes through to it
+         * and fires `change`, which is what starts the quality request.
+         */
+        BYD.qualityMenu = {
+            open: false,
+            init: function () {
+                var native = document.getElementById('qualitySelector');
+                var trigger = document.getElementById('qualityMenuTrigger');
+                var list = document.getElementById('qualityMenuList');
+                if (!native || !trigger || !list) return;
+                this.native = native;
+                this.trigger = trigger;
+                this.list = list;
+
+                var self = this;
+                list.innerHTML = '';
+                for (var i = 0; i < native.options.length; i++) {
+                    var opt = native.options[i];
+                    var item = document.createElement('div');
+                    item.className = 'quality-menu__option';
+                    item.setAttribute('role', 'option');
+                    item.setAttribute('data-value', opt.value);
+                    item.textContent = opt.textContent;
+                    list.appendChild(item);
+                }
+
+                list.addEventListener('click', function (e) {
+                    var item = e.target;
+                    while (item && item !== list && !item.getAttribute('data-value')) {
+                        item = item.parentNode;
+                    }
+                    if (item && item !== list) self.pick(item.getAttribute('data-value'));
+                });
+                trigger.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    self.toggle();
+                });
+                document.addEventListener('click', function (e) {
+                    if (self.open && !list.contains(e.target)) self.close();
+                });
+                document.addEventListener('keydown', function (e) {
+                    if (self.open && (e.key === 'Escape' || e.keyCode === 27)) self.close();
+                });
+                window.addEventListener('resize', function () { self.close(); });
+
+                this.sync();
+            },
+
+            /** Mirrors the native element's value into the trigger and list. */
+            sync: function () {
+                if (!this.native) return;
+                var value = this.native.value;
+                var selected = this.native.options[this.native.selectedIndex];
+                var valueEl = document.getElementById('qualityMenuValue');
+                if (valueEl && selected) valueEl.textContent = selected.textContent;
+                var items = this.list.children;
+                for (var i = 0; i < items.length; i++) {
+                    var item = items[i];
+                    item.textContent = this.native.options[i]
+                        ? this.native.options[i].textContent
+                        : item.textContent;
+                    item.setAttribute('aria-selected',
+                        item.getAttribute('data-value') === value ? 'true' : 'false');
+                }
+            },
+
+            pick: function (value) {
+                if (!this.native) return;
+                this.close();
+                if (value === this.native.value) return;
+                this.native.value = value;
+                this.sync();
+                this.native.dispatchEvent(new Event('change'));
+            },
+
+            toggle: function () { this.open ? this.close() : this.show(); },
+
+            show: function () {
+                if (!this.list) return;
+                this.sync();
+                this.list.classList.add('is-open');
+                this.trigger.setAttribute('aria-expanded', 'true');
+                this.open = true;
+                this.position();
+            },
+
+            close: function () {
+                if (!this.list) return;
+                this.list.classList.remove('is-open');
+                this.trigger.setAttribute('aria-expanded', 'false');
+                this.open = false;
+            },
+
+            /**
+             * Anchors the panel to the trigger's trailing edge, opening on
+             * whichever side has room. Windowed head-unit heights can be
+             * shorter than the list, so the chosen side also caps its height.
+             */
+            position: function () {
+                var GAP = 6;
+                var EDGE = 8;
+                var anchor = this.trigger.getBoundingClientRect();
+                var list = this.list;
+                list.style.minWidth = anchor.width + 'px';
+                list.style.maxHeight = '';
+
+                var spaceBelow = window.innerHeight - anchor.bottom - GAP - EDGE;
+                var spaceAbove = anchor.top - GAP - EDGE;
+                var below = list.offsetHeight <= spaceBelow || spaceBelow >= spaceAbove;
+                var space = below ? spaceBelow : spaceAbove;
+                if (list.offsetHeight > space) {
+                    list.style.maxHeight = Math.max(120, space) + 'px';
+                }
+
+                var height = list.offsetHeight;
+                list.style.top = (below
+                    ? anchor.bottom + GAP
+                    : Math.max(EDGE, anchor.top - height - GAP)) + 'px';
+                var left = anchor.right - list.offsetWidth;
+                list.style.left = Math.max(EDGE,
+                    Math.min(left, window.innerWidth - list.offsetWidth - EDGE)) + 'px';
+            }
+        };
+
         BYD.liveLayout = {
             mapExpanded: false,
             setMapExpanded: function (expanded) {
@@ -1429,10 +1659,7 @@
                 if (labelEl) labelEl.textContent = BYD.i18n.t('pip.select_camera');
                 if (overlayEl) overlayEl.style.display = 'none';
 
-                // Show idle state
-                const idleState = document.getElementById('videoIdleState');
-                if (idleState) idleState.classList.remove('hidden');
-
+                this.setStagePhase('idle');
                 this.updateConnectionStatus('idle');
                 return;
             }
@@ -1508,10 +1735,15 @@
                     if (d && d.cancelled) return d;
                     if (d && d.success === false) {
                         if (BYD.utils && BYD.utils.toast) {
-                            const fallback = d.exhausted
-                                ? BYD.i18n.t('stream.start_timeout')
-                                : BYD.i18n.t('stream.view_unavailable');
-                            BYD.utils.toast(d.errorCode ? BYD.i18n.t('stream.' + d.errorCode) : (d.error || fallback), 'error');
+                            // An exhausted poll still reports the sticky
+                            // `*_starting` code, which would announce progress
+                            // as the failure. The timeout is the outcome.
+                            BYD.utils.toast(d.exhausted
+                                ? BYD.i18n.t('stream.start_failed')
+                                : (d.errorCode
+                                    ? BYD.i18n.t('stream.' + d.errorCode)
+                                    : (d.error || BYD.i18n.t('stream.view_unavailable'))),
+                                'error');
                         }
                         return false;
                     }
@@ -1584,10 +1816,7 @@
             };
             this.streamStarted = true;
 
-            // Hide idle state
-            const idleState = document.getElementById('videoIdleState');
-            if (idleState) idleState.classList.add('hidden');
-
+            this.setStagePhase('busy');
             this.markStreamConnecting();
 
             // 1. Set quality
@@ -1620,18 +1849,19 @@
                     // the UI state. Don't bail out as if an error happened.
                     if (d && d.cancelled) return false;
                     if (d && d.success === false) {
-                        if (BYD.utils && BYD.utils.toast) {
-                            const fallback = d.exhausted
-                                ? BYD.i18n.t('stream.start_timeout')
-                                : BYD.i18n.t('stream.view_unavailable');
-                            BYD.utils.toast(d.errorCode ? BYD.i18n.t('stream.' + d.errorCode) : (d.error || fallback), 'error');
-                        }
+                        // An exhausted poll still carries the sticky `*_starting`
+                        // errorCode, so reporting that code here would announce
+                        // progress as the failure. The timeout is the outcome.
+                        const reason = d.exhausted
+                            ? BYD.i18n.t('stream.start_failed')
+                            : (d.errorCode
+                                ? BYD.i18n.t('stream.' + d.errorCode)
+                                : (d.error || BYD.i18n.t('stream.view_unavailable')));
                         document.querySelectorAll('.cam-hotspot').forEach(el => el.classList.remove('active'));
                         this.currentViewMode = -1;
                         this.confirmedViewMode = -1;
                         this.streamStarted = false;
-                        const idleState = document.getElementById('videoIdleState');
-                        if (idleState) idleState.classList.remove('hidden');
+                        this.setStagePhase('error', reason);
                         this.updateConnectionStatus('idle');
                         return false;
                     }
@@ -1642,13 +1872,10 @@
                         if (!selectionIsCurrent()) reassertLatestRoute();
                         return false;
                     }
-                    if (BYD.utils && BYD.utils.toast) {
-                        BYD.utils.toast(BYD.i18n.t('stream.view_unavailable'), 'error');
-                    }
                     this.currentViewMode = -1;
                     this.confirmedViewMode = -1;
                     this.streamStarted = false;
-                    if (idleState) idleState.classList.remove('hidden');
+                    this.setStagePhase('error', BYD.i18n.t('stream.view_unavailable'));
                     this.updateConnectionStatus('idle');
                     return false;
                 }
@@ -1658,8 +1885,9 @@
             const enabled = await this.enableStreaming();
             if (superseded() || !selectionIsCurrent()) return false;
             if (!enabled) {
-                if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('liveview.enable_failed'), 'error');
                 this.streamStarted = false;
+                this.setStagePhase('error', BYD.i18n.t('liveview.enable_failed'));
+                this.updateConnectionStatus('idle');
                 return false;
             }
 
@@ -1681,9 +1909,7 @@
                 const chip = document.getElementById('decoderChip');
                 if (chip) {
                     chip.textContent = 'WebCodecs';
-                    chip.style.background = 'rgba(34, 197, 94, 0.15)';
-                    chip.style.borderColor = 'rgba(34, 197, 94, 0.3)';
-                    chip.style.color = '#22c55e';
+                    chip.className = 'decoder-chip is-native';
                     chip.style.display = 'block';
                 }
                 
@@ -1725,9 +1951,7 @@
                     const chip = document.getElementById('decoderChip');
                     if (chip) {
                         chip.textContent = 'Fallback';
-                        chip.style.background = 'rgba(251, 191, 36, 0.15)';
-                        chip.style.borderColor = 'rgba(251, 191, 36, 0.3)';
-                        chip.style.color = '#fbbf24';
+                        chip.className = 'decoder-chip is-fallback';
                     }
                     this.fallbackFromWebCodecs();
                 };
@@ -1748,14 +1972,10 @@
                 if (chip) {
                     if (this.decoderMode === 'jmuxer') {
                         chip.textContent = 'JMuxer';
-                        chip.style.background = 'rgba(0,212,170,0.15)';
-                        chip.style.borderColor = 'rgba(0,212,170,0.3)';
-                        chip.style.color = 'var(--brand-primary)';
+                        chip.className = 'decoder-chip';
                     } else {
                         chip.textContent = 'Broadway';
-                        chip.style.background = 'rgba(251, 191, 36, 0.15)';
-                        chip.style.borderColor = 'rgba(251, 191, 36, 0.3)';
-                        chip.style.color = '#fbbf24';
+                        chip.className = 'decoder-chip is-fallback';
                     }
                     chip.style.display = 'block';
                 }
@@ -1774,18 +1994,68 @@
             return true;
         };
         
+        /**
+         * Drives the centred overlay on the video stage.
+         *   'idle'  — camera glyph + tap hint, waiting for a selection
+         *   'busy'  — spinner + progress text while the pipeline warms up
+         *   'error' — why the stream never arrived, held until the next pick
+         *   'live'  — hidden, the decoder owns the stage
+         * Only called on selection and terminal outcomes: a mid-stream
+         * reconnect must not drop this overlay back over a frozen frame.
+         */
+        BYD.stream.setStagePhase = function(phase, message) {
+            const stage = document.getElementById('videoIdleState');
+            if (!stage) return;
+            const textEl = stage.querySelector('.idle-text');
+            const subEl = stage.querySelector('.idle-subtext');
+            if (phase === 'live') {
+                stage.classList.add('hidden');
+                stage.classList.remove('is-busy');
+                stage.classList.remove('is-error');
+                return;
+            }
+            stage.classList.remove('hidden');
+            stage.classList.remove('is-busy');
+            stage.classList.remove('is-error');
+            if (phase === 'busy') {
+                stage.classList.add('is-busy');
+                if (textEl) textEl.textContent = message || BYD.i18n.t('pip.connecting');
+            } else if (phase === 'error') {
+                stage.classList.add('is-error');
+                if (textEl) {
+                    textEl.textContent = message || BYD.i18n.t('stream.start_failed');
+                }
+                if (subEl) subEl.textContent = BYD.i18n.t('stream.idle_hint');
+            } else if (textEl) {
+                textEl.textContent = BYD.i18n.t('stream.idle_hint');
+            }
+        };
+
+        /**
+         * Sink for the backend's start-up reason (oem_starting / pano_starting).
+         * Its presence makes shared stream.js skip its own toast, so the more
+         * specific message replaces the generic spinner text in place.
+         */
+        BYD.stream.showStartupStatus = function(message) {
+            const stage = document.getElementById('videoIdleState');
+            if (!stage || stage.classList.contains('hidden')) return;
+            this.setStagePhase('busy', message);
+        };
+
         BYD.stream.updateConnectionStatus = function(status) {
             const el = document.getElementById('connectionStatus');
             if (!el) return;
-            el.classList.remove('live', 'connecting');
+            el.classList.remove('live', 'connecting', 'disconnected');
             const textEl = el.querySelector('.status-text');
             if (status === 'live') {
                 el.classList.add('live');
                 if (textEl) textEl.textContent = BYD.i18n.t('liveview.live');
+                this.setStagePhase('live');
             } else if (status === 'connecting') {
                 el.classList.add('connecting');
                 if (textEl) textEl.textContent = BYD.i18n.t('pip.connecting');
             } else if (status === 'disconnected') {
+                el.classList.add('disconnected');
                 if (textEl) textEl.textContent = BYD.i18n.t('stream.disconnected');
             } else {
                 if (textEl) textEl.textContent = BYD.i18n.t('pip.select_camera');
@@ -1879,6 +2149,7 @@
                     if (select) {
                         select.value = data.current;
                         BYD.stream.selectedQuality = data.current;
+                        if (BYD.qualityMenu) BYD.qualityMenu.sync();
                     }
                 }
             } catch (e) {
@@ -1896,6 +2167,7 @@
             BYD.map.init();
             SurvSettings.initHeatmapOnly();
             await loadSavedStreamQuality();
+            BYD.qualityMenu.init();
             if (!BYD.stream.autoStartRequested) {
                 BYD.stream.autoStartRequested = true;
                 await BYD.stream.selectCamera(0);

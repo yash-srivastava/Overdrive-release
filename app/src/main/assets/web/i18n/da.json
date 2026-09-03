@@ -1883,6 +1883,7 @@
     "quality_set": "Kvalitet: {name}",
     "quality_failed": "Kunne ikke indstille kvalitet",
     "view_unavailable": "Visningstilstand ikke tilgængelig",
+    "start_failed": "Kameraet startede ikke",
     "start_timeout": "Stream start timeout",
     "view_name_0": "Alle Kameraer",
     "view_name_1": "Forside",

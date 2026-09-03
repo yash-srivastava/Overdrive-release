@@ -1883,6 +1883,7 @@
     "quality_set": "Jakość: {name}",
     "quality_failed": "Nie udało się ustawić jakości",
     "view_unavailable": "Tryb widoku niedostępny",
+    "start_failed": "Nie udało się uruchomić kamery",
     "start_timeout": "Przekroczono limit czasu rozpoczęcia strumienia",
     "view_name_0": "Wszystkie kamery",
     "view_name_1": "Przód",

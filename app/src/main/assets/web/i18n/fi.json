@@ -1883,6 +1883,7 @@
     "quality_set": "Laatu: {name}",
     "quality_failed": "Laadun asettaminen epäonnistui",
     "view_unavailable": "Näkymä ei ole käytettävissä",
+    "start_failed": "Kamera ei käynnistynyt",
     "start_timeout": "Virran alku aikakatkaistiin",
     "view_name_0": "Kaikki Kamerat",
     "view_name_1": "Etupuoli",

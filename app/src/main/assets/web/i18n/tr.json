@@ -2250,6 +2250,7 @@
     "quality_set": "Quality: {name}",
     "quality_failed": "Kalite ayarlanamadı",
     "view_unavailable": "Görünüm modu kullanılamıyor",
+    "start_failed": "Kamera başlatılamadı",
     "start_timeout": "Yayın başlatma zaman aşımına uğradı",
     "view_name_0": "Tüm Kameralar",
     "view_name_1": "Ön",

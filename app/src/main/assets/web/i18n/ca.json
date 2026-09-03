@@ -1883,6 +1883,7 @@
     "quality_set": "Qualitat: {name}",
     "quality_failed": "No s'ha pogut definir la qualitat",
     "view_unavailable": "El mode de visualització no està disponible",
+    "start_failed": "La càmera no s'ha iniciat",
     "start_timeout": "S'ha esgotat el temps d'espera per iniciar la transmissió",
     "view_name_0": "Totes les càmeres",
     "view_name_1": "Davantera",

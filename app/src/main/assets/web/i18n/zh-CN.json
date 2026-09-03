@@ -2524,6 +2524,7 @@
     "quality_set": "清晰度: {name}",
     "quality_failed": "设置质量失败",
     "view_unavailable": "查看模式不可用",
+    "start_failed": "相机未启动",
     "start_timeout": "流启动超时",
     "view_name_0": "所有摄像机",
     "view_name_1": "前端",

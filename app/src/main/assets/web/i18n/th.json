@@ -2250,6 +2250,7 @@
     "quality_set": "Quality: {name}",
     "quality_failed": "ตั้งค่าคุณภาพไม่สำเร็จ",
     "view_unavailable": "โหมดการแสดงผลไม่พร้อมใช้งาน",
+    "start_failed": "กล้องไม่เริ่มทำงาน",
     "start_timeout": "เริ่มสตรีมหมดเวลา",
     "view_name_0": "กล้องทั้งหมด",
     "view_name_1": "หน้า",

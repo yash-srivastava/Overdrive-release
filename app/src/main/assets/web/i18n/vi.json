@@ -2400,6 +2400,7 @@
     "quality_set": "Chất lượng: {name}",
     "quality_failed": "Đặt chất lượng thất bại",
     "view_unavailable": "Chế độ xem không khả dụng",
+    "start_failed": "Camera không khởi động được",
     "start_timeout": "Khởi động luồng hết thời gian chờ",
     "view_name_0": "Tất cả camera",
     "view_name_1": "Trước",

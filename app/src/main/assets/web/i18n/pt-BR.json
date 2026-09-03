@@ -2535,6 +2535,7 @@
     "quality_set": "Qualidade: {name}",
     "quality_failed": "Falha ao definir qualidade",
     "view_unavailable": "Modo de visualização não disponível",
+    "start_failed": "A câmera não iniciou",
     "start_timeout": "Tempo limite excedido ao iniciar a transmissão",
     "view_name_0": "Todas as Câmeras",
     "view_name_1": "Dianteira",

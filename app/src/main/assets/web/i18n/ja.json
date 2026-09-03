@@ -2532,6 +2532,7 @@
     "quality_set": "品質: {name}",
     "quality_failed": "品質の設定に失敗しました",
     "view_unavailable": "表示モードは利用できません",
+    "start_failed": "カメラを開始できませんでした",
     "start_timeout": "ストリームの開始がタイムアウトしました",
     "view_name_0": "すべてのカメラ",
     "view_name_1": "フロント",

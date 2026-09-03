@@ -1883,6 +1883,7 @@
     "quality_set": "Kvalita: {name}",
     "quality_failed": "Nepodařilo se nastavit kvalitu",
     "view_unavailable": "Režim zobrazení není k dispozici",
+    "start_failed": "Kameru se nepodařilo spustit",
     "start_timeout": "Vypršel časový limit vysílání",
     "view_name_0": "Všechny kamery",
     "view_name_1": "Přední",

@@ -1883,6 +1883,7 @@
     "quality_set": "Quality: {name}",
     "quality_failed": "Failed to set quality",
     "view_unavailable": "View mode not available",
+    "start_failed": "Камера није покренута",
     "start_timeout": "Stream start timed out",
     "view_name_0": "All Cameras",
     "view_name_1": "Front",

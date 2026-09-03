@@ -1883,6 +1883,7 @@
     "quality_set": "Kvalitet: {name}",
     "quality_failed": "Det gick inte att ange kvalitet",
     "view_unavailable": "Visningsläget är inte tillgängligt",
+    "start_failed": "Kameran startade inte",
     "start_timeout": "Stream start tidsinställd",
     "view_name_0": "Alla kameror",
     "view_name_1": "Framsida",

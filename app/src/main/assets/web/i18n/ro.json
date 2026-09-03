@@ -1883,6 +1883,7 @@
     "quality_set": "Calitate: {name}",
     "quality_failed": "Setarea calității a eșuat",
     "view_unavailable": "Modul de vizualizare nu este disponibil",
+    "start_failed": "Camera nu a pornit",
     "start_timeout": "Pornirea transmisiunii a expirat",
     "view_name_0": "Toate camerele",
     "view_name_1": "Față",

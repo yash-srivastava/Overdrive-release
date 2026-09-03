@@ -228,14 +228,10 @@ class WebViewFragment : Fragment() {
         // Pull the absolute-positioned camera top bar in by a hair so the
         // connection-status pill and quality dropdown breathe at narrow
         // landscape widths (head-unit windowed mode, ~600-900px wide).
-        '[data-app-shell="1"] .camera-top-bar { padding: 12px 14px !important; gap: 8px; }',
+        '[data-app-shell="1"] .camera-top-bar { padding: 12px 14px !important; }',
         '[data-app-shell="1"] .camera-top-bar .top-bar-left,',
         '[data-app-shell="1"] .camera-top-bar .top-bar-right { min-width: 0; flex-wrap: nowrap; }',
-        '[data-app-shell="1"] .quality-select-sota { min-width: 96px; max-width: 140px; }',
-        // Map overlay buttons (My Location / Directions) — keep them clear
-        // of the top-bar pill. The default top: 16px lands underneath the
-        // pill on narrow viewports.
-        '[data-app-shell="1"] #panelMap .map-overlay-actions { top: 14px !important; right: 14px !important; gap: 10px !important; }',
+        '[data-app-shell="1"] .quality-menu__trigger { min-width: 96px; max-width: 140px; }',
         '[data-app-shell="1"] .btn-map-float { width: 44px !important; height: 44px !important; }',
         '[data-app-shell="1"] .btn-map-float svg { width: 20px !important; height: 20px !important; }',
         // Camera hotspot labels — keep a generous translated-label clamp,

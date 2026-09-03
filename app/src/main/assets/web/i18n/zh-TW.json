@@ -2250,6 +2250,7 @@
     "quality_set": "畫質：{name}",
     "quality_failed": "無法設定畫質",
     "view_unavailable": "視角模式不可用",
+    "start_failed": "攝影機未啟動",
     "start_timeout": "串流啟動逾時",
     "view_name_0": "所有攝影機",
     "view_name_1": "前方",

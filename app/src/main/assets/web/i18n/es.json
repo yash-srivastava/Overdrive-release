@@ -2534,6 +2534,7 @@
     "quality_set": "Calidad: {name}",
     "quality_failed": "Error al establecer la calidad",
     "view_unavailable": "Modo de vista no disponible",
+    "start_failed": "La cámara no se inició",
     "start_timeout": "Inicio del stream agotado",
     "view_name_0": "Todas las cámaras",
     "view_name_1": "Frente",

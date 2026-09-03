@@ -2250,6 +2250,7 @@
     "quality_set": "Quality: {name}",
     "quality_failed": "गुणवत्ता सेट करने में विफल",
     "view_unavailable": "व्यू मोड उपलब्ध नहीं है",
+    "start_failed": "कैमरा शुरू नहीं हुआ",
     "start_timeout": "स्ट्रीम शुरू होने में टाइमआउट",
     "view_name_0": "सभी कैमरे",
     "view_name_1": "सामने",
