@@ -247,7 +247,7 @@
 
                             <!-- SOC gauge — visual battery level under the numeric
                                  SOC. Bound null-safely by
-                                 DashboardFragment.renderVehicleState: INVISIBLE
+                                 DashboardFragment.renderVehicleState: empty track
                                  while loading/unavailable, colorError at ≤20%. -->
                             <com.google.android.material.progressindicator.LinearProgressIndicator
                                 android:id="@+id/heroSocProgress"
@@ -256,10 +256,10 @@
                                 android:layout_marginTop="12dp"
                                 android:indeterminate="false"
                                 android:max="100"
-                                android:visibility="invisible"
                                 app:indicatorColor="?attr/colorPrimary"
                                 app:trackColor="?attr/colorSurfaceContainerHighest"
                                 app:trackCornerRadius="3dp"
+                                app:trackStopIndicatorSize="0dp"
                                 app:trackThickness="6dp" />
 
                             <!-- PHEV range breakdown — resolved EV / petrol leg
@@ -958,7 +958,7 @@
                             android:layout_width="24dp"
                             android:layout_height="24dp"
                             android:contentDescription="@null"
-                            android:src="@drawable/ic_chevron_right"
+                            android:src="@drawable/ic_arrow_outward"
                             app:tint="?attr/colorOnSurfaceVariant" />
                     </LinearLayout>
 
@@ -981,6 +981,7 @@
                         android:visibility="invisible"
                         app:indicatorColor="?attr/colorPrimary"
                         app:trackColor="?attr/colorSurfaceContainerHighest"
+                        app:trackStopIndicatorSize="0dp"
                         app:trackThickness="4dp" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
