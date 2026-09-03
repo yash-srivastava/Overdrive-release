@@ -230,9 +230,10 @@
                 <com.google.android.material.appbar.MaterialToolbar
                     android:id="@+id/toolbar"
                     android:layout_width="match_parent"
-                    android:layout_height="?attr/actionBarSize"
+                    android:layout_height="@dimen/app_bar_height"
                     android:background="?attr/colorSurface"
-                    app:titleTextAppearance="@style/TextAppearance.Material3.TitleLarge">
+                    app:contentInsetStart="@dimen/page_padding_horizontal"
+                    app:titleTextAppearance="@style/TextAppearance.Overdrive.HeadlineSmall">
 
                     <!--
                       Toolbar end-cluster: status pill + language picker.
@@ -308,7 +309,7 @@
                                 android:layout_marginStart="8dp"
                                 android:background="?attr/selectableItemBackgroundBorderless"
                                 android:contentDescription="@string/cd_copy_url"
-                                android:padding="6dp"
+                                android:padding="12dp"
                                 android:src="@drawable/ic_copy"
                                 app:tint="?attr/colorOnSurfaceVariant" />
                         </LinearLayout>
@@ -320,6 +321,7 @@
                             android:layout_marginStart="8dp"
                             android:background="?attr/selectableItemBackgroundBorderless"
                             android:contentDescription="@string/settings_language_label"
+                            android:padding="12dp"
                             android:src="@drawable/ic_language"
                             app:tint="?attr/colorOnSurfaceVariant" />
 
@@ -338,6 +340,7 @@
                         android:layout_marginEnd="12dp"
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:contentDescription="@string/onboarding_help_cd"
+                        android:padding="12dp"
                         android:src="@drawable/ic_help"
                         app:tint="?attr/colorOnSurfaceVariant" />
                 </com.google.android.material.appbar.MaterialToolbar>

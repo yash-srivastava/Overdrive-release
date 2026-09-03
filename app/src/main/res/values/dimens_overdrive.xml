@@ -15,6 +15,11 @@
   Material 3 1.13.0.
 -->
 <resources>
+    <!-- App bar. One height for both orientations: the platform actionBarSize
+         drops to 48dp in landscape, which is the head unit's default, and a
+         page title cannot carry a screen at that height. -->
+    <dimen name="app_bar_height">60dp</dimen>
+
     <!-- Page padding / outer rhythm -->
     <dimen name="page_padding_horizontal">24dp</dimen>
     <dimen name="page_padding_top">20dp</dimen>
