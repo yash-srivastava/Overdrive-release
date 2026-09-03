@@ -238,7 +238,16 @@
         android:id="@+id/settingsFragment"
         android:name="com.overdrive.app.ui.fragment.SettingsFragment"
         android:label="@string/rail_settings"
-        tools:layout="@layout/fragment_settings" />
+        tools:layout="@layout/fragment_settings">
+        <argument
+            android:name="settings_subrail_section"
+            app:argType="string"
+            android:defaultValue="" />
+        <argument
+            android:name="settings_from_recordings"
+            app:argType="boolean"
+            android:defaultValue="false" />
+    </fragment>
 
     <!-- Daemons (used to be its own rail item, now lives under Settings) -->
     <fragment

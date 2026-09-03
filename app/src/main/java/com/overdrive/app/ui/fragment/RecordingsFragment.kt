@@ -37,6 +37,7 @@ import com.overdrive.app.ui.model.RecordingFile
 import com.overdrive.app.ui.util.RecordingScanner
 import com.overdrive.app.ui.util.RecordingUiText
 import com.overdrive.app.ui.util.RecordingsApiClient
+import com.overdrive.app.ui.util.navigateDrillDown
 import java.lang.ref.WeakReference
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -1113,14 +1114,23 @@ class RecordingsFragment : Fragment() {
 
     private fun setupSettingsAction(view: View) {
         view.findViewById<MaterialButton>(R.id.btnRecordingsSettings)?.setOnClickListener {
-            val target = when (currentSource) {
-                // Replays are produced by the dashcam encoder's pre-record
-                // ring; their knobs live on the same recording settings page.
-                Source.ALL, Source.DASHCAM, Source.REPLAYS ->
-                    R.id.recordingSettingsWebFragment
-                Source.SURVEILLANCE -> R.id.surveillanceSettingsWebFragment
+            when (currentSource) {
+                // Replays share the dashcam encoder knobs, so they open
+                // Settings already on the Recording section — same chrome
+                // as Settings → Recording, with up returning here.
+                Source.ALL, Source.DASHCAM, Source.REPLAYS -> {
+                    val args = Bundle().apply {
+                        putString(
+                            SettingsFragment.KEY_SECTION,
+                            SettingsFragment.SECTION_RECORDING
+                        )
+                        putBoolean(SettingsFragment.KEY_FROM_RECORDINGS, true)
+                    }
+                    findNavController().navigateDrillDown(R.id.settingsFragment, args)
+                }
+                Source.SURVEILLANCE ->
+                    findNavController().navigate(R.id.surveillanceSettingsWebFragment)
             }
-            findNavController().navigate(target)
         }
     }
 

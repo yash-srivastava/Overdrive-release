@@ -33,6 +33,7 @@ import com.overdrive.app.ui.model.DaemonStatus
 import com.overdrive.app.ui.model.DaemonType
 import com.overdrive.app.ui.model.NavigationRailSwipePolicy
 import com.overdrive.app.ui.model.TunnelDisplayPolicy
+import com.overdrive.app.ui.fragment.SettingsFragment
 import com.overdrive.app.ui.navigation.NavigationRailCatalog
 import com.overdrive.app.ui.privacy.ScreenshotPrivacyController
 import com.overdrive.app.ui.util.PreferencesManager
@@ -1506,6 +1507,17 @@ open class MainActivity : AppCompatActivity() {
         // re-applying the activity label over the destination label.
         setupActionBarWithNavController(navController, appBarConfiguration)
 
+        // Settings is a top-level rail dest, so NavigationUI hides the up
+        // caret. When Recordings opened it as a child, keep the caret and
+        // pop back to the library instead of treating Settings as a root.
+        navController.addOnDestinationChangedListener { _, destination, arguments ->
+            if (destination.id == R.id.settingsFragment &&
+                arguments?.getBoolean(SettingsFragment.KEY_FROM_RECORDINGS) == true
+            ) {
+                supportActionBar?.setDisplayHomeAsUpEnabled(true)
+            }
+        }
+
         setupCustomRail(savedInstanceState)
     }
 
@@ -2239,6 +2251,12 @@ open class MainActivity : AppCompatActivity() {
     }
     
     override fun onSupportNavigateUp(): Boolean {
+        val fromRecordings = navController.currentDestination?.id == R.id.settingsFragment &&
+            navController.currentBackStackEntry?.arguments
+                ?.getBoolean(SettingsFragment.KEY_FROM_RECORDINGS) == true
+        if (fromRecordings) {
+            return navController.popBackStack()
+        }
         return navController.navigateUp(appBarConfiguration) || super.onSupportNavigateUp()
     }
     
