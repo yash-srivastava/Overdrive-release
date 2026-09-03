@@ -76,25 +76,22 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnSelectRecordings"
-                style="@style/Widget.Overdrive.M3.Button.Outlined"
+                style="@style/Widget.Overdrive.M3.Button.Header"
                 android:layout_width="wrap_content"
                 android:layout_height="48dp"
                 android:contentDescription="@string/recording_library_select"
                 android:text="@string/recording_library_select"
-                android:textAllCaps="false"
                 app:icon="@drawable/ic_check_circle"
-                app:iconGravity="textStart"
-                app:iconSize="20dp" />
+                app:iconGravity="textStart" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnRecordingsSettings"
-                style="@style/Widget.Overdrive.M3.Button.Tonal.Icon"
+                style="@style/Widget.Overdrive.M3.Button.Header"
                 android:layout_width="wrap_content"
                 android:layout_height="48dp"
                 android:layout_marginStart="12dp"
                 android:contentDescription="@string/recordings_action_settings"
                 android:text="@string/recordings_action_settings"
-                android:textAllCaps="false"
                 app:icon="@drawable/ic_settings"
                 app:iconGravity="textStart" />
         </LinearLayout>
@@ -277,7 +274,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnPrevDay"
-                style="@style/Widget.Material3.Button.IconButton"
+                style="@style/Widget.Overdrive.M3.HeaderIconButton"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:contentDescription="@string/cd_previous_day"
@@ -362,7 +359,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnNextDay"
-                style="@style/Widget.Material3.Button.IconButton"
+                style="@style/Widget.Overdrive.M3.HeaderIconButton"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:contentDescription="@string/cd_next_day"
@@ -576,7 +573,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnTogglePlaceSearch"
-                style="@style/Widget.Material3.Button.IconButton"
+                style="@style/Widget.Overdrive.M3.HeaderIconButton"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:contentDescription="@string/recording_lib_place_search_hint"
@@ -586,7 +583,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnOpenRecordingFilters"
-                style="@style/Widget.Material3.Button.IconButton"
+                style="@style/Widget.Overdrive.M3.HeaderIconButton"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:layout_marginStart="6dp"

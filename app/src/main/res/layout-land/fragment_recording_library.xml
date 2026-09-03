@@ -36,7 +36,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnPrevDay"
-                style="@style/Widget.Material3.Button.IconButton"
+                style="@style/Widget.Overdrive.M3.HeaderIconButton"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:contentDescription="@string/cd_previous_day"
@@ -116,7 +116,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnNextDay"
-                style="@style/Widget.Material3.Button.IconButton"
+                style="@style/Widget.Overdrive.M3.HeaderIconButton"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:contentDescription="@string/cd_next_day"
@@ -233,7 +233,7 @@
                     android:layout_height="36dp"
                     android:layout_gravity="center"
                     android:contentDescription="@null"
-                    android:src="@drawable/ic_videocam_off"
+                    android:src="@drawable/ic_recording_file"
                     app:tint="?attr/colorOnSurfaceVariant" />
             </FrameLayout>
 

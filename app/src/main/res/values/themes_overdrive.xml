@@ -144,6 +144,61 @@
         <item name="android:textAllCaps">false</item>
     </style>
 
+    <!-- Page-header action. Carries the same surface tier, hairline and corner
+         as the header's search and date cards, and zeroes the vertical inset
+         so the painted button fills the 48dp row instead of the ~36dp a
+         Material button paints inside it. -->
+    <style name="Widget.Overdrive.M3.Button.Header" parent="Widget.Material3.Button.OutlinedButton.Icon">
+        <item name="backgroundTint">?attr/colorSurfaceContainerHigh</item>
+        <item name="strokeColor">?attr/colorOutlineVariant</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="cornerRadius">@dimen/card_radius_accent</item>
+        <item name="iconTint">?attr/colorOnSurfaceVariant</item>
+        <item name="iconSize">20dp</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:textAllCaps">false</item>
+    </style>
+
+    <!-- Icon-only page action wearing the Button.Header tile. Built on the
+         icon-button primitive, not the labelled Icon style: that one carries
+         asymmetric text padding which leaves a lone glyph off-centre in a
+         48dp square. All four padding attrs are zeroed because a parent
+         style's paddingLeft/Right otherwise outrank an inherited
+         paddingStart/End. -->
+    <style name="Widget.Overdrive.M3.HeaderIconButton" parent="Widget.Material3.Button.IconButton.Outlined">
+        <item name="backgroundTint">?attr/colorSurfaceContainerHigh</item>
+        <item name="strokeColor">?attr/colorOutlineVariant</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="cornerRadius">@dimen/card_radius_accent</item>
+        <item name="iconTint">?attr/colorOnSurfaceVariant</item>
+        <item name="iconPadding">0dp</item>
+        <!-- textStart, not the default start: start pins the glyph to the
+             leading edge, textStart centres the icon-and-text group, which
+             for a label-less button is the glyph alone. -->
+        <item name="iconGravity">textStart</item>
+        <item name="android:paddingLeft">0dp</item>
+        <item name="android:paddingRight">0dp</item>
+        <item name="android:paddingStart">0dp</item>
+        <item name="android:paddingEnd">0dp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:insetLeft">0dp</item>
+        <item name="android:insetRight">0dp</item>
+        <item name="android:minWidth">48dp</item>
+        <item name="android:minHeight">48dp</item>
+    </style>
+
+    <!-- For rows shared with the segmented buttons, whose own inset paints
+         them 40dp: the inset shrinks the tile to match while the touch target
+         stays 48dp. -->
+    <style name="Widget.Overdrive.M3.HeaderIconButton.Compact">
+        <item name="android:insetTop">2dp</item>
+        <item name="android:insetBottom">2dp</item>
+    </style>
+
     <style name="Widget.Overdrive.M3.Button.Text" parent="Widget.Material3.Button.TextButton">
         <item name="cornerRadius">@dimen/card_radius_accent</item>
         <item name="android:minHeight">48dp</item>
