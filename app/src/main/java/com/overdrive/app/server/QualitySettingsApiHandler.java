@@ -2,6 +2,7 @@ package com.overdrive.app.server;
 
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.storage.StorageManager;
+import com.overdrive.app.util.ScratchPaths;
 
 import org.json.JSONObject;
 
@@ -40,8 +41,8 @@ public class QualitySettingsApiHandler {
     private static String recordingBitrate = "STANDARD";
     private static String recordingCodec = "H264";      // H264 or H265
     
-    private static final String UNIFIED_CONFIG_FILE = "/data/local/tmp/overdrive_config.json";
-    private static final String LEGACY_SETTINGS_FILE = "/data/local/tmp/camera_settings.json";
+    private static final String UNIFIED_CONFIG_FILE = ScratchPaths.path("overdrive_config.json");
+    private static final String LEGACY_SETTINGS_FILE = ScratchPaths.path("camera_settings.json");
     
     /**
      * Handle quality settings API requests.
@@ -1230,6 +1231,13 @@ public class QualitySettingsApiHandler {
                 || (oemCfg.has("fps") && oemF != panoF);
             oem.put("hasOwnQuality", diverged);
             response.put("oemDashcam", oem);
+        } catch (Exception ignored) {}
+
+        try {
+            JSONObject dilink5 = new JSONObject();
+            dilink5.put("cabinViewSupported",
+                    com.overdrive.app.camera.dilink5.DiLink5PlatformHelper.isSharkProfile());
+            response.put("dilink5", dilink5);
         } catch (Exception ignored) {}
         
         // Add codec info for UI

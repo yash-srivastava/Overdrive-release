@@ -20,6 +20,7 @@ import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import com.overdrive.app.util.ScratchPaths;
 
 /** Lightweight app_process helper used by the zrok watchdog. */
 public final class ZrokRuntimeProbe {
@@ -330,7 +331,7 @@ public final class ZrokRuntimeProbe {
 
     private static boolean isZrokProcess(int pid) {
         String cmdline = readCmdline(new File("/proc/" + pid + "/cmdline"));
-        return cmdline.contains("/data/local/tmp/zrok") && cmdline.contains("share");
+        return cmdline.contains(ScratchPaths.path("zrok")) && cmdline.contains("share");
     }
 
 
@@ -401,7 +402,7 @@ public final class ZrokRuntimeProbe {
         try {
             ProcessBuilder builder = new ProcessBuilder(command);
             builder.redirectErrorStream(true);
-            builder.environment().put("HOME", "/data/local/tmp");
+            builder.environment().put("HOME", ScratchPaths.getDir());
             Process process = builder.start();
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             Thread reader = new Thread(() -> copyOutput(process.getInputStream(), output), "zrok-version-reader");

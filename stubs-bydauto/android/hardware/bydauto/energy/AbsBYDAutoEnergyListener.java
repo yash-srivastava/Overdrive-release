@@ -8,5 +8,8 @@ package android.hardware.bydauto.energy;
 public abstract class AbsBYDAutoEnergyListener {
     public AbsBYDAutoEnergyListener() {}
     public void onEnergyFeedbackLevelChanged(int level) {}
+    public void onEnergyModeChanged(int mode) {}
+    public void onOperationModeChanged(int mode) {}
+    public void onRoadSurfaceChanged(int mode) {}
     public void onError(int code, String msg) {}
 }

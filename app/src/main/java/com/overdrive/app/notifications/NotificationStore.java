@@ -1,6 +1,7 @@
 package com.overdrive.app.notifications;
 
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.util.ScratchPaths;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -40,7 +41,7 @@ public final class NotificationStore {
     // Dedicated H2 file — NOT shared with overdrive_soc_h2. DB_CLOSE_ON_EXIT=FALSE:
     // shutdown is driven explicitly from CameraDaemon.shutdown() (mirrors
     // SocHistoryDatabase). FILE_LOCK=SOCKET is the cross-process safety net.
-    private static final String DB_PATH = "/data/local/tmp/overdrive_notif_h2";
+    private static final String DB_PATH = ScratchPaths.path("overdrive_notif_h2");
     // AUTO_COMPACT_FILL_RATE=50: idle-CPU tuning shared by all seven H2 stores
     // (see SocHistoryDatabase.JDBC_URL for the full rationale).
     private static final String JDBC_URL = "jdbc:h2:file:" + DB_PATH +

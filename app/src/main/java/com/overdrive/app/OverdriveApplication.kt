@@ -12,6 +12,7 @@ import com.overdrive.app.logging.LogConfig
 import com.overdrive.app.logging.LogManager
 import com.overdrive.app.server.LocaleManager
 import com.overdrive.app.services.DaemonKeepaliveService
+import com.overdrive.app.util.ScratchPaths
 // import com.overdrive.app.shell.PrivilegedShellSetup
 import com.overdrive.app.ui.util.PreferencesManager
 
@@ -34,6 +35,8 @@ class OverdriveApplication : Application() {
         // Auto-mode (or unset) writes an empty list so AppCompat falls back to
         // Locale.getDefault() — i.e. the BYD head unit's system language.
         applyPersistedLocale()
+
+        ScratchPaths.init(this)
 
         // Initialize LogConfig with app's cache directory for file logging
         LogConfig.init(this)

@@ -2436,6 +2436,7 @@
     "title_rear_camera": "Rear Camera",
     "title_right_camera": "Right Camera",
     "title_oem_dashcam": "OEM Dashcam",
+    "title_cabin_camera": "Cabin Camera",
     "title_toggle": "Toggle Camera View",
     "default_camera": "Camera",
     "connecting": "Connecting...",
@@ -2449,6 +2450,7 @@
     "hotspot_front": "FRONT",
     "hotspot_left": "LEFT",
     "hotspot_oem_dashcam": "DVR",
+    "hotspot_cabin": "CABIN",
     "oem_starting": "Starting OEM Dashcam…",
     "pano_starting": "Starting camera…",
     "stream_starting": "Streaming starting…",
@@ -2484,7 +2486,8 @@
     "view_name_3": "Rear",
     "view_name_4": "Left",
     "view_name_5": "Raw",
-    "view_name_6": "OEM Dashcam"
+    "view_name_6": "OEM Dashcam",
+    "view_name_9": "Cabin"
   },
   "auth": {
     "code_placeholder": "xxxxxxxx"

@@ -1,6 +1,7 @@
 package com.overdrive.app.charging;
 
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.util.ScratchPaths;
 
 import org.json.JSONObject;
 
@@ -114,7 +115,7 @@ public final class CounterScaleCalibrator {
     /** Rises below this are quantisation noise on either series, kWh. */
     private static final double MIN_STEP_KWH = 0.005;
 
-    private static final String STATE_FILE = "/data/local/tmp/od_counter_scale.json";
+    private static final String STATE_FILE = ScratchPaths.path("od_counter_scale.json");
     private static final String IDENTITY_KEY = "__identity";
 
     private static final ConcurrentHashMap<String, Calibration> calibrations =

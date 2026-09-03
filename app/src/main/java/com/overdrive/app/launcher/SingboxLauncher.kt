@@ -2,6 +2,7 @@ package com.overdrive.app.launcher
 
 import android.content.Context
 import com.overdrive.app.logging.LogManager
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * Launches sing-box proxy via ADB shell.
@@ -18,9 +19,9 @@ class SingboxLauncher(
         private const val TAG = "SingboxLauncher"
         
         // Paths
-        private const val SINGBOX_TMP_PATH = "/data/local/tmp/sing-box"
-        private const val SINGBOX_CONFIG_PATH = "/data/local/tmp/singbox_config.json"
-        private const val SINGBOX_LOG = "/data/local/tmp/singbox.log"
+        private val SINGBOX_TMP_PATH = ScratchPaths.path("sing-box")
+        private val SINGBOX_CONFIG_PATH = ScratchPaths.path("singbox_config.json")
+        private val SINGBOX_LOG = ScratchPaths.path("singbox.log")
         
         // Default proxy port
         private const val PROXY_PORT = 8119

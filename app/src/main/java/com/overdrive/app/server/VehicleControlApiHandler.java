@@ -9,6 +9,7 @@ import com.overdrive.app.byd.routing.VehicleCommandRouter;
 import com.overdrive.app.byd.routing.VehicleCommandRouter.CommandResult;
 import com.overdrive.app.byd.routing.VehicleCommandRouter.VehicleCommand;
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.util.ScratchPaths;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -2464,7 +2465,7 @@ public class VehicleControlApiHandler {
 
     // Audio library dir (mirror of AudioApiHandler.AUDIO_DIR) — where uploaded
     // sounds picked by the "Play Audio" action live. A "name" payload resolves here.
-    private static final String AUDIO_LIBRARY_DIR = "/data/local/tmp/.overdrive/audio";
+    private static final String AUDIO_LIBRARY_DIR = ScratchPaths.path(".overdrive/audio");
 
     /**
      * Play an uploaded sound (by library {@code name}) or an explicit {@code path} on

@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.BuildConfig;
 import com.overdrive.app.launcher.AdbShellExecutor;
@@ -58,7 +59,7 @@ public class AppUpdater {
     // the same failure; a NEW failure carries a different `ts` and re-arms.
     private static final String PREF_LAST_CONSUMED_FAILURE_TS = "last_consumed_failure_ts";
     // Also persist to filesystem (survives app reinstall, unlike SharedPreferences)
-    private static final String UPDATE_TIMESTAMP_FILE = "/data/local/tmp/overdrive_update_timestamp";
+    private static final String UPDATE_TIMESTAMP_FILE = ScratchPaths.path("overdrive_update_timestamp");
 
     /** Per-channel SharedPreferences baseline key. */
     private static String prefKeyForChannel(String channel) {
@@ -122,7 +123,7 @@ public class AppUpdater {
         installInFlight = false;
     }
     // Version file readable by daemon process (SharedPreferences are per-process)
-    public static final String VERSION_FILE = "/data/local/tmp/overdrive_version";
+    public static final String VERSION_FILE = ScratchPaths.path("overdrive_version");
     // Sentinels for the post-update handshake (see UpdateLifecycle).
     private static final String UPDATE_IN_PROGRESS_FILE = UpdateLifecycle.UPDATE_IN_PROGRESS_FILE;
 
@@ -177,7 +178,7 @@ public class AppUpdater {
     }
 
     /**
-     * "Are we in a process that can write {@code /data/local/tmp}?"
+     * "Are we in a process that can write {@code " + ScratchPaths.getDir() + "}?"
      * Used to decide between the direct OkHttp path and the
      * AdbDaemonLauncher-tunnelled shell path.
      *
@@ -193,7 +194,7 @@ public class AppUpdater {
     private static boolean canWriteLocalTmp() {
         Boolean cached = canWriteTmpCached;
         if (cached != null) return cached;
-        File probe = new File("/data/local/tmp/.overdrive_updater_probe");
+        File probe = new File(ScratchPaths.path(".overdrive_updater_probe"));
         boolean ok;
         try {
             try (FileOutputStream fos = new FileOutputStream(probe)) {
@@ -408,7 +409,7 @@ public class AppUpdater {
         // Direct path — write the script to a tmp file ourselves and exec it.
         // Same self-match defense as the ADB path: the running shell's argv
         // is just `sh <path>`, no daemon pattern visible to pkill.
-        String scriptPath = "/data/local/tmp/.appupdater_script_" + System.nanoTime() + ".sh";
+        String scriptPath = ScratchPaths.path(".appupdater_script_") + System.nanoTime() + ".sh";
         try {
             java.io.File scriptFile = new java.io.File(scriptPath);
             try (java.io.FileWriter fw = new java.io.FileWriter(scriptFile)) {
@@ -462,7 +463,7 @@ public class AppUpdater {
         }
     }
 
-    private static final String APK_PATH = "/data/local/tmp/overdrive_update.apk";
+    private static final String APK_PATH = ScratchPaths.path("overdrive_update.apk");
 
     private String getApkPath() {
         return APK_PATH;
@@ -1182,7 +1183,7 @@ public class AppUpdater {
     // methods ({@link #downloadAndInstall} / {@link #runDetachedInstall}) are
     // left BYTE-IDENTICAL by this addition.
     private static final String COMPANION_APK_PATH =
-            "/data/local/tmp/overdrive_companion.apk";
+            ScratchPaths.path("overdrive_companion.apk");
 
     /** No-op shell callback for fire-and-forget cleanup commands. */
     private static final com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback NOOP_SHELL =
@@ -1746,11 +1747,11 @@ public class AppUpdater {
                 cleanup(timestampFileForChannel(channel));
             }
             cleanup(UPDATE_IN_PROGRESS_FILE + " " + POST_UPDATE_FILE + " "
-                    + APK_PATH + " /data/local/tmp/overdrive_install.sh "
-                    + "/data/local/tmp/overdrive_install.sh.tmp");
+                    + APK_PATH + " " + ScratchPaths.getDir() + "/overdrive_install.sh "
+                    + ScratchPaths.path("overdrive_install.sh.tmp"));
             runShell(
-                    "for S in /data/local/tmp/camera_daemon.disabled "
-                            + "/data/local/tmp/acc_sentry_daemon.disabled; do "
+                    "for S in " + ScratchPaths.getDir() + "/camera_daemon.disabled "
+                            + ScratchPaths.path("acc_sentry_daemon.disabled; do ")
                             + "R=$(head -1 \"$S\" 2>/dev/null); "
                             + "case \"$R\" in 'disabled for update'*|"
                             + "'disabled by stopAllDaemons sweep'*|"
@@ -1788,8 +1789,8 @@ public class AppUpdater {
     private boolean runDetachedInstall(InstallCallback callback, String channel,
                                        String priorUpdateTimestamp,
                                        String priorDisplayVersion) {
-        String scriptPath = "/data/local/tmp/overdrive_install.sh";
-        String logPath = "/data/local/tmp/overdrive_install.log";
+        String scriptPath = ScratchPaths.path("overdrive_install.sh");
+        String logPath = ScratchPaths.path("overdrive_install.log");
 
         StringBuilder script = new StringBuilder();
         script.append("#!/system/bin/sh\n");
@@ -1805,9 +1806,9 @@ public class AppUpdater {
         // out watchdog + daemon together — no kill-order race, no sleep
         // window for one to respawn the other. Each `2>/dev/null` so a
         // "no such process" exit doesn't abort the script.
-        script.append("[ -f /data/local/tmp/camera_daemon.disabled ] || "
-                + "echo \"disabled for update at $(date)\" > /data/local/tmp/camera_daemon.disabled\n");
-        script.append("chmod 666 /data/local/tmp/camera_daemon.disabled 2>/dev/null\n");
+        script.append("[ -f " + ScratchPaths.getDir() + "/camera_daemon.disabled ] || "
+                + "echo \"disabled for update at $(date)\" > " + ScratchPaths.getDir() + "/camera_daemon.disabled\n");
+        script.append("chmod 666 " + ScratchPaths.getDir() + "/camera_daemon.disabled 2>/dev/null\n");
         // Plant the acc-sentry sentinel so its shell watchdog
         // (start_acc_sentry.sh) bails out on its next iteration if our pkill
         // misses a respawn race. Cleared below alongside camera_daemon.disabled.
@@ -1821,9 +1822,9 @@ public class AppUpdater {
         // destroy that record and resurrect a user-stopped tunnel/bot. The
         // pkill cascade below takes those daemons out regardless. Mirrors
         // UpdateLifecycle's core-only sentinel handling.
-        script.append("[ -f /data/local/tmp/acc_sentry_daemon.disabled ] || "
-                + "echo \"disabled for update at $(date)\" > /data/local/tmp/acc_sentry_daemon.disabled\n");
-        script.append("chmod 666 /data/local/tmp/acc_sentry_daemon.disabled 2>/dev/null\n");
+        script.append("[ -f " + ScratchPaths.getDir() + "/acc_sentry_daemon.disabled ] || "
+                + "echo \"disabled for update at $(date)\" > " + ScratchPaths.getDir() + "/acc_sentry_daemon.disabled\n");
+        script.append("chmod 666 " + ScratchPaths.getDir() + "/acc_sentry_daemon.disabled 2>/dev/null\n");
         script.append(psAwkKillLine("cam_daemon"));
         script.append(psAwkKillLine("acc_sentry"));
         script.append(psAwkKillLine("start_telegram"));
@@ -1839,32 +1840,32 @@ public class AppUpdater {
         script.append("killall -9 sing-box 2>/dev/null\n");
         script.append(psAwkKillLine("tailscaled"));
         script.append("killall -9 tailscaled 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/cam_watchdog.pid 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/start_acc_sentry.sh /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/start_zrok.sh 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/start_telegram.sh 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.getDir() + "/start_cam_daemon.sh " + ScratchPaths.getDir() + "/cam_watchdog.pid 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.getDir() + "/start_acc_sentry.sh " + ScratchPaths.getDir() + "/acc_sentry_daemon.lock 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.getDir() + "/start_zrok.sh 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.getDir() + "/start_telegram.sh 2>/dev/null\n");
 
         // Per-daemon lock files (mirrors DaemonLauncher's killDaemonViaAdb
         // cleanup) so the relaunched MainActivity's daemon supervisor doesn't
         // refuse to start because a stale lock looks alive.
-        script.append("rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/telegram_bot_daemon.lock 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/*_daemon.lock 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/cam_watchdog.pid 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.getDir() + "/camera_daemon.lock 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.getDir() + "/acc_sentry_daemon.lock 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.getDir() + "/telegram_bot_daemon.lock 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.getDir() + "/*_daemon.lock 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.getDir() + "/cam_watchdog.pid 2>/dev/null\n");
         // Sweep ONLY the transient config staging siblings a daemon killed
         // mid-write may orphan (overdrive_config.json.tmp.<pid> from the atomic
         // write, and the .bak.tmp staging file). MUST NOT touch the live config,
         // its .bak, or .bad — those are the recovery copies. Explicit suffixes,
         // never a broad overdrive_config* / *.json glob.
-        script.append("rm -f /data/local/tmp/overdrive_config.json.tmp.* "
-                + "/data/local/tmp/overdrive_config.json.bak.tmp 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.getDir() + "/overdrive_config.json.tmp.* "
+                + ScratchPaths.path("overdrive_config.json.bak.tmp 2>/dev/null\n"));
         // Clear only machine-written CORE markers. Pre-existing UI/Telegram
         // markers are durable manual stop intent and survive the update.
         // POST_UPDATE_FILE / UPDATE_IN_PROGRESS_FILE stay in place; the new
         // process consumes them via UpdateLifecycle.
-        script.append("for S in /data/local/tmp/camera_daemon.disabled "
-                + "/data/local/tmp/acc_sentry_daemon.disabled; do\n");
+        script.append("for S in " + ScratchPaths.getDir() + "/camera_daemon.disabled "
+                + ScratchPaths.path("acc_sentry_daemon.disabled; do\n"));
         script.append("  R=$(head -1 \"$S\" 2>/dev/null)\n");
         script.append("  case \"$R\" in 'disabled for update'*|"
                 + "'disabled by stopAllDaemons sweep'*|'disabled by killDaemon'*) "
@@ -1927,7 +1928,7 @@ public class AppUpdater {
               .append("\",\"priorDisplayVersion\":\"")
               .append(shellSafe(priorDisplayVersion))
               .append("\",\"ts\":%s}' ");
-        script.append("\"$PM_ESC\" \"$TS\" > /data/local/tmp/overdrive_update_progress.json\n");
+        script.append("\"$PM_ESC\" \"$TS\" > " + ScratchPaths.getDir() + "/overdrive_update_progress.json\n");
         script.append("  echo \"[install] FAILED rc=$INSTALL_RC\"\n");
         // Roll back the on-disk baseline + display files the daemon advanced
         // before pm install (the app-process consumeFailedUpdateError only
@@ -2007,7 +2008,7 @@ public class AppUpdater {
         // onSuccess path, never reached here). Nothing else overwrites it until
         // the NEXT install's "queued" write, so delete it now — pure hygiene so
         // a fresh poll doesn't see a stale terminal record.
-        script.append("  rm -f /data/local/tmp/overdrive_update_progress.json\n");
+        script.append("  rm -f " + ScratchPaths.getDir() + "/overdrive_update_progress.json\n");
         // Advance the persisted display label NOW — and ONLY here, on pm-install
         // success. VERSION_FILE drives the user-visible "current version" on every
         // surface (About / status / toast), so it must move only after the new
@@ -2158,12 +2159,12 @@ public class AppUpdater {
         // bugs.
         Log.i(TAG, "Killing daemons and watchdogs...");
         String killWatchdogsCmd =
-                "[ -f /data/local/tmp/camera_daemon.disabled ] || " +
-                "echo 'disabled for update at $(date)' > /data/local/tmp/camera_daemon.disabled\n" +
+                "[ -f " + ScratchPaths.getDir() + "/camera_daemon.disabled ] || " +
+                "echo 'disabled for update at $(date)' > " + ScratchPaths.getDir() + "/camera_daemon.disabled\n" +
                 psAwkKillLine("cam_daemon") +
                 psAwkKillLine("acc_sentry") +
-                "rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/cam_watchdog.pid /data/local/tmp/camera_daemon.lock 2>/dev/null\n" +
-                "rm -f /data/local/tmp/start_acc_sentry.sh /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/start_cam_daemon.sh " + ScratchPaths.getDir() + "/cam_watchdog.pid " + ScratchPaths.getDir() + "/camera_daemon.lock 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/start_acc_sentry.sh " + ScratchPaths.getDir() + "/acc_sentry_daemon.lock 2>/dev/null\n" +
                 "echo done\n";
 
         final boolean[] wdDone = {false};
@@ -2249,17 +2250,17 @@ public class AppUpdater {
         // from our own. Preserving the original text keeps both readings correct
         // with no ambiguity to resolve downstream.
         String sweepScript =
-                "[ -f /data/local/tmp/zrok.disabled ] || "
-                + "echo \"disabled by stopAllDaemons sweep at $(date)\" > /data/local/tmp/zrok.disabled\n" +
-                "chmod 666 /data/local/tmp/zrok.disabled 2>/dev/null\n" +
-                "[ -f /data/local/tmp/acc_sentry_daemon.disabled ] || "
-                + "echo \"disabled by stopAllDaemons sweep at $(date)\" > /data/local/tmp/acc_sentry_daemon.disabled\n" +
-                "chmod 666 /data/local/tmp/acc_sentry_daemon.disabled 2>/dev/null\n" +
-                "[ -f /data/local/tmp/telegram_bot_daemon.disabled ] || "
-                + "echo \"disabled by stopAllDaemons sweep at $(date)\" > /data/local/tmp/telegram_bot_daemon.disabled\n" +
-                "chmod 666 /data/local/tmp/telegram_bot_daemon.disabled 2>/dev/null\n" +
-                "rm -f /data/local/tmp/cam_watchdog.pid 2>/dev/null\n" +
-                "rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/start_acc_sentry.sh /data/local/tmp/start_zrok.sh /data/local/tmp/start_telegram.sh 2>/dev/null\n" +
+                "[ -f " + ScratchPaths.getDir() + "/zrok.disabled ] || "
+                + "echo \"disabled by stopAllDaemons sweep at $(date)\" > " + ScratchPaths.getDir() + "/zrok.disabled\n" +
+                "chmod 666 " + ScratchPaths.getDir() + "/zrok.disabled 2>/dev/null\n" +
+                "[ -f " + ScratchPaths.getDir() + "/acc_sentry_daemon.disabled ] || "
+                + "echo \"disabled by stopAllDaemons sweep at $(date)\" > " + ScratchPaths.getDir() + "/acc_sentry_daemon.disabled\n" +
+                "chmod 666 " + ScratchPaths.getDir() + "/acc_sentry_daemon.disabled 2>/dev/null\n" +
+                "[ -f " + ScratchPaths.getDir() + "/telegram_bot_daemon.disabled ] || "
+                + "echo \"disabled by stopAllDaemons sweep at $(date)\" > " + ScratchPaths.getDir() + "/telegram_bot_daemon.disabled\n" +
+                "chmod 666 " + ScratchPaths.getDir() + "/telegram_bot_daemon.disabled 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/cam_watchdog.pid 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/start_cam_daemon.sh " + ScratchPaths.getDir() + "/start_acc_sentry.sh " + ScratchPaths.getDir() + "/start_zrok.sh " + ScratchPaths.getDir() + "/start_telegram.sh 2>/dev/null\n" +
                 psAwkKillLine("cam_daemon") +
                 psAwkKillLine("acc_sentry") +
                 psAwkKillLine("sentry_daemon") +
@@ -2274,7 +2275,7 @@ public class AppUpdater {
                 "killall -9 tailscaled 2>/dev/null\n" +
                 "killall -9 sing-box 2>/dev/null\n" +
                 "sleep 1\n" +
-                "rm -f /data/local/tmp/*_daemon.lock 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/*_daemon.lock 2>/dev/null\n" +
                 "CAMERA_PIDS=$(ps -A -o PID,ARGS | grep -F 'cam_daemon' "
                 + "| grep -v grep | awk -v self=$$ '$1 != self {print $1}')\n" +
                 "if [ -n \"$CAMERA_PIDS\" ]; then "
@@ -2721,7 +2722,7 @@ public class AppUpdater {
         String priorDisplayVersion = null;
         long recordTs = 0;
         try {
-            java.io.File f = new java.io.File("/data/local/tmp/overdrive_update_progress.json");
+            java.io.File f = new java.io.File(ScratchPaths.path("overdrive_update_progress.json"));
             StringBuilder sb = new StringBuilder();
             try (java.io.BufferedReader r = new java.io.BufferedReader(
                     new java.io.InputStreamReader(new java.io.FileInputStream(f)))) {
@@ -2833,7 +2834,7 @@ public class AppUpdater {
      */
     private static boolean hasFailedUpdateMarker() {
         try {
-            java.io.File f = new java.io.File("/data/local/tmp/overdrive_update_progress.json");
+            java.io.File f = new java.io.File(ScratchPaths.path("overdrive_update_progress.json"));
             if (!f.exists()) return false;
             StringBuilder sb = new StringBuilder();
             try (java.io.BufferedReader r = new java.io.BufferedReader(

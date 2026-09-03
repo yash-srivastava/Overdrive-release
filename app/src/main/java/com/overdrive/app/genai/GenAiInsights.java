@@ -10,6 +10,7 @@ import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.notifications.NotificationBus;
 import com.overdrive.app.notifications.NotificationEvent;
 import com.overdrive.app.server.LocaleManager;
+import com.overdrive.app.util.ScratchPaths;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -624,7 +625,7 @@ public final class GenAiInsights {
 
     private static File home() {
         return new File(System.getProperty(
-                HOME_PROPERTY, "/data/local/tmp/.genai"));
+                HOME_PROPERTY, ScratchPaths.path(".genai")));
     }
 
     private static File storeFile() {

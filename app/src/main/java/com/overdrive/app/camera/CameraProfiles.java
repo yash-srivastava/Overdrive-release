@@ -23,6 +23,7 @@ public final class CameraProfiles {
     public static final String PROFILE_ATTO_3 = "atto3";
     public static final String PROFILE_TANG_2022 = "tang_2022";
     public static final String PROFILE_DILINK5_SEALION7 = "dilink5_sealion7";
+    public static final String PROFILE_DILINK5_SHARK = "dilink5_shark6";
 
     private static final LinkedHashMap<String, CameraProfile> PROFILES = new LinkedHashMap<>();
 
@@ -102,6 +103,28 @@ public final class CameraProfiles {
                 1920,
                 1080));
 
+        EnumMap<CameraRole, CameraSourceRef> dilink5SharkMappings = new EnumMap<>(CameraRole.class);
+        dilink5SharkMappings.put(CameraRole.WINDSHIELD, CameraSourceRef.direct(8));
+        dilink5SharkMappings.put(CameraRole.PANO_FRONT, CameraSourceRef.direct(8));
+        dilink5SharkMappings.put(CameraRole.PANO_REAR, CameraSourceRef.direct(5));
+        dilink5SharkMappings.put(CameraRole.PANO_LEFT, CameraSourceRef.direct(4));
+        dilink5SharkMappings.put(CameraRole.PANO_RIGHT, CameraSourceRef.direct(9));
+        dilink5SharkMappings.put(CameraRole.CABIN, CameraSourceRef.direct(0));
+
+        register(new CameraProfile(
+                PROFILE_DILINK5_SHARK,
+                "BYD DiLink 5.0 (Shark 6 / DXF)",
+                8,
+                1920,
+                1300,
+                0,
+                1920,
+                1080,
+                dilink5SharkMappings,
+                FOV_DEG_DEFAULT,
+                1920,
+                1080));
+
         EnumMap<CameraRole, CameraSourceRef> tangMappings = new EnumMap<>(legacyMappings);
         tangMappings.put(CameraRole.WINDSHIELD, CameraSourceRef.direct(0));
         register(new CameraProfile(
@@ -134,6 +157,9 @@ public final class CameraProfiles {
     }
 
     public static CameraProfile infer(String vehicleModel) {
+        if (com.overdrive.app.camera.dilink5.DiLink5PlatformHelper.isSharkProfile(vehicleModel)) {
+            return get(PROFILE_DILINK5_SHARK);
+        }
         if (vehicleModel != null) {
             String normalized = vehicleModel.toLowerCase(Locale.US)
                     .replace("-", "")

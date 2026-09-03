@@ -5,6 +5,7 @@ import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.monitor.BatterySocData;
 import com.overdrive.app.monitor.VehicleDataMonitor;
+import com.overdrive.app.util.ScratchPaths;
 
 import org.json.JSONObject;
 
@@ -42,7 +43,7 @@ public class SohEstimator {
     private double nominalCapacityKwh = 0;
     private String nominalSource = "unset"; // "user" | "auto" | "unset"
 
-    private static final String SOH_FILE = "/data/local/tmp/abrp_soh_estimate.properties";
+    private static final String SOH_FILE = ScratchPaths.path("abrp_soh_estimate.properties");
     private final File sohFile;
     private final PersistenceWriter persistenceWriter;
     private final UserNominalConfig userNominalConfig;
@@ -3538,7 +3539,7 @@ public class SohEstimator {
     // E6 (71.7 kWh) intentionally omitted: legacy taxi model, virtually
     // indistinguishable from Seal U (71.8 kWh).
     private static final double[] KNOWN_PACK_KWH = {
-        18.3, 26.6, 30.08, 38.0, 43.2, 44.9, 56.4,
+        18.3, 26.6, 29.6, 30.08, 38.0, 43.2, 44.9, 56.4,
         60.48, 61.44, 71.8, 82.56, 85.44, 87.0, 91.3, 108.8
     };
 
@@ -3608,6 +3609,7 @@ public class SohEstimator {
         if (matches(nominalKwh, 108.8))                                return 192;
         if (matches(nominalKwh, 44.9))                                 return 104;
         if (matches(nominalKwh, 30.08))                                return 96;
+        if (matches(nominalKwh, 29.6))                                 return 92;
         if (matches(nominalKwh, 38.0))                                 return 100;
         if (matches(nominalKwh, 43.2))                                 return 96;
         if (matches(nominalKwh, 56.4))                                 return 116;
@@ -3623,6 +3625,7 @@ public class SohEstimator {
     private static double mapCellCountToCapacity(int cellCount) {
         if (cellCount >= 82 && cellCount <= 86)   return 26.6;
         if (cellCount >= 94 && cellCount <= 98)   return 30.08;
+        if (cellCount >= 90 && cellCount <= 93)   return 29.6;
         if (cellCount >= 102 && cellCount <= 106) return 44.9;
         if (cellCount >= 114 && cellCount <= 118) return 56.4;
         if (cellCount >= 136 && cellCount <= 140) return 71.8;
@@ -3671,6 +3674,7 @@ public class SohEstimator {
         // identified" — an honest unknown. A user who knows their trim can still pin it exactly
         // via the user-nominal override.
         if (isDmiString && ct.contains("HAN")) return 0;
+        if (ct.contains("SHARK")) return 29.6;
         if (ct.contains("SEALION 6") || ct.contains("SEALION6") || ct.contains("SEA LION 6")) return 26.6;
         if (ct.contains("SEALION") || ct.contains("SEA LION")) return 91.3;
         if (ct.contains("SEAL U") || ct.contains("SEALU") || ct.contains("SEAL-U") || ct.contains("S7")) return 71.8;

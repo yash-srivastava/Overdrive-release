@@ -1,6 +1,7 @@
 package com.overdrive.app.byd;
 
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.util.ScratchPaths;
 
 import java.io.RandomAccessFile;
 import java.nio.channels.FileChannel;
@@ -44,9 +45,9 @@ public final class VehicleActuatorBridge {
     private static final String ENERGY_AUTHORITY_EPOCH_SETTING =
             "overdrive_energy_request_v5_epoch";
     private static final String ENERGY_STATE_LOCK_FILE =
-            "/data/local/tmp/overdrive_energy_request.lock";
+            ScratchPaths.path("overdrive_energy_request.lock");
     private static final String ENERGY_STATE_COORDINATE_FILE =
-            "/data/local/tmp/overdrive_energy_request.state";
+            ScratchPaths.path("overdrive_energy_request.state");
     private static final long ENERGY_STATE_LOCK_TIMEOUT_MS = 400L;
     private static final long ENERGY_MARKER_MAX_FUTURE_NANOS =
             TimeUnit.SECONDS.toNanos(30L);

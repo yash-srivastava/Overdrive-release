@@ -2,6 +2,7 @@ package com.overdrive.app.telegram.config;
 
 import com.overdrive.app.byd.cloud.crypto.CredentialCipher;
 import com.overdrive.app.config.UnifiedConfigManager;
+import com.overdrive.app.util.ScratchPaths;
 
 import org.json.JSONObject;
 
@@ -101,7 +102,7 @@ public final class UnifiedTelegramConfig {
      */
     private static final String K_TIER_MIGRATED = "_tierMigrated";
     private static final String LEGACY_PROPS_PATH =
-            "/data/local/tmp/telegram_config.properties";
+            ScratchPaths.path("telegram_config.properties");
 
     /**
      * Per-process latch that suppresses repeated migration attempts within

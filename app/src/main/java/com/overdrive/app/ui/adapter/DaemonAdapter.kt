@@ -17,6 +17,7 @@ import com.overdrive.app.ui.model.DaemonType
 import com.overdrive.app.ui.model.localizedName
 import com.google.android.material.switchmaterial.SwitchMaterial
 import com.overdrive.app.R
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * Adapter for displaying daemon cards in a RecyclerView.
@@ -231,14 +232,14 @@ class DaemonAdapter(
          */
         fun getLogFilePath(type: DaemonType): String? {
             return when (type) {
-                DaemonType.CAMERA_DAEMON -> "/data/local/tmp/cam_daemon.log"
-                DaemonType.SENTRY_DAEMON -> "/data/local/tmp/sentry_daemon.log"
-                DaemonType.ACC_SENTRY_DAEMON -> "/data/local/tmp/acc_sentry_daemon.log"
-                DaemonType.CLOUDFLARED_TUNNEL -> "/data/local/tmp/cloudflared.log"
-                DaemonType.ZROK_TUNNEL -> "/data/local/tmp/zrok.log"
-                DaemonType.TAILSCALE_TUNNEL -> "/data/local/tmp/.tailscale/tailscale.log"
-                DaemonType.SINGBOX_PROXY -> "/data/local/tmp/singbox.log"
-                DaemonType.TELEGRAM_DAEMON -> "/data/local/tmp/telegrambotdaemon.log"
+                DaemonType.CAMERA_DAEMON -> ScratchPaths.path("cam_daemon.log")
+                DaemonType.SENTRY_DAEMON -> ScratchPaths.path("sentry_daemon.log")
+                DaemonType.ACC_SENTRY_DAEMON -> ScratchPaths.path("acc_sentry_daemon.log")
+                DaemonType.CLOUDFLARED_TUNNEL -> ScratchPaths.path("cloudflared.log")
+                DaemonType.ZROK_TUNNEL -> ScratchPaths.path("zrok.log")
+                DaemonType.TAILSCALE_TUNNEL -> ScratchPaths.path(".tailscale/tailscale.log")
+                DaemonType.SINGBOX_PROXY -> ScratchPaths.path("singbox.log")
+                DaemonType.TELEGRAM_DAEMON -> ScratchPaths.path("telegrambotdaemon.log")
             }
         }
 

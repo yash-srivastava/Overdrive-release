@@ -2,6 +2,7 @@ package com.overdrive.app.util
 
 import android.util.Log
 import java.io.File
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * Loads native libraries for daemon processes.
@@ -68,7 +69,7 @@ object NativeLibraryLoader {
         // Try OpenH264 first
         val openh264Paths = listOf(
             "$nativeLibDir/libopenh264.so",
-            "/data/local/tmp/libopenh264.so",
+            ScratchPaths.path("libopenh264.so"),
             "/system/lib64/libopenh264.so",
             "/system/lib/libopenh264.so"
         )
@@ -88,7 +89,7 @@ object NativeLibraryLoader {
         // Try native encoder
         val encoderPaths = listOf(
             "$nativeLibDir/libnativeencoder.so",
-            "/data/local/tmp/libnativeencoder.so"
+            ScratchPaths.path("libnativeencoder.so")
         )
         
         for (path in encoderPaths) {
@@ -114,7 +115,7 @@ object NativeLibraryLoader {
      */
     fun isSingBoxAvailable(): Boolean {
         val paths = listOf(
-            "/data/local/tmp/sing-box",
+            ScratchPaths.path("sing-box"),
             "/system/bin/sing-box"
         )
         
@@ -137,7 +138,7 @@ object NativeLibraryLoader {
      * @return true if installation successful or already installed
      */
     fun installSingBox(nativeLibDir: String): Boolean {
-        val destPath = "/data/local/tmp/sing-box"
+        val destPath = ScratchPaths.path("sing-box")
         val srcPath = "$nativeLibDir/libsingbox.so"
         
         // Check if already installed

@@ -1,6 +1,7 @@
 package com.overdrive.app.daemon.camera
 
 import com.overdrive.app.camera.CameraProfiles
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * Camera configuration constants.
@@ -18,7 +19,7 @@ object CameraConfiguration {
     const val HTTP_PORT = 8080
 
     // Directories
-    const val STREAM_DIR = "/data/local/tmp/cam_stream"
+    val STREAM_DIR = ScratchPaths.path("cam_stream")
     const val APP_STREAM_DIR = "/storage/emulated/0/Android/data/com.overdrive.app/files/stream"
     const val DEFAULT_OUTPUT_DIR = "/sdcard/DCIM/BYDCam"
 

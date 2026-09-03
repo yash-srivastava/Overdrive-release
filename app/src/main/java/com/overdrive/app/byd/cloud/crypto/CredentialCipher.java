@@ -1,6 +1,7 @@
 package com.overdrive.app.byd.cloud.crypto;
 
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.util.ScratchPaths;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -26,7 +27,7 @@ public final class CredentialCipher {
     private static final int IV_LEN = 12;
     private static final int TAG_BITS = 128;
     private static final String KD_SALT = "overdrive-byd-cred-v1";
-    private static final String DID_PATH = "/data/local/tmp/.byd_device_id";
+    private static final String DID_PATH = ScratchPaths.path(".byd_device_id");
 
     private CredentialCipher() {}
 

@@ -21,6 +21,7 @@ import java.nio.charset.StandardCharsets
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * SOTA Unified Configuration Manager
@@ -44,8 +45,9 @@ import java.util.concurrent.atomic.AtomicLong
 object UnifiedConfigManager {
     private const val TAG = "UnifiedConfig"
     
-    // Single source of truth - world-readable location
-    private const val CONFIG_PATH = "/data/local/tmp/overdrive_config.json"
+    // Single source of truth - world-readable location (ScratchPaths remaps on Shark).
+    private val CONFIG_PATH: String
+        get() = ScratchPaths.path("overdrive_config.json")
 
     // ==================== DOUBLE-BUFFERED, SEQ-STAMPED DURABILITY ====================
     //
@@ -119,9 +121,11 @@ object UnifiedConfigManager {
     private const val IPC_RECONCILE_DELAY_MS = 75L
     private const val CACHE_REVALIDATE_MS = 1000L
     
-    // Legacy paths for migration
-    private const val LEGACY_SENTRY_CONFIG = "/data/local/tmp/sentry_config.json"
-    private const val LEGACY_CAMERA_SETTINGS = "/data/local/tmp/camera_settings.json"
+    // Legacy paths for migration (resolved at read time).
+    private val LEGACY_SENTRY_CONFIG: String
+        get() = ScratchPaths.path("sentry_config.json")
+    private val LEGACY_CAMERA_SETTINGS: String
+        get() = ScratchPaths.path("camera_settings.json")
     private const val LEGACY_SYSTEM_CONFIG = "/data/data/com.android.providers.settings/sentry_config.json"
     private const val ROOT_PROMOTION_SECTION = "__overdriveRootPromotion"
     private const val ROOT_PROMOTION_MARKER = "__overdrivePromoteRoot"
@@ -1812,7 +1816,7 @@ object UnifiedConfigManager {
             writeFileAndSync(bakTmp, config.toString(2), worldAccessible = true)
             if (!bakTmp.renameTo(bakFile)) {
                 // tmp-create/rename can fail for the app UID on sticky
-                // /data/local/tmp. Do NOT fall back to a non-atomic direct
+                // scratch directories. Do NOT fall back to a non-atomic direct
                 // write of the .bak: that would TRUNCATE the existing
                 // last-known-good copy, and a pm-install kill mid-write could
                 // leave BOTH primary and .bak torn — defeating the self-heal
@@ -1867,7 +1871,7 @@ object UnifiedConfigManager {
     /**
      * Mirror the good config to an APP-PRIVATE .bak the app process can ALWAYS
      * refresh atomically (its own data dir, where it can create a sibling and
-     * rename — unlike sticky /data/local/tmp). Confirmed IPC writes refresh it,
+     * rename — unlike sticky " + ScratchPaths.getDir() + "). Confirmed IPC writes refresh it,
      * and recoverFromBackup picks the higher-seq source between this and the
      * sticky .bak.
      *
@@ -2020,7 +2024,7 @@ object UnifiedConfigManager {
         // a half-written corrupt config that would wipe user settings.
         //
         // When the app UID (10xxx) cannot create this sibling in sticky
-        // /data/local/tmp, the write is deferred/rejected. It must never fall
+        // scratch directories, the write is deferred/rejected. It must never fall
         // back to opening CONFIG_PATH with truncate semantics: a process kill
         // during that write can destroy the only live config.
         // Per-PROCESS-unique tmp name (.tmp.<pid>): the rename onto CONFIG_PATH
@@ -3467,8 +3471,8 @@ object UnifiedConfigManager {
      *   "screenshotPrivacyMode": boolean
      * }
      *
-     * The legacy file at /data/local/tmp/.overdrive/locale was unreliable
-     * because the app UID can't `mkdir` under /data/local/tmp/, so writes
+     * The legacy file at " + ScratchPaths.getDir() + "/.overdrive/locale was unreliable
+     * because the app UID can't `mkdir` under " + ScratchPaths.getDir() + "/, so writes
      * from the picker silently failed and the language reverted on next
      * cold start.
      */
@@ -4121,7 +4125,8 @@ object UnifiedConfigManager {
     // peer's just-committed section (stale-snapshot lost update). An OS flock
     // held across the whole critical section makes those writers mutually
     // exclude. World-RW so any daemon UID can acquire it.
-    private const val LOCK_PATH = "$CONFIG_PATH.lock"
+    private val LOCK_PATH: String
+        get() = "$CONFIG_PATH.lock"
 
     /**
      * Every writer must lock this one stable inode. The live config inode is

@@ -7,6 +7,8 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
 
+import com.overdrive.app.util.ScratchPaths;
+
 import com.overdrive.app.daemon.proxy.Safe;
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -43,12 +45,17 @@ public class SentryDaemon {
     private static String SERVICE_BYD_DATACACHE() { return Safe.s("JQiIxMJxYlF8spk2fIi8Sg=="); }
     /** bg_datacache */
     private static String SERVICE_BG_DATACACHE() { return Safe.s("m84QJmAGTQpH+XP36MaDpA=="); }
-    /** /data/local/tmp */
-    private static String PATH_DATA_LOCAL_TMP() { return Safe.s("vuaMjrmBGBFh07qqnUuL8w=="); }
+    /** scratch dir (legacy tmp or emulated fallback) */
+    private static String PATH_DATA_LOCAL_TMP() {
+        return ScratchPaths.getDir();
+    }
     /** /data/data/com.android.providers.settings */
     private static String PATH_DATA_SYSTEM_SETTINGS() { return Safe.s("4FWGV7tPhe9614nkUCor4bnqFPfssDPoiHYPJxgenGAPG3xCP+0Cb2Hm04LZxNNJ"); }
-    /** /data/local/tmp/sentry_daemon.pid */
-    private static String PATH_SENTRY_PID() { return Safe.s("ZHx6IP38aGV/Q7iMCCcxzy1lsQShZtcRseW7dNE1si25na89IOT5cRwBuRuJBcXS"); }
+    /** sentry_daemon.pid */
+    private static String PATH_SENTRY_PID() {
+        return ScratchPaths.path(
+                Safe.s("ZHx6IP38aGV/Q7iMCCcxzy1lsQShZtcRseW7dNE1si25na89IOT5cRwBuRuJBcXS"));
+    }
     /** svc wifi enable */
     private static String CMD_WIFI_ENABLE() { return Safe.s("GzzLDvODRsKARkPOXEZeIA=="); }
     /** cmd wifi set-wifi-enabled enabled */
@@ -59,6 +66,7 @@ public class SentryDaemon {
     private static Context appContext = null;
     
     public static void main(String[] args) {
+        ScratchPaths.syncFromEnv();
         int myUid = android.os.Process.myUid();
         
         // Configure DaemonLogger for daemon context (enable stdout for app_process)
@@ -667,6 +675,7 @@ public class SentryDaemon {
     // ==================== SHELL EXECUTION ====================
     
     private static String execShell(String cmd) {
+        cmd = ScratchPaths.prepareExecShell(cmd);
         try {
             Process process = Runtime.getRuntime().exec(new String[]{"sh", "-c", cmd});
             process.waitFor();

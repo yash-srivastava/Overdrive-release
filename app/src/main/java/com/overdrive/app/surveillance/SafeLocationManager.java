@@ -2,6 +2,7 @@ package com.overdrive.app.surveillance;
 
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.monitor.GpsMonitor;
+import com.overdrive.app.util.ScratchPaths;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -34,7 +35,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public class SafeLocationManager {
 
     private static final String TAG = "SafeLocation";
-    private static final String CONFIG_FILE = "/data/local/tmp/safe_locations.json";
+    private static final String CONFIG_FILE = ScratchPaths.path("safe_locations.json");
     private static final int MAX_ZONES = 10;
     private static final double EARTH_RADIUS_M = 6_371_000.0;
     // Exit-hysteresis margin (m). Once inside a zone, the car must move beyond

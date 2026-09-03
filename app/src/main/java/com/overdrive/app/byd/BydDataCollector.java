@@ -3,6 +3,7 @@ package com.overdrive.app.byd;
 import android.content.Context;
 import android.content.Intent;
 import android.os.SystemClock;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.byd.bodywork.BodyworkConstants;
 import com.overdrive.app.byd.routing.DrivingSafetyGuard;
@@ -292,7 +293,7 @@ public class BydDataCollector {
     public static final String[] SNAPSHOT_FILE_PATHS = new String[] {
             "/storage/emulated/0/Android/data/com.overdrive.app/files/byd_telemetry_snap.json",
             "/storage/emulated/0/Overdrive/byd_telemetry_snap.json",
-            "/data/local/tmp/byd_telemetry_snap.json"
+            ScratchPaths.path("byd_telemetry_snap.json")
     };
 
     public static void writeSnapshotDiskFile(BydVehicleData data) {

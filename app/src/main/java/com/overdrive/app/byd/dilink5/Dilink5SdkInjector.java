@@ -3,6 +3,7 @@ package com.overdrive.app.byd.dilink5;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -117,7 +118,7 @@ public final class Dilink5SdkInjector {
             List<IOException> suppressed = new ArrayList<>();
             Object[] newElements = makeInMemoryElements(dexListCls, apkPaths, suppressed);
             if (newElements == null || newElements.length == 0) {
-                File optDir = context != null ? new File(context.getCodeCacheDir(), "bydauto-inj") : new File("/data/local/tmp/bydauto-inj");
+                File optDir = context != null ? new File(context.getCodeCacheDir(), "bydauto-inj") : new File(ScratchPaths.path("bydauto-inj"));
                 optDir.mkdirs();
                 List<File> files = new ArrayList<>();
                 for (String p : apkPaths) {

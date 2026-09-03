@@ -2,6 +2,7 @@ package com.overdrive.app.daemon;
 
 import android.os.Handler;
 import android.os.Looper;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.abrp.AbrpConfig;
 import com.overdrive.app.abrp.AbrpTelemetryService;
@@ -41,14 +42,23 @@ public class CameraDaemon {
     // Decrypted at runtime via Safe.s() - AES-256-CBC with stack-based key reconstruction
     /** com.overdrive.app */
     private static String APP_PACKAGE_NAME() { return Safe.s("3Is1Ze/xWL6dkFvd9bF+deUGK/HqnInkSi6jinpc6s8="); }
-    /** /data/local/tmp/cam_stream */
-    private static String PATH_CAMERA_STREAM_DIR() { return Safe.s("ZHx6IP38aGV/Q7iMCCcxzxuq9ag7mKGoQaOvzuwMDqM="); }
+    /** " + ScratchPaths.getDir() + "/cam_stream */
+    private static String PATH_CAMERA_STREAM_DIR() {
+        return com.overdrive.app.util.ScratchPaths.path(
+                Safe.s("ZHx6IP38aGV/Q7iMCCcxzxuq9ag7mKGoQaOvzuwMDqM="));
+    }
     /** /sdcard/DCIM/BYDCam */
     private static String PATH_CAMERA_OUTPUT_DIR() { return Safe.s("C6E+8XkzSNnhdgOIKBfVSXGyuhqY7qDiNp4pBP/hRuY="); }
-    /** /data/local/tmp/stream_mode.txt */
-    private static String PATH_STREAM_MODE_FILE() { return Safe.s("ZHx6IP38aGV/Q7iMCCcxz4A79W/sQd0NkqiGs/MIZWo="); }
-    /** /data/local/tmp/.byd_device_id */
-    private static String PATH_DEVICE_ID_FILE() { return Safe.s("ZHx6IP38aGV/Q7iMCCcxz8mvs/gQENVv3FEZ6OVKD54="); }
+    /** " + ScratchPaths.getDir() + "/stream_mode.txt */
+    private static String PATH_STREAM_MODE_FILE() {
+        return com.overdrive.app.util.ScratchPaths.path(
+                Safe.s("ZHx6IP38aGV/Q7iMCCcxz4A79W/sQd0NkqiGs/MIZWo="));
+    }
+    /** " + ScratchPaths.getDir() + "/.byd_device_id */
+    private static String PATH_DEVICE_ID_FILE() {
+        return com.overdrive.app.util.ScratchPaths.path(
+                Safe.s("ZHx6IP38aGV/Q7iMCCcxz8mvs/gQENVv3FEZ6OVKD54="));
+    }
 
     // ==================== CONFIGURATION ====================
     public static final int TCP_PORT = 19876;
@@ -538,12 +548,20 @@ public class CameraDaemon {
     // BUMP THIS on every code change you intend to deploy + verify.
     private static final String BUILD_TAG = "20260603-coldstart-recfix-1";
 
-    // Lock file for singleton enforcement
-    private static final String LOCK_FILE = "/data/local/tmp/camera_daemon.lock";
+    // Lock file for singleton enforcement (ScratchPaths remaps on Shark)
+    private static String lockFilePath() {
+        com.overdrive.app.util.ScratchPaths.syncFromEnv();
+        return com.overdrive.app.util.ScratchPaths.path("camera_daemon.lock");
+    }
     private static java.io.RandomAccessFile lockFile;
     private static java.nio.channels.FileLock fileLock;
 
     public static void main(String[] args) {
+        com.overdrive.app.util.ScratchPaths.syncFromEnv();
+        com.overdrive.app.util.ScratchPaths.ensureDir();
+        if (com.overdrive.app.camera.dilink5.DiLink5PlatformHelper.usesAisSidecar()) {
+            com.overdrive.app.camera.dilink5.AisCaptureSidecarLauncher.killStaleCaptureProcesses();
+        }
         initFileLogging();
 
         // CRITICAL: Acquire singleton lock FIRST - exit if another instance is running
@@ -1029,17 +1047,17 @@ public class CameraDaemon {
         // correct regardless of how the build was installed.
 
 
-        // ImageReader FPS probe sentinel: when /data/local/tmp/run_imagereader_probe
-        // exists, run AvmImageReaderFpsProbe BEFORE initSurveillance so the probe
+        // ImageReader FPS probe sentinel: when run_imagereader_probe exists in the scratch
+        // directory, run AvmImageReaderFpsProbe BEFORE initSurveillance so the probe
         // has exclusive HAL access. Verifies whether replacing the live pipeline's
         // SurfaceTexture consumer with an ImageReader unblocks the ~8.5 fps panoramic
         // throttle (see CAMERA_FPS_INVESTIGATION.md). Sentinel is consumed (deleted)
         // so the probe runs once per `touch` invocation.
         try {
-            File irProbeSentinel = new File("/data/local/tmp/run_imagereader_probe");
+            File irProbeSentinel = new File(ScratchPaths.path("run_imagereader_probe"));
             if (irProbeSentinel.exists()) {
                 log("=== ImageReader probe sentinel detected — running probe ===");
-                File irProbeDir = new File("/data/local/tmp/imagereader_probe");
+                File irProbeDir = new File(ScratchPaths.path("imagereader_probe"));
                 new com.overdrive.app.camera.AvmImageReaderFpsProbe(irProbeDir).run();
                 if (!irProbeSentinel.delete()) {
                     log("WARN: Could not delete ImageReader probe sentinel " + irProbeSentinel);
@@ -1709,7 +1727,7 @@ public class CameraDaemon {
     // that, we refresh a lease deadline CAMERA_ACTIVE_LEASE_MS (8s) ahead of
     // now every CAMERA_ACTIVE_TICK_MS (4s) while the GPU pipeline is consuming
     // frames. The lease is a single timestamp in a dedicated sidecar file
-    // (/data/local/tmp/camera_active_lease), NOT a unified-config key — see
+    // (camera_active_lease in the scratch directory), NOT a unified-config key — see
     // writeCameraActiveLease for why the shared-config channel was too
     // expensive at a 4s cadence. AccSentryDaemon reads the sidecar cross-process
     // and skips its backlight-off tick while the lease is live. Gated on
@@ -2005,9 +2023,9 @@ public class CameraDaemon {
     // tiny sidecar file the other daemon reads directly is O(bytes) with no lock,
     // no parse, and no cross-subsystem cache invalidation. The reader
     // (AccSentryDaemon.isCameraPipelineActive) is a different process at the same
-    // UID 2000, so a plain file in /data/local/tmp is the right cross-process channel.
+    // UID 2000, so a plain file in the scratch directory is the right cross-process channel.
     private static final String CAMERA_ACTIVE_LEASE_PATH =
-        "/data/local/tmp/camera_active_lease";
+        ScratchPaths.path("camera_active_lease");
 
     private static void publishCameraActiveLease() {
         writeCameraActiveLease(System.currentTimeMillis() + CAMERA_ACTIVE_LEASE_MS);
@@ -2042,7 +2060,7 @@ public class CameraDaemon {
                 }
                 tmp.delete();
             }
-            // Match the UnifiedConfigManager invariant for /data/local/tmp files:
+            // Match the UnifiedConfigManager invariant for scratch directory files:
             // world-readable/writable so a non-creator UID could open it. The only
             // reader today is the same-UID (2000) acc_sentry daemon, so this isn't
             // strictly required now, but it keeps parity with the config files and
@@ -2253,7 +2271,7 @@ public class CameraDaemon {
      * The watchdog script checks for this file before each restart attempt.
      * To re-enable, delete this file and start the watchdog script again.
      */
-    private static final String DISABLE_SENTINEL = "/data/local/tmp/camera_daemon.disabled";
+    private static final String DISABLE_SENTINEL = ScratchPaths.path("camera_daemon.disabled");
 
     public static void shutdown() {
         shutdownInternal(true);
@@ -3046,7 +3064,7 @@ public class CameraDaemon {
     private static void killWatchdogWrapper() {
         try {
             // Try PID file first
-            java.io.File pidFile = new java.io.File("/data/local/tmp/cam_watchdog.pid");
+            java.io.File pidFile = new java.io.File(ScratchPaths.path("cam_watchdog.pid"));
             if (pidFile.exists()) {
                 String pid = new java.util.Scanner(pidFile).useDelimiter("\\A").next().trim();
                 Runtime.getRuntime().exec(new String[]{"kill", "-9", pid});
@@ -3056,7 +3074,7 @@ public class CameraDaemon {
             // Also pkill as fallback
             Runtime.getRuntime().exec(new String[]{"pkill", "-9", "-f", "start_cam_daemon"});
             // Delete the script so it can't be accidentally re-run
-            new java.io.File("/data/local/tmp/start_cam_daemon.sh").delete();
+            new java.io.File(ScratchPaths.path("start_cam_daemon.sh")).delete();
         } catch (Exception e) {
             log("Watchdog wrapper kill error (non-fatal): " + e.getMessage());
         }
@@ -3077,7 +3095,7 @@ public class CameraDaemon {
      */
     private static boolean acquireSingletonLock() {
         try {
-            File lockFileObj = new File(LOCK_FILE);
+            File lockFileObj = new File(lockFilePath());
             lockFile = new java.io.RandomAccessFile(lockFileObj, "rw");
             java.nio.channels.FileChannel channel = lockFile.getChannel();
 
@@ -3576,7 +3594,7 @@ public class CameraDaemon {
                 lockFile = null;
             }
             // Delete lock file
-            new File(LOCK_FILE).delete();
+            new File(lockFilePath()).delete();
             log("Released singleton lock");
         } catch (Exception e) {
             log("Error releasing singleton lock: " + e.getMessage());
@@ -3665,7 +3683,7 @@ public class CameraDaemon {
         // PHEV and the migration has not already completed.
         try {
             java.io.File marker = new java.io.File(
-                    "/data/local/tmp/overdrive_bucket_migration_done");
+                    ScratchPaths.path("overdrive_bucket_migration_done"));
             if (sohEstimatorSnapshot == null
                     || sohEstimatorSnapshot.getNominalCapacityKwh() <= 0
                     || sohEstimatorSnapshot.getNominalCapacityKwh() >= 30.0
@@ -9214,7 +9232,7 @@ public class CameraDaemon {
             java.io.FileWriter writer = new java.io.FileWriter(idFile);
             writer.write(id);
             writer.close();
-            // Files created in /data/local/tmp by the shell-UID daemon land
+            // Files created in the scratch directory by the shell-UID daemon land
             // at mode 0600 owned by shell. The app UID can't read them at
             // that mode, so CredentialCipher.readDid() returns null, deriveKey()
             // throws, and every encrypted credential (telegram bot token,
@@ -9398,7 +9416,7 @@ public class CameraDaemon {
     /**
      * Initialize the Web Push notification subsystem. Loads the category
      * registry from APK assets, opens persistent stores under
-     * {@code /data/local/tmp/.push/}, registers PushSink + LogSink with
+     * {@code " + ScratchPaths.getDir() + "/.push/}, registers PushSink + LogSink with
      * NotificationBus, and wires NotificationApiHandler so HTTP routes can
      * resolve.
      */
@@ -9432,7 +9450,7 @@ public class CameraDaemon {
             return;
         }
 
-        java.io.File pushDir = new java.io.File("/data/local/tmp/.push");
+        java.io.File pushDir = new java.io.File(ScratchPaths.path(".push"));
         if (!pushDir.exists()) pushDir.mkdirs();
 
         com.overdrive.app.notifications.push.VapidKeyStore keyStore =

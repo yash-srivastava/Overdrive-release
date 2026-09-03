@@ -1,5 +1,5 @@
 {
-  "version": 9,
+  "version": 10,
   "default": "seal",
   "baseUrl": "https://github.com/yash-srivastava/Overdrive-release/releases/download/models-v1/",
   "batteryChemistryDefinitions": {
@@ -54,6 +54,25 @@
         "verifiedOn": "2026-08-02"
       },
       "nominalKwh": 82.5
+    },
+    {
+      "id": "shark6",
+      "name": "BYD Shark 6",
+      "file": "seal.glb",
+      "sizeBytes": 1653240,
+      "sha256": "1030260cb7dc6b4483cc4f5fd2feb4746870234a87ee3ccf7f3d71e7bd0178fe",
+      "bundled": true,
+      "phev": true,
+      "batteryChemistry": "lfp",
+      "batteryChemistryEvidence": {
+        "authority": "BYD",
+        "technology": "blade",
+        "nominalKwh": 29.6,
+        "configuration": "Shark 6 DMO PHEV 29.6 kWh Blade",
+        "sourceUrl": "https://www.byd.com/material/byd-site/za/product/shark-6/BYD%20SHARK%206%20Specifications%20%20-%20SA.pdf",
+        "verifiedOn": "2026-08-31"
+      },
+      "nominalKwh": 29.6
     },
     {
       "id": "sealion7",

@@ -2,6 +2,7 @@ package com.overdrive.app.server;
 
 import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.daemon.CameraDaemon;
+import com.overdrive.app.util.ScratchPaths;
 
 import org.json.JSONObject;
 
@@ -58,7 +59,7 @@ public final class LocaleManager {
      * fails from the app UID, which is exactly the bug we're migrating away
      * from — so reads stay best-effort and the migration is a one-shot.
      */
-    private static final String LEGACY_STATE_FILE = "/data/local/tmp/.overdrive/locale";
+    private static final String LEGACY_STATE_FILE = ScratchPaths.path(".overdrive/locale");
     private static volatile boolean legacyMigrationChecked = false;
 
     /** In-memory cache so we don't re-parse the unified config on every request. */

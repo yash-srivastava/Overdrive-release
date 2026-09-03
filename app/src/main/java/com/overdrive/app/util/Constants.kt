@@ -14,11 +14,11 @@ object Constants {
     const val TCP_PORT = 19876
     const val HTTP_PORT = 8080
     
-    // Directories
-    const val STREAM_DIR = "/data/local/tmp/cam_stream"
+    // Directories (daemon scratch resolved at runtime via ScratchPaths)
+    val STREAM_DIR: String get() = ScratchPaths.path("cam_stream")
     const val APP_STREAM_DIR = "/storage/emulated/0/Android/data/com.overdrive.app/files/stream"
     const val DEFAULT_OUTPUT_DIR = "/sdcard/DCIM/BYDCam"
-    const val LOG_DIR = "/data/local/tmp"
+    val LOG_DIR: String get() = ScratchPaths.getDir()
     
     // Camera Configuration (legacy Seal/Atto defaults)
     val PANO_WIDTH  = CameraProfiles.getLegacyDefault().panoWidth

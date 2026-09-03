@@ -5,6 +5,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStreamReader;
 import java.util.Locale;
+import com.overdrive.app.util.ScratchPaths;
 
 /**
  * Handles system commands: /daemons, /url, /help
@@ -117,13 +118,13 @@ public class SystemCommandHandler implements TelegramCommandHandler {
                 boolean isPaid = com.overdrive.app.config.CloudflaredPaidConfig.isPaidVersion();
                 String token = com.overdrive.app.config.CloudflaredPaidConfig.getToken();
                 if (isPaid && !token.isEmpty()) {
-                    String grepResult = ctx.execShell("grep -iE 'ingress|hostname' /data/local/tmp/cloudflared.log 2>/dev/null | grep -oE '[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}' | grep -vE '127\\.0\\.0\\.1' | tail -1");
+                    String grepResult = ctx.execShell("grep -iE 'ingress|hostname' " + ScratchPaths.getDir() + "/cloudflared.log 2>/dev/null | grep -oE '[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}' | grep -vE '127\\.0\\.0\\.1' | tail -1");
                     // execShell returns "" (not null) on no match — require a real host.
                     if (grepResult != null && !grepResult.trim().isEmpty() && grepResult.contains(".")) {
                         url = "https://" + grepResult.trim();
                     }
                 } else {
-                    String grepResult = ctx.execShell("grep -o 'https://[a-z0-9-]*\\.trycloudflare\\.com' /data/local/tmp/cloudflared.log 2>/dev/null | grep -v 'api\\.' | head -1");
+                    String grepResult = ctx.execShell("grep -o 'https://[a-z0-9-]*\\.trycloudflare\\.com' " + ScratchPaths.getDir() + "/cloudflared.log 2>/dev/null | grep -v 'api\\.' | head -1");
                     if (grepResult != null && grepResult.startsWith("https://") && grepResult.contains("-")) {
                         url = grepResult.trim();
                     }
@@ -141,7 +142,7 @@ public class SystemCommandHandler implements TelegramCommandHandler {
 
             if (zrokUp) {
                 String url = null;
-                String grepResult = ctx.execShell("grep -o 'https://[a-z0-9-]*\\.share\\.zrok\\.io' /data/local/tmp/zrok.log 2>/dev/null | tail -1");
+                String grepResult = ctx.execShell("grep -o 'https://[a-z0-9-]*\\.share\\.zrok\\.io' " + ScratchPaths.getDir() + "/zrok.log 2>/dev/null | tail -1");
                 if (grepResult != null && grepResult.startsWith("https://")) {
                     url = grepResult.trim();
                 }
@@ -158,7 +159,7 @@ public class SystemCommandHandler implements TelegramCommandHandler {
 
             if (tailscaleUp) {
                 String url = null;
-                String getIpResult = ctx.execShell("/data/local/tmp/.tailscale/tailscale --socket 127.0.0.1:8532 ip --1");
+                String getIpResult = ctx.execShell(ScratchPaths.path(".tailscale/tailscale --socket 127.0.0.1:8532 ip --1"));
                 if (getIpResult != null && !getIpResult.trim().isEmpty()) {
                     url = "http://" + getIpResult.trim() + ":8080";
                 }
@@ -175,7 +176,7 @@ public class SystemCommandHandler implements TelegramCommandHandler {
 
             // Last-resort fallback: if nothing resolved from logs, try the saved URL file.
             if (resolved == 0) {
-                File urlFile = new File("/data/local/tmp/tunnel_url.txt");
+                File urlFile = new File(ScratchPaths.path("tunnel_url.txt"));
                 if (urlFile.exists()) {
                     BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(urlFile)));
                     String saved = reader.readLine();

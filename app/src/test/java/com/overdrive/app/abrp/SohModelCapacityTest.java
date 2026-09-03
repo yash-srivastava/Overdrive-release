@@ -51,6 +51,8 @@ public class SohModelCapacityTest {
         assertEquals(82.56, SohEstimator.mapCarTypeToCapacity("Seal"), 0.001);
         assertEquals(71.8, SohEstimator.mapCarTypeToCapacity("Seal U"), 0.001);
         assertEquals(26.6, SohEstimator.mapCarTypeToCapacity("Sealion 6"), 0.001);
+        assertEquals(29.6, SohEstimator.mapCarTypeToCapacity("Shark 6"), 0.001);
+        assertEquals(29.6, SohEstimator.mapCarTypeToCapacity("BYD SHARK 6"), 0.001);
         assertEquals(91.3, SohEstimator.mapCarTypeToCapacity("Sealion 7"), 0.001);
         assertEquals(60.48, SohEstimator.mapCarTypeToCapacity("Atto 3"), 0.001);
         assertEquals(44.9, SohEstimator.mapCarTypeToCapacity("Dolphin"), 0.001);

@@ -151,6 +151,26 @@ else()
 endif()
 
 # ==================== DiLink 5 Camera Sidecar Executable & Hook ====================
+# Shark 6: PIE packaged as libais_capture.so — exec via linker64 from /data/app/.../lib/arm64/
+add_executable(ais_capture
+    camera/ais_capture_main.cpp
+    camera/ais_direct.cpp
+)
+target_link_libraries(ais_capture
+    dl
+    log
+    android
+)
+if(DEFINED CMAKE_LIBRARY_OUTPUT_DIRECTORY)
+    add_custom_command(TARGET ais_capture POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+            $<TARGET_FILE:ais_capture>
+            ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libais_capture.so
+        COMMENT "Package ais_capture as libais_capture.so for the APK"
+    )
+endif()
+
+# Sealion 7: qcarcam_test + LD_PRELOAD hook (unchanged)
 add_executable(dilink5_cam_sidecar
     camera/dilink5_cam_sidecar.cpp
 )

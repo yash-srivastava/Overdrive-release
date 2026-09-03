@@ -5,6 +5,7 @@ import android.util.Log
 import com.overdrive.app.config.UnifiedConfigManager
 import org.json.JSONObject
 import java.io.File
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * Configuration Manager - Persists SurveillanceConfig to JSON file.
@@ -22,10 +23,10 @@ class SurveillanceConfigManager(
         
         // Legacy paths (for migration only)
         private const val SYSTEM_CONFIG_PATH = "/data/data/com.android.providers.settings/sentry_config.json"
-        private const val SHELL_CONFIG_PATH = "/data/local/tmp/sentry_config.json"
+        private val SHELL_CONFIG_PATH = ScratchPaths.path("sentry_config.json")
         
         // SOTA: Use unified config path
-        private const val UNIFIED_CONFIG_PATH = "/data/local/tmp/overdrive_config.json"
+        private val UNIFIED_CONFIG_PATH = ScratchPaths.path("overdrive_config.json")
         
         private fun getDefaultConfigFile(): File {
             val uid = Process.myUid()

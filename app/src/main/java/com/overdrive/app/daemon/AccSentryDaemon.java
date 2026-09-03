@@ -7,6 +7,7 @@ import android.hardware.bydauto.power.BYDAutoPowerDevice;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.daemon.proxy.Safe;
 import com.overdrive.app.logging.DaemonLogger;
@@ -60,10 +61,15 @@ public class AccSentryDaemon {
     private static String CMD_DATA_ALWAYS_ON() { return Safe.s("kSl507BgPZXbv0JUusGzZofsus1EHyUHZji5UFGB7WLLwoz58e3wRdD6/xbXC307"); }
     /** settings get global mobile_data */
     private static String CMD_DATA_GET() { return Safe.s("4/qqmGNE2vhiGGggG70n0sRfHtz6gZempQZl+6FiiZk="); }
-    /** /data/local/tmp */
-    private static String PATH_DATA_LOCAL_TMP() { return Safe.s("vuaMjrmBGBFh07qqnUuL8w=="); }
-    /** /data/local/tmp/telegram_config.properties */
-    private static String PATH_TELEGRAM_CONFIG() { return Safe.s("ZHx6IP38aGV/Q7iMCCcxzwQSn0P1N0jxHygc8N+4Ft+9mlR8XQ+WvEw0ktanrtNx"); }
+    /** scratch dir (legacy tmp or emulated fallback) */
+    private static String PATH_DATA_LOCAL_TMP() {
+        return com.overdrive.app.util.ScratchPaths.getDir();
+    }
+    /** telegram_config.properties */
+    private static String PATH_TELEGRAM_CONFIG() {
+        return com.overdrive.app.util.ScratchPaths.path(
+                Safe.s("ZHx6IP38aGV/Q7iMCCcxzwQSn0P1N0jxHygc8N+4Ft+9mlR8XQ+WvEw0ktanrtNx"));
+    }
 
     // Power levels from BYDAutoBodyworkDevice
     private static final int POWER_LEVEL_OFF = 0;
@@ -180,23 +186,23 @@ public class AccSentryDaemon {
     private static final String PROCESS_INSTANCE_NONCE =
             createProcessInstanceNonce();
     private static final String PARK_REAPER_PATH =
-            "/data/local/tmp/overdrive_park_reaper.sh";
+            ScratchPaths.path("overdrive_park_reaper.sh");
     private static final String PARK_REAPER_CONTROL_PATH =
-            "/data/local/tmp/overdrive_park_reaper.control";
+            ScratchPaths.path("overdrive_park_reaper.control");
     private static final String PARK_REAPER_STATE_PATH =
-            "/data/local/tmp/overdrive_park_reaper.state";
+            ScratchPaths.path("overdrive_park_reaper.state");
     private static final String PARK_REAPER_LEASE_PATH =
-            "/data/local/tmp/overdrive_park_reaper.lease";
+            ScratchPaths.path("overdrive_park_reaper.lease");
     private static final String PARK_REAPER_LEASE_OWNER_PATH =
             PARK_REAPER_LEASE_PATH + "/owner";
     private static final String PARK_REAPER_RUN_PATH =
-            "/data/local/tmp/overdrive_park_reaper.running";
+            ScratchPaths.path("overdrive_park_reaper.running");
     private static final String PARK_REAPER_RUN_OWNER_PATH =
             PARK_REAPER_RUN_PATH + "/owner";
     private static final String PARK_REAPER_ACK_PREFIX =
-            "/data/local/tmp/overdrive_park_reaper.ack.";
+            ScratchPaths.path("overdrive_park_reaper.ack.");
     private static final String PARK_REAPER_DONE_PREFIX =
-            "/data/local/tmp/overdrive_park_reaper.done.";
+            ScratchPaths.path("overdrive_park_reaper.done.");
 
     /** Process-local app context. Returns null before main() initialises it. */
     public static Context getAppContext() { return appContext; }
@@ -1378,13 +1384,18 @@ public class AccSentryDaemon {
         }
     }
     
-    // Lock file for singleton enforcement
-    private static final String LOCK_FILE = "/data/local/tmp/acc_sentry_daemon.lock";
+    // Lock file for singleton enforcement (ScratchPaths remaps on Shark)
+    private static String lockFilePath() {
+        com.overdrive.app.util.ScratchPaths.syncFromEnv();
+        return com.overdrive.app.util.ScratchPaths.path("acc_sentry_daemon.lock");
+    }
     private static java.io.RandomAccessFile lockFileHandle;
     private static java.nio.channels.FileLock fileLock;
 
     public static void main(String[] args) {
         int myUid = android.os.Process.myUid();
+        com.overdrive.app.util.ScratchPaths.syncFromEnv();
+        com.overdrive.app.util.ScratchPaths.ensureDir();
 
         // Configure DaemonLogger for daemon context (enable stdout for app_process)
         DaemonLogger.configure(DaemonLogger.Config.defaults()
@@ -1392,7 +1403,7 @@ public class AccSentryDaemon {
             .withFileLog(true)
             .withConsoleLog(true));
 
-        logger = DaemonLogger.getInstance(TAG, PATH_DATA_LOCAL_TMP());
+        logger = DaemonLogger.getInstance(TAG, com.overdrive.app.util.ScratchPaths.getDir());
         
         // CRITICAL: Acquire singleton lock FIRST - exit if another instance is running
         if (!acquireSingletonLock()) {
@@ -1604,7 +1615,7 @@ public class AccSentryDaemon {
      */
     private static boolean acquireSingletonLock() {
         try {
-            java.io.File lockFileObj = new java.io.File(LOCK_FILE);
+            java.io.File lockFileObj = new java.io.File(lockFilePath());
             lockFileHandle = new java.io.RandomAccessFile(lockFileObj, "rw");
             java.nio.channels.FileChannel channel = lockFileHandle.getChannel();
             
@@ -1651,7 +1662,7 @@ public class AccSentryDaemon {
                 lockFileHandle.close();
                 lockFileHandle = null;
             }
-            new java.io.File(LOCK_FILE).delete();
+            new java.io.File(lockFilePath()).delete();
         } catch (Exception e) {
             log("Error releasing singleton lock: " + e.getMessage());
         }
@@ -5136,7 +5147,7 @@ public class AccSentryDaemon {
      * keep the existing power-save behaviour bit-exact.
      */
     private static final String CAMERA_ACTIVE_LEASE_PATH =
-        "/data/local/tmp/camera_active_lease";
+        ScratchPaths.path("camera_active_lease");
 
     // Upper bound on how far ahead of "now" a lease deadline may legitimately be.
     // CameraDaemon only ever writes now + 8s, so any live lease is <=8s out; we
@@ -6641,7 +6652,7 @@ public class AccSentryDaemon {
         ShellResult result = runTelegramShell(
                 generation,
                 enabled,
-                "SELF=$$; T=/data/local/tmp/telegram_probe.$$; "
+                "SELF=$$; T=" + ScratchPaths.getDir() + "/telegram_probe.$$; "
                 + "trap 'rm -f \"$T\" 2>/dev/null' 0 HUP INT TERM; "
                 + "ps -A -o PID,ARGS > \"$T\" 2>/dev/null || exit 41; "
                 + "D=$(awk -v self=\"$SELF\" "
@@ -6649,7 +6660,7 @@ public class AccSentryDaemon {
                 + "|| index($0,\"--nice-name=telegram_bot_daemon\") > 0) "
                 + "{print 1; exit}' \"$T\") || exit 42; "
                 + "W=$(awk -v self=\"$SELF\" "
-                + "'$1 != self && index($0,\"/data/local/tmp/start_telegram.sh\") > 0 "
+                + "'$1 != self && index($0,\"" + ScratchPaths.path("start_telegram.sh") + "\") > 0 "
                 + "{print 1; exit}' \"$T\") || exit 43; "
                 + "printf 'daemon=%s watchdog=%s\\n' \"${D:-0}\" \"${W:-0}\" "
                 + "|| exit 44");
@@ -6753,7 +6764,7 @@ public class AccSentryDaemon {
         //
         // A missing file falls through to auto-start; an unreadable one retries.
         java.io.File telegramSentinel =
-            new java.io.File("/data/local/tmp/telegram_bot_daemon.disabled");
+            new java.io.File(ScratchPaths.path("telegram_bot_daemon.disabled"));
         if (telegramSentinel.exists()) {
             String reason = readSentinelReason(telegramSentinel);
             if (reason == null) {
@@ -6843,7 +6854,7 @@ public class AccSentryDaemon {
                     ShellResult logResult = runTelegramShell(
                             transitionGeneration,
                             true,
-                            "tail -20 /data/local/tmp/telegrambotdaemon.log "
+                            "tail -20 " + ScratchPaths.getDir() + "/telegrambotdaemon.log "
                                     + "2>/dev/null || true");
                     if (logResult.success
                             && !logResult.output.isEmpty()) {
@@ -6938,7 +6949,7 @@ public class AccSentryDaemon {
         ShellResult shellResult = runTelegramShell(
                 transitionGeneration,
                 true,
-                "rm -f /data/local/tmp/telegram_bot_daemon.disabled "
+                "rm -f " + ScratchPaths.getDir() + "/telegram_bot_daemon.disabled "
                         + "2>/dev/null");
         if (!shellResult.success) {
             return shellResult.canceled;
@@ -6991,7 +7002,7 @@ public class AccSentryDaemon {
         shellResult = runTelegramShell(
                 transitionGeneration,
                 true,
-                "rm -f /data/local/tmp/telegram_bot_daemon.lock 2>/dev/null");
+                "rm -f " + ScratchPaths.getDir() + "/telegram_bot_daemon.lock 2>/dev/null");
         if (!shellResult.success) {
             return shellResult.canceled;
         }
@@ -7006,7 +7017,7 @@ public class AccSentryDaemon {
         // next ACC cycle or the next 30s in-process health-check tick
         // (only fires when MainActivity is alive). The watchdog respawns
         // on any non-zero exit, sentinel-gated for legitimate stops.
-        String scriptPath = "/data/local/tmp/start_telegram.sh";
+        String scriptPath = ScratchPaths.path("start_telegram.sh");
         try {
             // proxyArgs="" because AccSentry-launched daemon doesn't have
             // visibility into Android global HTTP proxy from this context.
@@ -7132,13 +7143,13 @@ public class AccSentryDaemon {
         ShellResult shellResult = runTelegramShell(
             transitionGeneration,
             false,
-            "S=/data/local/tmp/telegram_bot_daemon.disabled; T=\"$S.tmp.$$\"; "
+            "S=" + ScratchPaths.getDir() + "/telegram_bot_daemon.disabled; T=\"$S.tmp.$$\"; "
             + "R=$(head -1 \"$S\" 2>/dev/null); "
             + "case \"$R\" in "
             + "'disabled by ui'*|'disabled by telegram'*|'disabled by user'*) :;; "
             + "*) printf 'disabled by ACC-on at %s\\n' \"$(date)\" > \"$T\" "
             + "&& chmod 666 \"$T\" && mv -f \"$T\" \"$S\";; esac; "
-            + "rm -f /data/local/tmp/start_telegram.sh"
+            + "rm -f " + ScratchPaths.getDir() + "/start_telegram.sh"
         );
         if (!shellResult.success) {
             return shellResult.canceled;
@@ -7181,7 +7192,7 @@ public class AccSentryDaemon {
         shellResult = runTelegramShell(
                 transitionGeneration,
                 false,
-                "rm -f /data/local/tmp/telegram_bot_daemon.lock 2>/dev/null");
+                "rm -f " + ScratchPaths.getDir() + "/telegram_bot_daemon.lock 2>/dev/null");
         if (!shellResult.success) {
             return shellResult.canceled;
         }
@@ -8337,8 +8348,8 @@ public class AccSentryDaemon {
         sb.append("release_lease\n");
         sb.append("sleep 1\n");
         sb.append("owned_begin || stale_exit\n");
-        sb.append("run_bounded 20 rm -f /data/local/tmp/camera_daemon.lock ")
-          .append("/data/local/tmp/telegram_bot_daemon.lock || true\n");
+        sb.append("run_bounded 20 rm -f " + ScratchPaths.getDir() + "/camera_daemon.lock ")
+          .append(ScratchPaths.path("telegram_bot_daemon.lock || true\n"));
         sb.append("owns_state || { release_lease; stale_exit; }\n");
         sb.append("atomic_write \"$DONE_PATH\" \"$EXPECTED_STATE\" || { release_lease; failed_exit; }\n");
         sb.append("release_lease\n");
@@ -8582,6 +8593,7 @@ public class AccSentryDaemon {
 
     private static ShellResult execShellResult(
             String cmd, long timeoutMs, ShellOwnership ownership) {
+        cmd = com.overdrive.app.util.ScratchPaths.prepareExecShell(cmd);
         if (Thread.currentThread().isInterrupted()
                 || !isShellOwnershipCurrent(ownership)) {
             return new ShellResult(

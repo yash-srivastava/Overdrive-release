@@ -2,6 +2,7 @@ package com.overdrive.app.roadsense.store
 
 import org.json.JSONObject
 import java.io.File
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * Tracks which ~50 m map tiles this device has actually DRIVEN THROUGH, so the
@@ -142,7 +143,7 @@ class RouteCoverage {
     companion object {
         /** Own file (NOT the shared overdrive_config.json) — see class doc. Sits in
          *  the same daemon-writable dir as the H2 stores. */
-        private const val COVERAGE_PATH = "/data/local/tmp/overdrive_roadsense_coverage.json"
+        private val COVERAGE_PATH = ScratchPaths.path("overdrive_roadsense_coverage.json")
         /** Tiles to remember for the boundary-bounce guard (audit S5). ~3 covers a
          *  GPS jitter ping-pong across one boundary without blocking a genuine
          *  re-entry after driving away and coming back later in the trip. */

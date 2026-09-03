@@ -1,6 +1,7 @@
 package com.overdrive.app.automation;
 
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.util.ScratchPaths;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -36,7 +37,7 @@ import java.util.UUID;
 public final class ActionGroups {
     private static final DaemonLogger logger = DaemonLogger.getInstance("Automations");
 
-    private static final File HOME = new File("/data/local/tmp/.automations");
+    private static final File HOME = new File(ScratchPaths.path(".automations"));
     private static final File CONFIG = new File(HOME, "action_groups.json");
     private static final File BACKUP = new File(HOME, "action_groups.json.bak");
     private static final File TMP = new File(HOME, "action_groups.json.tmp");

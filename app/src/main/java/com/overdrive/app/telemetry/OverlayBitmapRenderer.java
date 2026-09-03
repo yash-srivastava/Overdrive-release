@@ -11,6 +11,7 @@ import android.graphics.PorterDuffColorFilter;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.telemetry.TelemetryFields.Field;
@@ -49,7 +50,7 @@ public class OverlayBitmapRenderer {
 
     private static final int WIDTH = 1280;
     private static final int HEIGHT = 80;
-    private static final String ICON_DIR = "/data/local/tmp/overlay/";
+    private static final String ICON_DIR = ScratchPaths.path("overlay/");
     private static final int ICON_SIZE = 40;
     private static final double KM_TO_MI = 0.621371;
 

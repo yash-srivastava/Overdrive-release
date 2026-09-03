@@ -27,14 +27,26 @@ public class GlobalProxyDaemon {
     private static String SVC_POWER_ON() { return Safe.s("evL2bKzQb67Tf3KRHg1cMVG8PSjiOvOcAsdtUSiirz4="); }
     /** svc power stayon false */
     private static String SVC_POWER_OFF() { return Safe.s("evL2bKzQb67Tf3KRHg1cMaUQ0s15R3JRQ4W151UI/Rs="); }
-    /** /data/local/tmp/singbox_config.json */
-    private static String SINGBOX_CONFIG() { return Safe.s("ZHx6IP38aGV/Q7iMCCcxzwYi8Dqee5TiGPRAGrXFGxQK19NSN/ULRr1XYqE0nHYW"); }
-    /** /data/local/tmp/singbox.log */
-    private static String SINGBOX_LOG() { return Safe.s("ZHx6IP38aGV/Q7iMCCcxz3vxHXoriO/4/mUU2N2RxN4="); }
-    /** /data/local/tmp/sing-box */
-    private static String SINGBOX_BIN() { return Safe.s("ZHx6IP38aGV/Q7iMCCcxz3TnY8grp670bzPyWlLlY9c="); }
-    /** /data/local/tmp/global_proxy.log */
-    private static String PROXY_LOG() { return Safe.s("ZHx6IP38aGV/Q7iMCCcxz5q9/uqUtW8BShQTy+DvGbRG9DHIjhkEadRt3RoxzdGj"); }
+    /** singbox_config.json (resolved via ScratchPaths) */
+    private static String SINGBOX_CONFIG() {
+        return com.overdrive.app.util.ScratchPaths.path(
+                Safe.s("ZHx6IP38aGV/Q7iMCCcxzwYi8Dqee5TiGPRAGrXFGxQK19NSN/ULRr1XYqE0nHYW"));
+    }
+    /** singbox.log */
+    private static String SINGBOX_LOG() {
+        return com.overdrive.app.util.ScratchPaths.path(
+                Safe.s("ZHx6IP38aGV/Q7iMCCcxz3vxHXoriO/4/mUU2N2RxN4="));
+    }
+    /** sing-box binary */
+    private static String SINGBOX_BIN() {
+        return com.overdrive.app.util.ScratchPaths.path(
+                Safe.s("ZHx6IP38aGV/Q7iMCCcxz3TnY8grp670bzPyWlLlY9c="));
+    }
+    /** global_proxy.log */
+    private static String PROXY_LOG() {
+        return com.overdrive.app.util.ScratchPaths.path(
+                Safe.s("ZHx6IP38aGV/Q7iMCCcxz5q9/uqUtW8BShQTy+DvGbRG9DHIjhkEadRt3RoxzdGj"));
+    }
     /** 8.8.8.8 */
     private static String DNS_GOOGLE() { return Safe.s("qmTp78S+Di6fTuBLyeiqxw=="); }
     /** 127.0.0.1 */
@@ -79,6 +91,7 @@ public class GlobalProxyDaemon {
     private static String SNI() { return Safe.s("u7674GDA85JNqEffkyiqRg=="); }
 
     public static void main(String[] args) {
+        com.overdrive.app.util.ScratchPaths.syncFromEnv();
         log("=== Global Proxy Daemon ===");
 
         try {
@@ -350,6 +363,7 @@ public class GlobalProxyDaemon {
     }
 
     private static void execShell(String cmd) {
+        cmd = com.overdrive.app.util.ScratchPaths.prepareExecShell(cmd);
         try {
             Runtime.getRuntime().exec(new String[]{"sh", "-c", cmd}).waitFor();
         } catch (Exception e) {}

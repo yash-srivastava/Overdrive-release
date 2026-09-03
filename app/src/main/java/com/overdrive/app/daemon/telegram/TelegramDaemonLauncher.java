@@ -1,6 +1,7 @@
 package com.overdrive.app.daemon.telegram;
 
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.util.ScratchPaths;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -26,7 +27,7 @@ public final class TelegramDaemonLauncher {
     private static final String DAEMON_CLASS =
             "com.overdrive.app.daemon.TelegramBotDaemon";
     private static final String DAEMON_LOG =
-            "/data/local/tmp/telegrambotdaemon.log";
+            ScratchPaths.path("telegrambotdaemon.log");
 
     private TelegramDaemonLauncher() {}
 

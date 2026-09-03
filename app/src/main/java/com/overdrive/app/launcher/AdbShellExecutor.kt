@@ -2,6 +2,7 @@ package com.overdrive.app.launcher
 
 import android.content.Context
 import com.overdrive.app.logging.LogManager
+import com.overdrive.app.util.ScratchPaths
 import dadb.AdbKeyPair
 import dadb.Dadb
 import java.io.File
@@ -62,6 +63,7 @@ class AdbShellExecutor(private val context: Context) {
         // trap-EXIT rm deletes the second's body. Companion-static eliminates
         // cross-instance collisions.
         private val scriptSeq = java.util.concurrent.atomic.AtomicLong(0)
+        private val scratchDirProbed = AtomicBoolean(false)
         
         fun setAuthCallback(callback: AdbAuthCallback?) {
             authCallback = callback
@@ -128,6 +130,9 @@ class AdbShellExecutor(private val context: Context) {
         executeInternal(command, "<sensitive:$description>", callback)
     }
 
+    private fun prepareShellCommand(command: String): String =
+        ScratchPaths.prepareShellCommand(command)
+
     private fun executeInternal(
         command: String,
         commandForLog: String,
@@ -145,7 +150,7 @@ class AdbShellExecutor(private val context: Context) {
                 logger.debug(TAG, "adb#$seq RUN [${Thread.currentThread().name}]")
                 val dadb = getOrCreateConnection()
                 val tConn = System.currentTimeMillis() - t0
-                val result = dadb.shell(command)
+                val result = dadb.shell(prepareShellCommand(command))
                 logger.debug(TAG, "adb#$seq DONE conn=${tConn}ms total=${System.currentTimeMillis() - t0}ms exit=${result.exitCode}")
 
                 if (result.exitCode == 0) {
@@ -163,7 +168,7 @@ class AdbShellExecutor(private val context: Context) {
     fun executeSync(command: String): ShellResult {
         logger.debug(TAG, "Executing sync: $command")
         val dadb = getOrCreateConnection()
-        val result = dadb.shell(command)
+        val result = dadb.shell(prepareShellCommand(command))
         return ShellResult(result.exitCode, result.allOutput)
     }
 
@@ -199,20 +204,16 @@ class AdbShellExecutor(private val context: Context) {
             // (any future script body containing the literal delimiter on
             // its own line would terminate the heredoc early).
             val nonce = "${System.nanoTime()}_${scriptSeq.incrementAndGet()}"
-            val scriptPath = "/data/local/tmp/.adb_script_${nonce}.sh"
+            val scriptPath = ScratchPaths.path(".adb_script_${nonce}.sh")
             val eofMarker = "__ADB_SCRIPT_EOF_${nonce}__"
+            val remappedBody = ScratchPaths.remapShell(scriptBody)
             try {
                 logger.debug(TAG, "Executing script via $scriptPath (${scriptBody.length} bytes)")
                 val dadb = getOrCreateConnection()
 
-                // Write via a heredoc — the heredoc body comes from stdin
-                // not argv, so a `pkill -f cam_daemon` pattern inside the
-                // body never appears in any shell's argv and self-match
-                // is impossible. No chmod needed: `sh <path>` reads the
-                // script regardless of x-bit, so the previous `chmod 755`
-                // was dead code.
-                val writeCmd = "cat > $scriptPath <<'$eofMarker'\n" +
-                        scriptBody +
+                val writeCmd = ScratchPaths.shellPrefix() +
+                        "cat > $scriptPath <<'$eofMarker'\n" +
+                        remappedBody +
                         "\n$eofMarker"
                 val writeResult = dadb.shell(writeCmd)
                 if (writeResult.exitCode != 0) {
@@ -308,6 +309,7 @@ class AdbShellExecutor(private val context: Context) {
                             logger.info(TAG, "ADB auth granted! Connection established.")
                             authCallback?.onAuthGranted()
                         }
+                        probeScratchDir(dadb)
                         return dadb
                     }
                 } catch (e: Exception) {
@@ -343,10 +345,23 @@ class AdbShellExecutor(private val context: Context) {
                 pollingStarted.set(false)
                 logger.info(TAG, "ADB connection established successfully")
                 authCallback?.onAuthGranted()
+                probeScratchDir(dadb)
                 return dadb
             } else {
                 throw Exception("ADB auth pending - waiting for user to accept")
             }
+        }
+    }
+    
+    private fun probeScratchDir(dadb: Dadb) {
+        if (!scratchDirProbed.compareAndSet(false, true)) return
+        try {
+            ScratchPaths.probeViaShell { cmd ->
+                val result = dadb.shell(cmd)
+                result.allOutput
+            }
+        } catch (e: Exception) {
+            logger.warn(TAG, "Scratch dir probe failed: ${e.message}")
         }
     }
     

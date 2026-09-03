@@ -1,6 +1,7 @@
 package com.overdrive.app.server;
 
 import android.content.Context;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.updater.AppUpdater;
@@ -43,7 +44,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public class UpdateApiHandler {
 
     private static final String TAG = "UpdateApi";
-    private static final String PROGRESS_FILE = "/data/local/tmp/overdrive_update_progress.json";
+    private static final String PROGRESS_FILE = ScratchPaths.path("overdrive_update_progress.json");
 
     // One install at a time. AtomicReference so we don't hold an updater past
     // the install (it's GC'd along with the dying process anyway).
@@ -382,7 +383,7 @@ public class UpdateApiHandler {
         // named cloudflared tunnels) and fall back to process probe.
         // AdbDaemonLauncher.tunnelType is intentionally NOT used; it's a default
         // value that's never reassigned at runtime.
-        String lastUrl = readTextFile("/data/local/tmp/tunnel_url.txt");
+        String lastUrl = readTextFile(ScratchPaths.path("tunnel_url.txt"));
         String tunnelType = "none";
         boolean tunnelUrlMayChange = false;
         if (lastUrl != null && !lastUrl.isEmpty()) {
