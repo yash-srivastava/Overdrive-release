@@ -1,5 +1,6 @@
 package com.overdrive.app.camera;
 
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
@@ -11,7 +12,7 @@ import java.nio.file.Paths;
 
 /**
  * Guards the BYD WebView camera-switch regression where an already-open
- * WebSocket continued delivering video but the top-left badge stayed on
+ * WebSocket continued delivering video but the top-left indicator stayed on
  * "Connecting..." because no second onopen event was emitted.
  */
 public class LiveViewConnectionStateAssetTest {
@@ -28,6 +29,22 @@ public class LiveViewConnectionStateAssetTest {
         assertTrue(liveView.contains(
                 "this.sotaPlayer.onFrame = (count) => this.noteFrameReceived(count);"));
         assertTrue(liveView.contains("this.markStreamConnecting();"));
+    }
+
+    /**
+     * The indicator carries no text — the video stage states what is
+     * happening — so its state has to reach assistive tech through
+     * aria-label, and clearing the stage on 'live' must not depend on the
+     * indicator being in the DOM.
+     */
+    @Test
+    public void streamIndicatorIsALabelledDotAndStageClearingIsIndependent() throws Exception {
+        String liveView = readAsset("local/live-view.html");
+
+        assertTrue(liveView.contains("data-i18n-attr=\"aria-label:pip.select_camera\""));
+        assertFalse(liveView.contains("class=\"status-text\""));
+        assertTrue(liveView.contains("el.setAttribute('aria-label', BYD.i18n.t(labelKey));"));
+        assertTrue(liveView.contains("if (status === 'live') this.setStagePhase('live');"));
     }
 
     private static String readAsset(String relativePath) throws Exception {

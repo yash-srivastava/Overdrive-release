@@ -26,12 +26,9 @@ public class StatusIndicatorAssetTest {
 
     @Test
     public void compactStatusPillsReuseTheSharedPrimitive() throws IOException {
-        String live = readRepositoryFile("app/src/main/assets/web/local/live-view.html");
         String vehicle = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
         String performance = readRepositoryFile("app/src/main/assets/web/local/performance.html");
 
-        assertTrue(live.contains("connection-status compact-status-pill"));
-        assertTrue(live.contains("conn-dot compact-status-pill__dot"));
         assertTrue(vehicle.contains("vc-pill compact-status-pill"));
         // Lock pill starts grey/"Unknown" until the cloud probe answers.
         assertTrue(vehicle.contains("dot grey compact-status-pill__dot"));

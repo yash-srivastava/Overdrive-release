@@ -57,9 +57,10 @@
                             <!-- Top Bar -->
                             <div class="camera-top-bar">
                                 <div class="top-bar-left">
-                                    <div class="connection-status compact-status-pill" id="connectionStatus">
-                                        <span class="conn-dot compact-status-pill__dot"></span>
-                                        <span class="status-text" data-i18n="pip.select_camera">Select Camera</span>
+                                    <div class="connection-status" id="connectionStatus" role="status"
+                                         aria-label="Select Camera"
+                                         data-i18n-attr="aria-label:pip.select_camera">
+                                        <span class="conn-dot"></span>
                                     </div>
                                     <div class="decoder-chip" id="decoderChip" style="display:none;">GPU</div>
                                 </div>
@@ -367,31 +368,20 @@
         .top-bar-left { min-width: 0; }
         .top-bar-right { flex: 0 0 auto; }
 
+        /* Stream state is a bare dot. The stage in the middle of the video
+           area carries the wording, so the accessible name lives on
+           aria-label — see BYD.stream.updateConnectionStatus. */
         .connection-status {
             display: inline-flex;
             align-items: center;
-            padding: 8px 14px;
-            background: var(--lv-pill-bg);
-            border: 1px solid var(--lv-pill-border-soft);
-            border-radius: var(--radius-md);
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--lv-overlay-text);
-            white-space: nowrap;
         }
 
         .conn-dot {
-            width: 8px; height: 8px;
-            flex: 0 0 8px;
+            width: 10px; height: 10px;
+            flex: 0 0 10px;
             border-radius: 50%;
             background: var(--text-muted);
             transition: all 0.3s;
-        }
-        .connection-status .status-text {
-            min-width: 0;
-            overflow: hidden;
-            line-height: 1;
-            text-overflow: ellipsis;
         }
         
         .connection-status.live .conn-dot {
@@ -1214,11 +1204,6 @@
             [dir="rtl"] .top-bar-left > * + *,
             [dir="rtl"] .top-bar-right > * + * { margin-right: 6px; }
             .top-bar-left { flex: 1 1 auto; }
-            .connection-status {
-                max-width: 92px;
-                padding: 6px 10px;
-                font-size: 11px;
-            }
             .decoder-chip { padding: 4px 8px; font-size: 9px; }
             .quality-menu__trigger {
                 width: 108px;
@@ -2044,22 +2029,24 @@
 
         BYD.stream.updateConnectionStatus = function(status) {
             const el = document.getElementById('connectionStatus');
-            if (!el) return;
-            el.classList.remove('live', 'connecting', 'disconnected');
-            const textEl = el.querySelector('.status-text');
-            if (status === 'live') {
-                el.classList.add('live');
-                if (textEl) textEl.textContent = BYD.i18n.t('liveview.live');
-                this.setStagePhase('live');
-            } else if (status === 'connecting') {
-                el.classList.add('connecting');
-                if (textEl) textEl.textContent = BYD.i18n.t('pip.connecting');
-            } else if (status === 'disconnected') {
-                el.classList.add('disconnected');
-                if (textEl) textEl.textContent = BYD.i18n.t('stream.disconnected');
-            } else {
-                if (textEl) textEl.textContent = BYD.i18n.t('pip.select_camera');
+            if (el) {
+                el.classList.remove('live', 'connecting', 'disconnected');
+                let labelKey = 'pip.select_camera';
+                if (status === 'live') {
+                    el.classList.add('live');
+                    labelKey = 'liveview.live';
+                } else if (status === 'connecting') {
+                    el.classList.add('connecting');
+                    labelKey = 'pip.connecting';
+                } else if (status === 'disconnected') {
+                    el.classList.add('disconnected');
+                    labelKey = 'stream.disconnected';
+                }
+                el.setAttribute('aria-label', BYD.i18n.t(labelKey));
             }
+            // Clearing the stage is not the dot's business: it has to happen
+            // whether or not the indicator is in the DOM.
+            if (status === 'live') this.setStagePhase('live');
         };
         
         const originalUpdateStatus = BYD.stream.updateStreamStatus;
