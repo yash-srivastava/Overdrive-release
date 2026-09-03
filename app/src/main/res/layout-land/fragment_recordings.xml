@@ -94,10 +94,11 @@
                 android:layout_width="220dp"
                 android:layout_height="48dp"
                 android:layout_marginStart="12dp"
-                app:cardBackgroundColor="?attr/colorSurfaceVariant"
+                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                 app:cardCornerRadius="@dimen/card_radius_standard"
                 app:cardElevation="0dp"
-                app:strokeWidth="0dp">
+                app:strokeColor="?attr/colorOutlineVariant"
+                app:strokeWidth="1dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -197,7 +198,7 @@
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/segmentAll"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    style="@style/Widget.Overdrive.M3.Button.Outlined"
                     android:layout_width="wrap_content"
                     android:layout_height="48dp"
                     android:text="@string/recordings_segment_all"
@@ -205,7 +206,7 @@
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/segmentDashcam"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    style="@style/Widget.Overdrive.M3.Button.Outlined"
                     android:layout_width="wrap_content"
                     android:layout_height="48dp"
                     android:text="@string/recordings_segment_dashcam"
@@ -217,7 +218,7 @@
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/segmentReplays"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    style="@style/Widget.Overdrive.M3.Button.Outlined"
                     android:layout_width="wrap_content"
                     android:layout_height="48dp"
                     android:text="@string/recordings_segment_replays"
@@ -231,7 +232,7 @@
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/segmentSurveillance"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    style="@style/Widget.Overdrive.M3.Button.Outlined"
                     android:layout_width="wrap_content"
                     android:layout_height="48dp"
                     android:text="@string/recordings_segment_surveillance"
@@ -263,11 +264,12 @@
                 android:layout_marginHorizontal="6dp"
                 android:clickable="true"
                 android:focusable="true"
-                app:cardBackgroundColor="?attr/colorSurfaceVariant"
+                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
                 app:cardElevation="0dp"
                 app:cardCornerRadius="@dimen/card_radius_accent"
                 app:rippleColor="?attr/colorPrimary"
-                app:strokeWidth="0dp">
+                app:strokeColor="?attr/colorOutlineVariant"
+                app:strokeWidth="1dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -402,13 +404,13 @@
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipTypeNormal"
-                                style="@style/Widget.Material3.Chip.Filter"
+                                style="@style/Widget.Overdrive.M3.Chip.Filter"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="@string/recording_lib_chip_type_normal" />
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipTypeProximity"
-                                style="@style/Widget.Material3.Chip.Filter"
+                                style="@style/Widget.Overdrive.M3.Chip.Filter"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="@string/recording_lib_chip_type_proximity" />
@@ -433,14 +435,14 @@
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipActorAny"
-                                style="@style/Widget.Material3.Chip.Filter"
+                                style="@style/Widget.Overdrive.M3.Chip.Filter"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="@string/recording_lib_chip_any"
                                 android:checked="true" />
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipActorPerson"
-                                style="@style/Widget.Material3.Chip.Filter"
+                                style="@style/Widget.Overdrive.M3.Chip.Filter"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="@string/recording_lib_chip_person"
@@ -450,7 +452,7 @@
                                 app:chipIconVisible="true" />
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipActorVehicle"
-                                style="@style/Widget.Material3.Chip.Filter"
+                                style="@style/Widget.Overdrive.M3.Chip.Filter"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="@string/recording_lib_chip_vehicle"
@@ -460,7 +462,7 @@
                                 app:chipIconVisible="true" />
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipActorBike"
-                                style="@style/Widget.Material3.Chip.Filter"
+                                style="@style/Widget.Overdrive.M3.Chip.Filter"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="@string/recording_lib_chip_bike"
@@ -470,7 +472,7 @@
                                 app:chipIconVisible="true" />
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipActorAnimal"
-                                style="@style/Widget.Material3.Chip.Filter"
+                                style="@style/Widget.Overdrive.M3.Chip.Filter"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="@string/recording_lib_chip_animal"
@@ -500,14 +502,14 @@
 
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSevAny"
-                                style="@style/Widget.Material3.Chip.Filter"
+                                style="@style/Widget.Overdrive.M3.Chip.Filter"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="@string/recording_lib_chip_any"
                                 android:checked="true" />
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSevAlert"
-                                style="@style/Widget.Material3.Chip.Filter"
+                                style="@style/Widget.Overdrive.M3.Chip.Filter"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="@string/recording_lib_chip_alert"
@@ -517,7 +519,7 @@
                                 app:chipIconVisible="true" />
                             <com.google.android.material.chip.Chip
                                 android:id="@+id/chipSevCritical"
-                                style="@style/Widget.Material3.Chip.Filter"
+                                style="@style/Widget.Overdrive.M3.Chip.Filter"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="@string/recording_lib_chip_critical"
@@ -552,7 +554,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFilterReset"
-                style="@style/Widget.Material3.Button.TextButton"
+                style="@style/Widget.Overdrive.M3.Button.Outlined"
                 android:layout_width="wrap_content"
                 android:layout_height="48dp"
                 android:layout_marginStart="6dp"
@@ -605,26 +607,26 @@
 
                     <com.google.android.material.chip.Chip
                         android:id="@+id/chipStorageAny"
-                        style="@style/Widget.Material3.Chip.Filter"
+                        style="@style/Widget.Overdrive.M3.Chip.Filter"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/recording_lib_chip_any"
                         android:checked="true" />
                     <com.google.android.material.chip.Chip
                         android:id="@+id/chipStorageInternal"
-                        style="@style/Widget.Material3.Chip.Filter"
+                        style="@style/Widget.Overdrive.M3.Chip.Filter"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/recording_lib_storage_filter_internal" />
                     <com.google.android.material.chip.Chip
                         android:id="@+id/chipStorageSd"
-                        style="@style/Widget.Material3.Chip.Filter"
+                        style="@style/Widget.Overdrive.M3.Chip.Filter"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/recording_lib_storage_filter_sd" />
                     <com.google.android.material.chip.Chip
                         android:id="@+id/chipStorageUsb"
-                        style="@style/Widget.Material3.Chip.Filter"
+                        style="@style/Widget.Overdrive.M3.Chip.Filter"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/recording_lib_storage_filter_usb" />
@@ -721,11 +723,11 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginStart="8dp"
-                            android:background="#CCEF4444"
+                            android:background="?attr/colorSurfaceContainerHighest"
                             android:fontFamily="sans-serif-medium"
                             android:paddingHorizontal="8dp"
                             android:paddingVertical="4dp"
-                            android:textColor="@android:color/white"
+                            android:textColor="?attr/colorOnSurfaceVariant"
                             android:textSize="10sp"
                             android:visibility="gone"
                             tools:text="CRITICAL"
@@ -736,11 +738,11 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginStart="6dp"
-                            android:background="#66384449"
+                            android:background="?attr/colorSurfaceContainerHighest"
                             android:fontFamily="sans-serif-medium"
                             android:paddingHorizontal="8dp"
                             android:paddingVertical="4dp"
-                            android:textColor="@android:color/white"
+                            android:textColor="?attr/colorOnSurfaceVariant"
                             android:textSize="10sp"
                             tools:text="EVENT" />
 
@@ -773,7 +775,7 @@
                         android:clickable="true"
                         android:focusable="true"
                         app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                        app:cardCornerRadius="14dp"
+                        app:cardCornerRadius="@dimen/card_radius_standard"
                         app:cardElevation="0dp"
                         app:rippleColor="?attr/colorPrimary"
                         app:strokeColor="?attr/colorOutlineVariant"
@@ -823,13 +825,19 @@
                     android:gravity="center"
                     android:padding="32dp">
 
-                    <ImageView
-                        android:layout_width="@dimen/card_icon_hero"
-                        android:layout_height="@dimen/card_icon_hero"
-                        android:contentDescription="@null"
-                        android:src="@drawable/ic_play_circle"
-                        app:tint="?attr/colorOnSurfaceVariant"
-                        android:alpha="0.6" />
+                    <FrameLayout
+                        android:layout_width="80dp"
+                        android:layout_height="80dp"
+                        android:background="@drawable/recording_lib_empty_tile">
+
+                        <ImageView
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:layout_gravity="center"
+                            android:contentDescription="@null"
+                            android:src="@drawable/ic_play_circle"
+                            app:tint="?attr/colorOnSurfaceVariant" />
+                    </FrameLayout>
 
                     <TextView
                         android:layout_width="wrap_content"

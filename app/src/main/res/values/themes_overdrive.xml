@@ -219,6 +219,16 @@
         <item name="shapeAppearance">@style/ShapeAppearance.Overdrive.SmallComponent</item>
     </style>
 
+    <!-- Filter chips. M3 ships these fully rounded; the app's 8dp shape
+         keeps a chip row from reading as a different design to the cards
+         and buttons it sits between. Applied per-chip rather than through
+         the chipStyle attr, which would also make assist chips checkable.
+         Chips built in code carry the same corner size on their
+         shapeAppearanceModel. -->
+    <style name="Widget.Overdrive.M3.Chip.Filter" parent="Widget.Material3.Chip.Filter">
+        <item name="shapeAppearance">@style/ShapeAppearance.Overdrive.SmallComponent</item>
+    </style>
+
     <!-- Segmented buttons (Dashcam / Surveillance) -->
     <style name="Widget.Overdrive.M3.SegmentedButton" parent="Widget.Material3.MaterialButtonGroup">
         <item name="singleSelection">true</item>

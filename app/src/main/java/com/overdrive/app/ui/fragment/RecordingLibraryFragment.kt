@@ -685,6 +685,15 @@ class RecordingLibraryFragment : Fragment() {
     }
 
     /**
+     * Chips created in code can't take a style attribute, so they pick up the
+     * app's component corner size here instead of Material's rounded default.
+     */
+    private fun Chip.applyAppCornerShape() {
+        shapeAppearanceModel = shapeAppearanceModel
+            .withCornerSize(resources.getDimension(R.dimen.card_radius_accent))
+    }
+
+    /**
      * Rebuild the inline active-filter chips and update the trailing pill's
      * label/badge to reflect the current filter state.
      */
@@ -722,6 +731,7 @@ class RecordingLibraryFragment : Fragment() {
 
         for ((label, removeAction) in active) {
             val chip = Chip(ctx).apply {
+                applyAppCornerShape()
                 setEnsureMinTouchTargetSize(false)
                 text = label
                 isCloseIconVisible = true

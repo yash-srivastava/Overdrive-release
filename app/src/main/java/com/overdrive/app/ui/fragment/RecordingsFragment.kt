@@ -1810,6 +1810,15 @@ class RecordingsFragment : Fragment() {
     }
 
     /**
+     * Chips created in code can't take a style attribute, so they pick up the
+     * app's component corner size here instead of Material's rounded default.
+     */
+    private fun Chip.applyAppCornerShape() {
+        shapeAppearanceModel = shapeAppearanceModel
+            .withCornerSize(resources.getDimension(R.dimen.card_radius_accent))
+    }
+
+    /**
      * (Re)build the Place chip row from [availablePlaces]. Hidden when no
      * geocoded clips exist — legacy users never see the row appear unless
      * they enable the feature and capture at least one tagged clip.
@@ -1842,6 +1851,7 @@ class RecordingsFragment : Fragment() {
 
         // "Any" — clears row.
         val anyChip = Chip(ctx)
+        anyChip.applyAppCornerShape()
         anyChip.text = ctx.getString(R.string.recording_lib_chip_any)
         anyChip.isCheckable = true
         anyChip.isChecked = placeFilter.isEmpty()
@@ -1865,6 +1875,7 @@ class RecordingsFragment : Fragment() {
         for (label in availablePlaces) {
             val key = label.lowercase()
             val chip = Chip(ctx)
+            chip.applyAppCornerShape()
             chip.text = label
             chip.isCheckable = true
             chip.isChecked = key in placeFilter
