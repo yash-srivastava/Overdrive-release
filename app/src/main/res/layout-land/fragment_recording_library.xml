@@ -259,7 +259,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnEmptyClearFilters"
-                style="@style/Widget.Material3.Button.TonalButton"
+                style="@style/Widget.Overdrive.M3.Button.Tonal"
                 android:layout_width="wrap_content"
                 android:layout_height="48dp"
                 android:layout_marginTop="14dp"
@@ -272,7 +272,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnEmptyRetry"
-                style="@style/Widget.Material3.Button.TonalButton"
+                style="@style/Widget.Overdrive.M3.Button.Tonal"
                 android:layout_width="wrap_content"
                 android:layout_height="48dp"
                 android:layout_marginTop="12dp"
@@ -321,7 +321,7 @@
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnLoadRetry"
-                    style="@style/Widget.Material3.Button.TextButton"
+                    style="@style/Widget.Overdrive.M3.Button.Text"
                     android:layout_width="wrap_content"
                     android:layout_height="48dp"
                     android:text="@string/action_retry"
@@ -368,7 +368,7 @@
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnSelectAll"
-                    style="@style/Widget.Material3.Button.TextButton"
+                    style="@style/Widget.Overdrive.M3.Button.Text"
                     android:layout_width="wrap_content"
                     android:layout_height="48dp"
                     android:text="@string/action_select_all_short"
@@ -377,7 +377,7 @@
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnShareSelected"
-                    style="@style/Widget.Material3.Button.TextButton"
+                    style="@style/Widget.Overdrive.M3.Button.Text"
                     android:layout_width="wrap_content"
                     android:layout_height="48dp"
                     android:contentDescription="@string/cd_share"
@@ -389,7 +389,7 @@
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnDeleteSelected"
-                    style="@style/Widget.Material3.Button.TextButton"
+                    style="@style/Widget.Overdrive.M3.Button.Text"
                     android:layout_width="wrap_content"
                     android:layout_height="48dp"
                     android:text="@string/action_delete"

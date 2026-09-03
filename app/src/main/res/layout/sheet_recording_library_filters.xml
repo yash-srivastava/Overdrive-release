@@ -284,7 +284,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnFilterApply"
-            style="@style/Widget.Material3.Button"
+            style="@style/Widget.Overdrive.M3.Button"
             android:layout_width="match_parent"
             android:layout_height="56dp"
             android:layout_marginTop="20dp"
