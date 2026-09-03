@@ -336,11 +336,11 @@
                     </LinearLayout>
                 </com.google.android.material.appbar.MaterialToolbar>
 
-                <!-- Overdrive accent stripe (mirrors portrait + web app bar). -->
+                <!-- App bar divider (mirrors portrait). -->
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="3dp"
-                    android:background="@drawable/toolbar_accent_stripe" />
+                    android:layout_height="1dp"
+                    android:background="?attr/colorOutlineVariant" />
             </com.google.android.material.appbar.AppBarLayout>
 
             <androidx.fragment.app.FragmentContainerView

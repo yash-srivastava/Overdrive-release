@@ -343,14 +343,14 @@
                 </com.google.android.material.appbar.MaterialToolbar>
 
                 <!--
-                  Overdrive accent stripe. 3dp gradient under the toolbar
-                  (primary → tertiary), mirroring the same stripe on the
-                  WebView side. Same identity, different content area.
+                  Separates the app bar from content that carries its own
+                  surfaces — the Live WebView renders a header of a similar
+                  tone directly beneath it.
                 -->
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="3dp"
-                    android:background="@drawable/toolbar_accent_stripe" />
+                    android:layout_height="1dp"
+                    android:background="?attr/colorOutlineVariant" />
             </com.google.android.material.appbar.AppBarLayout>
 
             <androidx.fragment.app.FragmentContainerView
