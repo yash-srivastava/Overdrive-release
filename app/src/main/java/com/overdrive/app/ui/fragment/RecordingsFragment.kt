@@ -17,6 +17,8 @@ import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
+import androidx.annotation.AttrRes
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.commit
 import androidx.navigation.fragment.findNavController
@@ -25,6 +27,7 @@ import com.google.android.material.button.MaterialButtonToggleGroup
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
+import com.google.android.material.color.MaterialColors
 import com.google.android.material.datepicker.CalendarConstraints
 import com.google.android.material.datepicker.DateValidatorPointBackward
 import com.google.android.material.datepicker.MaterialDatePicker
@@ -654,13 +657,23 @@ class RecordingsFragment : Fragment() {
         root.findViewById<TextView>(R.id.tvPreviewSeverityBadge)?.apply {
             visibility = if (severity == null) View.GONE else View.VISIBLE
             text = severity.orEmpty()
-            setBackgroundColor(
-                when (severity) {
-                    "CRITICAL" -> 0xCCEF4444.toInt()
-                    "ALERT" -> 0xCCF59E0B.toInt()
-                    else -> 0xCC475569.toInt()
-                }
-            )
+            // Tonal fill plus the matching status colour for the label, the
+            // same pairing the dashboard status chips use. Unknown severities
+            // fall back to a neutral surface tone.
+            val tone = when (severity) {
+                "CRITICAL" -> R.color.overdrive_status_danger_container to
+                    R.color.overdrive_status_danger
+                "ALERT" -> R.color.overdrive_status_warning_container to
+                    R.color.overdrive_status_warning
+                else -> null
+            }
+            if (tone == null) {
+                setBackgroundColor(themeColor(SURFACE_HIGHEST_ATTR))
+                setTextColor(themeColor(ON_SURFACE_VARIANT_ATTR))
+            } else {
+                setBackgroundColor(ContextCompat.getColor(hostContext, tone.first))
+                setTextColor(ContextCompat.getColor(hostContext, tone.second))
+            }
         }
         root.findViewById<TextView>(R.id.tvPreviewDetectedValue)?.text =
             RecordingUiText.actorSummary(hostContext, recording)
@@ -1965,5 +1978,14 @@ class RecordingsFragment : Fragment() {
         private const val WARMING_POLL_CAP_MS: Long = 10_000L
         /** Max shift exponent for backoff doubling — saturates the cap. */
         private const val WARMING_POLL_MAX_ATTEMPTS_FOR_BACKOFF = 8
+
+        // Surface roles resolve against material's attr namespace here, not the
+        // app's (nonTransitiveRClass).
+        private val SURFACE_HIGHEST_ATTR =
+            com.google.android.material.R.attr.colorSurfaceContainerHighest
+        private val ON_SURFACE_VARIANT_ATTR =
+            com.google.android.material.R.attr.colorOnSurfaceVariant
     }
 }
+
+private fun View.themeColor(@AttrRes attr: Int): Int = MaterialColors.getColor(this, attr)

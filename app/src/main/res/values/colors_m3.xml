@@ -68,6 +68,7 @@
     <color name="overdrive_status_success_container_light">#CCB5EFCB</color>
     <color name="overdrive_status_warning_container_light">#CCFFDDB8</color>
     <color name="overdrive_status_danger_container_light">#CCFFDAD6</color>
+    <color name="overdrive_status_info_container_light">#CCCBE6FF</color>
 
     <!--
       Theme-neutral semantic aliases. These are the public color contract for
@@ -116,5 +117,6 @@
     <color name="overdrive_status_success_container">@color/overdrive_status_success_container_light</color>
     <color name="overdrive_status_warning_container">@color/overdrive_status_warning_container_light</color>
     <color name="overdrive_status_danger_container">@color/overdrive_status_danger_container_light</color>
+    <color name="overdrive_status_info_container">@color/overdrive_status_info_container_light</color>
 
 </resources>

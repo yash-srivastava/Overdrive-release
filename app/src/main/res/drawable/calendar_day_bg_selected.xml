@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Selected-state fill for compact day and camera labels. Tonal rather
+     than full primary so the label stays readable over a thumbnail.
+     Content on top must use colorOnPrimaryContainer. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <solid android:color="@color/brand_primary" />
-    <corners android:radius="10dp" />
+    <solid android:color="?attr/colorPrimaryContainer" />
+    <corners android:radius="@dimen/card_radius_standard" />
 </shape>

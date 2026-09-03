@@ -72,6 +72,7 @@
     <color name="overdrive_status_success_container_dark">#CC06331F</color>
     <color name="overdrive_status_warning_container_dark">#CC33240C</color>
     <color name="overdrive_status_danger_container_dark">#CC3A1512</color>
+    <color name="overdrive_status_info_container_dark">#CC062F42</color>
 
     <!-- Dark overrides for the public semantic color contract. -->
     <color name="md_sys_color_primary">@color/md_sys_color_primary_dark</color>
@@ -116,5 +117,6 @@
     <color name="overdrive_status_success_container">@color/overdrive_status_success_container_dark</color>
     <color name="overdrive_status_warning_container">@color/overdrive_status_warning_container_dark</color>
     <color name="overdrive_status_danger_container">@color/overdrive_status_danger_container_dark</color>
+    <color name="overdrive_status_info_container">@color/overdrive_status_info_container_dark</color>
 
 </resources>
