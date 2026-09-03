@@ -258,7 +258,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_gravity="end"
-                        android:layout_marginEnd="12dp"
+                        android:layout_marginEnd="4dp"
                         android:gravity="center_vertical"
                         android:orientation="horizontal">
 
@@ -318,31 +318,27 @@
                             android:id="@+id/toolbarLanguageButton"
                             android:layout_width="48dp"
                             android:layout_height="48dp"
-                            android:layout_marginStart="8dp"
+                            android:layout_marginStart="4dp"
                             android:background="?attr/selectableItemBackgroundBorderless"
                             android:contentDescription="@string/settings_language_label"
                             android:padding="12dp"
                             android:src="@drawable/ic_language"
                             app:tint="?attr/colorOnSurfaceVariant" />
 
-                    </LinearLayout>
+                        <!-- Help stays inside urlBar so it packs next to language;
+                             urlBar itself stays visible even when the tunnel pill
+                             is gone. -->
+                        <ImageButton
+                            android:id="@+id/toolbarHelpButton"
+                            android:layout_width="48dp"
+                            android:layout_height="48dp"
+                            android:background="?attr/selectableItemBackgroundBorderless"
+                            android:contentDescription="@string/onboarding_help_cd"
+                            android:padding="12dp"
+                            android:src="@drawable/ic_help"
+                            app:tint="?attr/colorOnSurfaceVariant" />
 
-                    <!--
-                      Help "?" — direct child of the toolbar, OUTSIDE urlBar, because
-                      urlBar defaults to visibility=gone (only shown once a tunnel URL
-                      exists) and the help affordance must ALWAYS be reachable.
-                    -->
-                    <ImageButton
-                        android:id="@+id/toolbarHelpButton"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:layout_gravity="end|center_vertical"
-                        android:layout_marginEnd="12dp"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="@string/onboarding_help_cd"
-                        android:padding="12dp"
-                        android:src="@drawable/ic_help"
-                        app:tint="?attr/colorOnSurfaceVariant" />
+                    </LinearLayout>
                 </com.google.android.material.appbar.MaterialToolbar>
 
                 <!--
