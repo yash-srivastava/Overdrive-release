@@ -21,19 +21,10 @@
     android:paddingBottom="@dimen/page_padding_bottom">
 
     <!-- ================== HERO HEADER ================== -->
+    <!-- The app bar already names this screen. -->
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:accessibilityHeading="true"
-        android:text="@string/adb_console_hero_title"
-        android:textAppearance="@style/TextAppearance.Overdrive.HeadlineSmall"
-        android:textColor="?attr/colorOnSurface"
-        android:textStyle="bold" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
         android:text="@string/adb_console_hero_subtitle"
         android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
         android:textColor="?attr/colorOnSurfaceVariant" />

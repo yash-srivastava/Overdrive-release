@@ -29,19 +29,10 @@
         android:clipToPadding="false">
 
         <!-- ================== HERO ================== -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:accessibilityHeading="true"
-            android:text="@string/projection_hero_title"
-            android:textAppearance="@style/TextAppearance.Overdrive.HeadlineSmall"
-            android:textColor="?attr/colorOnSurface"
-            android:textStyle="bold" />
-
+        <!-- The app bar already names this screen. -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
             android:text="@string/projection_hero_subtitle"
             android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
             android:textColor="?attr/colorOnSurfaceVariant" />
