@@ -31,6 +31,11 @@
     <dimen name="card_radius_dialog">8dp</dimen>        <!-- Squared off to match the cards and the rail pill -->
     <dimen name="card_radius_accent">8dp</dimen>        <!-- buttons and segmented controls -->
 
+    <!-- Horizontal inset on each dialog action button. The alert dialog's
+         button bar spacing is fixed, so the gap between filled actions comes
+         from insetting their backgrounds. -->
+    <dimen name="dialog_button_gap_inset">4dp</dimen>
+
     <!-- Card padding -->
     <dimen name="card_padding_standard">20dp</dimen>
     <dimen name="card_padding_hero">24dp</dimen>

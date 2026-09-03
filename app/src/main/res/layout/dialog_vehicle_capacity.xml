@@ -197,8 +197,11 @@
                 android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
         </com.google.android.material.textfield.TextInputLayout>
 
-        <!-- Capacity input — M3 outlined text field with kWh suffix. -->
+        <!-- Capacity input — M3 outlined text field with kWh suffix. An
+             out-of-range value is reported on the field itself, which is why the
+             helper text carries the accepted range. -->
         <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/vehicleCapacityLayout"
             style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

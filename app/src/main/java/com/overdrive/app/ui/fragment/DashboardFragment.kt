@@ -18,6 +18,7 @@ import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
+import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.Observer
@@ -795,16 +796,20 @@ class DashboardFragment : Fragment() {
     }
 
     /**
-     * Visual battery gauge under the numeric SOC. INVISIBLE (not GONE) when
-     * SOC is unknown so the hero card's height never jumps between the
-     * loading and ready states. Indicator colour flips to the theme's error
-     * colour at ≤20% so a low battery reads at a glance; both attrs resolve
-     * per-theme, so light/dark are handled automatically.
+     * Visual battery gauge under the numeric SOC. An unknown SOC leaves the
+     * empty track on screen rather than hiding the widget, so the gauge is part
+     * of the card's shape whether or not the vehicle is talking. Indicator
+     * colour flips to the theme's error colour at ≤20% so a low battery reads
+     * at a glance; both attrs resolve per-theme, so light/dark are handled
+     * automatically.
      */
     private fun renderSocGauge(socPercent: Double?) {
         val gauge = heroSocProgress ?: return
+        gauge.visibility = View.VISIBLE
         if (socPercent == null) {
-            gauge.visibility = View.INVISIBLE
+            // Zero draws track only, so the bar reads as "no reading" next to
+            // the panel's own em dash instead of as a real empty battery.
+            gauge.setProgressCompat(0, /* animated = */ false)
             return
         }
         val clamped = socPercent.coerceIn(0.0, 100.0).toInt()
@@ -820,7 +825,6 @@ class DashboardFragment : Fragment() {
         gauge.setIndicatorColor(
             com.google.android.material.color.MaterialColors.getColor(gauge, colorAttr)
         )
-        gauge.visibility = View.VISIBLE
     }
 
     private fun renderCharging(charging: com.overdrive.app.ui.dashboard.DashboardChargingSnapshot?) {
@@ -1467,6 +1471,8 @@ class DashboardFragment : Fragment() {
         val summaryCalibration = dialogView.findViewById<TextView>(R.id.vehicleSummaryCalibration)
         val capInput = dialogView.findViewById<
             com.google.android.material.textfield.TextInputEditText>(R.id.vehicleCapacityInput)
+        val capLayout = dialogView.findViewById<
+            com.google.android.material.textfield.TextInputLayout>(R.id.vehicleCapacityLayout)
         val modelDropdown = dialogView.findViewById<
             com.google.android.material.textfield.MaterialAutoCompleteTextView>(
             R.id.vehicleModelDropdown)
@@ -1475,6 +1481,8 @@ class DashboardFragment : Fragment() {
 
         // Nothing is known to reset until the fetch lands.
         resetButton.isEnabled = false
+
+        capInput.doAfterTextChanged { capLayout.error = null }
 
         // These always resolve to a value, so they carry a placeholder from the
         // start: the fetch below runs off the main thread, and filling empty
@@ -1729,7 +1737,7 @@ class DashboardFragment : Fragment() {
                 val raw = capInput.text?.toString()?.trim().orEmpty()
                 val kwh = raw.toDoubleOrNull()
                 if (kwh == null || kwh < 15.0 || kwh > 120.0) {
-                    Toast.makeText(ctx, getString(R.string.vehicle_dialog_invalid_capacity), Toast.LENGTH_SHORT).show()
+                    capLayout.error = getString(R.string.vehicle_dialog_invalid_capacity)
                     return@setOnClickListener
                 }
                 completionDeferred = true
