@@ -701,6 +701,12 @@ public class ChargingApiHandler {
                         rangeKm >= 0 ? rangeKm : JSONObject.NULL);
                 live.put("sohPercent",
                         sohPercent > 0 ? sohPercent : JSONObject.NULL);
+                // car_service (dumpsys) overrides for platforms where the normal
+                // C1-C4 charging power/state cascade above is dead (e.g. DiLink 5 /
+                // Sealion 7). No-op — leaves every field above untouched — unless
+                // that platform check passes AND the live charge-state property was
+                // actually found. See CarSvcTelemetry.applyChargingOverrides.
+                com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.applyChargingOverrides(live);
             } catch (Exception e) {
                 logger.debug("Could not serialize live charging state: "
                         + e.getMessage());
@@ -740,6 +746,9 @@ public class ChargingApiHandler {
                 if (timeToFullMin > 0) {
                     status.put("timeToFullMin", timeToFullMin);
                 }
+                // See toLiveJson() above — same car_service override, same no-op
+                // guarantee off the DiLink5 platform / without a live reading.
+                com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.applyChargingOverrides(status);
             } catch (Exception e) {
                 return buildClearedStatusJson();
             }

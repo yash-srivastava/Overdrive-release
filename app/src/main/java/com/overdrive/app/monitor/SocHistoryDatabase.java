@@ -7014,8 +7014,41 @@ public class SocHistoryDatabase {
      * seconds-long label transient is not a trade worth making.
      */
     static int deriveIsDc(int gunState, double peakKw) {
-        return ChargingTypeClassifier.classify(gunState, peakKw);
+        int verdict = ChargingTypeClassifier.classify(gunState, peakKw);
+        if (verdict != ChargingTypeClassifier.UNKNOWN) return verdict;
+        // The gun-based classifier above has nothing to go on -- most
+        // commonly a car_service-fed session (CarSvcTelemetry never
+        // populates gun_state at all), where it lands on UNKNOWN unless
+        // peak happens to clear the conservative 25kW power-only DC floor.
+        // Without this fallback, a session like that stays classified as
+        // UNKNOWN/null forever once it closes: every one of the close
+        // paths below calls deriveIsDc() fresh and persists whatever it
+        // returns, so a perfectly good peak_power_kw reading (e.g. a
+        // 1.4kW AC session) would otherwise never turn into a real AC/DC
+        // verdict. Reuse the SAME >=11kW peak-only threshold
+        // updateOpenSessionPeakAvgPower() already applies live for this
+        // exact no-gun-state situation, so a session that closes (normal
+        // SESSION END, or the startup sweep for one abandoned mid-charge
+        // by an app restart) before ever revisiting that live update still
+        // ends up classified instead of stuck.
+        if (peakKw > 0) {
+            return peakKw >= LIVE_PEAK_ONLY_DC_THRESHOLD_KW
+                    ? ChargingTypeClassifier.DC : ChargingTypeClassifier.AC;
+        }
+        return ChargingTypeClassifier.UNKNOWN;
     }
+
+    /**
+     * Peak-only AC/DC threshold used when no gun-state evidence exists at
+     * all (see {@link #deriveIsDc} and {@link #updateOpenSessionPeakAvgPower}).
+     * Deliberately far below {@link ChargingTypeClassifier#DC_POWER_ONLY_MIN_PEAK_KW}
+     * -- that 25kW floor exists to avoid misreading a genuine high-power AC
+     * session as DC when SOME gun evidence (even if unreliable) is
+     * available; this threshold instead only ever applies when there is
+     * NO gun evidence whatsoever, where a much lower bar is the best
+     * available signal.
+     */
+    private static final double LIVE_PEAK_ONLY_DC_THRESHOLD_KW = 11.0;
 
     private int currentChargingTypeVerdict() {
         if (chargingTypeVerdict != ChargingTypeClassifier.AC
@@ -8944,6 +8977,151 @@ public class SocHistoryDatabase {
     public synchronized long getOpenChargingSessionStart() {
         if (!reconcilePendingActiveChargingReplacement()) return -1L;
         return wasCharging ? chargingStartTime : -1;
+    }
+
+    /**
+     * Recomputes {@code peak_power_kw}, {@code avg_power_kw}, and a rough
+     * {@code is_dc} heuristic for the CURRENTLY OPEN session from its
+     * recorded {@code charging_power_samples} (the same {@code AVG}/{@code
+     * MAX} queries {@link #resolvePeakKw}/{@link #resolveAveragePowerKw}
+     * already trust), and writes them back. Touches only the open row
+     * ({@code start_time = sessionStartTime AND end_time IS NULL}) — never a
+     * closed/historical session, per CHARGING-POWER-INVARIANTS.md I5 ("cost/
+     * energy rows are immutable snapshots").
+     *
+     * <p>Added for {@link com.overdrive.app.byd.CarSvcTelemetry}'s car_service
+     * (dumpsys) charging-power fallback on platforms (e.g. DiLink 5 /
+     * Sealion 7) where this class's own coarse in-session tick — whose power
+     * evidence comes from the normal C1-C4 HAL cascade — has nothing to
+     * average. {@code is_dc} here is a rough peak-power-only heuristic
+     * (&gt;= 11 kW), NOT the {@code gun_state}-derived verdict the rest of
+     * this class uses elsewhere; property {@code 0x21403c00} may be worth
+     * investigating as a real gun-state signal for car_service in future,
+     * but was not verified this round.
+     */
+    public synchronized boolean updateOpenSessionPeakAvgPower(long sessionStartTime) {
+        if (!isInitialized || connection == null || sessionStartTime <= 0) return false;
+        if (!wasCharging || sessionStartTime != chargingStartTime) return false;
+        double avg = averageSamplePowerKw(sessionStartTime);
+        double peak = peakSampleKw(sessionStartTime);
+        if (avg <= 0 && peak <= 0) return false;
+        double finalAvg = avg;
+        double finalPeak = peak;
+        Integer isDc = peak > 0 ? (peak >= LIVE_PEAK_ONLY_DC_THRESHOLD_KW ? 1 : 0) : null;
+        try {
+            runInTransaction(() -> {
+                try (PreparedStatement pstmt = connection.prepareStatement(
+                        "UPDATE " + TABLE_CHARGING
+                                + " SET peak_power_kw = ?, avg_power_kw = ?"
+                                + (isDc != null ? ", is_dc = ?" : "")
+                                + " WHERE start_time = ? AND end_time IS NULL;")) {
+                    int idx = 1;
+                    pstmt.setDouble(idx++, finalPeak > 0 ? finalPeak : 0);
+                    pstmt.setDouble(idx++, finalAvg > 0 ? finalAvg : -1);
+                    if (isDc != null) pstmt.setInt(idx++, isDc);
+                    pstmt.setLong(idx, sessionStartTime);
+                    if (pstmt.executeUpdate() != 1) {
+                        throw new java.sql.SQLException(
+                                "car_service peak/avg update found no matching open session");
+                    }
+                }
+            });
+            return true;
+        } catch (Exception e) {
+            logger.debug("updateOpenSessionPeakAvgPower failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Corrected session-energy recompute for the CURRENTLY OPEN session:
+     * {@code energyKwh = avgPowerKw * (maxT - minT) / 3_600_000.0} over the
+     * session's recorded positive, plausible ({@code 0 < power_kw <= 500})
+     * samples. Writes directly to {@code energy_added_kwh}, tagging {@code
+     * energy_source = SessionEnergyResolver.SRC_CARSVC} so the provenance is
+     * visible in the row.
+     *
+     * <p>Deliberately bypasses the official {@link SessionEnergyResolver}/
+     * {@code integrateSessionEnergyKwh} ("integrated_rate") pipeline for the
+     * open session — field testing found that pipeline producing energy
+     * figures roughly 8x too small on a car_service-only session (no C1-C4
+     * HAL evidence for its other cross-checks), cross-validated independently
+     * against the session's own observed SOC delta. This bypass only ever
+     * touches the currently-open row; closed/historical sessions, and the
+     * official calculation itself, are untouched — see
+     * CHARGING-POWER-INVARIANTS.md I5.
+     */
+    public synchronized boolean recomputeOpenSessionEnergyKwh(long sessionStartTime) {
+        if (!isInitialized || connection == null || sessionStartTime <= 0) return false;
+        if (!wasCharging || sessionStartTime != chargingStartTime) return false;
+        double avgPowerKw;
+        long minT;
+        long maxT;
+        try (PreparedStatement p = connection.prepareStatement(
+                "SELECT AVG(power_kw), MIN(t), MAX(t) FROM " + TABLE_CPS
+                        + " WHERE session_start_time = ?"
+                        + " AND power_kw > 0 AND power_kw <= 500;")) {
+            p.setLong(1, sessionStartTime);
+            try (ResultSet rs = p.executeQuery()) {
+                if (!rs.next()) return false;
+                avgPowerKw = rs.getDouble(1);
+                if (rs.wasNull() || avgPowerKw <= 0) return false;
+                minT = rs.getLong(2);
+                maxT = rs.getLong(3);
+            }
+        } catch (Exception e) {
+            logger.debug("recomputeOpenSessionEnergyKwh read failed: " + e.getMessage());
+            return false;
+        }
+        if (maxT <= minT) return false;
+        double energyKwh = avgPowerKw * (maxT - minT) / 3_600_000.0;
+        if (!(energyKwh > 0) || energyKwh > 500.0) return false;
+        try {
+            runInTransaction(() -> {
+                try (PreparedStatement pstmt = connection.prepareStatement(
+                        "UPDATE " + TABLE_CHARGING
+                                + " SET energy_added_kwh = ?, energy_source = ?, energy_incomplete = 0"
+                                + " WHERE start_time = ? AND end_time IS NULL;")) {
+                    pstmt.setDouble(1, energyKwh);
+                    pstmt.setString(2, com.overdrive.app.charging.SessionEnergyResolver.SRC_CARSVC);
+                    pstmt.setLong(3, sessionStartTime);
+                    if (pstmt.executeUpdate() != 1) {
+                        throw new java.sql.SQLException(
+                                "car_service energy recompute found no matching open session");
+                    }
+                }
+            });
+            return true;
+        } catch (Exception e) {
+            logger.debug("recomputeOpenSessionEnergyKwh write failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Raw {@code energy_added_kwh} column for the CURRENTLY OPEN session —
+     * bypasses {@link SessionEnergyResolver} arbitration entirely, for
+     * callers (like {@link com.overdrive.app.byd.CarSvcTelemetry}) that
+     * specifically want whatever was last written by
+     * {@link #recomputeOpenSessionEnergyKwh}. Returns -1 if no session is
+     * open, the row has no value yet, or the lookup fails.
+     */
+    public synchronized double getOpenSessionEnergyAddedKwhRaw(long sessionStartTime) {
+        if (!isInitialized || connection == null || sessionStartTime <= 0) return -1;
+        if (!wasCharging || sessionStartTime != chargingStartTime) return -1;
+        try (PreparedStatement p = connection.prepareStatement(
+                "SELECT energy_added_kwh FROM " + TABLE_CHARGING
+                        + " WHERE start_time = ? AND end_time IS NULL;")) {
+            p.setLong(1, sessionStartTime);
+            try (ResultSet rs = p.executeQuery()) {
+                if (!rs.next()) return -1;
+                double value = rs.getDouble(1);
+                return !rs.wasNull() && value > 0 ? value : -1;
+            }
+        } catch (Exception e) {
+            logger.debug("getOpenSessionEnergyAddedKwhRaw failed: " + e.getMessage());
+            return -1;
+        }
     }
 
     /**

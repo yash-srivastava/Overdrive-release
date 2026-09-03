@@ -328,7 +328,7 @@
                         <div class="dash-card-head">
                             <div>
                                 <span class="dash-card-kicker" data-i18n="charge.kicker">Energy</span>
-                                <h2 data-i18n="charge.card_title">Charging</h2>
+                                <h2 id="dashChargeTitle" data-i18n="charge.card_title">Charging</h2>
                             </div>
                             <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>
@@ -1921,27 +1921,42 @@
                         }
                     }
 
-                    // Climate — distinguish a reported OFF from no reading.
+                    // Climate — AC state · fan/temperature, dot-separated.
+                    // Fan speed is the actual signal for whether climate is
+                    // "on" (the AC switch can read on while idle, e.g. an
+                    // auto-mode cycle with no air moving):
+                    //  - fan > 0: "AC on · Fan {n} · {driver set temp}"
+                    //  - fan == 0 (or unknown): "AC off" only — no temp,
+                    //    a setpoint isn't meaningful when nothing's blowing
+                    //    and cabin ambient temp isn't reliably available.
                     if (data.climate) {
                         var remoteKnown = typeof data.climate.remoteClimateActive === 'boolean';
                         var localKnown = typeof data.climate.acOn === 'boolean';
                         var climateKnown = remoteKnown || localKnown;
-                        var acOn = data.climate.remoteClimateActive === true
-                            || data.climate.acOn === true;
-                        panel.classList.toggle('ac-on', acOn);
-                        var climText = climateKnown
-                            ? (acOn
+
+                        var fanLevel = data.climate.fanLevel;
+                        var fanKnown = typeof fanLevel === 'number' && fanLevel >= 0;
+                        var fanOn = fanKnown && fanLevel > 0;
+                        panel.classList.toggle('ac-on', fanOn);
+
+                        var climParts = [];
+                        climParts.push(climateKnown
+                            ? (fanOn
                                 ? (BYD.i18n.t('dashboard.glance_ac_on') || 'AC on')
                                 : (BYD.i18n.t('dashboard.glance_ac_off') || 'AC off'))
-                            : '--';
-                        var t = data.climate.insideTempC;
-                        if (typeof t === 'number' && t > 0) {
-                            climText = climateKnown
-                                ? climText + ' · ' + Math.round(t) + '°C'
-                                : Math.round(t) + '°C';
+                            : '--');
+
+                        if (fanOn) {
+                            climParts.push((BYD.i18n.t('dashboard.glance_fan') || 'Fan') + ' ' + fanLevel);
+
+                            var dTemp = data.climate.driverTempSetC;
+                            if (typeof dTemp === 'number' && dTemp > 0) {
+                                climParts.push(Math.round(dTemp) + '°C');
+                            }
                         }
-                        setText('glClimateText', climText);
-                        setRowState('glClimateText', climateKnown && acOn ? 'good' : '');
+
+                        setText('glClimateText', climParts.join(' · '));
+                        setRowState('glClimateText', climateKnown && fanOn ? 'good' : '');
                     }
 
                     // Tyres — colour the wheels, print PSI at each corner,
@@ -2500,6 +2515,29 @@
                 setChip('dashSurvChip', survLabel, status.gpuSurveillance ? 'good' : '');
                 setText('dashAcc', tOnOff(driveState.powerOn));
 
+                // recordingStatus.dilink5 is the same DiLink5Platform.isActive()
+                // gate the backend uses to decide which read path to even
+                // attempt. On a DiLink5 car we go car_service-only for
+                // 12V/SOC (falling back only to cache/estimate during the
+                // rare gap where car_service's lastEvent hasn't fired yet),
+                // and never touch the stock fields -- their vendor data
+                // sources (BatteryMonitor, BatterySocMonitor's
+                // BYDAutoStatisticDevice reflection) are flaky/slow-to-bind
+                // on this vehicle and shouldn't ever be allowed to shadow a
+                // working car_service reading, or worse, blank the tile
+                // while car_service had the answer the whole time. Off
+                // DiLink5 (dumpsysText() always unavailable there), stock is
+                // the only path that ever had data, same as before. This is
+                // the dashboard "Main info" card's own copy of the cascade
+                // core.js already applies to the sidebar's #batteryValue --
+                // they render independently and both need the same fix.
+                var rsDash = status.recordingStatus;
+                var isDiLink5Dash = !!(rsDash && rsDash.dilink5 === true);
+
+                var carSvcVoltageDash = (rsDash && rsDash.voltage12v !== undefined)
+                    ? Number(rsDash.voltage12v) : NaN;
+                var carSvcValidDash = isFinite(carSvcVoltageDash) && carSvcVoltageDash > 0;
+
                 var batteryVoltage = status.battery
                     ? Number(status.battery.voltage) : NaN;
                 var batteryFresh = status.battery
@@ -2507,8 +2545,61 @@
                     && status.battery.isStale !== true
                     && isFinite(batteryVoltage)
                     && batteryVoltage > 0;
-                setText('dash12v', batteryFresh
-                    ? batteryVoltage.toFixed(1) + 'V' : '--');
+
+                if (isDiLink5Dash) {
+                    if (carSvcValidDash) {
+                        setText('dash12v', carSvcVoltageDash.toFixed(1) + 'V');
+                        try { localStorage.setItem('cachedVoltage12v', String(carSvcVoltageDash)); } catch (e) {}
+                    } else {
+                        var dash12vEl = document.getElementById('dash12v');
+                        if (dash12vEl && !dash12vEl.textContent) {
+                            var cachedDash12v = null;
+                            try { cachedDash12v = localStorage.getItem('cachedVoltage12v'); } catch (e) {}
+                            setText('dash12v', cachedDash12v ? Number(cachedDash12v).toFixed(1) + 'V' : '--');
+                        }
+                    }
+                } else if (batteryFresh) {
+                    setText('dash12v', batteryVoltage.toFixed(1) + 'V');
+                    try { localStorage.setItem('cachedVoltage12v', String(batteryVoltage)); } catch (e) {}
+                } else {
+                    var dash12vEl2 = document.getElementById('dash12v');
+                    if (dash12vEl2 && !dash12vEl2.textContent) {
+                        var cachedDash12v2 = null;
+                        try { cachedDash12v2 = localStorage.getItem('cachedVoltage12v'); } catch (e) {}
+                        setText('dash12v', cachedDash12v2 ? Number(cachedDash12v2).toFixed(1) + 'V' : '--');
+                    } else if (!dash12vEl2) {
+                        setText('dash12v', '--');
+                    }
+                }
+
+                // Same DiLink5-exclusive treatment for main-battery SOC: if
+                // the stock BatterySocMonitor path (VehicleDataMonitor,
+                // reflection into vendor BYDAutoStatisticDevice) hasn't come
+                // up yet, synthesize status.soc from the live car_service
+                // SOC_VALUER reading (recordingStatus.carSvcSoc) instead of
+                // leaving it blank -- this feeds dashSoc/dashHeroSoc below
+                // AND renderHalRange()'s glance ring transparently. Also
+                // synthesize a rough range estimate (soc * 4 km, same
+                // approximation core.js already uses for the sidebar) when
+                // stock range is absent too, so Range doesn't blank in
+                // lockstep with a flaky stock SOC monitor.
+                if (isDiLink5Dash && (!status.soc || status.soc.percent === undefined)
+                        && typeof rsDash.carSvcSoc === 'number' && rsDash.carSvcSoc >= 0) {
+                    var carSvcSocPct = rsDash.carSvcSoc;
+                    status.soc = {
+                        percent: carSvcSocPct,
+                        isLow: carSvcSocPct <= 20,
+                        isCritical: carSvcSocPct <= 10,
+                        status: carSvcSocPct <= 10 ? 'CRITICAL' : (carSvcSocPct <= 20 ? 'LOW' : 'NORMAL')
+                    };
+                    if (!status.range || !(status.range.elecRangeKm > 0)) {
+                        var estRangeKm = Math.round(carSvcSocPct * 4);
+                        status.range = status.range || {};
+                        status.range.elecRangeKm = status.range.elecRangeKm || estRangeKm;
+                        status.range.totalRangeKm = status.range.totalRangeKm || estRangeKm;
+                    }
+                }
+
                 var socPercent = (status.soc && status.soc.percent !== undefined) ? status.soc.percent : null;
                 if (socPercent !== null) {
                     var socText = socPercent.toFixed(1) + '%';
@@ -2582,21 +2673,32 @@
                 // powerKw/socPercent/timeToFullMin). Absent on non-EV reads.
                 var c = status.charging;
                 this.glance.setCharging(c || null);
+
+                // Title: independent Unplugged/Plugged in state (previously folded
+                // into the single 5-way badge below). Set whether or not `c` is
+                // present so a non-EV read still shows a coherent "Unplugged".
+                var plugged = !!(c && c.plugged);
+                setText('dashChargeTitle',
+                    BYD.i18n.t(plugged ? 'charge.title_plugged' : 'charge.title_unplugged')
+                        || (plugged ? 'Plugged in' : 'Unplugged'));
+
                 if (c) {
+                    // Badge now independently reflects charging/full/fault only —
+                    // `plugged` moved to the title above, so this is a binary
+                    // Charging/Not charging (plus the Full/Charge fault specials),
+                    // not the old 5-way fault/charging/full/plugged/idle state.
                     var stateKey = c.fault ? 'charge.state_fault'
-                                 : c.charging ? 'charge.state_charging'
                                  : c.full ? 'charge.state_full'
-                                 : c.plugged ? 'charge.state_plugged'
-                                 : 'charge.state_idle';
+                                 : c.charging ? 'charge.state_charging'
+                                 : 'charge.state_not_charging';
                     var dotCls = c.fault ? 'dot-danger'
-                               : c.charging ? 'dot-active'
                                : c.full ? 'dot-good'
-                               : c.plugged ? 'dot-warn'
+                               : c.charging ? 'dot-active'
                                : 'dot-idle';
                     var dot = document.getElementById('dashChargeDot');
                     if (dot) dot.className = 'ic_status_dot ' + dotCls;
-                    var fallbackState = c.fault ? 'Charge fault' : c.charging ? 'Charging'
-                                      : c.full ? 'Full' : c.plugged ? 'Plugged in' : 'Idle';
+                    var fallbackState = c.fault ? 'Charge fault' : c.full ? 'Full'
+                                      : c.charging ? 'Charging' : 'Not charging';
                     setText('dashChargeState', BYD.i18n.t(stateKey) || fallbackState);
 
                     if (c.socPercent !== undefined && c.socPercent !== null) {

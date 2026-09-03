@@ -61,6 +61,7 @@ public class BatteryMonitor {
             if (data != null) {
                 // Get battery power voltage (actual volts)
                 JSONObject batteryPower = data.optJSONObject("batteryPower");
+                boolean primaryVoltageOk = false;
                 if (batteryPower != null) {
                     double voltage = batteryPower.optDouble("voltageVolts", Double.NaN);
                     long observedAtMs = batteryPower.optLong("observedAtMs", 0L);
@@ -68,6 +69,22 @@ public class BatteryMonitor {
                             && observedAtMs > 0L) {
                         lastBatteryVoltage = voltage;
                         lastBatteryUpdate = observedAtMs;
+                        primaryVoltageOk = true;
+                    }
+                }
+                if (!primaryVoltageOk) {
+                    // Vendor-HAL fallback: on platforms where the primary
+                    // batteryPower read above is dead (e.g. DiLink 5 /
+                    // Sealion 7 — every vendor 12V-voltage property throws/
+                    // returns garbage), fall back to car_service's own
+                    // property dump. CarSvcTelemetry gates itself on that
+                    // platform check, so this is an instant no-op everywhere
+                    // else — same as if this block didn't exist.
+                    float carSvcVoltage =
+                            com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.batteryVoltage12v();
+                    if (carSvcVoltage >= 0f) {
+                        lastBatteryVoltage = carSvcVoltage;
+                        lastBatteryUpdate = System.currentTimeMillis();
                     }
                 }
 

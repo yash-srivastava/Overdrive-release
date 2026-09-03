@@ -1378,8 +1378,58 @@ public class HttpServer {
         // Recording mode details (for status overlay)
         try {
             JSONObject recordingStatus = new JSONObject();
+            // Always-live 12V reading, no staleness/caching layer (unlike the
+            // BatteryMonitor-backed "battery" block below, whose 30s update
+            // gate + 60s staleness cutoff cause a fresh/stale flicker on a
+            // platform that only has this car_service source). Unconditional
+            // (not inside the rmm != null branch below) since it doesn't
+            // depend on RecordingModeManager at all. -1 when unavailable
+            // (including simply not being on the DiLink5 platform
+            // CarSvcTelemetry targets) — the web UI falls back to the
+            // "battery" block in that case.
+            recordingStatus.put("voltage12v",
+                    (double) com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.batteryVoltage12v());
+            // Lets the web UI tell "this device is DiLink5" apart from "this
+            // device just happens to have no stock SOC/12V reading right
+            // now" — see BYD.core.isDiLink5()/isDiLink5Dash() in the web
+            // assets, which gate the car_service-exclusive 12V/SOC cascade
+            // on this flag rather than falling back whenever stock is null.
+            recordingStatus.put("dilink5", com.overdrive.app.byd.DiLink5Platform.isActive());
+            // Fallback-only main-battery SOC (see CarSvcTelemetry.socPercent) —
+            // the web UI only synthesizes a status.soc object from this when
+            // the stock BatterySocMonitor reading is missing on a DiLink5
+            // platform. -1 when unavailable.
+            recordingStatus.put("carSvcSoc", com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.socPercent());
             com.overdrive.app.recording.RecordingModeManager rmm = CameraDaemon.getRecordingModeManager();
             if (rmm != null) {
+                // car_service (dumpsys) gear fallback — no-op everywhere except the
+                // DiLink5 platform this was verified on (see CarSvcTelemetry). On
+                // platforms where the vendor gearbox HAL is dead, this corrects the
+                // upstream gear value RecordingModeManager already trusts before we
+                // read it below, so gearToString (and DRIVE_MODE's own gear gate)
+                // pick it up with zero further changes. onGearChanged() is
+                // idempotent — a no-op when the gear hasn't actually changed.
+                int carSvcGear = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.gearValue();
+                if (carSvcGear >= 1) {
+                    rmm.onGearChanged(carSvcGear);
+                    // Also feed the shared gear dispatcher (CameraDaemon.
+                    // onGearChanged), NOT just RecordingModeManager directly
+                    // above. That call only updates the displayed gear —
+                    // trip start/stop is driven independently by
+                    // GearMonitor's own dedicated poll thread (reflection
+                    // into the same vendor gearbox HAL that's dead here),
+                    // which is what actually calls onGearChanged() and was
+                    // never reached by the direct rmm call. Without this,
+                    // the dashboard could show the correct DiLink5 gear
+                    // while trips silently never started or stopped, since
+                    // GearMonitor's own reads never produced anything
+                    // valid (see rmm.getGearMonitorRetryFailures(), often
+                    // nonzero). Purely additive: does not replace or
+                    // disable GearMonitor, and CameraDaemon.onGearChanged
+                    // already dedups a same-value gear internally, so
+                    // whichever path fires first/each time is harmless.
+                    com.overdrive.app.daemon.CameraDaemon.onGearChanged(carSvcGear);
+                }
                 recordingStatus.put("configuredMode", rmm.getCurrentMode().name());
                 recordingStatus.put("isRecording", pipeline != null && pipeline.isRecording());
                 recordingStatus.put("pipelineRunning", pipeline != null && pipeline.isRunning());

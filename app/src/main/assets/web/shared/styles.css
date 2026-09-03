@@ -2554,6 +2554,66 @@ select.md-input ~ .md-label {
     border-bottom: none;
 }
 
+/* Recenter button -- appears (top-right, clear of the bottom-right zoom
+   control) when the user pans/zooms away from the car while auto-follow
+   is running. Same dark-glass brand-teal language as .btn-map-float. */
+.map-recenter-btn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 1000;
+    width: 38px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 25, 25, 0.85);
+    border: 1px solid rgba(0,212,170,0.3);
+    border-radius: 50%;
+    color: var(--primary);
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.45), 0 0 20px rgba(0,212,170,0.12);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    opacity: 0;
+    transform: scale(0.85);
+    pointer-events: none;
+    transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                background 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.map-recenter-btn.visible {
+    opacity: 1;
+    transform: scale(1);
+    pointer-events: auto;
+}
+
+.map-recenter-btn:hover {
+    background: rgba(0, 60, 55, 0.9);
+    border-color: rgba(0,212,170,0.55);
+    color: #00ffcc;
+}
+
+.map-recenter-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+/* The dashboard's minimap card is small (180px tall) -- keep the button
+   proportionally smaller so it doesn't crowd the marker/zoom control. */
+.dash-location-map .map-recenter-btn {
+    width: 32px;
+    height: 32px;
+    top: 8px;
+    right: 8px;
+}
+
+.dash-location-map .map-recenter-btn svg {
+    width: 15px;
+    height: 15px;
+}
+
 /* Car marker on map */
 .car-map-marker {
     background: none;

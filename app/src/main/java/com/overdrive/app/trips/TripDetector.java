@@ -204,6 +204,23 @@ public class TripDetector {
         } catch (Exception e) {
             logger.error("Failed to read start SoC: " + e.getMessage());
         }
+        // DiLink5-exclusive car_service override, unconditional (not just a
+        // fallback for a null/missing stock read) — same "DiLink5 always
+        // wins" rule already applied to 12V/SOC elsewhere in this app
+        // (CarSvcTelemetry.socPercent doc comment). An earlier version of
+        // this fix only overrode when the stock reading was exactly 0.0,
+        // which would silently keep a stale-but-nonzero stock value instead
+        // of the better source; deliberately widened to always-preferred.
+        try {
+            if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+                int carSvcSoc = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.socPercent();
+                if (carSvcSoc >= 0 && carSvcSoc <= 100) {
+                    activeTrip.socStart = carSvcSoc;
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Failed to read car_service start SoC: " + e.getMessage());
+        }
 
         // Read start kWh (remaining energy from BMS)
         try {
@@ -350,6 +367,19 @@ public class TripDetector {
             }
         } catch (Exception e) {
             logger.error("Failed to read end SoC: " + e.getMessage());
+        }
+        // DiLink5-exclusive car_service override — see the matching comment
+        // in startTrip() above; same always-preferred (not fallback-only)
+        // rule applies symmetrically to the end-of-trip reading.
+        try {
+            if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+                int carSvcSoc = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.socPercent();
+                if (carSvcSoc >= 0 && carSvcSoc <= 100) {
+                    activeTrip.socEnd = carSvcSoc;
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Failed to read car_service end SoC: " + e.getMessage());
         }
 
         // Read end kWh (remaining energy from BMS)

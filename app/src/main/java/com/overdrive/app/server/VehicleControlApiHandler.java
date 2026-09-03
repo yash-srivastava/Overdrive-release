@@ -652,6 +652,33 @@ public class VehicleControlApiHandler {
             }
         }
 
+        // car_service (dumpsys) fallback for the base layer above. Only engages when
+        // BOTH: (a) BYD cloud telemetry merge is off (cloudDataMerge — the same
+        // Settings toggle CarSvcTelemetry.isCloudEnabled() reads), so it can never
+        // fight the cloud overlay logic below, and (b) the local SDK array just above
+        // produced nothing usable. CarSvcTelemetry.doorsArray() itself no-ops (all -1)
+        // off the DiLink5/Sealion7 platform this was verified on, so on every other
+        // platform/config this block is a pure no-op — see CarSvcTelemetry's own
+        // platform gate. Raw car_service door-lock encoding (2=locked, 1=unlocked)
+        // matches BYD cloud's per-door semantics exactly, so we translate through the
+        // SAME cloudLockToApi() helper the cloud overlay below already uses, rather
+        // than duplicating that mapping.
+        if (sdkOverall == -1 && !com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.isCloudEnabled()) {
+            int[] carSvcRaw = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.doorsArray();
+            // carSvcRaw = [rf, lf, rr, lr, trunk, hood, overall] (raw car_service encoding)
+            int carSvcOverall = cloudLockToApi(carSvcRaw[6]);
+            if (carSvcOverall == 1 || carSvcOverall == 2) {
+                doors.put("rf", cloudLockToApi(carSvcRaw[0]));
+                doors.put("lf", cloudLockToApi(carSvcRaw[1]));
+                doors.put("rr", cloudLockToApi(carSvcRaw[2]));
+                doors.put("lr", cloudLockToApi(carSvcRaw[3]));
+                doors.put("overall", carSvcOverall);
+                sdkOverall = carSvcOverall;
+                doors.put("source", "carsvc");
+                doors.put("scope", "vehicle");
+            }
+        }
+
         // Track which source authoritatively set LF so we can derive `overall`
         // correctly when cloud is missing. -1 = no authoritative LF yet.
         int otaLf = -1;
@@ -786,8 +813,17 @@ public class VehicleControlApiHandler {
 
         // Window open percent [1-6]: 0=closed, 100=fully open, -1=unknown
         // Index: 0=LF, 1=RF, 2=LR, 3=RR, 4=sunroof, 5=sunshade
-        JSONObject windows = new JSONObject();
-        if (data.windowOpenPercent != null && data.windowOpenPercent.length >= 4) {
+        // DiLink5-first: car_service's WINDOW_OPEN_PERCENT_*_R properties are
+        // tried BEFORE the vendor SDK arrays below (confirmed live, including
+        // a physical window-open test) — sunshade has no confirmed
+        // car_service mapping so it's always sourced from stock/cloud.
+        JSONObject windows = com.overdrive.app.byd.DiLink5Platform.isActive()
+                ? com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.windowsJson()
+                : null;
+        if (windows == null) windows = new JSONObject();
+        if (windows.length() > 0) {
+            // car_service had a reading — skip the stock/cloud paths entirely.
+        } else if (data.windowOpenPercent != null && data.windowOpenPercent.length >= 4) {
             windows.put("lf", data.windowOpenPercent[0]);
             windows.put("rf", data.windowOpenPercent[1]);
             windows.put("lr", data.windowOpenPercent[2]);
@@ -955,6 +991,38 @@ public class VehicleControlApiHandler {
         if (remoteClimateActive != null) {
             climate.put("remoteClimateActive", remoteClimateActive.booleanValue());
         }
+        // DiLink5-first override of just acOn: A_C_WORK_MODE_R can read "on"
+        // while AC_CONTROLLER_WIND_LEVEL (fan speed) is idle — e.g. between
+        // auto-mode cycles — which isn't "climate on" from the user's
+        // perspective. windMode/fanLevel/insideTempC/remoteClimateActive
+        // above stay stock-sourced; only acOn is confirmed live enough to
+        // override. No-op (leaves the stock acOn, if any) when car_service
+        // has no reading.
+        if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+            int carSvcAcOn = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.climateAcOnRaw();
+            if (carSvcAcOn >= 0) {
+                climate.put("acOn", carSvcAcOn == 1);
+            }
+            // Driver/passenger AC temperature setpoints -- never tracked
+            // anywhere in this app before, native or web. See
+            // CarSvcTelemetry.climateTempsRaw()'s doc comment for the
+            // driver-vs-passenger mapping confidence caveat. Added
+            // independently of each other (unlike acOn above, either or
+            // both can be present) so the web UI's glance row can still
+            // show one side even if the other has no reading.
+            int[] carSvcTemps = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.climateTempsRaw();
+            if (carSvcTemps[0] >= 0) climate.put("driverTempSetC", carSvcTemps[0]);
+            if (carSvcTemps[1] >= 0) climate.put("passengerTempSetC", carSvcTemps[1]);
+
+            // Fan level, read directly and unconditionally -- unlike the
+            // stock data.acFanLevel above, which the vendor code only
+            // reports while vehiclePoweredOn/its own AC-power-level gate is
+            // true, so the key goes missing entirely (not 0) whenever AC is
+            // off. Always overwrites the stock value (when present) so "fan
+            // genuinely at 0" and "no reading" stay distinguishable.
+            int carSvcFanLevel = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.climateFanLevelRaw();
+            if (carSvcFanLevel >= 0) climate.put("fanLevel", carSvcFanLevel);
+        }
         response.put("climate", climate);
 
         // Tyres — per-corner pressure (kPa + PSI), temperature, and the three
@@ -962,48 +1030,61 @@ public class VehicleControlApiHandler {
         // lost). Indexed [FL, FR, RL, RR]. The web UI's tyre callouts read this
         // block directly; if any required source is missing the corner falls
         // back to {available:false} so the UI shows a grey "no signal" state.
-        JSONObject tyres = new JSONObject();
-        boolean anyTyreData = data.tyrePressure != null
-                || data.tyrePressureState != null
-                || data.tyreAirLeakState != null
-                || data.tyreSignalState != null
-                || data.tyreTemperature != null;
-        if (anyTyreData) {
-            String[] keys = { "fl", "fr", "rl", "rr" };
-            for (int i = 0; i < keys.length; i++) {
-                JSONObject t = new JSONObject();
-                int kPa = (data.tyrePressure != null && i < data.tyrePressure.length)
-                        ? data.tyrePressure[i] : BydVehicleData.UNAVAILABLE;
-                if (kPa != BydVehicleData.UNAVAILABLE && kPa > 0) {
-                    t.put("kPa", kPa);
-                    // PSI = kPa * 0.1450377 (matches the OEM vehicle-control app
-                    // UnitFormatter conversion). One decimal place is
-                    // enough to distinguish ±3 kPa steps the BYD TPMS
-                    // actually reports — integer rounding collapses
-                    // 247/250/253 kPa all to 36 psi, hiding real change.
-                    double psi = kPa * 0.1450377;
-                    t.put("psi", Math.round(psi * 10.0) / 10.0);
-                }
-                if (data.tyreTemperature != null && i < data.tyreTemperature.length
-                        && data.tyreTemperature[i] != BydVehicleData.UNAVAILABLE) {
-                    t.put("temperatureC", data.tyreTemperature[i]);
-                }
-                if (data.tyrePressureState != null && i < data.tyrePressureState.length) {
-                    t.put("pressureState", data.tyrePressureState[i]);
-                }
-                if (data.tyreAirLeakState != null && i < data.tyreAirLeakState.length) {
-                    t.put("airLeakState", data.tyreAirLeakState[i]);
-                }
-                if (data.tyreSignalState != null && i < data.tyreSignalState.length) {
-                    t.put("signalState", data.tyreSignalState[i]);
-                }
-                // Available = we got at least one valid pressure reading.
-                t.put("available", t.has("kPa"));
-                tyres.put(keys[i], t);
-            }
-            tyres.put("available", true);
+        // DiLink5-first: car_service's TPMS properties are tried BEFORE the
+        // vendor SDK arrays below (raw units confirmed 0.1 psi against the
+        // vendor SDK's own psi reading for the same corner at the same
+        // moment) — this loses temperature/pressureState/airLeakState/
+        // signalState (car_service has no equivalent), which is acceptable
+        // since those corners still show a pressure reading.
+        JSONObject tyres = com.overdrive.app.byd.DiLink5Platform.isActive()
+                ? com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.tyrePressuresJson()
+                : null;
+        if (tyres != null) {
+            // car_service had at least one reading — skip the stock computation.
         } else {
-            tyres.put("available", false);
+            tyres = new JSONObject();
+            boolean anyTyreData = data.tyrePressure != null
+                    || data.tyrePressureState != null
+                    || data.tyreAirLeakState != null
+                    || data.tyreSignalState != null
+                    || data.tyreTemperature != null;
+            if (anyTyreData) {
+                String[] keys = { "fl", "fr", "rl", "rr" };
+                for (int i = 0; i < keys.length; i++) {
+                    JSONObject t = new JSONObject();
+                    int kPa = (data.tyrePressure != null && i < data.tyrePressure.length)
+                            ? data.tyrePressure[i] : BydVehicleData.UNAVAILABLE;
+                    if (kPa != BydVehicleData.UNAVAILABLE && kPa > 0) {
+                        t.put("kPa", kPa);
+                        // PSI = kPa * 0.1450377 (matches the OEM vehicle-control app
+                        // UnitFormatter conversion). One decimal place is
+                        // enough to distinguish ±3 kPa steps the BYD TPMS
+                        // actually reports — integer rounding collapses
+                        // 247/250/253 kPa all to 36 psi, hiding real change.
+                        double psi = kPa * 0.1450377;
+                        t.put("psi", Math.round(psi * 10.0) / 10.0);
+                    }
+                    if (data.tyreTemperature != null && i < data.tyreTemperature.length
+                            && data.tyreTemperature[i] != BydVehicleData.UNAVAILABLE) {
+                        t.put("temperatureC", data.tyreTemperature[i]);
+                    }
+                    if (data.tyrePressureState != null && i < data.tyrePressureState.length) {
+                        t.put("pressureState", data.tyrePressureState[i]);
+                    }
+                    if (data.tyreAirLeakState != null && i < data.tyreAirLeakState.length) {
+                        t.put("airLeakState", data.tyreAirLeakState[i]);
+                    }
+                    if (data.tyreSignalState != null && i < data.tyreSignalState.length) {
+                        t.put("signalState", data.tyreSignalState[i]);
+                    }
+                    // Available = we got at least one valid pressure reading.
+                    t.put("available", t.has("kPa"));
+                    tyres.put(keys[i], t);
+                }
+                tyres.put("available", true);
+            } else {
+                tyres.put("available", false);
+            }
         }
         // The user's configured limits ride along with the readings so the web
         // UI colours corners against the SAME numbers that drive notifications
