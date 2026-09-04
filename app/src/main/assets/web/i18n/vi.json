@@ -1886,7 +1886,9 @@
     "schedule_saved": "Đã lưu lịch sạc",
     "schedule_save_failed": "Không thể lưu lịch sạc",
     "section_schedule": "Lịch",
-    "section_charge_cap": "Giới hạn sạc"
+    "section_charge_cap": "Giới hạn sạc",
+    "start_charge": "Bắt đầu ngay",
+    "section_ac_current": "Dòng AC"
   },
   "performance": {
     "tab_battery": "Pin",
@@ -3392,11 +3394,12 @@
     },
     "seatpos": {
       "page_title": "Vị trí ghế",
+      "gate_ready": "Đã đỗ và có điện — có thể áp dụng vị trí.",
       "state_parked": "Đã đỗ",
       "state_moving": "Không ở số P",
       "state_acc_off": "ACC tắt",
-      "gate_acc_off": "Xe đã tắt, nên mô-tơ ghế không có điện. Áp dụng hoặc lưu một vị trí sẽ được chấp nhận nhưng không làm gì. Bật xe để tiếp tục.",
-      "gate_moving": "Xe không ở số P. Vị trí ghế chỉ có thể áp dụng khi cần số ở P — xe sẽ từ chối nếu không, kể cả khi đứng yên và đạp phanh. Lưu và đổi tên vẫn hoạt động.",
+      "gate_acc_off": "Xe đã tắt, nên mô-tơ ghế không có điện. Áp dụng và lưu sẽ không làm gì cho đến khi bạn bật xe.",
+      "gate_moving": "Không ở số P — không thể áp dụng cho đến khi cần số ở P. Lưu và đổi tên vẫn hoạt động.",
       "current": "Vị trí hiện tại",
       "current_unavailable": "Không thể đọc ghế",
       "matches": "Khớp {0}",
@@ -3415,7 +3418,8 @@
       "confirm": "Xác nhận",
       "use_in_automation": "Dùng trong tự động hóa",
       "open_automations": "Mở Tự động hóa",
-      "empty": "Chưa có vị trí nào được lưu. Chỉnh ghế và gương bằng các nút điều khiển trong xe, rồi nhấn Lưu thành mới.",
+      "empty_title": "Chưa có vị trí nào được lưu",
+      "empty": "Chỉnh ghế và gương trong xe, rồi nhấn Lưu thành mới.",
       "group_seat": "Ghế",
       "group_mirrors": "Gương",
       "axis_horizontal": "Trước/sau",
@@ -3466,8 +3470,8 @@
       "delete_failed": "Không thể xóa vị trí",
       "applied_toast": "Đã áp dụng {0}",
       "apply_failed": "Không thể áp dụng vị trí",
-      "unconfirmed_note": "Các địa chỉ này được xác nhận trên BYD Seal. Đọc và lưu vị trí đều an toàn trên mọi mẫu xe — ghi lại một vị trí, di chuyển ghế, ghi lại một vị trí khác, và xem các giá trị có thay đổi theo không. Áp dụng sẽ hỏi trước.",
-      "unconfirmed_note_unset": "Chưa chọn mẫu xe nào trong Cài đặt, nên xe này được coi là chưa xác định. Đọc và lưu vị trí đều an toàn — ghi lại một vị trí, di chuyển ghế, ghi lại một vị trí khác, và xem các giá trị có thay đổi theo không. Áp dụng sẽ hỏi trước.",
+      "unconfirmed_note": "Các địa chỉ này được xác nhận trên BYD Seal. Đọc và lưu đều an toàn; áp dụng sẽ hỏi trước.",
+      "unconfirmed_note_unset": "Chưa chọn mẫu xe trong Cài đặt. Đọc và lưu đều an toàn; áp dụng sẽ hỏi trước.",
       "unconfirmed_title": "Chưa xác nhận cho xe này",
       "unconfirmed_body": "Vị trí ghế và gương được đọc bằng các địa chỉ đã xác nhận trên BYD Seal, và xe của bạn có thể dùng địa chỉ khác. Mọi giá trị được gửi đi đều đã được đọc lại từ chính chiếc xe này khi vị trí được ghi lại, và xe phải đang đỗ, nên trường hợp xấu nhất có thể là một thứ gì đó khác ngoài ghế dịch chuyển nhẹ. Nên kiểm tra các con số trước: ghi lại một vị trí, di chuyển ghế, ghi lại một vị trí khác, và xem các giá trị có thay đổi theo ghế không.",
       "unconfirmed_confirm": "Vẫn áp dụng"

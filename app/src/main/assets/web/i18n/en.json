@@ -1946,7 +1946,9 @@
     "schedule_saved": "Charging schedule saved",
     "schedule_save_failed": "Couldn't save charging schedule",
     "section_schedule": "Schedule",
-    "section_charge_cap": "Charge limit"
+    "section_charge_cap": "Charge limit",
+    "start_charge": "Start now",
+    "section_ac_current": "AC current"
   },
   "performance": {
     "tab_battery": "Battery",
@@ -2863,11 +2865,12 @@
   },
   "seatpos": {
     "page_title": "Seat Positions",
+    "gate_ready": "Parked and powered \u2014 positions can be applied.",
     "state_parked": "Parked",
     "state_moving": "Not in Park",
     "state_acc_off": "ACC off",
-    "gate_acc_off": "The car is off, so the seat motors have no power. Applying or saving a position would be accepted and do nothing. Turn the car on to continue.",
-    "gate_moving": "The car is not in Park. Seat positions can only be applied with the gear in P \u2014 the vehicle refuses otherwise, even standing still with the brake pressed. Saving and renaming still work.",
+    "gate_acc_off": "The car is off, so the seat motors have no power. Apply and save will do nothing until you turn it on.",
+    "gate_moving": "Not in Park \u2014 apply is off until the gear is in P. Saving and renaming still work.",
     "current": "Current position",
     "current_unavailable": "Could not read the seat",
     "matches": "Matches {0}",
@@ -2886,7 +2889,8 @@
     "confirm": "Confirm",
     "use_in_automation": "Use in an automation",
     "open_automations": "Open Automations",
-    "empty": "No saved positions yet. Adjust the seat and mirrors with the controls in the car, then press Save as new.",
+    "empty_title": "No saved positions yet",
+    "empty": "Adjust the seat and mirrors in the car, then press Save as new.",
     "group_seat": "Seat",
     "group_mirrors": "Mirrors",
     "axis_horizontal": "Fore/aft",
@@ -2937,8 +2941,8 @@
     "delete_failed": "Could not delete the position",
     "applied_toast": "Applied {0}",
     "apply_failed": "Could not apply the position",
-    "unconfirmed_note": "These addresses are confirmed on a BYD Seal. Reading and saving positions is safe on any model \u2014 capture one, move the seat, capture another, and see whether the values follow. Applying asks first.",
-    "unconfirmed_note_unset": "No vehicle model is selected in Settings, so this car is treated as unknown. Reading and saving positions is safe \u2014 capture one, move the seat, capture another, and see whether the values follow. Applying asks first.",
+    "unconfirmed_note": "These addresses are confirmed on a BYD Seal. Reading and saving are safe; apply will ask first.",
+    "unconfirmed_note_unset": "No model is selected in Settings. Reading and saving are safe; apply will ask first.",
     "unconfirmed_title": "Not confirmed for this car",
     "unconfirmed_body": "Seat and mirror positions are read using addresses confirmed on a BYD Seal, and your car may use different ones. Every value being sent was read back from this same car when the position was captured, and the car must be parked, so the likely worst case is that something other than the seat moves slightly. Worth checking the numbers first: capture a position, move the seat, capture another, and see whether the values follow the seat.",
     "unconfirmed_confirm": "Apply anyway"

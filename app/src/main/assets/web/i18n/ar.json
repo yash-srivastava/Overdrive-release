@@ -1656,7 +1656,9 @@
     "schedule_saved": "تم حفظ جدول الشحن",
     "schedule_save_failed": "تعذر حفظ جدول الشحن",
     "section_schedule": "الجدول",
-    "section_charge_cap": "حد الشحن"
+    "section_charge_cap": "حد الشحن",
+    "start_charge": "ابدأ الآن",
+    "section_ac_current": "تيار التيار المتردد"
   },
   "performance": {
     "tab_battery": "البطارية",

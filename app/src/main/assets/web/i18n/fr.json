@@ -2040,7 +2040,9 @@
     "schedule_saved": "Programme de charge enregistré",
     "schedule_save_failed": "Impossible d'enregistrer le programme de charge",
     "section_schedule": "Programme",
-    "section_charge_cap": "Limite de charge"
+    "section_charge_cap": "Limite de charge",
+    "start_charge": "Démarrer",
+    "section_ac_current": "Courant CA"
   },
   "performance": {
     "tab_battery": "Batterie",

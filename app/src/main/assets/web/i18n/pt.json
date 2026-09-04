@@ -1446,7 +1446,9 @@
     "schedule_saved": "Programação de carregamento salva",
     "schedule_save_failed": "Não foi possível salvar agenda de carregamento",
     "section_schedule": "Agendamento",
-    "section_charge_cap": "Limite de carga"
+    "section_charge_cap": "Limite de carga",
+    "start_charge": "Iniciar agora",
+    "section_ac_current": "Corrente CA"
   },
   "performance": {
     "tab_battery": "Bateria",

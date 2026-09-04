@@ -1767,7 +1767,9 @@
     "schedule_saved": "充電排程已儲存",
     "schedule_save_failed": "無法儲存充電排程",
     "section_schedule": "排程",
-    "section_charge_cap": "充電上限"
+    "section_charge_cap": "充電上限",
+    "start_charge": "立即開始",
+    "section_ac_current": "交流電流"
   },
   "performance": {
     "tab_battery": "電池",

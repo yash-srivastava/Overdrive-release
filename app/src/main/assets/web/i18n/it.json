@@ -2044,7 +2044,9 @@
     "schedule_saved": "Programma di ricarica salvato",
     "schedule_save_failed": "Impossibile salvare il programma di ricarica",
     "section_schedule": "Programma",
-    "section_charge_cap": "Limite di carica"
+    "section_charge_cap": "Limite di carica",
+    "start_charge": "Avvia ora",
+    "section_ac_current": "Corrente CA"
   },
   "performance": {
     "tab_battery": "Batteria",

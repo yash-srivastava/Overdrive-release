@@ -1446,7 +1446,9 @@
     "schedule_saved": "Program de încărcare salvat",
     "schedule_save_failed": "Nu s-a putut salva programul de încărcare",
     "section_schedule": "Programare",
-    "section_charge_cap": "Limită taxă"
+    "section_charge_cap": "Limită taxă",
+    "start_charge": "Pornește acum",
+    "section_ac_current": "Curent CA"
   },
   "performance": {
     "tab_battery": "Baterie",

@@ -2042,7 +2042,9 @@
     "schedule_saved": "充電スケジュールを保存しました",
     "schedule_save_failed": "充電スケジュールを保存できませんでした",
     "section_schedule": "スケジュール",
-    "section_charge_cap": "充電上限"
+    "section_charge_cap": "充電上限",
+    "start_charge": "今すぐ開始",
+    "section_ac_current": "AC電流"
   },
   "performance": {
     "tab_battery": "バッテリー",

@@ -1446,7 +1446,9 @@
     "schedule_saved": "Plán nabíjení byl uložen",
     "schedule_save_failed": "Plán nabíjení nelze uložit",
     "section_schedule": "Naplánovat",
-    "section_charge_cap": "Limit nabíjení"
+    "section_charge_cap": "Limit nabíjení",
+    "start_charge": "Spustit nyní",
+    "section_ac_current": "Střídavý proud"
   },
   "performance": {
     "tab_battery": "Baterie",

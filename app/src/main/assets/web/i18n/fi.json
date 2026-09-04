@@ -1446,7 +1446,9 @@
     "schedule_saved": "Ladataan aikataulua tallennettu",
     "schedule_save_failed": "Latausaikataulua ei voitu tallentaa",
     "section_schedule": "Aikataulu",
-    "section_charge_cap": "Veloituksen raja"
+    "section_charge_cap": "Veloituksen raja",
+    "start_charge": "Aloita nyt",
+    "section_ac_current": "AC-virta"
   },
   "performance": {
     "tab_battery": "Akku",

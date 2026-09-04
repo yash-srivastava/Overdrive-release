@@ -1767,7 +1767,9 @@
     "schedule_saved": "चार्जिंग शेड्यूल सहेजा गया",
     "schedule_save_failed": "चार्जिंग शेड्यूल सहेजा नहीं जा सका",
     "section_schedule": "शेड्यूल",
-    "section_charge_cap": "चार्ज सीमा"
+    "section_charge_cap": "चार्ज सीमा",
+    "start_charge": "अभी शुरू करें",
+    "section_ac_current": "एसी करंट"
   },
   "performance": {
     "tab_battery": "बैटरी",

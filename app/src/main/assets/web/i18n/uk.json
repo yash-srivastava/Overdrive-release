@@ -1446,7 +1446,9 @@
     "schedule_saved": "Розклад заряджання збережено",
     "schedule_save_failed": "Не вдалося зберегти розклад зарядки",
     "section_schedule": "Розклад",
-    "section_charge_cap": "Обмеження заряду"
+    "section_charge_cap": "Обмеження заряду",
+    "start_charge": "Запустити зараз",
+    "section_ac_current": "Струм AC"
   },
   "performance": {
     "tab_battery": "Батарея",

@@ -1488,6 +1488,7 @@ open class MainActivity : AppCompatActivity() {
                 R.id.liveViewFragment,
                 R.id.recordingsFragment,
                 R.id.vehicleControlFragment,
+                R.id.seatPositionsFragment,
                 R.id.projectionFragment,
                 R.id.tripsFragment,
                 R.id.chargingFragment,
@@ -1502,14 +1503,12 @@ open class MainActivity : AppCompatActivity() {
             )
         )
 
-        // Titles go through the ActionBar rather than Toolbar.setTitle: the
-        // wrapper marks the title as explicitly set, so AppCompat stops
-        // re-applying the activity label over the destination label.
+        // The ActionBar wrapper marks the title as explicitly set, which stops
+        // AppCompat re-applying the activity label over the destination label.
         setupActionBarWithNavController(navController, appBarConfiguration)
 
-        // Settings is a top-level rail dest, so NavigationUI hides the up
-        // caret. When Recordings opened it as a child, keep the caret and
-        // pop back to the library instead of treating Settings as a root.
+        // Settings is a top-level rail destination, so NavigationUI hides the
+        // up caret; it has to be restored when Recordings opens it as a child.
         navController.addOnDestinationChangedListener { _, destination, arguments ->
             if (destination.id == R.id.settingsFragment &&
                 arguments?.getBoolean(SettingsFragment.KEY_FROM_RECORDINGS) == true
@@ -1666,9 +1665,8 @@ open class MainActivity : AppCompatActivity() {
         navigationRailCollapseRow?.let { row ->
             row.findViewById<ImageView>(R.id.railItemIcon)
                 ?.setImageResource(R.drawable.ic_chevron_right)
-            // The visible label only ever shows while the rail is expanded, so
-            // it names the action available there. The collapsed state gets the
-            // other direction through the tooltip and contentDescription.
+            // The label is only visible while the rail is expanded; the
+            // collapsed state names the action via tooltip and contentDescription.
             row.findViewById<TextView>(R.id.railItemLabel)
                 ?.setText(R.string.rail_collapse_label)
             row.setOnClickListener {
@@ -1908,10 +1906,9 @@ open class MainActivity : AppCompatActivity() {
 
     /**
      * Cross-fade each category header between its label and the hairline that
-     * stands in for it at the compact width, where 80dp leaves no room for
-     * text. The header's height is fixed, so neither state relayouts the rail.
-     *
-     * A duration of 0 applies the end state immediately.
+     * stands in for it at the compact 80dp width. Header height is fixed, so
+     * neither state relayouts the rail. A duration of 0 applies the end state
+     * immediately.
      */
     private fun setRailSectionsExpanded(expanded: Boolean, durationMs: Long) {
         railSections.forEach { section ->
@@ -1969,8 +1966,8 @@ open class MainActivity : AppCompatActivity() {
     /**
      * Walks every rail row — destinations, secondary actions, then the pinned
      * collapse row, which lives outside [navigationRail] but takes the same
-     * compact/expanded treatment. Its label res is the collapsed-state one,
-     * because that is the state where the tooltip stands in for the label.
+     * compact/expanded treatment. The label res passed for it is the
+     * collapsed-state one, which is where the tooltip stands in for the label.
      */
     private inline fun forEachRailRow(action: (LinearLayout, Int) -> Unit) {
         railItems.forEach { item ->
@@ -2000,8 +1997,6 @@ open class MainActivity : AppCompatActivity() {
         if (!force && navigationRailRowsExpandedForm == expanded) return
         navigationRailRowsExpandedForm = expanded
         forEachRailRow { row, labelRes -> applyRailRowLayout(row, labelRes, expanded) }
-        // The wordmark tracks the rows: centred in the 80dp strip, left-aligned
-        // on the same inset as the row labels once there is width for it.
         navigationRailBrand?.let { brand ->
             val inset = resources.getDimensionPixelSize(
                 R.dimen.rail_item_pill_inset_horizontal
@@ -2017,9 +2012,9 @@ open class MainActivity : AppCompatActivity() {
 
     private fun applyRailRowLayout(row: LinearLayout, labelRes: Int, expanded: Boolean) {
         val label = row.findViewById<TextView>(R.id.railItemLabel) ?: return
-        // Content sits inside the selected plate, not the rail, so these stay
-        // the tokens rail_item_indicator.xml insets by. With the 24dp icon this
-        // also holds the icon centre on the 40dp line at both rail widths.
+        // Must stay the insets rail_item_indicator.xml uses: content sits inside
+        // the selected plate, and with the 24dp icon this also holds the icon
+        // centre on the 40dp line at both rail widths.
         val horizontalPadding = if (expanded) {
             resources.getDimensionPixelSize(R.dimen.rail_item_pill_inset_horizontal) +
                 resources.getDimensionPixelSize(R.dimen.rail_item_pill_content_inset)
@@ -2067,9 +2062,6 @@ open class MainActivity : AppCompatActivity() {
      * Chevron points right when collapsed, left when expanded. Rotating one
      * drawable rather than swapping two keeps the affordance continuous with
      * the slide instead of blinking to a different asset mid-motion.
-     *
-     * The row it lives in is a normal rail row, so [applyRailRowLayout] already
-     * holds the icon on the 40dp line at both widths — only rotation moves.
      */
     private fun updateRailExpandButton(
         expanded: Boolean,

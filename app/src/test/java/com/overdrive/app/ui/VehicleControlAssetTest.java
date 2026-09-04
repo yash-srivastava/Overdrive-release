@@ -29,7 +29,7 @@ public class VehicleControlAssetTest {
 
     /**
      * The corners are a strip in the bottom bar, not cards floating over the
-     * render: fixed-width cards pinned to the viewport corners collided with
+     * render: fixed-width cards pinned to the viewport corners collide with
      * the floating chrome at head-unit aspect ratios.
      */
     @Test
@@ -51,6 +51,57 @@ public class VehicleControlAssetTest {
         assertFalse(ruleFor(css, ".vc-tyre-strip").contains("gap:"));
     }
 
+    /** Every cloud-gated control carries its marker in the same corner. */
+    @Test
+    public void cloudMarkerSitsInOneCornerForEveryControlKind() throws IOException {
+        String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
+
+        assertFalse(css.contains(
+                ".vc-preset[data-requires-cloud=\"true\"]::after { top: 4px; right: auto; left: 4px; }"));
+        assertTrue(css.contains("[dir=\"rtl\"] .vc-preset[data-requires-cloud=\"true\"]::after"));
+        // The marker overlaps a short label unless the pill reserves room on
+        // both sides — padding one side alone shifts the label off centre.
+        assertTrue(ruleFor(css,
+                ".vc-window-row-wide .vc-window-presets > .vc-preset[data-requires-cloud=\"true\"]")
+                .contains("padding-left: 26px; padding-right: 26px"));
+    }
+
+    /** Trunk actions use the current Lucide door glyphs. */
+    @Test
+    public void trunkActionsUseOfficialLucideDoorGlyphs() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
+
+        String doorOpen = "M10 4a2 2 0 0 1 2.36-1.968l5.41.992A1.5 1.5 0 0 1 19 4.5V21l-7.876.992A1 1 0 0 1 10 21z";
+        String doorClosed = "M19 21V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v16";
+        assertTrue(html.contains(doorOpen));
+        assertTrue(html.contains(doorClosed));
+        // Tab and panel action share one revision of the glyph.
+        assertEquals(2, count(html, doorOpen));
+        assertFalse(html.contains("<polyline points=\"9 8 12 5 15 8\"/>"));
+        assertFalse(html.contains("<polyline points=\"9 12 12 15 15 12\"/>"));
+    }
+
+    /**
+     * The hold hint captions the two memory tiles, so it shares a line with
+     * them rather than centring itself under the whole panel.
+     */
+    @Test
+    public void seatMemoryHintReadsAsACaptionForItsOwnTiles() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
+        String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
+
+        assertTrue(html.contains("class=\"vc-seat-memory\""));
+        assertTrue(html.contains("class=\"vc-seat-memory-actions\""));
+        assertTrue(ruleFor(css, ".vc-seat-memory").contains("flex-basis: 100%"));
+        assertTrue(ruleFor(css, ".vc-seat-memory").contains("border-top"));
+        String hint = ruleFor(css, ".vc-hold-hint");
+        assertFalse(hint.contains("text-transform: uppercase"));
+        assertFalse(hint.contains("font-size: 9px"));
+        assertTrue(hint.contains("margin-top: 8px"));
+        // Nesting drops the .vc-panel-row > * gutter, so Chrome 58 needs margins.
+        assertTrue(css.contains(".vc-seat-memory-actions > .vc-tile + .vc-tile { margin-left: 6px; }"));
+    }
+
     /** No glow shadows or raw colour literals on the corners. */
     @Test
     public void tyreCellsUseSemanticStatusTokens() throws IOException {
@@ -64,9 +115,8 @@ public class VehicleControlAssetTest {
     }
 
     /**
-     * The cloud gate has to offer a way out of itself. Reading a "go to
-     * Settings" sentence is not an action, so the modal carries a CTA that the
-     * bridge turns into real navigation, with a web route for tunnel sessions.
+     * The cloud gate carries a CTA that the bridge turns into real navigation,
+     * with a web route for tunnel sessions.
      */
     @Test
     public void cloudGateOffersNavigationRatherThanInstructions() throws IOException {
@@ -104,18 +154,19 @@ public class VehicleControlAssetTest {
         assertTrue(html.contains("class=\"vc-panel-row vc-stack-grid\" id=\"panelLights\""));
         assertTrue(ruleFor(css, ".ambient-wrapper").contains("width: 100%"));
         assertTrue(ruleFor(css, ".vc-ambient-slider").contains("width: 100%"));
-        // Charging: stacked labelled rows rather than one horizontal overflow.
+        // Charging: labelled rows, compact footer actions — not full-width save bricks.
         assertTrue(html.contains("data-i18n=\"vehicle_control.window\""));
         assertTrue(html.contains("data-i18n=\"vehicle_control.repeat\""));
+        assertTrue(html.contains("class=\"vc-schedule-bar vc-charge-footer\""));
+        assertTrue(html.contains("data-i18n=\"vehicle_control.start_charge\""));
+        assertTrue(html.contains("data-i18n=\"vehicle_control.section_ac_current\""));
+        assertFalse(ruleFor(css, ".vc-charge-save").contains("width: 100%"));
         assertFalse(ruleFor(css, ".vc-schedule-bar").contains("gap:"));
         assertFalse(ruleFor(css, ".vc-schedule-grid").contains("gap:"));
         assertTrue(css.contains(".vc-schedule-bar + .vc-schedule-bar { margin-top: 8px; }"));
     }
 
-    /**
-     * A centred bounding box puts the model's midpoint on the ground plane,
-     * which buries the lower half of every GLB under the floor.
-     */
+    /** The dock clips the sheet, so the panel carries no rounded lid of its own. */
     @Test
     public void dockClipsTheSheetInsteadOfASecondRoundedLid() throws IOException {
         String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
@@ -164,6 +215,43 @@ public class VehicleControlAssetTest {
         assertTrue(script.contains("if (sel._vcBound) {"));
         assertTrue(script.contains("if (!toggle || toggle._vcBound) return;"));
         assertTrue(script.contains("container.innerHTML = '';"));
+    }
+
+    /**
+     * Lite mode paints the same VehicleArt render the Dashboard uses, including
+     * vehicle_fallback for an unset id.
+     */
+    @Test
+    public void liteHeroUsesDashboardFallbackArtRatherThanAnIcon() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
+        String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
+        String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
+        String api = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/server/ModelsApiHandler.java");
+
+        assertTrue(html.contains("id=\"vcLiteHeroImg\""));
+        assertFalse(html.contains("M19 17h2c.6 0 1-.4 1-1v-3"));
+        assertFalse(css.contains(".vc-lite-hero svg"));
+        assertTrue(script.contains("apply('');"));
+        assertTrue(script.contains("VC.artIdFromSelected(selected)"));
+        assertTrue(script.contains("if (selected.modelSource === 'unset') return '';"));
+        assertFalse(script.contains("apply((selected && selected.modelId) || '');"));
+        assertTrue(script.contains("fetch('/api/models/art?id='"));
+        assertTrue(api.contains("VehicleArt.INSTANCE.drawableFor(id)"));
+
+        // Under uid 2000 the shared context resolves com.android.shell, so its
+        // Resources cannot open our raw drawables. Art comes from an
+        // AssetManager built on our own APK.
+        assertTrue(api.contains("res.openRawResource(drawableId)"));
+        assertFalse(api.contains("ctx.getResources().openRawResource(drawableId)"));
+        assertTrue(api.contains("CameraDaemon.getApkAssets()"));
+        assertTrue(api.contains("new android.content.res.Resources(assets, metrics, config)"));
+        assertTrue(readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/daemon/CameraDaemon.java")
+                .contains("public static android.content.res.AssetManager getApkAssets()"));
+        assertTrue(readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/ui/vehicle/VehicleArt.kt")
+                .contains("else -> R.drawable.vehicle_fallback"));
     }
 
     @Test
@@ -289,7 +377,7 @@ public class VehicleControlAssetTest {
                 + count(html, "data-state=\"3\" disabled")
                 + count(html, "data-state=\"4\" disabled")
                 + count(html, "data-state=\"5\" disabled"));
-        assertTrue(html.contains("vehicle-control.js?v=vclite12"));
+        assertTrue(html.contains("vehicle-control.js?v=vclite14"));
         assertTrue(script.contains("fetch('/api/vehicle/ac-charge-current-limit')"));
         assertTrue(script.contains("self.apiPost('/api/vehicle/ac-charge-current-limit'"));
         assertTrue(script.contains("startAcChargeCurrentSync: function()"));

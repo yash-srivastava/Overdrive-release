@@ -1767,7 +1767,9 @@
     "schedule_saved": "Şarj programı kaydedildi",
     "schedule_save_failed": "Şarj programı kaydedilemedi",
     "section_schedule": "Program",
-    "section_charge_cap": "Şarj limiti"
+    "section_charge_cap": "Şarj limiti",
+    "start_charge": "Şimdi başlat",
+    "section_ac_current": "AC akımı"
   },
   "performance": {
     "tab_battery": "Akü",

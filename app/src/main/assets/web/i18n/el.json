@@ -1446,7 +1446,9 @@
     "schedule_saved": "Το χρονοδιάγραμμα φόρτισης αποθηκεύτηκε",
     "schedule_save_failed": "Αδυναμία αποθήκευσης προγράμματος φόρτισης",
     "section_schedule": "Χρονοδιάγραμμα",
-    "section_charge_cap": "Όριο φόρτισης"
+    "section_charge_cap": "Όριο φόρτισης",
+    "start_charge": "Έναρξη τώρα",
+    "section_ac_current": "Ρεύμα AC"
   },
   "performance": {
     "tab_battery": "Μπαταρία",

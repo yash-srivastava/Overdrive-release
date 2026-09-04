@@ -184,8 +184,7 @@ var VC = {
      */
     _startImmersiveScene: function() {
         var self = this;
-        // Default: Aurora White (converted to linear so it matches the rest
-        // of the colour pipeline; see applyColor() for the rationale).
+        // Default: Aurora White, converted to linear like applyColor() does.
         this.baseColor = new THREE.Color(0xE8E8EC).convertSRGBToLinear();
         this.initThreeJS();
         this.initColorPicker();
@@ -254,32 +253,49 @@ var VC = {
         this.loadLiteHeroArt();
     },
 
-    /**
-     * Point the lite hero at the selected model's render. Goes through fetch()
-     * rather than setting img.src directly so auth.js can attach the bearer
-     * token — over a tunnel the session cookie is stripped and a bare <img>
-     * request would come back 401.
-     */
     loadLiteHeroArt: function() {
         var hero = document.getElementById('vcLiteHero');
         var img = document.getElementById('vcLiteHeroImg');
         if (!hero || !img || typeof fetch !== 'function') return;
-        // Already resolved on an earlier lite pass — re-fetching would only
-        // blank the hero for a beat on every 3D → lite switch.
-        if (hero.classList.contains('has-art')) return;
-        this._fetchSelected(function(selected) {
-            var id = (selected && selected.modelId) || '';
-            fetch('/api/models/art?id=' + encodeURIComponent(id))
+
+        var apply = function(id, triesLeft) {
+            var key = id || '';
+            if (img.getAttribute('data-art-id') === key && hero.classList.contains('has-art')) {
+                return;
+            }
+            fetch('/api/models/art?id=' + encodeURIComponent(key))
                 .then(function(resp) {
                     if (!resp.ok) throw new Error('art ' + resp.status);
                     return resp.blob();
                 })
                 .then(function(blob) {
-                    img.src = URL.createObjectURL(blob);
+                    if (img._artUrl) URL.revokeObjectURL(img._artUrl);
+                    img._artUrl = URL.createObjectURL(blob);
+                    img.src = img._artUrl;
+                    img.setAttribute('data-art-id', key);
                     hero.classList.add('has-art');
                 })
-                .catch(function() { /* silhouette fallback stays up */ });
+                .catch(function() {
+                    if (hero.classList.contains('has-art')) return;
+                    var left = typeof triesLeft === 'number' ? triesLeft : 4;
+                    if (left <= 0) return;
+                    setTimeout(function() { apply(key, left - 1); }, 1500);
+                });
+        };
+
+        apply('');
+        this._fetchSelected(function(selected) {
+            apply(VC.artIdFromSelected(selected));
         });
+    },
+
+    // Same provenance as DashboardFragment.refreshVehicleTile: modelId is the
+    // 3D render default (Seal when unset) and must not drive the hero.
+    artIdFromSelected: function(selected) {
+        if (!selected) return '';
+        if (selected.selectedModelId) return selected.selectedModelId;
+        if (selected.modelSource === 'unset') return '';
+        return selected.modelId || '';
     },
 
     /**
@@ -300,9 +316,8 @@ var VC = {
     },
 
     /**
-     * Visible label is CSS-driven (html.vc-mode-*) because writing t() here
-     * used to blank the chip: the catalog is often still loading, and t()
-     * returns null, which textContent stores as "".
+     * Visible label is CSS-driven (html.vc-mode-*): t() returns null while the
+     * catalog is still loading, and textContent stores that as "".
      */
     _syncViewModeChip: function() {
         var btn = document.getElementById('btnViewMode');
@@ -1945,6 +1960,8 @@ var VC = {
         // switch back to lite fetches art for the car now selected.
         var hero = document.getElementById('vcLiteHero');
         if (hero) hero.classList.remove('has-art');
+        var img = document.getElementById('vcLiteHeroImg');
+        if (img) img.removeAttribute('data-art-id');
         this.loadModel(id);
     },
 
@@ -6100,10 +6117,6 @@ var VC = {
     // ---- Tyre corners ------------------------------------------------------
 
     // The corners are a four-cell strip in the bottom bar, laid out by CSS.
-    // Per-frame 3D wheel projection was tried first and its alignment is
-    // unreliable across BYD models, camera angles, and the AndroidBridge scale
-    // bump; corner-pinned cards were tried after that and collided with the
-    // floating chrome at head-unit aspect ratios.
     _cacheCarBounds: function() {
         // Mark "ready to lay out" — actual positioning is screen-space,
         // not model-space, so we don't need to compute world anchors.
@@ -6135,10 +6148,9 @@ var VC = {
     // Reusable scratch vectors so the per-frame projection allocates nothing.
     _tyreScratchVec: null,
 
-    // Layout is pure CSS (see vehicle-control.css — .vc-tyre-cell is a flex
-     // child of the strip in the bottom bar). The per-frame call from animate()
-     // is a no-op so we never touch DOM layout properties on the BYD WebView's
-     // hot path.
+    // Layout is pure CSS (.vc-tyre-cell in vehicle-control.css). The per-frame
+    // call from animate() is a no-op so the WebView's hot path never touches
+    // DOM layout properties.
     _updateTyreCalloutPositions: function() { /* no-op — CSS handles it */ },
 
     // User-configured kPa limits from /api/vehicle/state (tyres.limits), kept

@@ -1446,7 +1446,9 @@
     "schedule_saved": "Laaiskedule gestoor",
     "schedule_save_failed": "Kon nie laaiskedule stoor nie",
     "section_schedule": "Skedule",
-    "section_charge_cap": "Laailimiet"
+    "section_charge_cap": "Laailimiet",
+    "start_charge": "Begin nou",
+    "section_ac_current": "WS-stroom"
   },
   "performance": {
     "tab_battery": "Battery",

@@ -1,196 +1,237 @@
 /*
- * Seat positions page. Only what this page adds — cards, buttons, chips, badges and
- * form controls all come from shared/styles.css.
- *
- * The head-unit WebView is Chrome 58, so flex spacing uses sibling margins instead
- * of `gap` (flex gap arrived in Chrome 84).
+ * Seat positions page. Cards, buttons and form controls come from
+ * shared/styles.css. The head-unit WebView is Chrome 58, so flex spacing
+ * uses sibling margins instead of `gap` (flex gap arrived in Chrome 84).
  */
 
 /* ── Seat glyph ───────────────────────────────────────────────────────────────
- * The car's side-profile seat render, drawn
- * TWICE and clipped along the crease at the recliner, so the backrest half can
- * rotate against the cushion. One flat image would be a static picture; two
- * halves make the glyph actually show the geometry it is labelling, and the wedge
- * that opens at the join reads as the seam between the two cushions.
- *
- * Geometry measured off the 519px source: crease (292,368) -> (400,470), recliner
- * pivot (325,415). As percentages of the 430x509 crop those are 53.95%,70.33% ->
- * 79.07%,90.37% and 61.63%,79.57%.
+ * Side-profile seat, split into backrest + cushion so the backrest can rotate
+ * against the seat. Geometry is inferred from captured axes and kept gentle:
+ * past roughly 12 degrees the two halves visibly pull apart at the join.
  * ───────────────────────────────────────────────────────────────────────────── */
 .seat {
     position: relative;
     flex: none;
-    /* The source render faces left; facing right reads better beside a name. */
-    transform: scaleX(-1);
+    color: var(--on-surface-variant);
+}
+.seat-svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    overflow: visible;
+}
+.seat-svg-part {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.seat-svg-floor {
+    stroke: var(--outline-variant);
+    stroke-width: 2;
+    stroke-linecap: round;
 }
 
-.seat-body { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
-
-.seat-part {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    background-image: url('images/seat-side.png');
-    background-size: 100% 100%;
-    background-repeat: no-repeat;
-    transform-origin: 61.63% 79.57%;
-}
-
-.seat-part.cushion { -webkit-clip-path: polygon(0% 62%, 53.95% 70.33%, 79.07% 90.37%, 100% 100%, 0% 100%); clip-path: polygon(0% 62%, 53.95% 70.33%, 79.07% 90.37%, 100% 100%, 0% 100%); }
-.seat-part.back    { -webkit-clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 79.07% 90.37%, 53.95% 70.33%, 0% 62%); clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 79.07% 90.37%, 53.95% 70.33%, 0% 62%); }
-
-/*
- * Floor reference. Outside .seat-body so it does NOT move with the seat — without a
- * fixed datum a height change is invisible. Clearance is measured, not guessed: the
- * artwork's solid content ends at 91.6% and its shadow at 95%, and the lowest HEIGHT
- * adds 6% of downward travel, so 107% keeps a gap under the seat even at its lowest.
- */
-.seat-floor {
-    position: absolute;
-    left: -12%;
-    right: -12%;
-    top: 107%;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, var(--outline) 20%, var(--outline) 80%, transparent);
-    opacity: 0.55;
-}
-
-.seat-frame {
-    flex: none;
+/* ── One-line gate status ────────────────────────────────────────────────────── */
+.sp-status {
+    display: -webkit-flex;
     display: flex;
+    -webkit-align-items: center;
     align-items: center;
-    justify-content: center;
-    background: var(--surface-container-high);
+    min-height: 44px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    background: var(--surface-container);
     border: 1px solid var(--outline-variant);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--on-surface);
 }
-.seat-frame.row-size { width: 64px; height: 64px; }
-.seat-frame.hero-size { width: 116px; height: 116px; align-self: center; }
+.sp-status-dot {
+    -webkit-flex: none;
+    flex: none;
+    width: 8px;
+    height: 8px;
+    margin-right: 10px;
+    border-radius: 50%;
+    background: var(--outline);
+}
+.sp-status[data-state="ok"] .sp-status-dot { background: var(--status-success); }
+.sp-status[data-state="warn"] .sp-status-dot { background: var(--status-warning); }
+.sp-status[data-state="off"] .sp-status-dot { background: var(--status-danger); }
+.sp-status[data-state="info"] .sp-status-dot { background: var(--status-info); }
+[dir="rtl"] .sp-status-dot { margin-right: 0; margin-left: 10px; }
 
-/* ── Current position hero ───────────────────────────────────────────────────── */
-.sp-hero { display: flex; align-items: stretch; }
-.sp-hero > * + * { margin-left: 18px; }
-.sp-hero-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.sp-hero-main > * + * { margin-top: 10px; }
-.sp-hero-top { display: flex; align-items: flex-start; justify-content: space-between; }
-.sp-hero-top > * + * { margin-left: 12px; }
-.sp-eyebrow {
-    font-size: 10.5px;
+/* ── Current position ────────────────────────────────────────────────────────── */
+.sp-now + #spList { margin-top: 20px; }
+.sp-now-body {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+}
+.sp-now-art {
+    -webkit-flex: none;
+    flex: none;
+    width: 64px;
+    height: 72px;
+    margin-right: 16px;
+}
+.sp-now-art:empty { display: none; }
+[dir="rtl"] .sp-now-art { margin-right: 0; margin-left: 16px; }
+
+.sp-now-main { -webkit-flex: 1; flex: 1; min-width: 0; }
+.sp-now-eyebrow {
+    font-size: 12px;
     font-weight: 700;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--outline);
 }
-.sp-match { font-size: 17px; font-weight: 650; letter-spacing: 0em; }
+.sp-match {
+    margin-top: 3px;
+    font-size: 18px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    color: var(--on-surface);
+}
 .sp-match em { font-style: normal; color: var(--primary); }
 
+.sp-now-actions {
+    -webkit-flex: none;
+    flex: none;
+    margin-left: 16px;
+}
+[dir="rtl"] .sp-now-actions { margin-left: 0; margin-right: 16px; }
+
 /* ── Axis readout ────────────────────────────────────────────────────────────── */
-.sp-axes { display: flex; flex-direction: column; }
-.sp-axes > * + * { margin-top: 5px; }
-.sp-axis-line { display: flex; align-items: baseline; flex-wrap: wrap; }
-.sp-axis-line > * + * { margin-left: 8px; }
+.sp-axes { margin-top: 10px; }
+.sp-axis-line {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-flex-wrap: wrap;
+    flex-wrap: wrap;
+}
+.sp-axis-line + .sp-axis-line { margin-top: 6px; }
 .sp-axis-group {
-    font-size: 10px;
+    -webkit-flex: none;
+    flex: none;
+    width: 60px;
+    font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.09em;
+    letter-spacing: 0.07em;
     text-transform: uppercase;
     color: var(--outline);
-    width: 56px;
-    flex: none;
 }
 .sp-axis {
-    font-family: var(--family-mono);
+    padding: 3px 8px;
+    margin: 2px 6px 2px 0;
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-sm);
+    background: var(--surface-container-high);
     font-size: 12px;
     font-variant-numeric: tabular-nums;
     color: var(--on-surface-variant);
     white-space: nowrap;
 }
-.sp-axis .k { color: var(--outline); }
-.sp-axis .v { color: var(--on-surface); font-weight: 500; }
-.sp-axis + .sp-axis::before { content: '\00b7'; color: var(--outline-variant); margin: 0 6px 0 2px; }
+.sp-axis .v { color: var(--on-surface); font-weight: 650; margin-left: 2px; }
+[dir="rtl"] .sp-axis { margin: 2px 0 2px 6px; }
+[dir="rtl"] .sp-axis .v { margin-left: 0; margin-right: 2px; }
 
-/* Two-batch apply progress, mirroring what applyFull actually does. */
-.sp-batches { display: flex; align-items: center; }
+.sp-batches {
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    padding: 0 var(--card-pad) 16px;
+}
 .sp-batches > * + * { margin-left: 8px; }
 .sp-batch {
+    display: -webkit-inline-flex;
     display: inline-flex;
+    -webkit-align-items: center;
     align-items: center;
-    font-family: var(--family-mono);
     font-size: 11px;
-    padding: 2px 8px;
-    border-radius: var(--radius-full);
+    padding: 4px 8px;
+    border-radius: var(--radius-md);
     border: 1px solid var(--outline-variant);
     color: var(--outline);
 }
-.sp-batch .led { width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--outline); }
+.sp-batch .led {
+    width: 6px;
+    height: 6px;
+    margin-right: 6px;
+    border-radius: 50%;
+    background: var(--outline);
+}
 .sp-batch.run .led { background: var(--status-warning); animation: sp-pulse 700ms ease-in-out infinite; }
-.sp-batch.done { color: var(--status-success); border-color: var(--outline-variant); }
+.sp-batch.done { color: var(--status-success); }
 .sp-batch.done .led { background: var(--status-success); }
 @keyframes sp-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
 /* ── List ────────────────────────────────────────────────────────────────────── */
-.sp-group-head { display: flex; align-items: center; padding: 16px 2px 4px; }
-.sp-group-head > * + * { margin-left: 10px; }
-.sp-group-title { font-size: 13px; font-weight: 650; }
-.sp-group-meta { font-size: 12px; color: var(--outline); }
-.sp-group-rule { flex: 1; height: 1px; background: var(--outline-variant); }
+.sp-group-head { padding: 4px 2px 10px; }
+.sp-group-title { font-size: 13px; font-weight: 650; color: var(--on-surface); }
+.sp-group-meta { margin-left: 8px; font-size: 12px; color: var(--outline); }
 
 .sp-row {
+    display: -webkit-flex;
     display: flex;
+    -webkit-align-items: center;
     align-items: center;
-    padding: 12px 16px;
+    padding: 12px 14px;
     border-radius: var(--radius-md);
     background: var(--surface-container);
     border: 1px solid var(--outline-variant);
-    transition: background var(--duration-short) var(--easing-standard),
-                border-color var(--duration-short) var(--easing-standard);
 }
 .sp-row > * + * { margin-left: 14px; }
 .sp-row + .sp-row { margin-top: 8px; }
-.sp-row:hover { background: var(--surface-container-high); }
 .sp-row.is-applied { border-color: var(--primary); }
 
-.sp-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.sp-name-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.sp-name { font-weight: 650; font-size: 14.5px; letter-spacing: 0em; }
-/* The car's own name for a renamed slot. Subdued and truncating: it is a reference
-   point, not the row's identity, and the account-prefixed form is long. */
+.sp-row-art {
+    -webkit-flex: none;
+    flex: none;
+    width: 44px;
+    height: 50px;
+}
+.sp-row-main { -webkit-flex: 1; flex: 1; min-width: 0; }
+.sp-name-line { display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; -webkit-flex-wrap: wrap; flex-wrap: wrap; }
+.sp-name-line > * + * { margin-left: 8px; }
+.sp-name { font-weight: 650; font-size: 15px; }
 .sp-carname {
+    margin-top: 2px;
     font-size: 12px;
-    color: var(--tertiary);
+    color: var(--on-surface-variant);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .sp-chip {
-    font-size: 10.5px;
+    font-size: 11px;
     font-weight: 650;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
     padding: 2px 8px;
-    border-radius: var(--radius-full);
+    border-radius: var(--radius-md);
     border: 1px solid var(--outline-variant);
     color: var(--outline);
     white-space: nowrap;
 }
-.sp-chip.from-car { color: var(--tertiary); border-color: var(--outline-variant); }
+.sp-chip.from-car { color: var(--tertiary); }
 .sp-chip.applied {
     color: var(--status-success);
-    border-color: var(--outline-variant);
     background: var(--surface-container-high);
 }
-
-/* Used-by marker. Dependency info only — automations are edited on the Automations
-   page, never here. This exists so deleting or overwriting a position is not a
-   silent break. */
 .sp-chip.used-by {
     appearance: none;
     font-family: inherit;
     cursor: pointer;
+    display: -webkit-inline-flex;
     display: inline-flex;
+    -webkit-align-items: center;
     align-items: center;
     color: var(--on-surface-variant);
     background: transparent;
@@ -198,8 +239,19 @@
 .sp-chip.used-by svg { width: 12px; height: 12px; margin-right: 5px; }
 .sp-chip.used-by:hover { background: var(--surface-container-highest); color: var(--on-surface); }
 
-.sp-row-actions { flex: none; display: flex; align-items: center; }
+.sp-row-actions { -webkit-flex: none; flex: none; display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; }
 .sp-row-actions > * + * { margin-left: 6px; }
+
+.sp-icon-btn {
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    padding: 0;
+    background: var(--surface-container-high);
+    border: 1px solid var(--outline-variant);
+    color: var(--on-surface);
+}
+.sp-icon-btn svg { width: 18px; height: 18px; }
 
 /* ── Overflow menu ───────────────────────────────────────────────────────────── */
 .sp-menu-wrap { position: relative; }
@@ -211,14 +263,14 @@
     background: var(--surface-container-high);
     border: 1px solid var(--outline-variant);
     border-radius: var(--radius-md);
-    box-shadow: var(--shadow-lg);
     padding: 6px;
     display: none;
+    -webkit-flex-direction: column;
     flex-direction: column;
     z-index: 15;
 }
 .sp-menu > * + * { margin-top: 2px; }
-.sp-menu.open { display: flex; }
+.sp-menu.open { display: -webkit-flex; display: flex; }
 .sp-menu button {
     appearance: none;
     border: 0;
@@ -230,51 +282,89 @@
     padding: 9px 12px;
     border-radius: var(--radius-sm);
     cursor: pointer;
+    display: -webkit-flex;
     display: flex;
+    -webkit-align-items: center;
     align-items: center;
     white-space: nowrap;
 }
-.sp-menu button svg { width: 15px; height: 15px; margin-right: 10px; flex: none; opacity: 0.8; }
+.sp-menu button svg { width: 15px; height: 15px; margin-right: 10px; -webkit-flex: none; flex: none; }
 .sp-menu button:hover { background: var(--surface-container-highest); }
 .sp-menu button.danger { color: var(--status-danger); }
 .sp-menu-sep { height: 1px; background: var(--outline-variant); margin: 4px 6px; }
 
 /* ── Used-by dialog list ─────────────────────────────────────────────────────── */
-.sp-uses { display: flex; flex-direction: column; }
+.sp-uses { display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column; }
 .sp-uses > * + * { margin-top: 8px; }
 .sp-use {
+    display: -webkit-flex;
     display: flex;
+    -webkit-align-items: baseline;
     align-items: baseline;
     padding: 9px 12px;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     background: var(--surface-container-low);
     border: 1px solid var(--outline-variant);
 }
 .sp-use > * + * { margin-left: 10px; }
 .sp-use-name { font-weight: 600; font-size: 13.5px; }
-.sp-use-trigger { font-size: 12px; color: var(--outline); }
 
 .sp-empty {
-    padding: 18px;
-    border: 1px dashed var(--outline-variant);
-    border-radius: var(--radius-md);
-    color: var(--outline);
-    font-size: 13px;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    flex-direction: column;
+    -webkit-align-items: center;
+    align-items: center;
+    padding: 32px 20px;
     text-align: center;
+    background: var(--surface-container);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md);
+}
+.sp-empty-tile {
+    width: 64px;
+    height: 64px;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-align-items: center;
+    align-items: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+    background: var(--surface-container-high);
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-md);
+    color: var(--on-surface-variant);
+}
+.sp-empty-tile svg { width: 28px; height: 28px; }
+.sp-empty-title {
+    margin-top: 14px;
+    font-size: 16px;
+    font-weight: 650;
+    color: var(--on-surface);
+}
+.sp-empty-hint {
+    margin-top: 6px;
+    max-width: 360px;
+    font-size: 13px;
+    color: var(--on-surface-variant);
+    line-height: 1.45;
 }
 
 @media (prefers-reduced-motion: reduce) {
     .sp-batch.run .led { animation: none; }
 }
 
-/* ── what a position stores ─────────────────────────────────────────────────── */
-/* Two positions can now differ in KIND, not just in value, so the row says which. */
 .sp-parts-summary {
+    margin-top: 4px;
+    display: -webkit-flex;
     display: flex;
+    -webkit-align-items: center;
     align-items: center;
     font-size: 12px;
-    color: var(--tertiary);
+    color: var(--on-surface-variant);
 }
+.sp-row-axes { margin-top: 4px; }
 .sp-dot { margin: 0 6px; opacity: 0.5; }
 .sp-swatch {
     display: inline-block;
@@ -285,40 +375,35 @@
     border: 1px solid var(--outline-variant);
 }
 
-/* ── save-parts chooser ─────────────────────────────────────────────────────── */
-.sp-parts { display: flex; flex-direction: column; margin-top: 4px; }
+.sp-parts { display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column; margin-top: 4px; }
 .sp-parts > * + * { margin-top: 4px; }
 .sp-part {
+    display: -webkit-flex;
     display: flex;
+    -webkit-align-items: flex-start;
     align-items: flex-start;
     padding: 10px 12px;
     border: 1px solid var(--outline-variant);
-    border-radius: 10px;
+    border-radius: var(--radius-md);
     cursor: pointer;
 }
 .sp-part > * + * { margin-left: 10px; }
 .sp-part:hover { background: var(--surface-container-high); }
-.sp-part input { margin-top: 2px; flex: none; }
-.sp-part-text { display: flex; flex-direction: column; min-width: 0; }
+.sp-part input { margin-top: 2px; -webkit-flex: none; flex: none; }
+.sp-part-text { display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column; min-width: 0; }
 .sp-part-text > * + * { margin-top: 2px; }
 .sp-part-label { font-weight: 600; font-size: 14px; }
-.sp-part-hint { font-size: 12px; color: var(--tertiary); }
+.sp-part-hint { font-size: 12px; color: var(--on-surface-variant); }
 
-/* ── colour picker ──────────────────────────────────────────────────────────── */
-/* A gradient track rather than a swatch grid. The car exposes 6/30/63/126 colours by
-   trim and only the 30-colour hex ramp is known here, so swatches cannot be drawn for
-   a larger palette — but a gradient can, and it matches the continuous-looking control
-   the car's own screen uses. The slider still picks a discrete index. */
-.sp-colour-pick { display: flex; flex-direction: column; margin-top: 4px; }
+.sp-colour-pick { display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column; margin-top: 4px; }
 .sp-colour-pick > * + * { margin-top: 10px; }
 .sp-colour-range {
     -webkit-appearance: none;
     appearance: none;
     width: 100%;
     height: 28px;
-    border-radius: var(--radius-full);
+    border-radius: var(--radius-md);
     border: 1px solid var(--outline-variant);
-    /* background is the palette gradient, set inline */
     cursor: pointer;
 }
 .sp-colour-range::-webkit-slider-thumb {
@@ -328,8 +413,6 @@
     height: 22px;
     border-radius: 50%;
     background: transparent;
-    /* A ring, not a fill: the colour under the thumb is the thing being chosen, so
-       covering it with a solid handle would hide the answer. */
     border: 3px solid var(--on-surface);
     box-shadow: 0 0 0 2px var(--surface);
 }
@@ -342,28 +425,56 @@
     box-shadow: 0 0 0 2px var(--surface);
 }
 .sp-colour-meta {
+    display: -webkit-flex;
     display: flex;
+    -webkit-align-items: baseline;
     align-items: baseline;
-    font-family: var(--family-mono);
     font-size: 12px;
     color: var(--on-surface-variant);
 }
 .sp-colour-meta > * + * { margin-left: 4px; }
 .sp-colour-of { color: var(--outline); }
 
+.sp-dialog {
+    border-radius: var(--radius-md);
+    box-shadow: none;
+}
+.sp-dialog-title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 650;
+}
+.sp-dialog-body {
+    margin: 8px 0 0;
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--on-surface-variant);
+}
+#spDialogHtml { margin-top: 14px; }
+#spDialogInput {
+    display: none;
+    width: 100%;
+    margin-top: 14px;
+}
 .sp-dialog-actions {
+    display: -webkit-flex;
     display: flex;
+    -webkit-justify-content: flex-end;
     justify-content: flex-end;
+    margin-top: 20px;
 }
 .sp-dialog-actions > * + * { margin-left: 8px; }
+.sp-dialog-cancel {
+    background: var(--surface-container-highest);
+    color: var(--on-surface);
+    border: none;
+}
 
-[dir="rtl"] .sp-hero > * + * { margin-left: 0; margin-right: 18px; }
-[dir="rtl"] .sp-hero-top > * + * { margin-left: 0; margin-right: 12px; }
-[dir="rtl"] .sp-axis-line > * + *,
+[dir="rtl"] .sp-axes > * + *,
 [dir="rtl"] .sp-batches > * + *,
 [dir="rtl"] .sp-name-line > * + *,
 [dir="rtl"] .sp-dialog-actions > * + * { margin-left: 0; margin-right: 8px; }
-[dir="rtl"] .sp-group-head > * + *,
+[dir="rtl"] .sp-group-meta,
 [dir="rtl"] .sp-use > * + *,
 [dir="rtl"] .sp-part > * + * { margin-left: 0; margin-right: 10px; }
 [dir="rtl"] .sp-row > * + * { margin-left: 0; margin-right: 14px; }
@@ -371,16 +482,16 @@
 [dir="rtl"] .sp-colour-meta > * + * { margin-left: 0; margin-right: 4px; }
 [dir="rtl"] .sp-batch .led,
 [dir="rtl"] .sp-chip.used-by svg,
-[dir="rtl"] .sp-menu button svg {
-    margin-right: 0;
-}
+[dir="rtl"] .sp-menu button svg { margin-right: 0; }
 [dir="rtl"] .sp-batch .led { margin-left: 6px; }
 [dir="rtl"] .sp-chip.used-by svg { margin-left: 5px; }
 [dir="rtl"] .sp-menu button svg { margin-left: 10px; }
 
 @media (max-width: 768px) {
     .sp-row {
+        -webkit-align-items: flex-start;
         align-items: flex-start;
+        -webkit-flex-wrap: wrap;
         flex-wrap: wrap;
     }
     .sp-row-actions {
@@ -388,25 +499,21 @@
         margin-top: 12px;
         margin-left: 0;
     }
-    .sp-row-actions > .btn:not(.icon-btn) { flex: 1; }
-    [dir="rtl"] .sp-row-actions {
-        margin-right: 0;
-    }
+    .sp-row-actions > .btn:not(.sp-icon-btn) { -webkit-flex: 1; flex: 1; }
+    [dir="rtl"] .sp-row-actions { margin-right: 0; }
 }
 
 @media (max-width: 480px) {
-    .sp-hero {
-        flex-direction: column;
+    .sp-now-body {
+        -webkit-flex-wrap: wrap;
+        flex-wrap: wrap;
     }
-    .sp-hero > * + * {
-        margin-top: 16px;
+    .sp-now-actions {
+        width: 100%;
+        margin-top: 14px;
         margin-left: 0;
     }
-    .sp-hero-top .btn {
-        flex: none;
-        white-space: nowrap;
-    }
-    [dir="rtl"] .sp-hero > * + * {
-        margin-right: 0;
-    }
+    [dir="rtl"] .sp-now-actions { margin-right: 0; }
+    .sp-now-actions > .btn { width: 100%; }
+    .sp-axis-group { width: 100%; margin-bottom: 2px; }
 }

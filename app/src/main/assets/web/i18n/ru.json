@@ -2039,7 +2039,9 @@
     "schedule_saved": "Расписание зарядки сохранено",
     "schedule_save_failed": "Не удалось сохранить расписание зарядки",
     "section_schedule": "Расписание",
-    "section_charge_cap": "Лимит заряда"
+    "section_charge_cap": "Лимит заряда",
+    "start_charge": "Запустить сейчас",
+    "section_ac_current": "Ток AC"
   },
   "performance": {
     "tab_battery": "Аккумуляторная батарея",

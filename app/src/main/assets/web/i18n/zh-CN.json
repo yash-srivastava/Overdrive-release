@@ -2034,7 +2034,9 @@
     "schedule_saved": "充电计划已保存",
     "schedule_save_failed": "无法保存充电计划",
     "section_schedule": "计划",
-    "section_charge_cap": "充电上限"
+    "section_charge_cap": "充电上限",
+    "start_charge": "立即开始",
+    "section_ac_current": "交流电流"
   },
   "performance": {
     "tab_battery": "电池",

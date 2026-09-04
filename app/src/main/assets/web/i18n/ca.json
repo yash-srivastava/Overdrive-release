@@ -1446,7 +1446,9 @@
     "schedule_saved": "Programació de càrrega desada",
     "schedule_save_failed": "No s'ha pogut desar la programació de càrrega",
     "section_schedule": "Programació",
-    "section_charge_cap": "Límit de càrrega"
+    "section_charge_cap": "Límit de càrrega",
+    "start_charge": "Comença ara",
+    "section_ac_current": "Corrent CA"
   },
   "performance": {
     "tab_battery": "Bateria",

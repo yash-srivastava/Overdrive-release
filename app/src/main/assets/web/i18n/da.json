@@ -1446,7 +1446,9 @@
     "schedule_saved": "Opladningsplan gemt",
     "schedule_save_failed": "Kunne ikke gemme opladningsplan",
     "section_schedule": "Tidsplan",
-    "section_charge_cap": "Grænse for afgift"
+    "section_charge_cap": "Grænse for afgift",
+    "start_charge": "Start nu",
+    "section_ac_current": "AC-strøm"
   },
   "performance": {
     "tab_battery": "Batteri",

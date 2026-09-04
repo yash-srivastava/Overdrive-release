@@ -1446,7 +1446,9 @@
     "schedule_saved": "Charging schedule saved",
     "schedule_save_failed": "Couldn't save charging schedule",
     "section_schedule": "Schedule",
-    "section_charge_cap": "Charge limit"
+    "section_charge_cap": "Charge limit",
+    "start_charge": "Indítás most",
+    "section_ac_current": "AC áram"
   },
   "performance": {
     "tab_battery": "Battery",

@@ -1804,7 +1804,9 @@
     "schedule_saved": "Lader plan lagret",
     "schedule_save_failed": "Kunne ikke lagre ladeplan",
     "section_schedule": "Tidsplan",
-    "section_charge_cap": "Grense for fyllingsmengde"
+    "section_charge_cap": "Grense for fyllingsmengde",
+    "start_charge": "Start nå",
+    "section_ac_current": "AC-strøm"
   },
   "performance": {
     "tab_battery": "Batteri",

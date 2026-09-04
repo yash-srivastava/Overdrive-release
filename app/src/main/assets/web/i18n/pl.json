@@ -1446,7 +1446,9 @@
     "schedule_saved": "Harmonogram ładowania zapisany",
     "schedule_save_failed": "Nie można zapisać harmonogramu ładowania",
     "section_schedule": "Harmonogram",
-    "section_charge_cap": "Limit opłat"
+    "section_charge_cap": "Limit opłat",
+    "start_charge": "Uruchom teraz",
+    "section_ac_current": "Prąd AC"
   },
   "performance": {
     "tab_battery": "Bateria",

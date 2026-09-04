@@ -1767,7 +1767,9 @@
     "schedule_saved": "충전 일정이 저장되었습니다",
     "schedule_save_failed": "충전 일정을 저장할 수 없습니다",
     "section_schedule": "일정",
-    "section_charge_cap": "충전 한도"
+    "section_charge_cap": "충전 한도",
+    "start_charge": "지금 시작",
+    "section_ac_current": "AC 전류"
   },
   "performance": {
     "tab_battery": "배터리",

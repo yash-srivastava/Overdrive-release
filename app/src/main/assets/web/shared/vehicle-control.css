@@ -73,8 +73,6 @@
 .vc-nav-btn:hover { background: var(--vc-pill-bg-hover); }
 .vc-nav-btn:active { -webkit-transform: scale(0.92); transform: scale(0.92); }
 
-/* One chrome row on the stage: lock | appearance | cloud. Equal-flex
-   side slots keep the middle cluster on the true center line. */
 .vc-status-bar {
     position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); left: 10px; right: 10px;
     display: -webkit-flex; display: flex;
@@ -130,9 +128,6 @@
 .dot.green.partial { color: var(--status-success); }
 .dot.amber.partial { color: var(--status-warning); }
 
-/* Paint swatches — square tiles matching the app's 8dp language. The active
-   swatch is marked with a primary ring drawn as a box-shadow so the tile's own
-   colour stays edge-to-edge instead of being eaten by a border. */
 .vc-colors {
     display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center;
     box-sizing: border-box;
@@ -164,9 +159,9 @@
 .vc-swatch-custom svg { width: 16px; height: 16px; }
 .vc-swatch-custom.active { color: var(--primary); border-color: var(--primary); }
 
-/* Model selector — custom listbox rather than a native <select>, whose popup
-   the WebView paints with its own (orange) highlight that CSS cannot reach.
-   The hidden <select> stays the value + i18n source of truth. */
+/* Custom listbox: the WebView paints a native <select> popup with its own
+   orange highlight that CSS cannot reach. The hidden <select> stays the
+   value + i18n source of truth. */
 .vc-model-select { display: none; }
 .vc-model-menu { position: relative; -webkit-flex-shrink: 0; flex-shrink: 0; }
 .vc-model-menu__trigger {
@@ -198,11 +193,7 @@
 .vc-model-menu.open .vc-model-menu__chevron {
     -webkit-transform: rotate(180deg); transform: rotate(180deg);
 }
-/* Stale — the last manifest refresh failed, so newly released models may be
-   missing. Opening the menu retries. */
-/* Kept in the DOM so a failed manifest refresh can still retry on open.
-   The yellow dot on the trigger was being read as a status for the selected
-   model, so it stays out of the chrome. */
+/* Kept in the DOM so a failed manifest refresh can still retry on open. */
 .vc-model-menu__stale { display: none; }
 .vc-model-menu__list {
     display: none;
@@ -271,8 +262,6 @@
 .vc-toast.error { border-color: var(--status-danger); color: var(--status-danger); }
 .vc-toast.info { border-color: var(--status-info); color: var(--status-info); }
 
-/* Surround-view and view-mode chips sit in the middle slot of the one
-   chrome row. Horizontal icon + label so the label has room to read. */
 .vc-3d-btn {
     display: -webkit-inline-flex; display: inline-flex;
     -webkit-align-items: center; align-items: center;
@@ -300,16 +289,12 @@
 .vc-3d-btn:hover { background: var(--vc-pill-bg-hover); color: var(--vc-text-primary); }
 .vc-3d-btn.on { border-color: var(--primary); background: var(--primary-container); color: var(--on-primary-container); }
 /* Both labels live in the chip; the page-mode class (set before first paint)
-   picks which word is visible so a late i18n catalog cannot blank the text. */
+   picks which one shows, so a late i18n catalog cannot blank the text. */
 html.vc-mode-lite .vc-view-to-lite { display: none; }
 html.vc-mode-immersive .vc-view-to-3d { display: none; }
 
 /* ===== TYRE PRESSURE STRIP =====
-   One cell per corner, sitting in the bottom bar above the category dock.
-   The cells used to be cards pinned to the four corners of the render, which
-   read as spatial without being spatial: nothing tied a card to a wheel, and
-   at every viewport size one pair or the other collided with the floating
-   chrome. A strip reads left-to-right in one pass and never overlaps. */
+   One cell per corner, sitting in the bottom bar above the category dock. */
 
 .vc-tyre-strip {
     display: -webkit-flex; display: flex;
@@ -421,8 +406,7 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
     margin-right: 3px;
 }
 
-/* State colour scale. Dot, state word, and the pressure figure all shift
-   together so a low tyre is unmistakable without reading the label. */
+/* State colour scale. */
 .vc-tyre-cell[data-state="normal"]  .vc-tyre-dot     { background: var(--primary); }
 .vc-tyre-cell[data-state="normal"]  .vc-tyre-state   { color: var(--primary); }
 
@@ -443,8 +427,8 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
 .vc-tyre-cell[data-state="muted"]   .vc-tyre-dot     { background: var(--outline); }
 .vc-tyre-cell[data-state="muted"]   .vc-tyre-state   { color: var(--vc-text-muted); }
 
-/* Surround view covers the stage; the strip has nothing to annotate then.
-   Model load must not hide it — tyre data is independent of the GLB. */
+/* Hidden only under Surround view; tyre data is independent of the GLB, so
+   model load must not hide it. */
 .vc-viewport[data-3d-on="true"] ~ .vc-bar .vc-tyre-strip {
     display: none;
 }
@@ -488,9 +472,6 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
 }
 .vc-bar > * { pointer-events: auto; }
 
-/* One card for the sheet and the tabs. The closed panel used to keep its own
-   1px rounded border at max-height: 0, which sat on top of the tab bar as a
-   lid that then slid out through it. */
 .vc-dock {
     width: 100%;
     overflow: hidden;
@@ -553,11 +534,9 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
     padding: 8px 12px;
 }
 
-/* Windows panel: one card per aperture, two per row. Cards rather than bare
-   rows because each aperture carries its own readout and preset group, and a
-   flat stack of seven identical rows gave no visual grouping to scan.
-   Gutters are margins, not `gap` — Chrome 58 ignores flex gap. The grid's
-   negative right margin absorbs the trailing card gutter. */
+/* Windows panel: one card per aperture, two per row. Gutters are margins,
+   not `gap` — Chrome 58 ignores flex gap. The grid's negative right margin
+   absorbs the trailing card gutter. */
 .vc-window-grid {
     display: -webkit-flex; display: flex;
     -webkit-flex-wrap: wrap; flex-wrap: wrap;
@@ -600,8 +579,6 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
     -webkit-align-items: center; align-items: center;
 }
 .vc-window-presets > .vc-preset { -webkit-flex: 1; flex: 1; }
-/* The All-windows row spans the grid, so let its three actions keep their
-   intrinsic width instead of stretching to a third of the panel each. */
 .vc-window-row-wide .vc-window-presets > .vc-preset { -webkit-flex: none; flex: none; padding: 0 16px; }
 .vc-window-presets > .vc-preset + .vc-preset { margin-left: 4px; }
 [dir="rtl"] .vc-window-presets > .vc-preset + .vc-preset { margin-left: 0; margin-right: 4px; }
@@ -622,8 +599,7 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
     transition: background .15s, border-color .15s, color .15s;
 }
 
-/* Stacked panels (Lights) — full-width rows instead of a centred wrap, so a
-   tile and a colour ramp don't end up competing on one line. */
+/* Stacked panels (Lights) — full-width rows. */
 .vc-stack-grid {
     -webkit-flex-direction: column; flex-direction: column;
     -webkit-align-items: stretch; align-items: stretch;
@@ -745,11 +721,13 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
 .vc-tile[data-requires-cloud="true"],
 .vc-preset[data-requires-cloud="true"],
 .vc-charge-action[data-requires-cloud="true"],
-.vc-charge-save[data-requires-cloud="true"] { position: relative; }
+.vc-charge-save[data-requires-cloud="true"],
+.vc-charge-switch[data-requires-cloud="true"] { position: relative; }
 .vc-tile[data-requires-cloud="true"]::after,
 .vc-preset[data-requires-cloud="true"]::after,
 .vc-charge-action[data-requires-cloud="true"]::after,
-.vc-charge-save[data-requires-cloud="true"]::after {
+.vc-charge-save[data-requires-cloud="true"]::after,
+.vc-charge-switch[data-requires-cloud="true"]::after {
     content: '';
     position: absolute; top: 4px; right: 4px;
     width: 18px; height: 18px;
@@ -761,24 +739,31 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
     background-size: 12px 12px;
     pointer-events: none;
 }
-.vc-preset[data-requires-cloud="true"]::after { top: 4px; right: auto; left: 4px; }
+/* A preset is a short label pill, so the marker would sit on the text. Pad both
+   sides to keep the label centred under it. */
+.vc-window-row-wide .vc-window-presets > .vc-preset[data-requires-cloud="true"] {
+    padding-left: 26px; padding-right: 26px;
+}
 [dir="rtl"] .vc-tile[data-requires-cloud="true"]::after,
+[dir="rtl"] .vc-preset[data-requires-cloud="true"]::after,
 [dir="rtl"] .vc-charge-action[data-requires-cloud="true"]::after,
-[dir="rtl"] .vc-charge-save[data-requires-cloud="true"]::after {
+[dir="rtl"] .vc-charge-save[data-requires-cloud="true"]::after,
+[dir="rtl"] .vc-charge-switch[data-requires-cloud="true"]::after {
     right: auto; left: 4px;
 }
-[dir="rtl"] .vc-preset[data-requires-cloud="true"]::after { left: auto; right: 4px; }
 .vc-tile[data-cloud-state="connected"]::after,
 .vc-preset[data-cloud-state="connected"]::after,
 .vc-charge-action[data-cloud-state="connected"]::after,
-.vc-charge-save[data-cloud-state="connected"]::after {
+.vc-charge-save[data-cloud-state="connected"]::after,
+.vc-charge-switch[data-cloud-state="connected"]::after {
     background-color: var(--primary-container);
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300876C' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z'/></svg>");
 }
 .vc-tile[data-cloud-state="checking"]::after,
 .vc-preset[data-cloud-state="checking"]::after,
 .vc-charge-action[data-cloud-state="checking"]::after,
-.vc-charge-save[data-cloud-state="checking"]::after {
+.vc-charge-save[data-cloud-state="checking"]::after,
+.vc-charge-switch[data-cloud-state="checking"]::after {
     background-color: var(--status-warning-container);
 }
 .vc-tile[data-cloud-state="not_configured"],
@@ -788,7 +773,9 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
 .vc-charge-action[data-cloud-state="not_configured"],
 .vc-charge-action[data-cloud-state="unavailable"],
 .vc-charge-save[data-cloud-state="not_configured"],
-.vc-charge-save[data-cloud-state="unavailable"] {
+.vc-charge-save[data-cloud-state="unavailable"],
+.vc-charge-switch[data-cloud-state="not_configured"],
+.vc-charge-switch[data-cloud-state="unavailable"] {
     border-style: dashed;
     background: var(--vc-tile-bg-disabled);
 }
@@ -815,11 +802,21 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
 .vc-tile.memory.armed { border-color: var(--primary); color: var(--primary); }
 .vc-tile.memory.armed::after { height: 0; }
 
-/* "Hold to save" helper line under the seat-memory tiles. */
+.vc-seat-memory {
+    -webkit-flex-basis: 100%; -ms-flex-preferred-size: 100%; flex-basis: 100%;
+    margin-top: 10px; padding-top: 10px;
+    border-top: 1px solid var(--outline-variant);
+}
+.vc-seat-memory-actions {
+    display: -webkit-flex; display: flex;
+    -webkit-align-items: center; align-items: center;
+}
+.vc-seat-memory-actions > .vc-tile + .vc-tile { margin-left: 6px; }
+[dir="rtl"] .vc-seat-memory-actions > .vc-tile + .vc-tile { margin-left: 0; margin-right: 6px; }
 .vc-hold-hint {
-    -ms-flex-preferred-size: 100%; flex-basis: 100%;
-    margin: 4px 2px 0; font-size: 9px; font-weight: 600; letter-spacing: .3px;
-    text-transform: uppercase; color: var(--vc-text-muted); text-align: center;
+    margin-top: 8px;
+    font-size: 11px; font-weight: 500;
+    color: var(--vc-text-muted);
 }
 
 /* Small +/- button */
@@ -923,7 +920,7 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
     border-top: 1px solid var(--vc-border-subtle);
 }
 .vc-charging-divider { border-top: 1px solid var(--vc-border-subtle); padding-top: 10px; }
-/* Climate remote-precondition row still uses this class. */
+/* Also used by the Climate remote-precondition row. */
 .vc-charging-section {
     display: -webkit-flex; display: flex;
     -webkit-flex-direction: column; flex-direction: column;
@@ -964,13 +961,14 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
     color: var(--on-primary-container);
 }
 .vc-charge-switch:disabled { opacity: .45; cursor: not-allowed; }
-.vc-charge-actions { width: 100%; }
+.vc-schedule-bar > .vc-charge-switch { margin-left: auto; margin-right: 0; }
+[dir="rtl"] .vc-schedule-bar > .vc-charge-switch { margin-left: 0; margin-right: auto; }
+.vc-charge-footer { -webkit-justify-content: flex-end; justify-content: flex-end; }
 .vc-charge-action,
 .vc-charge-save {
-    -webkit-flex: 1; flex: 1;
-    min-height: 48px;
-    padding: 0 12px;
-    border-radius: var(--radius-md);
+    min-height: 40px;
+    padding: 0 14px;
+    border-radius: var(--radius-sm);
     border: 1px solid var(--vc-border-subtle);
     background: var(--surface-container);
     color: var(--vc-text-strong);
@@ -984,8 +982,6 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
     color: var(--on-primary-container);
 }
 .vc-charge-save {
-    -webkit-flex: none; flex: none;
-    width: 100%;
     background: var(--primary);
     border-color: var(--primary);
     color: var(--on-primary);
@@ -1050,9 +1046,7 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
     -webkit-align-items: stretch; align-items: stretch;
     width: 100%;
 }
-/* One concern per row, left-aligned so the labels form a readable column.
-   Everything used to sit on a single centred line that overflowed the panel.
-   Sibling margins rather than `gap` for the Chrome 58 WebView. */
+/* Sibling margins rather than `gap` for the Chrome 58 WebView. */
 .vc-schedule-bar {
     display: -webkit-flex; display: flex;
     -webkit-align-items: center; align-items: center;
@@ -1117,7 +1111,7 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
    read as one system; only the full-width break is new.
    Full-width via flex-basis only — NOT width:100%. `.vc-panel-row > *` adds 2px of
    horizontal margin, so an explicit 100% width would overflow the row by 4px. Matches
-   how .vc-sound-engine / .vc-hold-hint claim their own line. */
+   how .vc-sound-engine / .vc-seat-memory claim their own line. */
 .vc-climate-schedule {
     -webkit-flex-basis: 100%; -ms-flex-preferred-size: 100%; flex-basis: 100%;
     margin-top: 8px;
@@ -1320,8 +1314,6 @@ button.vc-pill:active { -webkit-transform: scale(.95); transform: scale(.95); }
 .vc-modal-text strong {
     color: var(--vc-text-strong);
 }
-/* Dialog actions mirror the native battery-capacity dialog: filled primary
-   trailing, tonal dismiss ahead of it. */
 .vc-modal-actions {
     display: -webkit-flex; display: flex;
     -webkit-justify-content: flex-end; justify-content: flex-end;
@@ -1440,16 +1432,7 @@ html.vc-mode-lite .vc-lite-hero {
     width: auto;
     height: auto;
 }
-.vc-lite-hero svg {
-    width: 46%;
-    max-width: 430px;
-    height: auto;
-    /* Inherits the themed text colour; heavy fade so the placeholder reads as
-       a backdrop, not content. */
-    opacity: 0.35;
-}
 .vc-lite-hero.has-art img { display: block; }
-.vc-lite-hero.has-art svg { display: none; }
 @media (max-height: 560px) {
     .vc-lite-hero { padding: 96px 16px 150px; }
 }

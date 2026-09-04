@@ -1767,7 +1767,9 @@
     "schedule_saved": "บันทึกตารางเวลาชาร์จไฟเรียบร้อยแล้ว",
     "schedule_save_failed": "ไม่สามารถบันทึกตารางเวลาชาร์จไฟได้",
     "section_schedule": "ตารางเวลาตั้งไว้",
-    "section_charge_cap": "ลิมิตกระแสชาร์จ"
+    "section_charge_cap": "ลิมิตกระแสชาร์จ",
+    "start_charge": "เริ่มตอนนี้",
+    "section_ac_current": "กระแส AC"
   },
   "performance": {
     "tab_battery": "แบตเตอรี่",

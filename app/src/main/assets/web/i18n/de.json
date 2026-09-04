@@ -2045,7 +2045,9 @@
     "schedule_saved": "Ladeplan gespeichert",
     "schedule_save_failed": "Ladeplan konnte nicht gespeichert werden",
     "section_schedule": "Zeitplan",
-    "section_charge_cap": "Ladelimit"
+    "section_charge_cap": "Ladelimit",
+    "start_charge": "Jetzt starten",
+    "section_ac_current": "AC-Strom"
   },
   "performance": {
     "tab_battery": "Batterie",
