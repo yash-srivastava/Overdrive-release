@@ -658,9 +658,7 @@ class RecordingsFragment : Fragment() {
         root.findViewById<TextView>(R.id.tvPreviewSeverityBadge)?.apply {
             visibility = if (severity == null) View.GONE else View.VISIBLE
             text = severity.orEmpty()
-            // Tonal fill plus the matching status colour for the label, the
-            // same pairing the dashboard status chips use. Unknown severities
-            // fall back to a neutral surface tone.
+            // Same tonal fill / status label pairing as the dashboard chips.
             val tone = when (severity) {
                 "CRITICAL" -> R.color.overdrive_status_danger_container to
                     R.color.overdrive_status_danger
@@ -1115,9 +1113,8 @@ class RecordingsFragment : Fragment() {
     private fun setupSettingsAction(view: View) {
         view.findViewById<MaterialButton>(R.id.btnRecordingsSettings)?.setOnClickListener {
             when (currentSource) {
-                // Replays share the dashcam encoder knobs, so they open
-                // Settings already on the Recording section — same chrome
-                // as Settings → Recording, with up returning here.
+                // Replays share the dashcam encoder knobs, so they open Settings
+                // on the Recording section.
                 Source.ALL, Source.DASHCAM, Source.REPLAYS -> {
                     val args = Bundle().apply {
                         putString(
@@ -1823,8 +1820,8 @@ class RecordingsFragment : Fragment() {
     }
 
     /**
-     * Chips created in code can't take a style attribute, so they pick up the
-     * app's component corner size here instead of Material's rounded default.
+     * Chips created in code can't take a style attribute, so the app's
+     * component corner size has to be applied here.
      */
     private fun Chip.applyAppCornerShape() {
         shapeAppearanceModel = shapeAppearanceModel

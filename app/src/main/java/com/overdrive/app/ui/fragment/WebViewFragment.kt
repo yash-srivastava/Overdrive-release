@@ -42,6 +42,36 @@ class WebViewFragment : Fragment() {
         const val ARG_PAGE_PATH = "page_path"
         private const val KEY_SAVED_URL = "saved_url"
 
+        // Page paths this process has already painted once. The daemon serves
+        // HTML no-store but CSS/JS with max-age, so a revisit is fast enough
+        // that the overlay would only read as a flash. Process-wide, so it
+        // survives fragment recreation and resets on process death.
+        private val warmedPaths: MutableSet<String> =
+            java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+        // Hides the in-page PWA chrome before the first paint. INJECT_JS runs
+        // on onPageFinished, which is late enough for the sidebar to flash.
+        // Keyed on data-android-embed and NOT data-app-shell: app-shell.js
+        // tags the standalone HTML dashboard with that attribute, and it must
+        // keep its nav.
+        private const val EMBED_ATTR = "data-android-embed"
+        private const val EMBED_CHROME = """<script>document.documentElement.setAttribute('data-android-embed','1');</script><style>[data-android-embed="1"] .sidebar,[data-android-embed="1"] .sidebar-overlay,[data-android-embed="1"] .mobile-header,[data-android-embed="1"] .page-header{display:none !important;}[data-android-embed="1"]{--sidebar-width:0px !important;}[data-android-embed="1"] .main-content{margin-left:0 !important;padding-top:0 !important;}[data-android-embed="1"] .bottom-tabs{left:0 !important;right:0 !important;}</style>"""
+
+        /** Splice [EMBED_CHROME] into a page's `<head>`, falling back to
+         *  `<html>` and then the document start. */
+        @JvmStatic
+        fun spliceEmbedChrome(html: String): String {
+            if (html.contains(EMBED_ATTR)) return html
+            for (tag in arrayOf("<head", "<html")) {
+                val open = html.indexOf(tag, ignoreCase = true)
+                if (open < 0) continue
+                val close = html.indexOf('>', open)
+                if (close < 0) continue
+                return html.substring(0, close + 1) + EMBED_CHROME + html.substring(close + 1)
+            }
+            return EMBED_CHROME + html
+        }
+
         // ── Key-mapping capture bridge ────────────────────────────────────
         // The Key Mapping "press a button to capture it" box lives in the
         // WebView, but hardware buttons hit the NATIVE AccessibilityService
@@ -228,8 +258,7 @@ class WebViewFragment : Fragment() {
         '[data-app-shell="1"] .top-bar-btn { display: none !important; }',
         // Pull the absolute-positioned camera top bar in by a hair so the
         // status dot and quality dropdown breathe at narrow landscape widths
-        // (head-unit windowed mode, ~600-900px wide). Equal on both axes so
-        // the corner-placed dot keeps matching gaps.
+        // (head-unit windowed mode, ~600-900px wide).
         '[data-app-shell="1"] .camera-top-bar { padding: 14px !important; }',
         '[data-app-shell="1"] .camera-top-bar .top-bar-left,',
         '[data-app-shell="1"] .camera-top-bar .top-bar-right { min-width: 0; flex-wrap: nowrap; }',
@@ -353,6 +382,8 @@ class WebViewFragment : Fragment() {
     private var errorOverlay: View? = null
     private var btnRetry: MaterialButton? = null
     private var currentUrl: String? = null
+    // Path of the load in flight, used to mark it warm once it paints.
+    private var currentLoadKey: String? = null
     private var pageLoadFailed = false
     // True between onPageStarted and onPageFinished / onReceivedError. The
     // auth-cookie retry consults this so it doesn't fire a reload() during
@@ -777,7 +808,24 @@ class WebViewFragment : Fragment() {
                         }
                         if (url.endsWith(".mp4")) mime = "video/mp4"
 
-                        val response = WebResourceResponse(mime, encoding, stream)
+                        // Only the app's WebView reaches this intercept, so the
+                        // embed chrome never lands on the tunnel / PWA clients.
+                        var bodyStream: java.io.InputStream = stream
+                        var splicedHtml = false
+                        if (mime == "text/html" && connection.responseCode == 200) {
+                            try {
+                                val patched = spliceEmbedChrome(
+                                    String(stream.readBytes(), Charsets.UTF_8))
+                                bodyStream = java.io.ByteArrayInputStream(
+                                    patched.toByteArray(Charsets.UTF_8))
+                                splicedHtml = true
+                            } catch (e: Exception) {
+                                android.util.Log.w("WebViewProxy",
+                                    "HTML splice failed: ${e.message}")
+                            }
+                        }
+
+                        val response = WebResourceResponse(mime, encoding, bodyStream)
 
                         // 4. Pass Status Code (206 vs 200)
                         response.setStatusCodeAndReasonPhrase(
@@ -820,7 +868,7 @@ class WebViewFragment : Fragment() {
                         // MANUAL OVERRIDES: Ensure these exist even if server forgot them
                         headers["Access-Control-Allow-Origin"] = "*"
                         headers["Accept-Ranges"] = "bytes"  // Tells player "You can seek"
-                        if (length > 0) {
+                        if (length > 0 && !splicedHtml) {
                             headers["Content-Length"] = length.toString()
                         }
                         response.responseHeaders = headers
@@ -902,13 +950,14 @@ class WebViewFragment : Fragment() {
                     // load.
                     pageLoadFailed = false
                     loadInProgress = true
-                    showLoading()
+                    applyLoadChrome(url)
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     loadInProgress = false
                     if (!pageLoadFailed) {
+                        currentLoadKey?.let { warmedPaths.add(it) }
                         showContent()
                         // Theme: tag <html data-theme="…"> BEFORE INJECT_JS so any
                         // CSS that depends on the variable values uses the right
@@ -1596,7 +1645,7 @@ class WebViewFragment : Fragment() {
 
     private fun loadPage() {
         pageLoadFailed = false
-        showLoading()
+        applyLoadChrome(currentUrl)
         currentUrl?.let { webView?.loadUrl(it) }
     }
 
@@ -1605,14 +1654,39 @@ class WebViewFragment : Fragment() {
         loadPage()
     }
 
+    private fun pathKeyOf(url: String?): String? {
+        if (url.isNullOrBlank()) return null
+        return try { Uri.parse(url).path?.takeIf { it.isNotBlank() } } catch (_: Throwable) { null }
+    }
+
+    /** Overlay covers the first paint of a page; a warm revisit goes
+     *  straight to content so the spinner does not read as a flash. */
+    private fun applyLoadChrome(url: String?) {
+        pathKeyOf(url)?.let { currentLoadKey = it }
+        val warm = currentLoadKey?.let { warmedPaths.contains(it) } == true
+        if (warm) hideLoading() else showLoading()
+    }
+
     private fun showLoading() {
+        loadingOverlay?.animate()?.cancel()
         loadingOverlay?.alpha = 1f
         loadingOverlay?.visibility = View.VISIBLE
         errorOverlay?.visibility = View.GONE
         webView?.visibility = View.VISIBLE
     }
 
+    private fun hideLoading() {
+        loadingOverlay?.animate()?.cancel()
+        loadingOverlay?.visibility = View.GONE
+        errorOverlay?.visibility = View.GONE
+        webView?.visibility = View.VISIBLE
+    }
+
     private fun showContent() {
+        if (loadingOverlay?.visibility != View.VISIBLE) {
+            hideLoading()
+            return
+        }
         loadingOverlay?.animate()?.alpha(0f)?.setDuration(200)
             ?.withEndAction { loadingOverlay?.visibility = View.GONE }?.start()
         errorOverlay?.visibility = View.GONE
@@ -1620,6 +1694,7 @@ class WebViewFragment : Fragment() {
     }
 
     private fun showError() {
+        loadingOverlay?.animate()?.cancel()
         loadingOverlay?.visibility = View.GONE
         errorOverlay?.visibility = View.VISIBLE
         webView?.visibility = View.INVISIBLE

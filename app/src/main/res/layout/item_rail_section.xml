@@ -2,10 +2,9 @@
 <!--
   Category header for the navigation rail. Non-interactive.
 
-  The label names the group at the expanded width; the hairline stands in for
-  it at the compact 80dp width, where there is no room for text.
-  MainActivity.applySectionForm cross-fades the two across the slide, and the
-  fixed height keeps the swap free of relayout.
+  MainActivity.applySectionForm cross-fades the label (expanded width) and the
+  hairline (compact width) across the slide; the fixed height keeps the swap
+  free of relayout.
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"

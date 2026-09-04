@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Panel behind a single hero-card metric. surfaceContainerHigh sits one tier
-  above the card so the metric lifts off it, with an outlineVariant hairline to
-  keep the panels separable at driving distance. It also has to hold against
-  the ribbon backdrop, which passes behind these panels.
+  above the card so the metric lifts off it, and has to hold against the
+  ribbon backdrop that passes behind these panels.
 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">

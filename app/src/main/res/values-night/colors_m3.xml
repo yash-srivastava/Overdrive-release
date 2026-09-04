@@ -31,10 +31,8 @@
     <color name="md_sys_color_error_container_dark">#93000A</color>
     <color name="md_sys_color_on_error_container_dark">#FFDAD6</color>
 
-    <!-- Background / surfaces — green-black. The seed hue is carried into the
-         neutrals themselves, so surfaces read as deep green rather than grey
-         and the container tiers stay legible against each other on a sunlit
-         dashboard. -->
+    <!-- Background / surfaces — green-black; the seed hue is carried into the
+         neutrals themselves rather than left grey. -->
     <color name="md_sys_color_background_dark">#010A07</color>
     <color name="md_sys_color_on_background_dark">#E6EDE9</color>
     <color name="md_sys_color_surface_dark">#010A07</color>
@@ -66,9 +64,8 @@
     <color name="overdrive_status_info_dark">#85CFFF</color>
 
     <!-- Container tones for the status colors above, for status pills that need
-         a fill rather than just text. Each sits ~2 tiers above the card it
-         lands on so the pill reads as filled without glowing. Alpha lets the
-         hero card's ribbon carry through the pills. -->
+         a fill rather than just text. Alpha lets the hero card's ribbon carry
+         through the pills. -->
     <color name="overdrive_status_success_container_dark">#CC06331F</color>
     <color name="overdrive_status_warning_container_dark">#CC33240C</color>
     <color name="overdrive_status_danger_container_dark">#CC3A1512</color>

@@ -30,8 +30,7 @@ import java.net.HttpURLConnection
  * Spanned with bolded numbers / accented colors. Higher `priority` wins in
  * sort order; ties shuffle to keep the rotation feeling alive across visits.
  *
- * `icon` names the kind of thing the row reports, so the activity card can
- * render a feed rather than a block of sentences. 0 leaves the row iconless.
+ * `icon` names the kind of thing the row reports; 0 leaves the row iconless.
  */
 data class DashboardInsight(
     val text: CharSequence,

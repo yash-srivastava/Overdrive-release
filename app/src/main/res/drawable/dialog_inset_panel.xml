@@ -2,8 +2,7 @@
 <!--
   Read-only panel nested inside a dialog. surfaceContainerHighest sits one tier
   above the surfaceContainerHigh that Theme.Overdrive.M3.Dialog gives the window,
-  so the panel lifts off the dialog. Going the other way reads as a punched-out
-  dark well against the green dark palette.
+  so the panel lifts off the dialog.
 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">

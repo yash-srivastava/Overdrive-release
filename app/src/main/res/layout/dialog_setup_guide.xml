@@ -1,9 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- First-launch setup guide dialog (M3).
-
-     Three numbered steps carry the setup; the troubleshooting notes below the
-     divider are deliberately plain rows so they never read as a fourth gate.
-
      Wrapped in ScrollView so the content + buttons are always reachable
      on landscape BYD head units (720p, ~604dp usable height). -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
@@ -39,9 +35,7 @@
             android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
             android:textColor="?attr/colorOnSurfaceVariant" />
 
-        <!-- Post-update notice. Sits under the title rather than above it so the
-             dialog still opens on its own name, and stays neutral because it
-             reports a fact — step 2 below is the thing to act on. -->
+        <!-- Post-update notice — shown only after an update. -->
         <TextView
             android:id="@+id/tvVersionBanner"
             android:layout_width="match_parent"
@@ -60,9 +54,8 @@
             tools:text="Updated — re-confirm autostart"
             tools:visibility="visible" />
 
-        <!-- Step 1: Language. Complete from the start — Auto is a valid
-             selection out of the box — so it carries the check and a compact
-             action instead of the full-width button the open steps use. -->
+        <!-- Step 1: Language. Complete from the start, since Auto is a valid
+             selection out of the box. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -276,9 +269,7 @@
 
         </LinearLayout>
 
-        <!-- Troubleshooting — optional follow-ups, not setup gates. No card, no
-             badge and no checkmark, so the three steps above stay the only
-             things that look like a checklist. -->
+        <!-- Troubleshooting — optional follow-ups, not setup gates. -->
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
@@ -295,9 +286,7 @@
             android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
             android:textColor="?attr/colorOnSurfaceVariant" />
 
-        <!-- Tip: disable BYD Traffic Monitor. The action sits on the title row
-             rather than under the body — a row of its own per tip pushed the
-             dialog past the head unit's usable height. -->
+        <!-- Tip: disable BYD Traffic Monitor. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -385,9 +374,8 @@
 
             </LinearLayout>
 
-            <!-- Names the screen the steps above happen on, and takes the user
-                 there. Labelled with the rail's own word for it so the two
-                 always agree. -->
+            <!-- Labelled with the rail's own word for the screen so the two
+                 stay in agreement. -->
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnOpenDiagnostics"
                 style="@style/Widget.Overdrive.M3.Button.Text"

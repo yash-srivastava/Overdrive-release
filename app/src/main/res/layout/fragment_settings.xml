@@ -49,8 +49,6 @@
         android:paddingTop="@dimen/page_padding_top"
         android:paddingBottom="@dimen/page_padding_bottom">
 
-        <!-- The app bar names this screen and the rail carries the wordmark,
-             so the header is the one line that says what is tunable here. -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

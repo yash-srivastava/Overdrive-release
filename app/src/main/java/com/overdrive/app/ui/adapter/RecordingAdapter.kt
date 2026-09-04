@@ -586,9 +586,8 @@ private fun View.resolveColor(@ColorRes colorRes: Int): Int =
     ContextCompat.getColor(context, colorRes)
 
 /**
- * Paint a badge in a status tone. The tonal container carries the fill and the
- * matching status colour the label, which keeps the pair legible in both themes
- * and over a thumbnail — the container tones are ~80% opaque.
+ * Paint a badge in a status tone: the tonal container carries the fill and the
+ * matching status colour the label.
  */
 private fun TextView.tintAsStatusBadge(@ColorRes fill: Int, @ColorRes label: Int) {
     setBackgroundColor(resolveColor(fill))
@@ -597,7 +596,7 @@ private fun TextView.tintAsStatusBadge(@ColorRes fill: Int, @ColorRes label: Int
 
 /**
  * The same treatment for a badge that carries no status meaning. Surface roles
- * live under material's attr namespace here, not the app's (nonTransitiveRClass).
+ * resolve against material's attr namespace, not the app's (nonTransitiveRClass).
  */
 private fun TextView.tintAsNeutralBadge() {
     setBackgroundColor(

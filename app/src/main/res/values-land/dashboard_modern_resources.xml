@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Landscape hero is full-bleed. Panels are a fixed width so they do
-         not stretch with the card; the render is capped so the nodpi bitmap
-         does not measure at 338dp; the ribbon is a trailing box so the wave
-         stays readable behind the car. -->
+    <!-- Landscape hero is full-bleed. Panels are a fixed width so they do not
+         stretch with the card, and the render is capped so the nodpi bitmap
+         does not measure at 338dp. -->
     <dimen name="dashboard_hero_metric_width">260dp</dimen>
     <dimen name="dashboard_hero_metric_min_height">100dp</dimen>
     <dimen name="dashboard_hero_art_max_height">200dp</dimen>
@@ -11,8 +10,7 @@
     <dimen name="dashboard_hero_ribbon_width">1040dp</dimen>
 
     <!-- Hero status chips. Sized against the metric row above rather than to
-         its content, so the three read as one row — a little short of the
-         row's full 532dp so they don't square off with the panels. -->
+         their content, so the three read as one row. -->
     <dimen name="dashboard_hero_chip_width">160dp</dimen>
     <dimen name="dashboard_hero_chip_min_height">42dp</dimen>
 

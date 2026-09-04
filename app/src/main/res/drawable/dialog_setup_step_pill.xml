@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Step-number badge in the setup guide. Rounded square, not a circle, so the
-     badges read as part of the same shape family as the cards around them. -->
+<!-- Step-number badge in the setup guide. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <solid android:color="?attr/colorPrimaryContainer" />

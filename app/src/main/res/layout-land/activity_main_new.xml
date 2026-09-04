@@ -13,9 +13,8 @@
 
   Layout = navigation rail (left, scrollable) + main stage on the right.
   The right side stacks: MaterialToolbar → nav host. The toolbar takes
-  @dimen/app_bar_height rather than ?actionBarSize, which the platform drops
-  to 48dp in landscape, and its title inset matches the page content padding
-  so the page name lines up with the content beneath it.
+  @dimen/app_bar_height, not ?actionBarSize, which the platform drops to 48dp
+  in landscape.
 
   ID `drawerLayout` was historically referenced; the rail-based shell does
   not use a drawer. MainActivity tolerates its absence (findViewById
@@ -38,10 +37,9 @@
         android:orientation="horizontal">
 
         <!-- ============================================================== -->
-        <!--  Navigation rail — a column of wordmark, scrolling             -->
-        <!--  destinations, and the pinned collapse row. The middle         -->
-        <!--  scrolls because the landscape strip between BYD's two system  -->
-        <!--  bars is short enough to clip "Diagnostics" + "Settings".      -->
+        <!--  Navigation rail — wordmark, scrolling destinations, pinned    -->
+        <!--  collapse row. The middle scrolls because the strip between    -->
+        <!--  BYD's two system bars clips the last destinations.            -->
         <!-- ============================================================== -->
         <LinearLayout
             android:id="@+id/navigationRailContainer"
@@ -50,9 +48,8 @@
             android:background="?attr/colorSurfaceContainerLow"
             android:orientation="vertical">
 
-            <!-- Wordmark, so the rail names the app instead of opening on an
-                 empty strip. Auto-sizes because it has to read at both rail
-                 widths; MainActivity only moves its gravity. -->
+            <!-- Wordmark. Auto-sizes so it reads at both rail widths;
+                 MainActivity only moves its gravity. -->
             <TextView
                 android:id="@+id/railBrand"
                 android:layout_width="match_parent"
@@ -228,8 +225,8 @@
             </com.overdrive.app.ui.widget.SwipeExpandableRailScrollView>
 
             <!-- Collapse sits below the scroller so a long destination list
-                 can never push it out of reach. MainActivity rotates its
-                 chevron 0°→180° with the slide; one asset, no blink. -->
+                 cannot push it out of reach. MainActivity rotates its chevron
+                 0°→180° with the slide. -->
             <include
                 android:id="@+id/railCollapseRow"
                 layout="@layout/item_rail_destination"

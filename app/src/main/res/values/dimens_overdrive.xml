@@ -15,9 +15,8 @@
   Material 3 1.13.0.
 -->
 <resources>
-    <!-- App bar. One height for both orientations: the platform actionBarSize
-         drops to 48dp in landscape, which is the head unit's default, and a
-         page title cannot carry a screen at that height. -->
+    <!-- App bar. One height for both orientations; the platform actionBarSize
+         drops to 48dp in landscape, which is the head unit's default. -->
     <dimen name="app_bar_height">60dp</dimen>
 
     <!-- Page padding / outer rhythm -->
@@ -33,7 +32,7 @@
     <!-- Card radii -->
     <dimen name="card_radius_standard">8dp</dimen>      <!-- Operational cards and grouped surfaces -->
     <dimen name="card_radius_hero">8dp</dimen>          <!-- Large content surfaces remain restrained -->
-    <dimen name="card_radius_dialog">8dp</dimen>        <!-- Squared off to match the cards and the rail pill -->
+    <dimen name="card_radius_dialog">8dp</dimen>        <!-- Matches the cards and the rail pill -->
     <dimen name="card_radius_accent">8dp</dimen>        <!-- buttons and segmented controls -->
 
     <!-- Horizontal inset on each dialog action button. The alert dialog's

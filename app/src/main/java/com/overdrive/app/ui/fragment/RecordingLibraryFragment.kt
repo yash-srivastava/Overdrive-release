@@ -685,8 +685,8 @@ class RecordingLibraryFragment : Fragment() {
     }
 
     /**
-     * Chips created in code can't take a style attribute, so they pick up the
-     * app's component corner size here instead of Material's rounded default.
+     * Chips created in code can't take a style attribute, so the app's
+     * component corner size has to be applied here.
      */
     private fun Chip.applyAppCornerShape() {
         shapeAppearanceModel = shapeAppearanceModel

@@ -26,14 +26,9 @@
         android:paddingTop="8dp"
         android:paddingBottom="8dp">
 
-        <!-- What the daemon currently holds. On its own raised panel so the
-             read-only half is separated from the editable half by a surface
-             rather than by a hairline.
-
-             Detection, capacity, SOH and model always end up populated, so they
-             hold a placeholder until the fetch lands rather than appearing into
-             a dialog the user is already looking at. The derived two are
-             genuinely conditional and stay GONE without data. -->
+        <!-- What the daemon currently holds. Detection, capacity, SOH and model
+             hold a placeholder until the fetch lands; the derived readings stay
+             GONE without data. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -41,10 +36,6 @@
             android:orientation="vertical"
             android:padding="@dimen/dashboard_modern_card_padding">
 
-            <!-- Header row: the mode the readings below come from, and the
-                 action that changes it. Paired on one row because the reset is
-                 what flips the mode, and because the mode label is short enough
-                 to leave the button room. -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -60,10 +51,8 @@
                     android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
                     android:textColor="?attr/colorOnSurface" />
 
-                <!-- Clears the manual capacity and model, which is what this
-                     panel reports, so it sits here rather than in the button bar
-                     where it read as a third dismissal. Disabled while detection
-                     is already automatic — see DashboardFragment. -->
+                <!-- Clears the manual capacity and model. Disabled while
+                     detection is already automatic — see DashboardFragment. -->
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/vehicleResetAuto"
                     style="@style/Widget.Overdrive.M3.Button.Outlined"
@@ -74,12 +63,6 @@
                     android:text="@string/vehicle_dialog_reset" />
             </LinearLayout>
 
-            <!-- Three labelled readings across the panel, same label-over-value
-                 shape as the hero card metrics. A "Label: value" stack reads as
-                 a dump; the label carries the naming so the value can be short
-                 and large enough to scan. Labels are borrowed from the inputs
-                 below and from diagnostics, which is also where "Battery health"
-                 names SOH for users. -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -156,9 +139,8 @@
                 </LinearLayout>
             </LinearLayout>
 
-            <!-- Footnotes: derived values that only exist once the daemon has
-                 learned something, so they read as sentences rather than taking
-                 a column of their own. -->
+            <!-- Footnotes: derived values that exist only once the daemon has
+                 learned something. -->
             <TextView
                 android:id="@+id/vehicleSummaryEffective"
                 android:layout_width="match_parent"
@@ -197,9 +179,7 @@
                 android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
         </com.google.android.material.textfield.TextInputLayout>
 
-        <!-- Capacity input — M3 outlined text field with kWh suffix. An
-             out-of-range value is reported on the field itself, which is why the
-             helper text carries the accepted range. -->
+        <!-- Capacity input — M3 outlined text field with kWh suffix. -->
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/vehicleCapacityLayout"
             style="@style/Widget.Material3.TextInputLayout.OutlinedBox"

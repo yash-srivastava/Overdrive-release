@@ -26,11 +26,8 @@
             app:cardCornerRadius="@dimen/dashboard_modern_radius"
             app:cardElevation="0dp">
 
-            <!-- Ribbon backdrop. Fills the card so the wave is clipped by the
-                 card's own edges rather than ending mid-surface, and centerCrop
-                 overhangs it sideways so the wave's faint tail falls outside the
-                 leading edge. Declared before the content, with the render, so
-                 metricVehicle's ripple still covers the whole card. -->
+            <!-- Ribbon backdrop. Declared before the content, with the render,
+                 so metricVehicle's ripple still covers the whole card. -->
             <ImageView
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
@@ -41,11 +38,8 @@
                 android:scaleType="centerCrop"
                 android:src="@drawable/dashboard_hero_ribbon" />
 
-            <!-- Vehicle render, sized as a fraction of the card rather than a
-                 fixed width: the two orientations and the 5 metric-column
-                 permutations all change the card's width, and the car has to
-                 keep the same presence in each. The spacer holds the body's
-                 share. -->
+            <!-- Vehicle render, sized as a fraction of the card width; the
+                 spacer holds the body's share. -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -133,9 +127,8 @@
                         app:tint="?attr/colorPrimary" />
                 </LinearLayout>
 
-                <!-- Kept clear of the render by the same weight split. The
-                     header deliberately is not, so "Tap to set" sits in the
-                     corner above the car. -->
+                <!-- Kept clear of the render by the same weight split; the
+                     header row is not, so "Tap to set" stays in the corner. -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -210,10 +203,7 @@
                                     android:textStyle="bold" />
 
                                 <!-- Vehicle's own (HAL) range — visible only when a
-                                     personalized figure headlines this panel, so the
-                                     two estimates read together. Inside the panel
-                                     rather than beside it: a third panel in this row
-                                     leaves ~50dp for a figure that wants 78dp. Bound
+                                     personalized figure headlines this panel. Bound
                                      null-safely by DashboardFragment. -->
                                 <LinearLayout
                                     android:id="@+id/vehicleHalRangeColumn"

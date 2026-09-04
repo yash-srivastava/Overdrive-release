@@ -32,9 +32,8 @@ public class LiveViewConnectionStateAssetTest {
     }
 
     /**
-     * The indicator carries no text — the video stage states what is
-     * happening — so its state has to reach assistive tech through
-     * aria-label, and clearing the stage on 'live' must not depend on the
+     * The indicator carries no text, so its state reaches assistive tech
+     * through aria-label. Clearing the stage on 'live' must not depend on the
      * indicator being in the DOM.
      */
     @Test

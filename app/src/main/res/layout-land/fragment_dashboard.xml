@@ -26,11 +26,9 @@
             app:cardCornerRadius="@dimen/dashboard_modern_radius"
             app:cardElevation="0dp">
 
-                <!-- Ribbon backdrop. A trailing box rather than the full card,
-                     so the 2.25 wave reads at a usable size behind the car
-                     without filling the header. Declared before the content,
-                     with the render, so metricVehicle's ripple still covers
-                     the whole card. -->
+                <!-- Ribbon backdrop. Declared before the content, with the
+                     render, so metricVehicle's ripple still covers the whole
+                     card. -->
                 <ImageView
                     android:layout_width="@dimen/dashboard_hero_ribbon_width"
                     android:layout_height="match_parent"
@@ -43,8 +41,7 @@
                     android:src="@drawable/dashboard_hero_ribbon" />
 
                 <!-- Vehicle render. wrap_content + maxHeight so the nodpi
-                     bitmap does not measure at 338dp and stretch the card; the
-                     trailing inset sits it off the edge rather than flush right. -->
+                     bitmap does not measure at 338dp and stretch the card. -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -137,8 +134,7 @@
                     </LinearLayout>
 
                     <!-- Panels are a fixed width so they do not stretch with the
-                         full-bleed card. The header row is not inset, so
-                         "Tap to set" stays in the trailing corner. -->
+                         full-bleed card. -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -213,11 +209,8 @@
 
                                     <!-- Vehicle's own (HAL) range — visible only
                                          when a personalized figure headlines this
-                                         panel, so the two estimates read together.
-                                         Inside the panel rather than beside it: a
-                                         third panel in this row leaves ~50dp for a
-                                         figure that wants 78dp. Bound null-safely
-                                         by DashboardFragment. -->
+                                         panel. Bound null-safely by
+                                         DashboardFragment. -->
                                     <LinearLayout
                                         android:id="@+id/vehicleHalRangeColumn"
                                         android:layout_width="match_parent"

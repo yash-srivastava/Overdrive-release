@@ -352,8 +352,6 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            /* Equal on both axes: the status dot is corner-placed against this
-               padding, so an asymmetric inset reads as a misplaced dot. */
             padding: 16px;
             background: var(--lv-top-overlay);
             position: absolute;
@@ -367,15 +365,13 @@
         .top-bar-left > * + *, .top-bar-right > * + * { margin-left: 10px; }
         [dir="rtl"] .top-bar-left > * + *,
         [dir="rtl"] .top-bar-right > * + * { margin-left: 0; margin-right: 10px; }
-        /* Pinned to the top, not centred: the row's height comes from the
-           quality menu opposite it, which would push the dot far below its
-           own left inset. */
+        /* Top-aligned: the row's height comes from the quality menu opposite,
+           which would otherwise push the dot below its own left inset. */
         .top-bar-left { min-width: 0; align-self: flex-start; }
         .top-bar-right { flex: 0 0 auto; }
 
-        /* Stream state is a bare dot. The stage in the middle of the video
-           area carries the wording, so the accessible name lives on
-           aria-label — see BYD.stream.updateConnectionStatus. */
+        /* The dot carries no text, so its accessible name lives on aria-label
+           — see BYD.stream.updateConnectionStatus. */
         .connection-status {
             display: inline-flex;
             align-items: center;
@@ -413,8 +409,7 @@
             letter-spacing: 0.05em;
         }
 
-        /* Decoder path: the tonal default reads as "expected", warning as
-           "degraded". Set from JS as the player resolves a decoder. */
+        /* Set from JS as the player resolves a decoder. */
         .decoder-chip.is-native {
             background: var(--status-success-container);
             color: var(--status-success);
@@ -599,9 +594,6 @@
             color: var(--text-muted);
         }
 
-        /* Start-up progress belongs on the stage the user is waiting on. The
-           toast container is fixed to the viewport, so on the wide head-unit
-           layout it floated near the bottom edge, off-centre from the video. */
         .idle-spinner {
             display: none;
             width: 26px;
@@ -615,8 +607,6 @@
         .video-idle-state.is-busy .idle-glyph { display: none; }
         .video-idle-state.is-busy .idle-spinner { display: block; }
 
-        /* The tinted tile carries the failure; the reason itself stays in body
-           colour so it reads as a state of the stage, not an alarm. */
         .video-idle-state.is-error .idle-glyph { display: none; }
         .video-idle-state.is-error .idle-alert { display: block; opacity: 1; }
         .video-idle-state.is-error .idle-subtext { display: block; }
@@ -629,8 +619,6 @@
 
         .video-idle-state.is-error .idle-text { color: var(--on-surface); }
 
-        /* The spinner carries its own shape; the tile that frames the idle
-           glyph would only box it in. */
         .video-idle-state.is-busy .idle-icon {
             width: auto;
             height: auto;
@@ -701,9 +689,6 @@
         .deterrent-btn:hover { background: var(--lv-pill-bg-hover); border-color: var(--brand-primary); }
         .deterrent-btn:active { transform: scale(0.96); }
 
-        /* Horn = warning (attention / alert). Flash = brand teal (lights).
-           Coloured icon + border keep the two actions distinct at a glance;
-           the body stays theme-neutral so both read on light + dark. */
         .deterrent-horn svg { color: var(--status-warning); }
         .deterrent-horn:hover { border-color: var(--status-warning); }
         .deterrent-flash svg { color: var(--brand-primary); }
@@ -1066,9 +1051,6 @@
             margin-right: 8px;
         }
 
-        /* Labelled rather than a bare chevron: on a full-bleed map this is the
-           only way back, and an unlabelled glyph reads as decoration. Quiet by
-           default — navigating back shouldn't outrank the map's own actions. */
         .location-close-button {
             display: none;
             flex: 0 0 auto;
@@ -1127,12 +1109,8 @@
             background: var(--surface-container);
         }
 
-        /* Back leads the header rather than trailing it: the trailing corner is
-           where the map floats its own action buttons, so a control there stacked
-           on top of them and sat hard against the viewport edge.
-           Margin, NOT flex `gap`: gap on a flex container is Chrome 84+, and BYD's
-           in-app WebView is Chrome 58 (see the decoder notes further down), where it
-           would be ignored and the title would butt against the button. */
+        /* Margin, NOT flex `gap`: gap is Chrome 84+ and BYD's in-app WebView is
+           Chrome 58, where the title would butt against the button. */
         #panelCameras.map-expanded .location-close-button {
             display: flex;
             order: -1;
@@ -1144,11 +1122,8 @@
             margin-left: 6px;
         }
 
-        /* The title block must be able to shrink/ellipsize: this is a nowrap flex
-           row, and with a long localized title (or a narrow 320px phone) its
-           intrinsic width exceeded the header — measured scrollWidth 459px in a
-           320px box. min-width:0 lets the title yield first so the row always
-           stays inside the viewport. */
+        /* min-width:0 lets the title yield first: this is a nowrap flex row, and
+           a long localized title overflows the header on a 320px phone. */
         #panelCameras.map-expanded .location-card-header > div:first-child {
             min-width: 0;
             overflow: hidden;
@@ -1985,13 +1960,10 @@
         };
         
         /**
-         * Drives the centred overlay on the video stage.
-         *   'idle'  — camera glyph + tap hint, waiting for a selection
-         *   'busy'  — spinner + progress text while the pipeline warms up
-         *   'error' — why the stream never arrived, held until the next pick
-         *   'live'  — hidden, the decoder owns the stage
-         * Only called on selection and terminal outcomes: a mid-stream
-         * reconnect must not drop this overlay back over a frozen frame.
+         * Drives the centred overlay on the video stage: 'idle', 'busy',
+         * 'error', or 'live' (hidden). Call only on selection and terminal
+         * outcomes — a mid-stream reconnect must not drop this overlay back
+         * over a frozen frame.
          */
         BYD.stream.setStagePhase = function(phase, message) {
             const stage = document.getElementById('videoIdleState');
@@ -2049,8 +2021,6 @@
                 }
                 el.setAttribute('aria-label', BYD.i18n.t(labelKey));
             }
-            // Clearing the stage is not the dot's business: it has to happen
-            // whether or not the indicator is in the DOM.
             if (status === 'live') this.setStagePhase('live');
         };
         

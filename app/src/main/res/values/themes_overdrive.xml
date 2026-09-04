@@ -145,9 +145,8 @@
     </style>
 
     <!-- Page-header action. Carries the same surface tier, hairline and corner
-         as the header's search and date cards, and zeroes the vertical inset
-         so the painted button fills the 48dp row instead of the ~36dp a
-         Material button paints inside it. -->
+         as the header's search and date cards, with the vertical inset zeroed
+         so the painted button fills the 48dp row. -->
     <style name="Widget.Overdrive.M3.Button.Header" parent="Widget.Material3.Button.OutlinedButton.Icon">
         <item name="backgroundTint">?attr/colorSurfaceContainerHigh</item>
         <item name="strokeColor">?attr/colorOutlineVariant</item>
@@ -163,10 +162,9 @@
     </style>
 
     <!-- Icon-only page action wearing the Button.Header tile. Built on the
-         icon-button primitive, not the labelled Icon style: that one carries
-         asymmetric text padding which leaves a lone glyph off-centre in a
-         48dp square. All four padding attrs are zeroed because a parent
-         style's paddingLeft/Right otherwise outrank an inherited
+         icon-button primitive, not the labelled Icon style, whose asymmetric
+         text padding leaves a lone glyph off-centre. All four padding attrs are
+         zeroed because a parent style's paddingLeft/Right outrank an inherited
          paddingStart/End. -->
     <style name="Widget.Overdrive.M3.HeaderIconButton" parent="Widget.Material3.Button.IconButton.Outlined">
         <item name="backgroundTint">?attr/colorSurfaceContainerHigh</item>
@@ -282,12 +280,9 @@
         <item name="shapeAppearance">@style/ShapeAppearance.Overdrive.SmallComponent</item>
     </style>
 
-    <!-- Filter chips. M3 ships these fully rounded; the app's 8dp shape
-         keeps a chip row from reading as a different design to the cards
-         and buttons it sits between. Applied per-chip rather than through
-         the chipStyle attr, which would also make assist chips checkable.
-         Chips built in code carry the same corner size on their
-         shapeAppearanceModel. -->
+    <!-- Filter chips. Applied per-chip rather than through the chipStyle attr,
+         which would also make assist chips checkable. Chips built in code carry
+         the same corner size on their shapeAppearanceModel. -->
     <style name="Widget.Overdrive.M3.Chip.Filter" parent="Widget.Material3.Chip.Filter">
         <item name="shapeAppearance">@style/ShapeAppearance.Overdrive.SmallComponent</item>
     </style>

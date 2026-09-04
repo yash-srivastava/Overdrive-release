@@ -29,7 +29,6 @@
         android:paddingBottom="@dimen/page_padding_bottom">
 
         <!-- ============== HERO ============== -->
-        <!-- The app bar already names this screen. -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

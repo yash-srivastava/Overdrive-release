@@ -181,9 +181,6 @@ public class SetupGuideDialog {
             dialog.dismiss();
         });
 
-        // Camera tip: the fix happens on Diagnostics, so hand the user over and
-        // close the guide. Left open when the host cannot navigate, matching the
-        // Traffic Monitor tip above — the written steps still stand on their own.
         View btnDiagnostics = view.findViewById(R.id.btnOpenDiagnostics);
         if (btnDiagnostics != null) {
             btnDiagnostics.setOnClickListener(v -> {
@@ -204,8 +201,8 @@ public class SetupGuideDialog {
 
     /**
      * The views one guided step owns. A step is either pending — instructions
-     * plus a full-width action — or complete, where the action is gone and the
-     * check, the muted title and the body carry the confirmation instead.
+     * plus an action — or complete, where the check and body carry the
+     * confirmation and the action is gone.
      */
     private static final class StepRow {
         private final TextView title;

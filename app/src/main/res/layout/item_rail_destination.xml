@@ -4,9 +4,6 @@
   landscape parks at the bottom. MainActivity.applyRailRowLayout flips between
   the compact (icon over label) and expanded (icon beside label) forms, and the
   rail driver tags this view with the destination id.
-
-  The 24dp icon has no wrapper: its width plus the expanded row's start padding
-  is what holds the icon centre on the 40dp line across both rail widths.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"

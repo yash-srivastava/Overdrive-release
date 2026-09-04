@@ -2341,9 +2341,6 @@ select.md-input ~ .md-label {
     z-index: 10 !important;
 }
 
-/* Map controls read as controls, not as primary actions: a plain surface
-   chip on the same 8px shape as the rest of the chrome. Directions is the
-   one accented action in the cluster. */
 .btn-map-float {
     width: 48px;
     height: 48px;
@@ -2518,8 +2515,7 @@ select.md-input ~ .md-label {
     overflow: hidden;
 }
 
-/* Leaflet overrides — the map chrome uses the same surface tokens and 8px
-   shape as the rest of the app so it doesn't read as a third design. */
+/* Leaflet overrides */
 .map-container .leaflet-container {
     background: var(--surface-container-lowest);
     z-index: 1 !important;
@@ -2579,8 +2575,6 @@ select.md-input ~ .md-label {
     z-index: 2;
 }
 
-/* A live fix is signalled by the expanding ring below, not by the marker
-   itself, so the car stays legible against light and dark basemaps. */
 .car-pulse {
     position: absolute;
     width: 40px;

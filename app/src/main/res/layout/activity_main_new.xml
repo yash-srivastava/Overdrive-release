@@ -46,9 +46,8 @@
             android:background="?attr/colorSurfaceContainerLow"
             android:orientation="vertical">
 
-            <!-- Wordmark, so the rail names the app instead of opening on an
-                 empty strip. Auto-sizes because it has to read at both rail
-                 widths; MainActivity only moves its gravity. -->
+            <!-- Wordmark. Auto-sizes so it reads at both rail widths;
+                 MainActivity only moves its gravity. -->
             <TextView
                 android:id="@+id/railBrand"
                 android:layout_width="match_parent"
@@ -201,8 +200,8 @@
             </com.overdrive.app.ui.widget.SwipeExpandableRailScrollView>
 
             <!-- Collapse sits below the scroller so a long destination list
-                 can never push it out of reach. MainActivity rotates its
-                 chevron 0°→180° with the slide; one asset, no blink. -->
+                 cannot push it out of reach. MainActivity rotates its chevron
+                 0°→180° with the slide. -->
             <include
                 android:id="@+id/railCollapseRow"
                 layout="@layout/item_rail_destination"
@@ -341,11 +340,6 @@
                     </LinearLayout>
                 </com.google.android.material.appbar.MaterialToolbar>
 
-                <!--
-                  Separates the app bar from content that carries its own
-                  surfaces — the Live WebView renders a header of a similar
-                  tone directly beneath it.
-                -->
                 <View
                     android:layout_width="match_parent"
                     android:layout_height="1dp"

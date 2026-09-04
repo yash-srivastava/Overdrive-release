@@ -8,9 +8,8 @@ import java.util.Locale
  * Maps a selected vehicle model id to its dashboard render.
  *
  * Ids arrive from /api/models/selected, but the id space is wider than
- * models/manifest.json — a manually selected or HAL-reported model can be
- * anything DashboardFragment.modelDisplayName knows about, so ids are
- * normalized and matched exactly.
+ * models/manifest.json: a manually selected or HAL-reported model can be
+ * anything DashboardFragment.modelDisplayName knows about.
  */
 object VehicleArt {
 

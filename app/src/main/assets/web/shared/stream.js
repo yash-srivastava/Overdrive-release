@@ -123,18 +123,13 @@ BYD.stream = {
             // lastStartError is the canonical case.
             if (data && data.success === false && !data.starting) break;
             if (!toastShown && data && data.success === false && data.starting) {
-                // Prefer backend-provided errorCode (oem_starting,
-                // pano_starting, stream_starting) so the text matches the
-                // actual gate that's still warming up. Fall back to the
-                // mode-based heuristic for older backends that don't emit
-                // errorCode on the starting path.
+                // Backend-provided errorCode names the gate that's still
+                // warming up; older backends don't emit it on the starting
+                // path, hence the mode-based fallback.
                 const key = (data.errorCode && typeof data.errorCode === 'string')
                     ? 'stream.' + data.errorCode
                     : (mode === 6 ? 'stream.oem_starting' : 'stream.pano_starting');
                 const message = BYD.i18n.t(key);
-                // A page that shows start-up progress on the stream surface
-                // itself claims the message, so it isn't also announced by a
-                // toast pinned to the far side of a wide layout.
                 if (typeof this.showStartupStatus === 'function') {
                     this.showStartupStatus(message);
                 } else if (BYD.utils && BYD.utils.toast) {
@@ -1186,8 +1181,8 @@ BYD.stream = {
                 const selector = document.getElementById('qualitySelector');
                 if (selector) {
                     selector.value = data.current;
-                    // Pages that mirror the selector in their own menu need the
-                    // written value reflected; assigning .value fires no event.
+                    // Assigning .value fires no event, so mirrored menus
+                    // need an explicit sync.
                     if (BYD.qualityMenu) BYD.qualityMenu.sync();
                     console.log('[Stream] Loaded saved quality:', data.current);
                 }

@@ -46,11 +46,8 @@
             android:orientation="horizontal"
             android:baselineAligned="false">
 
-            <!--
-              The app bar already names this screen, so the header carries
-              the counts instead. Populated by refreshCounts(); the pending
-              string holds the line's height until the first scan lands.
-            -->
+            <!-- Counts line. Populated by refreshCounts(); the pending string
+                 holds its height until the first scan lands. -->
             <TextView
                 android:id="@+id/tvRecordingsSummary"
                 android:layout_width="0dp"

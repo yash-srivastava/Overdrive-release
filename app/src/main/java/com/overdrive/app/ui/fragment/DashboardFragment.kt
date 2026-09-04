@@ -94,8 +94,6 @@ class DashboardFragment : Fragment() {
     private lateinit var recordingStorageProgress:
         com.google.android.material.progressindicator.LinearProgressIndicator
 
-    // Stable activity rows. Each row is an icon beside its text, so the three
-    // views travel together.
     private class ActivityRowViews(
         val container: View,
         val icon: ImageView,
@@ -342,7 +340,6 @@ class DashboardFragment : Fragment() {
             aiInsightExpanded = !aiInsightExpanded
             renderAiInsightExpansion()
         }
-        // The whole row expands, so the chevron stays a plain indicator.
         metricTunnel.setOnClickListener {
             dashboardState = DashboardStateReducer.remoteExpanded(
                 dashboardState,
@@ -416,8 +413,8 @@ class DashboardFragment : Fragment() {
             getString(R.string.dashboard_chip_recording_idle)
         }
 
-        // Each chip's tone comes from the same source its text does, never from
-        // parsing the text back out — these strings are localized.
+        // Chip text is localized, so tone comes from the same source the text
+        // does and is never parsed back out of it.
         tintStatusChip(
             heroChipTunnel,
             if (collectAvailableTunnels().isEmpty()) StatusTone.DOWN else StatusTone.LIVE
@@ -436,12 +433,8 @@ class DashboardFragment : Fragment() {
     private enum class StatusTone { LIVE, IDLE, DOWN }
 
     /**
-     * Paint a hero chip by what it is reporting — green live, amber idle, red
-     * down — so the row is readable without reading it.
-     *
-     * The fills are set here rather than in the layout because a chip's tone
-     * follows runtime state. The layout still carries the resting tone so the
-     * card looks finished before the first daemon poll lands.
+     * Paint a hero chip by what it is reporting: green live, amber idle, red
+     * down. The layout carries the resting tone for the pre-poll state.
      */
     private fun tintStatusChip(chip: Chip, tone: StatusTone) {
         val ctx = context ?: return
@@ -754,7 +747,6 @@ class DashboardFragment : Fragment() {
         }
     }
 
-    /** Show/hide the vehicle's own range estimate under the range figure. */
     private fun setHalRangeColumnVisible(visible: Boolean) {
         vehicleHalRangeColumn?.visibility = if (visible) View.VISIBLE else View.GONE
     }
@@ -796,19 +788,15 @@ class DashboardFragment : Fragment() {
     }
 
     /**
-     * Visual battery gauge under the numeric SOC. An unknown SOC leaves the
-     * empty track on screen rather than hiding the widget, so the gauge is part
-     * of the card's shape whether or not the vehicle is talking. Indicator
-     * colour flips to the theme's error colour at ≤20% so a low battery reads
-     * at a glance; both attrs resolve per-theme, so light/dark are handled
-     * automatically.
+     * Visual battery gauge under the numeric SOC. An unknown SOC keeps the
+     * empty track on screen instead of hiding the widget; the indicator turns
+     * the theme's error colour at or below [LOW_SOC_THRESHOLD_PERCENT].
      */
     private fun renderSocGauge(socPercent: Double?) {
         val gauge = heroSocProgress ?: return
         gauge.visibility = View.VISIBLE
         if (socPercent == null) {
-            // Zero draws track only, so the bar reads as "no reading" next to
-            // the panel's own em dash instead of as a real empty battery.
+            // Zero draws the track only, standing in for "no reading".
             gauge.setProgressCompat(0, /* animated = */ false)
             return
         }
@@ -1035,9 +1023,8 @@ class DashboardFragment : Fragment() {
             views.container.visibility = if (row == null) View.GONE else View.VISIBLE
             if (row == null) return@forEachIndexed
             views.text.text = row.text
-            // Placeholder rows carry no icon; keep the slot so their text stays
-            // on the same left edge as the real ones, and dim it so it doesn't
-            // read as a real event.
+            // Placeholder rows carry no icon; the slot stays to hold the text's
+            // left edge.
             val placeholder = row.icon == 0
             if (placeholder) {
                 views.icon.visibility = View.INVISIBLE
@@ -1484,9 +1471,8 @@ class DashboardFragment : Fragment() {
 
         capInput.doAfterTextChanged { capLayout.error = null }
 
-        // These always resolve to a value, so they carry a placeholder from the
-        // start: the fetch below runs off the main thread, and filling empty
-        // rows on its return would resize the dialog after it is up.
+        // Placeholders from the start: the fetch below is off the main thread,
+        // and filling empty rows on its return would resize the live dialog.
         val pendingValue = getString(R.string.vehicle_dialog_value_pending)
         summaryDetection.text = getString(R.string.vehicle_dialog_detection, pendingValue)
         summaryCapacity.text = pendingValue
@@ -1653,10 +1639,10 @@ class DashboardFragment : Fragment() {
                     }
                 }
 
-                // A typed capacity or a picked model is an override; either one
-                // takes the pack out of auto-detection, and the reset clears
-                // both. Model state comes from /api/models/selected rather than
-                // the status modelId, which also reports auto-detected models.
+                // A typed capacity or a picked model takes the pack out of
+                // auto-detection. Model state has to come from
+                // /api/models/selected: the status modelId also reports
+                // auto-detected models.
                 val manual = finalNominalSource == "user" || initialModelId != null
                 summaryDetection.text = getString(
                     R.string.vehicle_dialog_detection,

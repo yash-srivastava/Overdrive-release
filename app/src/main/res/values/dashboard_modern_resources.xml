@@ -9,32 +9,21 @@
     <dimen name="dashboard_modern_qr_size">184dp</dimen>
 
     <!-- Hero-card split: the metrics column against the vehicle render beside
-         it. Weights rather than widths, so the card can be any width and the
-         render keeps the same presence. Both fragment_dashboard variants apply
-         the pair twice — once to the render row, once to the content row — and
-         they have to agree or the metrics run under the car. -->
+         it. Both fragment_dashboard variants apply the pair twice — once to the
+         render row, once to the content row — and they have to agree or the
+         metrics run under the car. -->
     <item name="dashboard_hero_body_weight" format="float" type="dimen">60</item>
     <item name="dashboard_hero_art_weight" format="float" type="dimen">40</item>
 
-    <!-- Measurement ceiling for the ribbon backdrop, not a display height.
-
-         The ribbon is a nodpi bitmap, so its intrinsic size is its pixel size
-         read as dp — 900 x 400dp. The head unit runs at density 1.0, where that
-         is the whole card, and an ImageView showing it at match_parent height
-         reports it in the card's first measure pass: the card stretches to 400dp
-         and the metrics are left with dead space beneath them.
-
-         ImageView only applies maxHeight when adjustViewBounds is set, and only
-         while a dimension is still unresolved. So this caps the first pass, and
-         the second pass — where FrameLayout hands match_parent children the
-         card's settled height as EXACTLY — ignores it and the ribbon fills the
-         card. Any value under the card's ~216dp shortest content height works. -->
+    <!-- Measurement ceiling for the ribbon backdrop, not a display height. The
+         nodpi bitmap measures at 900 x 400dp and would stretch the card on the
+         first pass. ImageView honours maxHeight only while a dimension is
+         unresolved, so the second pass ignores this and the ribbon fills the
+         card. Any value under the card's ~216dp content height works. -->
     <dimen name="dashboard_hero_backdrop_measure_cap">40dp</dimen>
 
-    <!-- Ribbon opacity. The art is dark line work, so on the light surface it
-         has to sit well back or it competes with the accent text in the header's
-         trailing corner. values-night runs it at full strength, where it reads
-         as depth against a near-black card instead. -->
+    <!-- Ribbon opacity. Dark line work has to sit well back on the light
+         surface; values-night runs it at full strength. -->
     <item name="dashboard_hero_ribbon_alpha" format="float" type="dimen">0.3</item>
 
     <string name="dashboard_modern_vehicle_status">Vehicle status</string>
