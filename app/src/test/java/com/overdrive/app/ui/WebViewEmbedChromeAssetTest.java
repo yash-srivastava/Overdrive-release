@@ -44,18 +44,24 @@ public class WebViewEmbedChromeAssetTest {
     }
 
     @Test
-    public void spinnerCoversOnlyPagesThisProcessHasNotPainted() throws IOException {
+    public void spinnerCoversEveryWebViewLoad() throws IOException {
         String fragment = readRepositoryFile(FRAGMENT);
 
-        assertTrue(fragment.contains("private val warmedPaths"));
-        assertTrue(fragment.contains("warmedPaths.contains(it)"));
-        assertTrue(fragment.contains("currentLoadKey?.let { warmedPaths.add(it) }"));
-        assertTrue(fragment.contains("if (warm) hideLoading() else showLoading()"));
+        // No warm-path shortcut: a page that skips the overlay on a revisit
+        // makes navigation look inconsistent against the pages that show it.
+        assertFalse(fragment.contains("warmedPaths"));
+        assertFalse(fragment.contains("currentLoadKey"));
+
+        int chrome = fragment.indexOf("private fun applyLoadChrome()");
+        assertTrue(chrome >= 0);
+        String body = fragment.substring(chrome, fragment.indexOf('}', chrome));
+        assertTrue(body.contains("showLoading()"));
+        assertFalse(body.contains("hideLoading()"));
 
         int show = fragment.indexOf("private fun showLoading()");
         assertTrue(show >= 0);
-        String body = fragment.substring(show, fragment.indexOf("private fun hideLoading()"));
-        assertTrue(body.contains("View.VISIBLE"));
+        String showBody = fragment.substring(show, fragment.indexOf("private fun hideLoading()"));
+        assertTrue(showBody.contains("View.VISIBLE"));
     }
 
     private static String readRepositoryFile(String relativePath) throws IOException {

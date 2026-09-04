@@ -42,13 +42,6 @@ class WebViewFragment : Fragment() {
         const val ARG_PAGE_PATH = "page_path"
         private const val KEY_SAVED_URL = "saved_url"
 
-        // Page paths this process has already painted once. The daemon serves
-        // HTML no-store but CSS/JS with max-age, so a revisit is fast enough
-        // that the overlay would only read as a flash. Process-wide, so it
-        // survives fragment recreation and resets on process death.
-        private val warmedPaths: MutableSet<String> =
-            java.util.Collections.synchronizedSet(mutableSetOf<String>())
-
         // Hides the in-page PWA chrome before the first paint. INJECT_JS runs
         // on onPageFinished, which is late enough for the sidebar to flash.
         // Keyed on data-android-embed and NOT data-app-shell: app-shell.js
@@ -382,8 +375,6 @@ class WebViewFragment : Fragment() {
     private var errorOverlay: View? = null
     private var btnRetry: MaterialButton? = null
     private var currentUrl: String? = null
-    // Path of the load in flight, used to mark it warm once it paints.
-    private var currentLoadKey: String? = null
     private var pageLoadFailed = false
     // True between onPageStarted and onPageFinished / onReceivedError. The
     // auth-cookie retry consults this so it doesn't fire a reload() during
@@ -950,14 +941,13 @@ class WebViewFragment : Fragment() {
                     // load.
                     pageLoadFailed = false
                     loadInProgress = true
-                    applyLoadChrome(url)
+                    applyLoadChrome()
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     loadInProgress = false
                     if (!pageLoadFailed) {
-                        currentLoadKey?.let { warmedPaths.add(it) }
                         showContent()
                         // Theme: tag <html data-theme="…"> BEFORE INJECT_JS so any
                         // CSS that depends on the variable values uses the right
@@ -1645,7 +1635,7 @@ class WebViewFragment : Fragment() {
 
     private fun loadPage() {
         pageLoadFailed = false
-        applyLoadChrome(currentUrl)
+        applyLoadChrome()
         currentUrl?.let { webView?.loadUrl(it) }
     }
 
@@ -1654,17 +1644,10 @@ class WebViewFragment : Fragment() {
         loadPage()
     }
 
-    private fun pathKeyOf(url: String?): String? {
-        if (url.isNullOrBlank()) return null
-        return try { Uri.parse(url).path?.takeIf { it.isNotBlank() } } catch (_: Throwable) { null }
-    }
-
-    /** Overlay covers the first paint of a page; a warm revisit goes
-     *  straight to content so the spinner does not read as a flash. */
-    private fun applyLoadChrome(url: String?) {
-        pathKeyOf(url)?.let { currentLoadKey = it }
-        val warm = currentLoadKey?.let { warmedPaths.contains(it) } == true
-        if (warm) hideLoading() else showLoading()
+    /** Every WebView load shows the overlay, warm or cold, so the whole app
+     *  behaves the same way on navigation. */
+    private fun applyLoadChrome() {
+        showLoading()
     }
 
     private fun showLoading() {

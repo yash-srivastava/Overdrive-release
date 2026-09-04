@@ -32,7 +32,7 @@
         android:background="?android:attr/colorBackground"
         android:gravity="center"
         android:orientation="vertical"
-        android:visibility="gone">
+        android:visibility="visible">
 
         <ProgressBar
             android:layout_width="48dp"
