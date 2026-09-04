@@ -4037,16 +4037,22 @@ var VC = {
                 slider.value = colour;
                 var options = this.vehicleState.lights.ambientOptions;
                 var wrap = slider.parentNode;
+                var swatch = document.getElementById('ambientSwatch');
+                var picked = options && colour >= 1 && colour <= options.length
+                    ? options[colour - 1] : null;
                 if (options && options.length) {
                     slider.disabled = false;
                     slider.style.background = 'linear-gradient(to right, ' + options.join(',') + ')';
-                    if (colour >= 1 && colour <= options.length && wrap && wrap.style) {
-                        wrap.style.setProperty('--ambient-thumb', options[colour - 1]);
-                    }
                 } else {
                     slider.disabled = true;
-                    if (wrap && wrap.style) wrap.style.removeProperty('--ambient-thumb');
                 }
+                // Hidden rather than neutral-filled: an empty palette means the
+                // car has not reported a colour, which is not the same as grey.
+                if (wrap && wrap.style) {
+                    if (picked) wrap.style.setProperty('--ambient-swatch', picked);
+                    else wrap.style.removeProperty('--ambient-swatch');
+                }
+                if (swatch) swatch.style.display = picked ? '' : 'none';
             }
         }
     },

@@ -805,12 +805,27 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
     border: 1px solid var(--vc-border-subtle);
     background: var(--vc-tile-bg);
 }
+.ambient-head {
+    display: -webkit-flex; display: flex;
+    -webkit-align-items: center; align-items: center;
+    margin-bottom: 8px;
+}
 .ambient-title {
     font-size: 12px;
     font-weight: 600;
     color: var(--vc-text-strong);
-    margin-bottom: 8px;
 }
+/* Reads the selected colour off a neutral surface. On the ramp itself every
+   swatch sits against a different neighbour, so none of them read true. */
+.ambient-swatch {
+    -webkit-box-sizing: border-box; box-sizing: border-box;
+    width: 14px; height: 14px;
+    margin-left: auto;
+    border: 1px solid var(--vc-border-subtle);
+    border-radius: 50%;
+    background: var(--ambient-swatch, transparent);
+}
+[dir="rtl"] .ambient-swatch { margin-left: 0; margin-right: auto; }
 .vc-ambient-slider {
     -webkit-appearance: none; appearance: none;
     width: 100%;
@@ -824,24 +839,25 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
     opacity: .45;
     cursor: not-allowed;
 }
-/* The knob is the selected swatch. It carries a ring of the card background so
-   it reads as punched out of the ramp rather than floating on top of it. */
+/* A fixed white handle. Tinting it per tick made the ramp look like it was
+   glitching, and against 31 neighbouring hues the tint never read as the
+   selected colour anyway — the header swatch carries that. */
 .vc-ambient-slider::-webkit-slider-thumb {
     -webkit-appearance: none; appearance: none;
     -webkit-box-sizing: border-box; box-sizing: border-box;
-    width: 22px; height: 22px;
-    border: 1px solid rgba(0, 0, 0, 0.45);
+    width: 20px; height: 20px;
+    border: 1px solid rgba(0, 0, 0, 0.35);
     border-radius: 50%;
-    background: var(--ambient-thumb, var(--vc-text-primary));
+    background: #fff;
     box-shadow: 0 0 0 3px var(--vc-tile-bg);
     cursor: pointer;
 }
 .vc-ambient-slider::-moz-range-thumb {
     box-sizing: border-box;
-    width: 22px; height: 22px;
-    border: 1px solid rgba(0, 0, 0, 0.45);
+    width: 20px; height: 20px;
+    border: 1px solid rgba(0, 0, 0, 0.35);
     border-radius: 50%;
-    background: var(--ambient-thumb, var(--vc-text-primary));
+    background: #fff;
     box-shadow: 0 0 0 3px var(--vc-tile-bg);
     cursor: pointer;
 }

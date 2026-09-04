@@ -123,21 +123,34 @@ public class VehicleControlAssetTest {
         assertFalse(html.contains("P.Cool"));
     }
 
+    /**
+     * The handle stays one fixed colour. Tinting it per tick read as the ramp
+     * glitching, and a tint surrounded by 31 neighbouring hues never reads as
+     * the selected colour — the header swatch is the readout.
+     */
     @Test
-    public void ambientSliderThumbUsesTheSelectedSwatchNotAGrayDot() throws IOException {
+    public void ambientHandleIsFixedAndTheSwatchCarriesTheColour() throws IOException {
         String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
         String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
 
         String thumb = ruleFor(css, ".vc-ambient-slider::-webkit-slider-thumb");
-        assertTrue(thumb.contains("background: var(--ambient-thumb, var(--vc-text-primary))"));
-        assertTrue(script.contains("wrap.style.setProperty('--ambient-thumb'"));
+        assertTrue(thumb.contains("background: #fff"));
+        assertFalse("the handle must not be tinted per tick",
+                thumb.contains("var(--ambient-thumb"));
         assertFalse(thumb.contains("background: var(--color, var(--primary))"));
-        // A ring of the card background, not a white rim: the rim read as a
-        // bullseye and left the swatch too small to judge against the ramp.
+        // A ring of the card background, not a white rim: the rim read as a bullseye.
         assertTrue(thumb.contains("box-shadow: 0 0 0 3px var(--vc-tile-bg)"));
         assertFalse(thumb.contains("border: 2px solid #fff"));
         assertTrue("a bordered thumb without border-box overflows the 20px track",
                 thumb.contains("box-sizing: border-box"));
+
+        assertTrue(html.contains("class=\"ambient-swatch\" id=\"ambientSwatch\""));
+        assertTrue(ruleFor(css, ".ambient-swatch").contains("var(--ambient-swatch, transparent)"));
+        assertTrue(script.contains("wrap.style.setProperty('--ambient-swatch'"));
+        // An unread palette hides the swatch instead of showing a grey dot.
+        assertTrue(script.contains("swatch.style.display = picked ? '' : 'none';"));
+        assertFalse(ruleFor(css, ".ambient-head").contains("gap:"));
     }
 
     /**
@@ -519,7 +532,7 @@ public class VehicleControlAssetTest {
                 + count(html, "data-state=\"3\" disabled")
                 + count(html, "data-state=\"4\" disabled")
                 + count(html, "data-state=\"5\" disabled"));
-        assertTrue(html.contains("vehicle-control.js?v=vclite17"));
+        assertTrue(html.contains("vehicle-control.js?v=vclite18"));
         assertTrue(script.contains("fetch('/api/vehicle/ac-charge-current-limit')"));
         assertTrue(script.contains("self.apiPost('/api/vehicle/ac-charge-current-limit'"));
         assertTrue(script.contains("startAcChargeCurrentSync: function()"));

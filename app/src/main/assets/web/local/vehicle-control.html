@@ -28,7 +28,7 @@
     </script>
     <script src="../shared/app-shell.js?v=5"></script>
     <link rel="stylesheet" href="../shared/styles.css?v=24">
-    <link rel="stylesheet" href="../shared/vehicle-control.css?v=31">
+    <link rel="stylesheet" href="../shared/vehicle-control.css?v=32">
 </head>
 <body>
     <div class="app-layout">
@@ -465,7 +465,10 @@
                                 </button>
                             </div>
                             <div class="ambient-wrapper">
-                                <span class="ambient-title" data-i18n="vehicle.ambient_lights">Ambient Lights</span>
+                                <div class="ambient-head">
+                                    <span class="ambient-title" data-i18n="vehicle.ambient_lights">Ambient Lights</span>
+                                    <span class="ambient-swatch" id="ambientSwatch" style="display:none;" aria-hidden="true"></span>
+                                </div>
                                 <input type="range" id="ambientColourSlider" class="vc-ambient-slider" min="1" max="31" step="1" value="1" aria-label="Ambient Colour" />
                             </div>
                         </div>
@@ -641,7 +644,7 @@
                 '../shared/vendor/gsap.min.js?v=12'
             ];
             var chain = window.VC_LITE ? [] : window.VC_VENDOR_CHAIN.slice();
-            chain.push('../shared/vehicle-control.js?v=vclite17');
+            chain.push('../shared/vehicle-control.js?v=vclite18');
             for (var i = 0; i < chain.length; i++) {
                 var s = document.createElement('script');
                 s.src = chain[i];
