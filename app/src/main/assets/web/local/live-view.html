@@ -10,7 +10,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
-    <script src="../shared/theme.js?v=6"></script>
+    <script src="../shared/theme.js?v=7"></script>
     <script src="../shared/app-shell.js?v=5"></script>
     <script>
         if (typeof window.AndroidBridge !== 'undefined') {
@@ -20,7 +20,7 @@
     <style>
         html.is-app-webview .cabin-listen-btn { display: none !important; }
     </style>
-    <link rel="stylesheet" href="../shared/styles.css?v=27">
+    <link rel="stylesheet" href="../shared/styles.css?v=28">
     <link rel="stylesheet" href="../shared/leaflet.css" />
     <script src="../shared/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jmuxer@2.0.4/dist/jmuxer.min.js"></script>
@@ -62,7 +62,6 @@
                                          data-i18n-attr="aria-label:pip.select_camera">
                                         <span class="conn-dot"></span>
                                     </div>
-                                    <div class="decoder-chip" id="decoderChip" style="display:none;">GPU</div>
                                 </div>
                                 <div class="top-bar-right">
                                     <!-- The <select> stays the source of truth for the
@@ -153,8 +152,9 @@
                                             onclick="BYD.stream.fireDeterrent('horn')"
                                             data-i18n-attr="title:liveview.deterrent_horn;aria-label:liveview.deterrent_horn"
                                             title="Horn" aria-label="Horn">
+                                        <!-- Lucide megaphone -->
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                            <path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                                            <path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>
                                         </svg>
                                         <span class="deterrent-label" data-i18n="liveview.deterrent_horn">Horn</span>
                                     </button>
@@ -162,8 +162,9 @@
                                             onclick="BYD.stream.fireDeterrent('flash')"
                                             data-i18n-attr="title:liveview.deterrent_flash;aria-label:liveview.deterrent_flash"
                                             title="Flash" aria-label="Flash">
+                                        <!-- Lucide lightbulb -->
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                                            <path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/>
                                         </svg>
                                         <span class="deterrent-label" data-i18n="liveview.deterrent_flash">Flash</span>
                                     </button>
@@ -397,27 +398,6 @@
 
         .connection-status.disconnected .conn-dot {
             background: var(--status-danger);
-        }
-        
-        .decoder-chip {
-            padding: 6px 10px;
-            background: var(--primary-container);
-            border-radius: var(--radius-md);
-            font-size: 10px;
-            font-weight: 700;
-            color: var(--on-primary-container);
-            letter-spacing: 0.05em;
-        }
-
-        /* Set from JS as the player resolves a decoder. */
-        .decoder-chip.is-native {
-            background: var(--status-success-container);
-            color: var(--status-success);
-        }
-
-        .decoder-chip.is-fallback {
-            background: var(--status-warning-container);
-            color: var(--status-warning);
         }
         
         .quality-menu { position: relative; }
@@ -667,36 +647,60 @@
         }
         .deterrent-controls .deterrent-btn + .deterrent-btn { margin-top: 10px; }
 
+        /* In the browser the theme picker sits bottom-right, over both the
+           deterrent stack and the expand-map button. The app never mounts the
+           picker, so reserve room for it outside the WebView only. */
+        html:not(.is-app-webview) .deterrent-controls {
+            bottom: calc(76px + var(--safe-bottom, 0px));
+        }
+        html:not(.is-app-webview) .location-expand-button {
+            margin-right: 60px;
+        }
+        [dir="rtl"] html:not(.is-app-webview) .location-expand-button {
+            margin-right: 0;
+            margin-left: 60px;
+        }
+
+        /* Same surface language as .btn-map-float, so the two floating clusters
+           on this page read as one control family. */
         .deterrent-btn {
-            display: inline-flex;
+            display: flex;
             align-items: center;
             justify-content: flex-start;
-            min-width: 108px;
-            padding: 10px 16px;
-            background: var(--lv-pill-bg);
-            border: 1px solid var(--lv-pill-border);
+            box-sizing: border-box;
+            width: 116px;
+            height: 40px;
+            padding: 0 12px;
+            background: var(--surface-container);
+            border: 1px solid var(--outline-variant);
             border-radius: var(--radius-md);
-            color: var(--lv-overlay-text);
+            color: var(--on-surface);
             font-size: 13px;
-            font-weight: 700;
-            letter-spacing: 0.02em;
+            font-weight: 600;
             cursor: pointer;
-            transition: transform 0.15s ease, background 0.2s ease, border-color 0.2s ease;
+            transition: background 0.2s ease, border-color 0.2s ease;
             -webkit-tap-highlight-color: transparent;
         }
         .deterrent-btn svg { width: 18px; height: 18px; margin-right: 8px; flex: 0 0 18px; }
         .deterrent-btn .deterrent-label { line-height: 1; white-space: nowrap; }
-        .deterrent-btn:hover { background: var(--lv-pill-bg-hover); border-color: var(--brand-primary); }
-        .deterrent-btn:active { transform: scale(0.96); }
+        .deterrent-btn:hover { background: var(--surface-container-high); }
+        .deterrent-btn:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: 2px;
+        }
+        .deterrent-btn:disabled,
+        .deterrent-btn[disabled] {
+            color: var(--on-surface-variant);
+            border-style: dashed;
+            cursor: not-allowed;
+        }
 
-        .deterrent-horn svg { color: var(--status-warning); }
-        .deterrent-horn:hover { border-color: var(--status-warning); }
-        .deterrent-flash svg { color: var(--brand-primary); }
-
-        /* Pending state while the cloud round-trip is in flight — dim +
-           block re-taps so a double-tap doesn't queue two horn commands. */
+        /* Pending state while the cloud round-trip is in flight — the only
+           place semantic colour appears. Blocks re-taps so a double-tap
+           doesn't queue two horn commands. */
         .deterrent-btn.pending {
-            opacity: 0.55;
+            border-color: var(--status-warning);
+            color: var(--status-warning);
             pointer-events: none;
         }
 
@@ -1184,7 +1188,6 @@
             [dir="rtl"] .top-bar-left > * + *,
             [dir="rtl"] .top-bar-right > * + * { margin-right: 6px; }
             .top-bar-left { flex: 1 1 auto; }
-            .decoder-chip { padding: 4px 8px; font-size: 9px; }
             .quality-menu__trigger {
                 width: 108px;
                 min-width: 108px;
@@ -1213,7 +1216,7 @@
             /* Tighter deterrent buttons on phones so the pair doesn't crowd
                the bottom-right of a small video stage. */
             .deterrent-controls { right: 12px; bottom: calc(12px + var(--safe-bottom, 0px)); }
-            .deterrent-btn { min-width: 96px; padding: 9px 12px; font-size: 12px; }
+            .deterrent-btn { width: 104px; height: 36px; padding: 0 10px; font-size: 12px; }
             .deterrent-btn svg { width: 16px; height: 16px; flex: 0 0 16px; margin-right: 6px; }
             .deterrent-controls .deterrent-btn + .deterrent-btn { margin-top: 8px; }
 
@@ -1870,13 +1873,6 @@
                     if (_sw) _sw.classList.remove('active');
                 }
                 
-                // Show decoder badge
-                const chip = document.getElementById('decoderChip');
-                if (chip) {
-                    chip.textContent = 'WebCodecs';
-                    chip.className = 'decoder-chip is-native';
-                    chip.style.display = 'block';
-                }
                 
                 // CRITICAL FIX: Use the /ws endpoint on the current port (e.g. 8080)
                 // Do NOT use port 8887 - that's the dead legacy port
@@ -1913,11 +1909,6 @@
                     if (BYD.utils && BYD.utils.toast) {
                         BYD.utils.toast(BYD.i18n.t('liveview.decoder_fallback'), 'warning');
                     }
-                    const chip = document.getElementById('decoderChip');
-                    if (chip) {
-                        chip.textContent = 'Fallback';
-                        chip.className = 'decoder-chip is-fallback';
-                    }
                     this.fallbackFromWebCodecs();
                 };
                 this.sotaPlayer.start();
@@ -1932,18 +1923,6 @@
                     return false;
                 }
                 if (superseded() || !selectionIsCurrent()) return false;
-                
-                const chip = document.getElementById('decoderChip');
-                if (chip) {
-                    if (this.decoderMode === 'jmuxer') {
-                        chip.textContent = 'JMuxer';
-                        chip.className = 'decoder-chip';
-                    } else {
-                        chip.textContent = 'Broadway';
-                        chip.className = 'decoder-chip is-fallback';
-                    }
-                    chip.style.display = 'block';
-                }
                 
                 // Show appropriate video element based on decoder mode
                 if (this.decoderMode === 'jmuxer') {
