@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -10,10 +10,10 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
-    <script src="../shared/theme.js?v=5"></script>
+    <script src="../shared/theme.js?v=6"></script>
     <script src="../shared/app-shell.js?v=2"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=23">
-    <link rel="stylesheet" href="../shared/seat-positions.css?v=2">
+    <link rel="stylesheet" href="../shared/styles.css?v=24">
+    <link rel="stylesheet" href="../shared/seat-positions.css?v=5">
 </head>
 <body>
     <div class="app-layout">
@@ -37,14 +37,6 @@
 
             <div class="page-body">
 
-                <!-- Priority order lives in renderGate(): unpowered motors first
-                     (a write is accepted and does nothing), then gear-out-of-P,
-                     then an unconfirmed axis map. -->
-                <div class="sp-status" id="spStatus" data-state="off">
-                    <span class="sp-status-dot" aria-hidden="true"></span>
-                    <span class="sp-status-text" id="spStatusText" data-i18n="seatpos.gate_acc_off">The car is off, so the seat motors have no power. Apply and save will do nothing until you turn it on.</span>
-                </div>
-
                 <div class="card sp-now">
                     <div class="card-body sp-now-body">
                         <div class="sp-now-art" id="spCurrentGlyph"></div>
@@ -59,6 +51,13 @@
                             </button>
                         </div>
                     </div>
+                    <!-- Priority order lives in renderGate(): unpowered motors first
+                         (a write is accepted and does nothing), then gear-out-of-P,
+                         then an unconfirmed axis map. -->
+                    <div class="sp-status" id="spStatus" data-state="off">
+                        <span class="sp-status-dot" aria-hidden="true"></span>
+                        <span class="sp-status-text" id="spStatusText" data-i18n="seatpos.gate_acc_off">The car is off, so the seat motors have no power. Apply and save will do nothing until you turn it on.</span>
+                    </div>
                     <div class="sp-batches" id="spBatches" style="display:none;">
                         <span class="sp-batch" id="spBatch1"><span class="led"></span>batch 1 · mirrors</span>
                         <span class="sp-batch" id="spBatch2"><span class="led"></span>batch 2 · seat</span>
@@ -70,6 +69,8 @@
             </div>
         </main>
     </div>
+
+    <div id="toastContainer" class="toast-container"></div>
 
     <div class="modal-backdrop" id="spScrim" style="display:none;">
         <div class="modal-card sp-dialog" role="dialog" aria-modal="true" aria-labelledby="spDialogTitle">
@@ -87,7 +88,7 @@
     <script src="../shared/auth.js"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
     <script src="../shared/core.js?v=20"></script>
-    <script src="../shared/seat-positions.js?v=2"></script>
+    <script src="../shared/seat-positions.js?v=5"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');

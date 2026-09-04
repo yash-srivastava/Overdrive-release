@@ -4,56 +4,35 @@
  * uses sibling margins instead of `gap` (flex gap arrived in Chrome 84).
  */
 
-/* ── Seat glyph ───────────────────────────────────────────────────────────────
- * Side-profile seat, split into backrest + cushion so the backrest can rotate
- * against the seat. Geometry is inferred from captured axes and kept gentle:
- * past roughly 12 degrees the two halves visibly pull apart at the join.
- * ───────────────────────────────────────────────────────────────────────────── */
-.seat {
-    position: relative;
-    flex: none;
-    color: var(--on-surface-variant);
-}
+/* ── Seat glyph ─────────────────────────────────────────────────────────────── */
 .seat-svg {
+    display: block;
     width: 100%;
     height: 100%;
-    display: block;
-    overflow: visible;
-}
-.seat-svg-part {
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 3;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-}
-.seat-svg-floor {
-    stroke: var(--outline-variant);
-    stroke-width: 2;
-    stroke-linecap: round;
+    color: var(--on-surface-variant);
 }
 
-/* ── One-line gate status ────────────────────────────────────────────────────── */
+/* ── One-line gate status ──────────────────────────────────────────────────────
+ * The footer of the card whose buttons it governs, not a banner stacked above the
+ * page: readiness only means anything next to Save and Apply.
+ * ───────────────────────────────────────────────────────────────────────────── */
 .sp-status {
     display: -webkit-flex;
     display: flex;
-    -webkit-align-items: center;
-    align-items: center;
-    min-height: 44px;
-    padding: 10px 14px;
-    margin-bottom: 12px;
-    background: var(--surface-container);
-    border: 1px solid var(--outline-variant);
-    border-radius: var(--radius-md);
-    font-size: 13px;
+    -webkit-align-items: flex-start;
+    align-items: flex-start;
+    padding: 10px var(--card-pad) 12px;
+    border-top: 1px solid var(--outline-variant);
+    font-size: 12px;
     line-height: 1.4;
-    color: var(--on-surface);
+    color: var(--on-surface-variant);
 }
 .sp-status-dot {
     -webkit-flex: none;
     flex: none;
     width: 8px;
     height: 8px;
+    margin-top: 4px;
     margin-right: 10px;
     border-radius: 50%;
     background: var(--outline);
@@ -66,17 +45,19 @@
 
 /* ── Current position ────────────────────────────────────────────────────────── */
 .sp-now + #spList { margin-top: 20px; }
+/* Top-aligned: centring re-centres the art and the buttons every time a row's
+   details expand, so the whole row appears to slide. */
 .sp-now-body {
     display: -webkit-flex;
     display: flex;
-    -webkit-align-items: center;
-    align-items: center;
+    -webkit-align-items: flex-start;
+    align-items: flex-start;
 }
 .sp-now-art {
     -webkit-flex: none;
     flex: none;
     width: 64px;
-    height: 72px;
+    height: 64px;
     margin-right: 16px;
 }
 .sp-now-art:empty { display: none; }
@@ -107,7 +88,52 @@
 [dir="rtl"] .sp-now-actions { margin-left: 0; margin-right: 16px; }
 
 /* ── Axis readout ────────────────────────────────────────────────────────────── */
-.sp-axes { margin-top: 10px; }
+.sp-details-toggle {
+    display: -webkit-inline-flex;
+    display: inline-flex;
+    -webkit-align-items: center;
+    align-items: center;
+    margin-top: 8px;
+    padding: 4px 10px 4px 7px;
+    border: 1px solid var(--outline-variant);
+    border-radius: var(--radius-sm);
+    background: var(--surface-container);
+    color: var(--on-surface-variant);
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+}
+[dir="rtl"] .sp-details-toggle { padding: 4px 7px 4px 10px; }
+.sp-details-toggle:hover {
+    background: var(--surface-container-high);
+    color: var(--on-surface);
+}
+.sp-details-toggle:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+.sp-details-toggle svg {
+    -webkit-flex: none;
+    flex: none;
+    width: 14px;
+    height: 14px;
+    margin-right: 5px;
+    -webkit-transition: -webkit-transform 0.15s ease;
+    transition: transform 0.15s ease;
+}
+[dir="rtl"] .sp-details-toggle svg { margin-right: 0; margin-left: 5px; }
+.sp-details.is-open .sp-details-toggle svg {
+    -webkit-transform: rotate(180deg);
+    transform: rotate(180deg);
+}
+.sp-details:not(.is-open) .sp-axes { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+    .sp-details-toggle svg { -webkit-transition: none; transition: none; }
+}
+
+.sp-axes { margin-top: 8px; }
 .sp-axis-line {
     display: -webkit-flex;
     display: flex;
@@ -117,30 +143,33 @@
     flex-wrap: wrap;
 }
 .sp-axis-line + .sp-axis-line { margin-top: 6px; }
+/* An inline eyebrow, not a fixed column: labels like "Left mirror sideways"
+   overflow a 60px gutter and drag every row ragged. */
 .sp-axis-group {
     -webkit-flex: none;
     flex: none;
-    width: 60px;
+    margin: 2px 10px 2px 0;
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.07em;
     text-transform: uppercase;
     color: var(--outline);
 }
+[dir="rtl"] .sp-axis-group { margin: 2px 0 2px 10px; }
 .sp-axis {
-    padding: 3px 8px;
-    margin: 2px 6px 2px 0;
-    border: 1px solid var(--outline-variant);
-    border-radius: var(--radius-sm);
-    background: var(--surface-container-high);
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
+    margin: 2px 14px 2px 0;
+    font-size: 11px;
     color: var(--on-surface-variant);
-    white-space: nowrap;
 }
-.sp-axis .v { color: var(--on-surface); font-weight: 650; margin-left: 2px; }
-[dir="rtl"] .sp-axis { margin: 2px 0 2px 6px; }
-[dir="rtl"] .sp-axis .v { margin-left: 0; margin-right: 2px; }
+.sp-axis .v {
+    margin-left: 5px;
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--on-surface);
+}
+[dir="rtl"] .sp-axis { margin: 2px 0 2px 14px; }
+[dir="rtl"] .sp-axis .v { margin-left: 0; margin-right: 5px; }
 
 .sp-batches {
     display: -webkit-flex;
@@ -181,8 +210,8 @@
 .sp-row {
     display: -webkit-flex;
     display: flex;
-    -webkit-align-items: center;
-    align-items: center;
+    -webkit-align-items: flex-start;
+    align-items: flex-start;
     padding: 12px 14px;
     border-radius: var(--radius-md);
     background: var(--surface-container);
@@ -196,7 +225,7 @@
     -webkit-flex: none;
     flex: none;
     width: 44px;
-    height: 50px;
+    height: 44px;
 }
 .sp-row-main { -webkit-flex: 1; flex: 1; min-width: 0; }
 .sp-name-line { display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; -webkit-flex-wrap: wrap; flex-wrap: wrap; }
@@ -364,16 +393,19 @@
     font-size: 12px;
     color: var(--on-surface-variant);
 }
-.sp-row-axes { margin-top: 4px; }
+.sp-row-axes { margin-top: 0; }
 .sp-dot { margin: 0 6px; opacity: 0.5; }
+/* A flex parent eats the whitespace either side, so the gutter has to be a margin. */
 .sp-swatch {
     display: inline-block;
     width: 10px;
     height: 10px;
+    margin-left: 7px;
     border-radius: 50%;
     vertical-align: middle;
     border: 1px solid var(--outline-variant);
 }
+[dir="rtl"] .sp-swatch { margin-left: 0; margin-right: 7px; }
 
 .sp-parts { display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column; margin-top: 4px; }
 .sp-parts > * + * { margin-top: 4px; }
@@ -515,5 +547,5 @@
     }
     [dir="rtl"] .sp-now-actions { margin-right: 0; }
     .sp-now-actions > .btn { width: 100%; }
-    .sp-axis-group { width: 100%; margin-bottom: 2px; }
+    .sp-axis-group { -webkit-flex-basis: 100%; flex-basis: 100%; margin-bottom: 2px; }
 }

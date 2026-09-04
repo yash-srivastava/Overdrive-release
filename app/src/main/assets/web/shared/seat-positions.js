@@ -29,6 +29,10 @@ const SeatPositions = {
     colourMax: 30,
     _pollTimer: null,
 
+    // Which axis readouts are expanded, by position id ('current' for the hero card).
+    // Survives the 5s geometry poll, which rebuilds the card.
+    detailsOpen: {},
+
     // Axis table. Order here is the display order. Groups match the two batches
     // applyFull writes, which is also how a person thinks about them.
     AXES: [
@@ -53,6 +57,7 @@ const SeatPositions = {
 
     ICONS: {
         bolt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+        chevron: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',
         dots: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>',
         link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>',
         pencil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
@@ -64,6 +69,10 @@ const SeatPositions = {
         this.load();
         document.getElementById('spSaveNew').addEventListener('click', () => this.saveAsNew());
         document.getElementById('spList').addEventListener('click', (e) => this.onListClick(e));
+        document.getElementById('spCurrentAxes').addEventListener('click', (e) => {
+            const button = e.target.closest('button[data-act="details"]');
+            if (button) this.toggleDetails(button);
+        });
         // Close any open row menu on an outside click.
         document.addEventListener('click', (e) => {
             if (!e.target.closest || !e.target.closest('.sp-menu-wrap')) this.closeMenus(null);
@@ -216,8 +225,12 @@ const SeatPositions = {
             '<span class="v">' + this.esc(axes[a.key]) + '</span></span>').join('');
     },
 
-    /** Two labelled rows of value chips, one per apply batch. */
-    axesHtml(axes) {
+    /**
+     * Thirteen axis values per position is a wall of numbers on a page whose rows are
+     * chosen by name, so they sit behind a disclosure. What a position stores is already
+     * on the summary line above; the numbers only matter when comparing two positions.
+     */
+    axesHtml(axes, key) {
         const lines = ['seat', 'mirror'].map(group => {
             const items = this.axisSpans(axes, group);
             if (!items) return '';
@@ -226,43 +239,48 @@ const SeatPositions = {
             return '<div class="sp-axis-line"><span class="sp-axis-group">' + this.esc(label) +
                 '</span>' + items + '</div>';
         }).join('');
-        return lines ? '<div class="sp-axes">' + lines + '</div>' : '';
+        if (!lines) return '';
+        const open = !!this.detailsOpen[key];
+        return '<div class="sp-details' + (open ? ' is-open' : '') + '" data-key="' + this.esc(key) + '">' +
+            '<button type="button" class="sp-details-toggle" data-act="details" aria-expanded="' +
+                (open ? 'true' : 'false') + '">' + this.ICONS.chevron +
+                '<span class="sp-details-label">' + this.esc(this.detailsLabel(open)) + '</span>' +
+            '</button>' +
+            '<div class="sp-axes">' + lines + '</div>' +
+        '</div>';
+    },
+
+    detailsLabel(open) {
+        return open
+            ? this.t('seatpos.hide_details', 'Hide details')
+            : this.t('seatpos.show_details', 'Show details');
     },
 
     /**
-     * Side-profile glyph. Direction of each axis is INFERRED from comparing captured
-     * positions, not measured against real travel, and the ranges are chosen to read
-     * well rather than to be true. Angles stay gentle: past roughly 12 degrees the two
-     * clipped halves visibly pull apart at the join, and real positions differ by far
-     * less than that.
+     * Toggled in place rather than through a re-render: the row carries an open menu and
+     * focus, and a rebuild would drop both.
      */
+    toggleDetails(button) {
+        const wrap = button.closest('.sp-details');
+        if (!wrap) return;
+        const open = !this.detailsOpen[wrap.getAttribute('data-key')];
+        this.detailsOpen[wrap.getAttribute('data-key')] = open;
+        wrap.classList.toggle('is-open', open);
+        button.setAttribute('aria-expanded', open ? 'true' : 'false');
+        const label = button.querySelector('.sp-details-label');
+        if (label) label.textContent = this.detailsLabel(open);
+    },
+
+    // Material Icons `airline_seat_recline_extra`. Filled, so it carries no stroke width.
+    SEAT_PATH: 'M5.35 5.64c-.9-.64-1.12-1.88-.49-2.79.63-.9 1.88-1.12 2.79-.49.9.64 1.12 1.88.49 2.79-.64.9-1.88 1.12-2.79.49zM16 19H8.93c-1.48 0-2.74-1.08-2.96-2.54L4 7H2l1.99 9.76C4.37 19.2 6.47 21 8.94 21H16v-2zm.23-4h-4.88l-1.03-4.1c1.58.89 3.28 1.54 5.15 1.22V9.99c-1.63.31-3.44-.27-4.69-1.25L9.14 7.47c-.23-.18-.49-.3-.76-.38-.32-.09-.66-.12-.99-.06h-.02c-1.23.22-2.05 1.39-1.84 2.61l1.35 5.92C7.16 16.98 8.39 18 9.83 18h6.85l3.82 3 1.5-1.5-5.77-4.5z',
+
     /**
-     * Side-profile seat, facing right. The backrest pivots at the recliner and
-     * the cushion tilts at its own hinge, so a stored pose is legible at a
-     * glance. Whole-seat translation carries height and fore/aft against the
-     * fixed floor rule — without a fixed datum a height change is invisible.
+     * A posed side profile would have to invent the axis directions, which the
+     * numbers behind Show details state exactly.
      */
-    glyph(axes, size) {
-        const v = (k, d) => (!axes || axes[k] === undefined || axes[k] === this.SENTINEL) ? d : axes[k];
-        const n = x => Math.round(x * 100) / 100;
-        const backDeg = -(v('BACKREST', 55) - 55) * 0.30;
-        const tiltDeg = -(v('SITPOINT', 50) - 50) * 0.13;
-        const dy = (50 - v('HEIGHT', 50)) / 100 * 8;
-        const dx = -(v('HORIZONTAL', 50) - 50) / 100 * 6;
-        return '<svg class="seat-svg" viewBox="0 0 64 72" aria-hidden="true">' +
-            '<g transform="translate(' + n(dx) + ' ' + n(dy) + ')">' +
-                // Backrest with an integrated headrest, hinged at the cushion line.
-                '<g transform="rotate(' + n(backDeg) + ' 26 46)">' +
-                    '<path class="seat-svg-part" d="M20 46 L20 16 Q20 9 27 9 L31 9 Q37 9 37 16 L37 30 Q37 34 33 35 L26 37"/>' +
-                '</g>' +
-                // Cushion, hinged at its rear edge so the front lifts.
-                '<g transform="rotate(' + n(tiltDeg) + ' 24 50)">' +
-                    '<path class="seat-svg-part" d="M22 42 L48 45 Q53 46 53 51 Q53 55 48 55 L27 55 Q21 55 21 49 Z"/>' +
-                '</g>' +
-                '<path class="seat-svg-part" d="M28 55 L28 64 M44 55 L44 64"/>' +
-            '</g>' +
-            '<path class="seat-svg-floor" d="M8 68 L56 68"/>' +
-        '</svg>';
+    glyph(axes) {
+        return '<svg class="seat-svg" viewBox="0 0 24 24" fill="currentColor" ' +
+            'aria-hidden="true"><path d="' + this.SEAT_PATH + '"/></svg>';
     },
 
     // Largest per-axis deviation still counted as "this position". The seat does not land
@@ -313,7 +331,7 @@ const SeatPositions = {
         // No reading means no pose to draw. An empty holder collapses (:empty)
         // rather than reserving space for a seat shape that would be invented.
         glyphEl.innerHTML = this.current ? this.glyph(this.current) : '';
-        axesEl.innerHTML = this.current ? this.axesHtml(this.current) : '';
+        axesEl.innerHTML = this.current ? this.axesHtml(this.current, 'current') : '';
         if (!this.current) {
             matchEl.textContent = this.t('seatpos.current_unavailable', 'Could not read the seat');
         } else {
@@ -379,7 +397,7 @@ const SeatPositions = {
                 // car's own UI calls it.
                 (p.carName ? '<div class="sp-carname">' + this.esc(p.carName) + '</div>' : '') +
                 this.partsSummaryHtml(p) +
-                '<div class="sp-row-axes">' + this.axesHtml(p.axes) + '</div>' +
+                '<div class="sp-row-axes">' + this.axesHtml(p.axes, p.id) + '</div>' +
             '</div>' +
             '<div class="sp-row-actions">' +
                 (isUser ? '<button class="btn btn-secondary" data-act="saveHere"' + (this.acc ? '' : ' disabled') + '>' +
@@ -431,7 +449,8 @@ const SeatPositions = {
 
     emptyHtml() {
         return '<div class="sp-empty">' +
-            '<div class="sp-empty-tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 9V6a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v3"/><path d="M3 16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5a2 2 0 0 0-4 0v2H7v-2a2 2 0 0 0-4 0Z"/><path d="M5 18v2"/><path d="M19 18v2"/></svg></div>' +
+            '<div class="sp-empty-tile"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+                '<path d="' + this.SEAT_PATH + '"/></svg></div>' +
             '<div class="sp-empty-title">' + this.esc(this.t('seatpos.empty_title', 'No saved positions yet')) + '</div>' +
             '<div class="sp-empty-hint">' + this.esc(this.t('seatpos.empty',
                 'Adjust the seat and mirrors in the car, then press Save as new.')) + '</div>' +
@@ -499,6 +518,7 @@ const SeatPositions = {
         }
         this.closeMenus(null);
 
+        if (act === 'details') return this.toggleDetails(btn);
         if (act === 'apply') return this.apply(p);
         if (act === 'usedBy') return this.showUses(p);
         if (act === 'useInAutomation') return this.useInAutomation(p);
