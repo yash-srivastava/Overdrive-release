@@ -80,7 +80,6 @@ var VC = {
     cloudStatusInterval: null,
     cloudLockInterval: null,
     acChargeCurrentInterval: null,
-    _toastTimer: null,
     // Command and fetch generations keep an older asynchronous result from
     // overwriting a newer action or a user edit.
     _windowCommandRevisions: {},
@@ -4034,14 +4033,16 @@ var VC = {
             if (typeof colour === 'number') {
                 slider.value = colour;
                 var options = this.vehicleState.lights.ambientOptions;
+                var wrap = slider.parentNode;
                 if (options && options.length) {
                     slider.disabled = false;
                     slider.style.background = 'linear-gradient(to right, ' + options.join(',') + ')';
-                    if (colour >= 1 && colour <= options.length) {
-                        slider.style.setProperty('--color', options[colour - 1]);
+                    if (colour >= 1 && colour <= options.length && wrap && wrap.style) {
+                        wrap.style.setProperty('--ambient-thumb', options[colour - 1]);
                     }
                 } else {
                     slider.disabled = true;
+                    if (wrap && wrap.style) wrap.style.removeProperty('--ambient-thumb');
                 }
             }
         }
@@ -6312,25 +6313,7 @@ var VC = {
     },
 
     toast: function(message, type) {
-        var el = document.getElementById('vcToast');
-        if (!el) return;
-        if (message == null || message === '') {
-            var tr = BYD.i18n && BYD.i18n.t ? BYD.i18n.t.bind(BYD.i18n) : null;
-            if (type === 'success') {
-                message = (tr && tr('toast.fallback_success')) || 'Done';
-            } else if (type === 'error') {
-                message = (tr && tr('toast.fallback_error')) || 'Something went wrong';
-            } else {
-                message = (tr && tr('toast.fallback_info')) || 'Done';
-            }
-        }
-        el.textContent = message;
-        el.className = 'vc-toast show ' + (type || 'info');
-        clearTimeout(this._toastTimer);
-        var toastEl = el;
-        this._toastTimer = setTimeout(function() {
-            toastEl.classList.remove('show');
-        }, 2500);
+        if (BYD.core && BYD.core.toast) BYD.core.toast(message, type || 'info', 2500);
     },
 
     /**

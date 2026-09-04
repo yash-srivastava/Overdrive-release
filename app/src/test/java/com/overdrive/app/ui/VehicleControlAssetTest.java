@@ -51,21 +51,6 @@ public class VehicleControlAssetTest {
         assertFalse(ruleFor(css, ".vc-tyre-strip").contains("gap:"));
     }
 
-    /** Every cloud-gated control carries its marker in the same corner. */
-    @Test
-    public void cloudMarkerSitsInOneCornerForEveryControlKind() throws IOException {
-        String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
-
-        assertFalse(css.contains(
-                ".vc-preset[data-requires-cloud=\"true\"]::after { top: 4px; right: auto; left: 4px; }"));
-        assertTrue(css.contains("[dir=\"rtl\"] .vc-preset[data-requires-cloud=\"true\"]::after"));
-        // The marker overlaps a short label unless the pill reserves room on
-        // both sides — padding one side alone shifts the label off centre.
-        assertTrue(ruleFor(css,
-                ".vc-window-row-wide .vc-window-presets > .vc-preset[data-requires-cloud=\"true\"]")
-                .contains("padding-left: 26px; padding-right: 26px"));
-    }
-
     /** Trunk actions use the current Lucide door glyphs. */
     @Test
     public void trunkActionsUseOfficialLucideDoorGlyphs() throws IOException {
@@ -82,24 +67,143 @@ public class VehicleControlAssetTest {
     }
 
     /**
-     * The hold hint captions the two memory tiles, so it shares a line with
-     * them rather than centring itself under the whole panel.
+     * Memory tiles sit in the same row as heat/cool. A titled block under a
+     * divider made the Seats sheet read as two stacked panels.
      */
     @Test
-    public void seatMemoryHintReadsAsACaptionForItsOwnTiles() throws IOException {
+    public void seatMemoryTilesSitInTheSameRowAsHeatAndCool() throws IOException {
         String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
         String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
 
-        assertTrue(html.contains("class=\"vc-seat-memory\""));
-        assertTrue(html.contains("class=\"vc-seat-memory-actions\""));
-        assertTrue(ruleFor(css, ".vc-seat-memory").contains("flex-basis: 100%"));
-        assertTrue(ruleFor(css, ".vc-seat-memory").contains("border-top"));
-        String hint = ruleFor(css, ".vc-hold-hint");
-        assertFalse(hint.contains("text-transform: uppercase"));
-        assertFalse(hint.contains("font-size: 9px"));
-        assertTrue(hint.contains("margin-top: 8px"));
-        // Nesting drops the .vc-panel-row > * gutter, so Chrome 58 needs margins.
-        assertTrue(css.contains(".vc-seat-memory-actions > .vc-tile + .vc-tile { margin-left: 6px; }"));
+        int seats = html.indexOf("id=\"panelSeats\"");
+        int windows = html.indexOf("id=\"panelWindows\"");
+        String panel = html.substring(seats, windows);
+        assertTrue(panel.contains("id=\"btnSeatMemory1\""));
+        assertTrue(panel.contains("id=\"btnSeatMemory2\""));
+        assertTrue(panel.contains("class=\"vc-tile memory\""));
+        assertFalse(panel.contains("vc-block--divider"));
+        assertFalse(panel.contains("vc-seat-memory"));
+        assertFalse(css.contains(".vc-hold-hint"));
+        assertFalse(css.contains(".vc-seat-memory-actions"));
+    }
+
+    /**
+     * Seats tab and memory tiles use Material {@code airline_seat_recline_extra},
+     * not the Lucide armchair that reads as a couch at 20px.
+     */
+    @Test
+    public void seatsTabUsesTheMaterialReclinedSeat() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
+        String seat = "M5.35 5.64c-.9-.64-1.12-1.88-.49-2.79";
+        assertTrue(html.contains(seat));
+        assertEquals(3, count(html, seat));
+        assertFalse(html.contains("M19 9V6a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v3"));
+    }
+
+    @Test
+    public void findCarUsesTheMaterialExploreGlyph() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
+        assertTrue(html.contains("M12 10.9c-.61 0-1.1.49-1.1 1.1s.49 1.1 1.1 1.1"));
+        assertFalse(html.contains("M19.07 4.93A10 10 0 0 1 22 12"));
+    }
+
+    @Test
+    public void seatClimateTilesUseMaterialLeftRightGlyphsAndLabels() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
+        String en = readRepositoryFile("app/src/main/assets/web/i18n/en.json");
+
+        assertTrue(html.contains("m801-458-66-44 13-21"));
+        assertTrue(html.contains("m561-458-66-44 13-21"));
+        assertTrue(html.contains(">Left heat</span>"));
+        assertTrue(html.contains(">Left cool</span>"));
+        assertTrue(html.contains(">Right heat</span>"));
+        assertTrue(html.contains(">Right cool</span>"));
+        assertTrue(en.contains("\"driver_heat\": \"Left heat\""));
+        assertFalse(html.contains("D.Heat"));
+        assertFalse(html.contains("P.Cool"));
+    }
+
+    @Test
+    public void ambientSliderThumbUsesTheSelectedSwatchNotAGrayDot() throws IOException {
+        String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
+        String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
+
+        assertTrue(ruleFor(css, ".vc-ambient-slider::-webkit-slider-thumb").contains(
+                "background: var(--ambient-thumb, #fff)"));
+        assertTrue(script.contains("wrap.style.setProperty('--ambient-thumb'"));
+        assertFalse(ruleFor(css, ".vc-ambient-slider::-webkit-slider-thumb").contains(
+                "background: var(--color, var(--primary))"));
+    }
+
+    /**
+     * A titled block with an optional caption is the one primitive every panel
+     * that outgrows a row of tiles uses. It must not collide with the existing
+     * `.vc-group` segmented-button primitive.
+     */
+    @Test
+    public void panelsShareOneTitledBlockPrimitive() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
+        String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
+
+        assertTrue(ruleFor(css, ".vc-block").contains("flex-direction: column"));
+        assertTrue(ruleFor(css, ".vc-group").contains("display: inline-flex"));
+        assertFalse("width cannot absorb the .vc-panel-row gutter",
+                ruleFor(css, ".vc-block--full").contains("width: 100%"));
+
+        // Climate: labelled steppers on their own row instead of bare siblings.
+        assertTrue(html.contains("class=\"vc-block vc-block--stepper\""));
+        assertTrue(html.contains("data-i18n=\"vehicle.temperature\""));
+        assertTrue(html.contains("data-i18n=\"vehicle.fan\""));
+        assertTrue(ruleFor(css, ".vc-stepper").contains("height: 48px"));
+        assertTrue(ruleFor(css, ".vc-stepper > .vc-mini").contains("border: none"));
+
+        // Charging reuses the same block, no bespoke charge-* wrappers left.
+        assertFalse(css.contains(".vc-charge-block"));
+        assertFalse(css.contains(".vc-charging-section"));
+        assertFalse(css.contains(".vc-charge-footer"));
+    }
+
+    /** Tiles need 8px of air; 2px margins had them nearly touching. */
+    @Test
+    public void panelTilesAreNotShoulderToShoulder() throws IOException {
+        String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
+
+        assertTrue(css.contains(".vc-panel-row > * { margin: 4px; }"));
+    }
+
+    /**
+     * A fixed badge cannot fit both a 58px tile and a 40px switch, and on a
+     * connected account it marks every gated control for no reason. State only.
+     */
+    @Test
+    public void cloudGatingIsStateNotAPerButtonBadge() throws IOException {
+        String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
+
+        assertFalse(css.contains("data-requires-cloud=\"true\"]::after"));
+        assertFalse(css.contains("data-cloud-state=\"connected\"]::after"));
+        assertFalse(css.contains("data-cloud-state=\"checking\"]::after"));
+        assertFalse("the badge dodge padding goes with the badge",
+                css.contains("padding-left: 26px; padding-right: 26px;"));
+
+        String gated = ruleFor(css, ".vc-charge-switch[data-cloud-state=\"unavailable\"]");
+        assertTrue(gated.contains("border-style: dashed"));
+        assertTrue(gated.contains("var(--vc-text-muted)"));
+    }
+
+    /** One toast component for the whole app, anchored above the control dock. */
+    @Test
+    public void vehicleUsesTheSharedToastAboveTheDock() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
+        String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
+        String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
+
+        assertFalse(html.contains("id=\"vcToast\""));
+        assertFalse(css.contains(".vc-toast"));
+        assertTrue(html.contains("<div id=\"toastContainer\" class=\"toast-container\"></div>"));
+        assertTrue(script.contains("BYD.core.toast(message, type || 'info', 2500)"));
+        // Static inside the bottom bar's flex column, so it clears the dock in
+        // every panel state without tracking the panel height.
+        assertTrue(ruleFor(css, ".vc-bar > .toast-container").contains("position: static"));
     }
 
     /** No glow shadows or raw colour literals on the corners. */
@@ -157,13 +261,28 @@ public class VehicleControlAssetTest {
         // Charging: labelled rows, compact footer actions — not full-width save bricks.
         assertTrue(html.contains("data-i18n=\"vehicle_control.window\""));
         assertTrue(html.contains("data-i18n=\"vehicle_control.repeat\""));
-        assertTrue(html.contains("class=\"vc-schedule-bar vc-charge-footer\""));
+        assertTrue(html.contains("class=\"vc-schedule-bar vc-block-actions\""));
         assertTrue(html.contains("data-i18n=\"vehicle_control.start_charge\""));
         assertTrue(html.contains("data-i18n=\"vehicle_control.section_ac_current\""));
         assertFalse(ruleFor(css, ".vc-charge-save").contains("width: 100%"));
+        // Start now / Save are an equal-width pair, not a full-width slab.
+        assertTrue(ruleFor(css, ".vc-block-actions > .vc-charge-save").contains("max-width: 160px"));
+        // The charge-limit slider must stay full width at every breakpoint.
+        assertFalse(css.contains(".vc-soc-slider { width: 120px; }"));
         assertFalse(ruleFor(css, ".vc-schedule-bar").contains("gap:"));
         assertFalse(ruleFor(css, ".vc-schedule-grid").contains("gap:"));
         assertTrue(css.contains(".vc-schedule-bar + .vc-schedule-bar { margin-top: 8px; }"));
+
+        // Precondition is the same labelled stepper row as Temperature / Fan,
+        // not a left-clustered schedule bar with Save parked on the far edge.
+        int climate = html.indexOf("id=\"climateScheduleSection\"");
+        int sound = html.indexOf("id=\"panelSound\"");
+        String pre = html.substring(climate, sound);
+        assertTrue(pre.contains("class=\"vc-block-row\""));
+        assertTrue(pre.contains("data-i18n=\"vehicle.precondition_time\""));
+        assertTrue(pre.contains("class=\"vc-climate-actions\""));
+        assertFalse(pre.contains("vc-schedule-bar"));
+        assertTrue(ruleFor(css, ".vc-climate-actions").contains("height: 48px"));
     }
 
     /** The dock clips the sheet, so the panel carries no rounded lid of its own. */
@@ -377,7 +496,7 @@ public class VehicleControlAssetTest {
                 + count(html, "data-state=\"3\" disabled")
                 + count(html, "data-state=\"4\" disabled")
                 + count(html, "data-state=\"5\" disabled"));
-        assertTrue(html.contains("vehicle-control.js?v=vclite14"));
+        assertTrue(html.contains("vehicle-control.js?v=vclite16"));
         assertTrue(script.contains("fetch('/api/vehicle/ac-charge-current-limit')"));
         assertTrue(script.contains("self.apiPost('/api/vehicle/ac-charge-current-limit'"));
         assertTrue(script.contains("startAcChargeCurrentSync: function()"));
