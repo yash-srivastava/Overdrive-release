@@ -3164,7 +3164,10 @@ select.md-input ~ .md-label {
     bottom: 40px;
 }
 
-/* === TOAST === */
+/* === TOAST ===
+ * One surface for every page. Status is a leading dot, not a tinted body, so a
+ * success and an error read as the same component.
+ */
 .toast-container {
     position: fixed;
     bottom: 24px;
@@ -3173,23 +3176,49 @@ select.md-input ~ .md-label {
     z-index: 1000;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    align-items: center;
 }
 
 .toast {
-    padding: 12px 20px;
-    background: var(--bg-surface);
-    border: 1px solid var(--border-default);
+    display: flex;
+    align-items: center;
+    max-width: 90vw;
+    padding: 12px 16px;
+    background: var(--surface-container-highest);
+    border: 1px solid var(--outline-variant);
     border-radius: var(--radius-md);
-    font-size: 14px;
-    box-shadow: var(--shadow-lg);
+    color: var(--on-surface);
+    font-size: 13px;
+    font-weight: 500;
     animation: slideUp 0.3s ease;
 }
 
-.toast.success { border-color: var(--success); }
-.toast.error { border-color: var(--danger); }
+.toast + .toast { margin-top: 8px; }
+
+.toast::before {
+    content: '';
+    flex: none;
+    width: 8px;
+    height: 8px;
+    margin-right: 10px;
+    border-radius: 50%;
+    background: var(--status-info);
+}
+
+.toast.success::before { background: var(--status-success); }
+.toast.warning::before { background: var(--status-warning); }
+.toast.error::before { background: var(--status-danger); }
+.toast.info::before { background: var(--status-info); }
+
+[dir="rtl"] .toast::before { margin-right: 0; margin-left: 10px; }
 
 @keyframes slideUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* core.js plays this reversed to dismiss. */
+@keyframes slideIn {
     from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: translateY(0); }
 }

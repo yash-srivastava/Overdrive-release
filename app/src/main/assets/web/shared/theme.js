@@ -334,23 +334,6 @@
             return;
         }
 
-        // Live View (index.html) — `.seamless-camera-view` has the
-        // `.camera-top-bar` overlay at top (connection pill + quality
-        // selector + fullscreen button), the `.mini-preview` Map↔Cameras
-        // toggle pinned bottom-right, the `.car-selector-bottom` panel
-        // at the bottom (car silhouette + 5 hotspot labels), and a
-        // floating `.menu-toggle` hamburger at top-left on mobile.
-        // The only conflict-free spot is mid-height on the right edge,
-        // tucked into the empty video letterbox area between the camera
-        // top bar and the car selector. Same treatment as Vehicle Control.
-        if (document.querySelector('.seamless-camera-view')) {
-            wrap.style.top = '50%';
-            wrap.style.right = '14px';
-            wrap.style.transform = 'translateY(-50%)';
-            wrap.setAttribute('data-popup', 'up');
-            return;
-        }
-
         // Events / Trips / Notifications / Recording / Surveillance — these
         // are scrollable list/form pages with a top filter bar and (on mobile)
         // a bottom mobile-nav OR a sticky `.footer-bar` Apply-Changes panel
