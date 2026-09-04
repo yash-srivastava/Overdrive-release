@@ -824,21 +824,25 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
     opacity: .45;
     cursor: not-allowed;
 }
+/* The knob is the selected swatch. It carries a ring of the card background so
+   it reads as punched out of the ramp rather than floating on top of it. */
 .vc-ambient-slider::-webkit-slider-thumb {
     -webkit-appearance: none; appearance: none;
+    -webkit-box-sizing: border-box; box-sizing: border-box;
     width: 22px; height: 22px;
-    border: 2px solid #fff;
+    border: 1px solid rgba(0, 0, 0, 0.45);
     border-radius: 50%;
-    background: var(--ambient-thumb, #fff);
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
+    background: var(--ambient-thumb, var(--vc-text-primary));
+    box-shadow: 0 0 0 3px var(--vc-tile-bg);
     cursor: pointer;
 }
 .vc-ambient-slider::-moz-range-thumb {
+    box-sizing: border-box;
     width: 22px; height: 22px;
-    border: 2px solid #fff;
+    border: 1px solid rgba(0, 0, 0, 0.45);
     border-radius: 50%;
-    background: var(--ambient-thumb, #fff);
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
+    background: var(--ambient-thumb, var(--vc-text-primary));
+    box-shadow: 0 0 0 3px var(--vc-tile-bg);
     cursor: pointer;
 }
 .vc-ambient-slider:disabled::-webkit-slider-thumb {

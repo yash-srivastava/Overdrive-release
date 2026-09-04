@@ -128,11 +128,34 @@ public class VehicleControlAssetTest {
         String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
         String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
 
-        assertTrue(ruleFor(css, ".vc-ambient-slider::-webkit-slider-thumb").contains(
-                "background: var(--ambient-thumb, #fff)"));
+        String thumb = ruleFor(css, ".vc-ambient-slider::-webkit-slider-thumb");
+        assertTrue(thumb.contains("background: var(--ambient-thumb, var(--vc-text-primary))"));
         assertTrue(script.contains("wrap.style.setProperty('--ambient-thumb'"));
-        assertFalse(ruleFor(css, ".vc-ambient-slider::-webkit-slider-thumb").contains(
-                "background: var(--color, var(--primary))"));
+        assertFalse(thumb.contains("background: var(--color, var(--primary))"));
+        // A ring of the card background, not a white rim: the rim read as a
+        // bullseye and left the swatch too small to judge against the ramp.
+        assertTrue(thumb.contains("box-shadow: 0 0 0 3px var(--vc-tile-bg)"));
+        assertFalse(thumb.contains("border: 2px solid #fff"));
+        assertTrue("a bordered thumb without border-box overflows the 20px track",
+                thumb.contains("box-sizing: border-box"));
+    }
+
+    /**
+     * The showroom rig doubles as a specular source: the GLB paint is
+     * low-roughness, so the car reads as a mirror once the rig runs hot.
+     */
+    @Test
+    public void showroomLightingStaysBelowMirrorBrightness() throws IOException {
+        String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
+
+        assertTrue(script.contains("this.renderer.toneMappingExposure = 0.95;"));
+        assertTrue(script.contains("new THREE.HemisphereLight(0x88aacc, 0x222244, 0.75)"));
+        assertTrue(script.contains("new THREE.DirectionalLight(0xffffff, 0.8)"));
+        assertTrue(script.contains("mat.envMapIntensity = 0.6;"));
+        // Restore-on-bowl-exit must read the live intensities; a second copy of
+        // the numbers here silently un-dims the rig.
+        assertTrue(script.contains("{ light: keyLight,  base: keyLight.intensity }"));
+        assertFalse(script.contains("{ light: keyLight,  base: 1.2 }"));
     }
 
     /**
@@ -496,7 +519,7 @@ public class VehicleControlAssetTest {
                 + count(html, "data-state=\"3\" disabled")
                 + count(html, "data-state=\"4\" disabled")
                 + count(html, "data-state=\"5\" disabled"));
-        assertTrue(html.contains("vehicle-control.js?v=vclite16"));
+        assertTrue(html.contains("vehicle-control.js?v=vclite17"));
         assertTrue(script.contains("fetch('/api/vehicle/ac-charge-current-limit')"));
         assertTrue(script.contains("self.apiPost('/api/vehicle/ac-charge-current-limit'"));
         assertTrue(script.contains("startAcChargeCurrentSync: function()"));

@@ -629,7 +629,7 @@ var VC = {
         this.renderer.setClearColor(this._readCanvasClearColor(), 1);
         this.renderer.outputEncoding = THREE.sRGBEncoding;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.renderer.toneMappingExposure = 1.2;
+        this.renderer.toneMappingExposure = 0.95;
 
         this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
@@ -753,41 +753,44 @@ var VC = {
         // surround-bowl path can dim them — a fully-lit showroom car parked on
         // top of live AVM footage reads as fake; biased toward bowl ambient it
         // reads as "in the scene". See _setLightsForBowl.
-        var ambient = new THREE.HemisphereLight(0x88aacc, 0x222244, 1.0);
+        var ambient = new THREE.HemisphereLight(0x88aacc, 0x222244, 0.75);
         this.scene.add(ambient);
 
-        // Key light — strong top-front
-        var keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        // Key light — top-front. Kept under 1.0: the GLB paint is low-roughness,
+        // so a brighter key blows the body into a mirror.
+        var keyLight = new THREE.DirectionalLight(0xffffff, 0.8);
         keyLight.position.set(5, 8, 5);
         this.scene.add(keyLight);
 
         // Fill light
-        var fillLight = new THREE.DirectionalLight(0x8899bb, 0.6);
+        var fillLight = new THREE.DirectionalLight(0x8899bb, 0.45);
         fillLight.position.set(-5, 4, -3);
         this.scene.add(fillLight);
 
         // Rim light from below — cyberpunk floor glow in selected color
-        var rimLight = new THREE.PointLight(0x00E5FF, 0.6, 15);
+        var rimLight = new THREE.PointLight(0x00E5FF, 0.5, 15);
         rimLight.position.set(0, -1.5, 0);
         this.scene.add(rimLight);
         this.rimLight = rimLight;
 
         // Back accent
-        var backLight = new THREE.DirectionalLight(0x6644aa, 0.3);
+        var backLight = new THREE.DirectionalLight(0x6644aa, 0.25);
         backLight.position.set(0, 3, -6);
         this.scene.add(backLight);
 
         // Save originals so the bowl path can scale them down and restore on
         // exit. For the HemisphereLight we also stash the original colours
         // since the AVM-derived sky-tint sampler tints them while bowl is up.
+        // base reads off each light so retuning the showroom above cannot leave
+        // the bowl-exit restore handing back the old intensities.
         this._sceneLights = [
-            { light: ambient,   base: 1.0,
+            { light: ambient,   base: ambient.intensity,
               origColor: ambient.color.clone(),
               origGroundColor: ambient.groundColor.clone() },
-            { light: keyLight,  base: 1.2 },
-            { light: fillLight, base: 0.6 },
-            { light: rimLight,  base: 0.6 },
-            { light: backLight, base: 0.3 }
+            { light: keyLight,  base: keyLight.intensity },
+            { light: fillLight, base: fillLight.intensity },
+            { light: rimLight,  base: rimLight.intensity },
+            { light: backLight, base: backLight.intensity }
         ];
     },
 
@@ -1045,7 +1048,7 @@ var VC = {
 
                         // Keep the model's original material for everything else
                         if (mat && mat.isMeshStandardMaterial) {
-                            mat.envMapIntensity = 1.0;
+                            mat.envMapIntensity = 0.6;
                             mat.needsUpdate = true;
                         }
                     }
