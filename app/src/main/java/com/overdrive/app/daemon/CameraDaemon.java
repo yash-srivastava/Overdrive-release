@@ -4217,6 +4217,23 @@ public class CameraDaemon {
 
             gpuPipeline.init(assetManager, com.overdrive.app.daemon.DaemonBootstrap.getContext());
 
+            // init() can return normally while an internal GL/EGL step still
+            // failed silently, leaving isInitialized() false forever with
+            // gpuPipeline itself non-null. Every exit/retry check below this
+            // point tests "gpuPipeline != null", so that silent failure was
+            // never distinguished from success and never retried -- confirmed
+            // live: surveillance stuck uninitialized for over an hour with the
+            // existing exponential-backoff retry (below) never once firing,
+            // because nothing here ever threw to trigger it. Throwing funnels
+            // this case through the same catch block and retry schedule that
+            // every other init failure already uses correctly.
+            if (!gpuPipeline.isInitialized()) {
+                throw new IllegalStateException(
+                        "GpuSurveillancePipeline.init() returned without completing "
+                        + "initialization (isInitialized() still false) -- likely a "
+                        + "GL/EGL failure swallowed internally");
+            }
+
             log("GPU Surveillance initialized: profile=" + resolvedCamera.getProfile().getDisplayName()
                 + ", panoCam=" + resolvedCamera.getPanoCameraId()
                 + ", size=" + resolvedCamera.getPanoWidth() + "x" + resolvedCamera.getPanoHeight()
