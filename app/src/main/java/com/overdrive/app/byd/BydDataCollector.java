@@ -7680,7 +7680,41 @@ public class BydDataCollector {
             int[] signalStates = new int[4];
             for (int i = 0; i < 4; i++) {
                 Object p = BydDeviceHelper.callGetter(tyreDevice, "getTyrePressureValue", i + 1);
-                pressures[i] = (p instanceof Number) ? ((Number) p).intValue() : -1;
+                int rawPressure = (p instanceof Number) ? ((Number) p).intValue() : -1;
+                // Some firmware (confirmed on a European-market unit, France)
+                // returns this raw value pre-scaled by roughly the SAME
+                // kPa->psi factor this class already applies for its own psi
+                // display (0.1450377) — i.e. raw already sits almost exactly
+                // on the real BAR reading (raw * 0.1450377 ~= true bar),
+                // rather than being real kPa directly like the firmware this
+                // formula was reverse-engineered against. Confirmed against
+                // the OFFICIAL BYD app on that vehicle: raw=19/20 showed as
+                // "2.8"/"2.9" PSI here, and the official app showed the same
+                // "2.8"/"2.9" as BAR for the same tires — so true kPa is
+                // raw * 14.50377 (= raw * 0.1450377 * 100), not raw directly.
+                // Data-driven disambiguation, not a locale/model guess: a
+                // real inflated tire is never below ~150 kPa (this app's own
+                // criticalLow default is 152) and this rescale only ever
+                // fires on a raw value that couldn't be real kPa already.
+                if (rawPressure > 0 && rawPressure < 100) {
+                    rawPressure = Math.round(rawPressure * 14.50377f);
+                }
+                // Sanity check AFTER whichever branch ran above: a real inflated
+                // tyre is never outside roughly 100-450 kPa (~14.5-65 psi) even
+                // half-flat. If neither the direct-kPa assumption nor the
+                // bar-rescale above lands in that range, this vehicle/firmware
+                // is reporting a raw scale we haven't seen before. Log it loudly
+                // with the untouched raw value so it can be identified and a
+                // real fix added, rather than silently showing a number that's
+                // very likely wrong.
+                if (rawPressure > 0 && (rawPressure < 100 || rawPressure > 450)) {
+                    logger.warn("Tyre pressure corner " + (i + 1) + " raw=" + rawPressure
+                            + " is outside any plausible tyre-pressure range after scale "
+                            + "correction — this vehicle may report a raw unit we don't "
+                            + "recognize. Withholding rather than showing a likely-wrong value.");
+                    rawPressure = -1;
+                }
+                pressures[i] = rawPressure;
                 Object s = BydDeviceHelper.callGetter(tyreDevice, "getTyrePressureState", i + 1);
                 pressureStates[i] = (s instanceof Number) ? ((Number) s).intValue() : -1;
                 Object leak = BydDeviceHelper.callGetter(tyreDevice, "getTyreAirLeakState", i + 1);
