@@ -2585,7 +2585,21 @@ public class AccSentryDaemon {
             return;
         }
 
-        if (level == POWER_LEVEL_OFF && lastPowerLevel != POWER_LEVEL_OFF) {
+        if (isDilink5Unit()) {
+            // DiLink 5 accessory (ACC=1) means the driver is using the car.
+            // Legacy units treat ON→ACC as shutdown and park-darken the panel;
+            // that is exactly the "turn ACC on, brightness slams to 0" bug.
+            if (level == POWER_LEVEL_OFF) {
+                if (lastPowerLevel != POWER_LEVEL_OFF) {
+                    log("ACC OFF detected");
+                    enterSentryMode();
+                }
+            } else if (inSentryMode || lastPowerLevel < POWER_LEVEL_ACC) {
+                log("ACC/ON detected (DiLink5 powerLevel="
+                        + powerLevelToString(level) + ") — leaving sentry");
+                exitSentryMode();
+            }
+        } else if (level == POWER_LEVEL_OFF && lastPowerLevel != POWER_LEVEL_OFF) {
             log("ACC OFF detected");
             enterSentryMode();
         } else if (level >= POWER_LEVEL_ON && lastPowerLevel < POWER_LEVEL_ON) {
@@ -4284,7 +4298,10 @@ public class AccSentryDaemon {
         }
 
         boolean dilink4 = isDilink4CameraMode();
-        if (!dilink4) {
+        // DiLink 5 uses the same StealthPanel backlight path as DiLink 4.
+        // The legacy branch writes screen_brightness 0 every keep-alive tick,
+        // which is what slams the driver's slider to minimum after ACC on.
+        if (!dilink4 && !isDilink5Unit()) {
             if (!isScreenDeterrentActive() && !isCameraPipelineActive()) {
                 if (!isPanelRequestCurrent(generation, false)) {
                     return true;
@@ -4405,6 +4422,26 @@ public class AccSentryDaemon {
             } catch (Exception e) {
                 // Fall through
             }
+        }
+
+        // DiLink 5: never write screen_brightness. That clobbers the driver's
+        // slider on every keep-alive tick (~10s). Parked darkening uses
+        // StealthPanel backlight-off, which does not touch Android brightness.
+        if (isDilink5Unit()) {
+            if (on) {
+                ShellResult keyResult = execShellResult(
+                        "input keyevent 224",
+                        DEFAULT_SHELL_TIMEOUT_MS, ownership);
+                if (!keyResult.success) {
+                    log("Backlight shell fallback failed: keyevent="
+                            + keyResult.describeFailure());
+                }
+                return keyResult.success;
+            }
+            try {
+                com.overdrive.app.power.StealthPanel.turnOff(appContext);
+            } catch (Throwable ignored) {}
+            return true;
         }
 
         // Fallback: Settings brightness & StealthPanel
@@ -5113,6 +5150,14 @@ public class AccSentryDaemon {
                     .optJSONObject("camera");
             if (c == null) return false;
             return "dilink4".equalsIgnoreCase(c.optString("cameraMode", "default"));
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static boolean isDilink5Unit() {
+        try {
+            return com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported();
         } catch (Throwable t) {
             return false;
         }
@@ -6345,7 +6390,13 @@ public class AccSentryDaemon {
     private static int readPowerLevel() {
         if (appContext == null) return -1;
         try {
-            if (!com.overdrive.app.monitor.AccMonitor.isAccOn()) {
+            // Only suppress the DiLink 5 "HAL always reports ON" false-wake
+            // while a parked sentry session is actually active. AccMonitor in
+            // this process is not updated by CameraDaemon IPC, so applying the
+            // short-circuit after ACC-on has already exited sentry immediately
+            // re-parks the car and the keep-alive dims the screen again.
+            if (inSentryMode
+                    && !com.overdrive.app.monitor.AccMonitor.isAccOn()) {
                 return POWER_LEVEL_OFF;
             }
         } catch (Throwable ignored) {}
@@ -6364,18 +6415,21 @@ public class AccSentryDaemon {
 
     private static void applyHeartbeatPowerLevel(
             int level, long callbackSequenceBeforeRead) {
-        if (level == POWER_LEVEL_ACC) {
+        if (level == POWER_LEVEL_ACC && !isDilink5Unit()) {
             log("ACC heartbeat: level=ACC (1) is a transient; "
                     + "skipping publish");
             return;
         }
         if (level != POWER_LEVEL_OFF
                 && level != POWER_LEVEL_ON
-                && level != POWER_LEVEL_OK) {
+                && level != POWER_LEVEL_OK
+                && level != POWER_LEVEL_ACC) {
             return;
         }
 
-        boolean isAccOff = level < POWER_LEVEL_ON;
+        boolean isAccOff = isDilink5Unit()
+                ? level == POWER_LEVEL_OFF
+                : level < POWER_LEVEL_ON;
         int desiredFlag = isAccOff ? 1 : 0;
         synchronized (accObservationLock) {
             if (accCallbackSequence.get()
