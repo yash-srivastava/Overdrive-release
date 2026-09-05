@@ -11,6 +11,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
     <script src="../shared/theme.js?v=7"></script>
+    <script src="../shared/skeleton.js?v=4"></script>
     <script src="../shared/app-shell.js?v=5"></script>
     <script>
         if (typeof window.AndroidBridge !== 'undefined') {
@@ -20,7 +21,7 @@
     <style>
         html.is-app-webview .cabin-listen-btn { display: none !important; }
     </style>
-    <link rel="stylesheet" href="../shared/styles.css?v=28">
+    <link rel="stylesheet" href="../shared/styles.css?v=32">
     <link rel="stylesheet" href="../shared/leaflet.css" />
     <script src="../shared/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jmuxer@2.0.4/dist/jmuxer.min.js"></script>
@@ -232,19 +233,21 @@
                                 <div class="location-card-header">
                                     <div>
                                         <h2 data-i18n="dashboard.card_location">Vehicle location</h2>
-                                        <div class="location-freshness">
+                                        <div class="location-freshness is-sk">
                                             <span class="location-freshness-dot"></span>
-                                            <span id="lastGpsUpdate">--</span>
+                                            <span class="location-freshness-label">
+                                                <span id="lastGpsUpdate">—</span>
+                                            </span>
+                                            <span class="sk sk-cover" data-sk-group="gpsFreshness"></span>
                                         </div>
                                     </div>
                                     <button type="button" class="location-close-button"
                                             onclick="BYD.liveLayout.setMapExpanded(false)"
                                             data-i18n-attr="aria-label:liveview.back_to_cameras"
                                             aria-label="Back to cameras">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <path d="m15 18-6-6 6-6"/>
+                                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                                            <path fill="currentColor" d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l8.92-7.92L13.5 5.5 8 11h12z"/>
                                         </svg>
-                                        <span data-i18n="common.back">Back</span>
                                     </button>
                                 </div>
 
@@ -266,11 +269,14 @@
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l19-9-9 19-2-8-8-2z"/></svg>
                                         </button>
                                     </div>
-                                    <div class="location-distance-chip">
+                                    <div class="location-distance-chip is-sk">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
                                         </svg>
-                                        <span id="distanceToCar">--</span>
+                                        <span class="location-distance-label">
+                                            <span id="distanceToCar">—</span>
+                                        </span>
+                                        <span class="sk sk-cover" data-sk-group="gpsDistance"></span>
                                     </div>
                                 </div>
 
@@ -978,21 +984,40 @@
         }
 
         .location-freshness {
+            position: relative;
             display: flex;
             align-items: center;
             margin-top: 5px;
-            color: var(--text-muted);
+            color: var(--on-surface);
             font-size: 11px;
             font-weight: 500;
         }
 
+        /* The dot carries the fix state; the label just names it. */
         .location-freshness-dot {
             width: 7px;
             height: 7px;
             margin-right: 6px;
             border-radius: 50%;
-            background: var(--status-success);
+            background: var(--outline);
         }
+
+        /* Text width is unknowable before the reading lands, so the label slot
+           reserves one and the placeholder covers it. */
+        .location-freshness-label {
+            display: -webkit-inline-flex;
+            display: inline-flex;
+            -webkit-align-items: center;
+            align-items: center;
+            -webkit-justify-content: flex-start;
+            justify-content: flex-start;
+            min-width: 68px;
+            line-height: 1;
+        }
+
+        .location-freshness-dot.is-live { background: var(--status-success); }
+        .location-freshness-dot.is-stale { background: var(--status-warning); }
+        .location-freshness-dot.is-down { background: var(--status-danger); }
 
         .location-map-frame {
             position: relative;
@@ -1025,6 +1050,23 @@
             color: var(--on-surface-variant);
             font-size: 10px;
             font-weight: 600;
+            line-height: 1;
+        }
+
+        .location-distance-label {
+            display: -webkit-inline-flex;
+            display: inline-flex;
+            -webkit-align-items: center;
+            align-items: center;
+            -webkit-justify-content: flex-start;
+            justify-content: flex-start;
+            min-width: 34px;
+            min-height: 13px;
+            line-height: 1;
+        }
+
+        .location-distance-label #distanceToCar {
+            line-height: 1;
         }
 
         .location-distance-chip svg {
@@ -1032,6 +1074,8 @@
             height: 13px;
             margin-right: 5px;
             color: var(--on-surface-variant);
+            -webkit-flex-shrink: 0;
+            flex-shrink: 0;
         }
 
         .location-expand-button {
@@ -1058,29 +1102,34 @@
         .location-close-button {
             display: none;
             flex: 0 0 auto;
-            height: 32px;
-            padding: 0 10px 0 6px;
             align-items: center;
             justify-content: center;
+            width: 48px;
+            height: 48px;
+            padding: 0;
+            margin: -8px 0 -8px -12px;
             border: 0;
-            border-radius: var(--radius-sm);
+            border-radius: 50%;
             background: transparent;
-            color: var(--on-surface-variant);
-            font-size: 13px;
-            font-weight: 600;
-            white-space: nowrap;
+            color: var(--on-surface);
             cursor: pointer;
         }
 
         .location-close-button:hover {
             background: var(--surface-container-high);
-            color: var(--on-surface);
         }
 
         .location-close-button svg {
-            width: 16px;
-            height: 16px;
-            margin-right: 4px;
+            width: 24px;
+            height: 24px;
+        }
+
+        [dir="rtl"] .location-close-button {
+            margin: -8px -12px -8px 0;
+        }
+
+        [dir="rtl"] .location-close-button svg {
+            transform: scaleX(-1);
         }
 
         /* Compact preview is deliberately passive: map controls and the
@@ -1118,12 +1167,6 @@
         #panelCameras.map-expanded .location-close-button {
             display: flex;
             order: -1;
-            margin-right: 6px;
-        }
-
-        [dir="rtl"] #panelCameras.map-expanded .location-close-button {
-            margin-right: 0;
-            margin-left: 6px;
         }
 
         /* min-width:0 lets the title yield first: this is a nowrap flex row, and
@@ -1225,14 +1268,8 @@
             #panelCameras .seamless-camera-view {
                 overflow-y: auto;
             }
-            /* The stage GROWS to absorb whatever the rail doesn't use, instead of
-               being pinned to 58%. Previously stage was `0 0 58%` and the rail
-               `0 0 auto` (~251px intrinsic), so on any viewport where those two
-               didn't happen to sum to 100% the remainder was left as dead space at
-               the bottom — measured 77px at 390x844 and 106px at 412x915. Keeping
-               a min-height preserves a usable video area on short screens; the
-               basis stays 58% so the initial proportions are unchanged where they
-               already added up. */
+            /* Grows to absorb whatever the intrinsically-sized rail leaves, so a
+               viewport where the two do not sum to 100% has no dead strip. */
             #panelCameras .camera-stage {
                 flex: 1 1 58%;
                 min-height: 300px;
@@ -1266,7 +1303,7 @@
             /* Expanding the map floats .mobile-header (position:absolute, z-index:60)
                over the panel so tiles paint to the top edge — see
                body.live-map-active in styles.css. The expanded card's header, which
-               carries the ONLY "Back to cameras" control, sits at top:0 and was
+               carries the only back-to-cameras control, sits at top:0 and was
                therefore covered 100% by that floating header on every phone size:
                the user had no way back except the sidebar. Start the card below the
                header instead of under it. The header is display:none above 768px, so
@@ -1318,7 +1355,7 @@
     <script src="../shared/update-flow.js"></script>
     <script src="../shared/cabin-audio.js?v=1"></script>
     <script src="../shared/stream.js?v=index4"></script>
-    <script src="../shared/map.js?v=1"></script>
+    <script src="../shared/map.js?v=4"></script>
     <script src="../shared/surveillance.js?v=survtoggle1"></script>
     <script>
         function toggleSidebar() {

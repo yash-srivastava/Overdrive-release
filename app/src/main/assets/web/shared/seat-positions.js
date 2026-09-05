@@ -138,6 +138,11 @@ const SeatPositions = {
         await this.loadAutomations();
         await this.loadCurrent();
         this.render();
+        // First resolved paint only. The 5s loadCurrent() poll updates axes in place.
+        if (window.BYD && BYD.skeleton) {
+            BYD.skeleton.resolve('seatCurrent');
+            BYD.skeleton.resolve('seatList');
+        }
         this.syncPolling();
     },
 

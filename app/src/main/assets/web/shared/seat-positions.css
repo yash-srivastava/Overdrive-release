@@ -63,6 +63,20 @@
 .sp-now-art:empty { display: none; }
 [dir="rtl"] .sp-now-art { margin-right: 0; margin-left: 16px; }
 
+/* First-load placeholders for the hero pose and the saved list. */
+.sp-sk-art {
+    -webkit-flex: none;
+    flex: none;
+    width: 64px;
+    height: 64px;
+    margin-right: 16px;
+}
+[dir="rtl"] .sp-sk-art { margin-right: 0; margin-left: 16px; }
+.sp-sk-match { width: 180px; height: 20px; margin-top: 5px; }
+.sp-sk-axes { width: 240px; height: 14px; margin-top: 10px; }
+.sp-sk-row { width: 100%; height: 44px; }
+.sp-sk-row + .sp-sk-row { margin-top: 10px; }
+
 .sp-now-main { -webkit-flex: 1; flex: 1; min-width: 0; }
 .sp-now-eyebrow {
     font-size: 12px;
@@ -75,7 +89,6 @@
     margin-top: 3px;
     font-size: 18px;
     font-weight: 650;
-    letter-spacing: -0.01em;
     color: var(--on-surface);
 }
 .sp-match em { font-style: normal; color: var(--primary); }

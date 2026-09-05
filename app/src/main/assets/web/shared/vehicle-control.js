@@ -32,6 +32,11 @@ if (window.VC_LITE && typeof THREE === 'undefined') {
 }
 
 var VC = {
+    // Showroom ambient. Neutral so the body paint reads its own colour instead
+    // of a blue cast; addLighting and the AVM sky-tint sampler share these.
+    SHOWROOM_SKY_HEX: 0xF2F4F8,
+    SHOWROOM_GROUND_HEX: 0x26262C,
+
     // Three.js core (initialized in init())
     scene: null,
     camera: null,
@@ -434,11 +439,17 @@ var VC = {
         this._syncViewModeChip();
         // initLiteMode hid these inline; the CSS mode class alone can't win
         // against an inline display:none.
-        var show = ['colorPicker', 'modelMenu', 'btn3dView'];
+        var show = ['colorPicker', 'modelMenu'];
+        // Surround view has no host in the app WebView, and revealing it here
+        // flashes a button until init3dButton hides it again.
+        if (!window.AndroidBridge) show.push('btn3dView');
         for (var i = 0; i < show.length; i++) {
             var el = document.getElementById(show[i]);
             if (el) el.style.display = '';
         }
+        // Presets are local, so fill the row as the stage appears instead of after
+        // the vendor download. _startImmersiveScene rebuilds it from scratch.
+        this.initColorPicker();
     },
 
     _enterLiteMode: function() {
@@ -753,7 +764,8 @@ var VC = {
         // surround-bowl path can dim them — a fully-lit showroom car parked on
         // top of live AVM footage reads as fake; biased toward bowl ambient it
         // reads as "in the scene". See _setLightsForBowl.
-        var ambient = new THREE.HemisphereLight(0x88aacc, 0x222244, 0.75);
+        var ambient = new THREE.HemisphereLight(
+            VC.SHOWROOM_SKY_HEX, VC.SHOWROOM_GROUND_HEX, 0.78);
         this.scene.add(ambient);
 
         // Key light — top-front. Kept under 1.0: the GLB paint is low-roughness,
@@ -763,18 +775,19 @@ var VC = {
         this.scene.add(keyLight);
 
         // Fill light
-        var fillLight = new THREE.DirectionalLight(0x8899bb, 0.45);
+        var fillLight = new THREE.DirectionalLight(0xfdfdff, 0.4);
         fillLight.position.set(-5, 4, -3);
         this.scene.add(fillLight);
 
-        // Rim light from below — cyberpunk floor glow in selected color
-        var rimLight = new THREE.PointLight(0x00E5FF, 0.5, 15);
+        // Rim light from below — floor glow, recoloured to the selected paint
+        // by setBodyColor while the 3D view is idle.
+        var rimLight = new THREE.PointLight(0xF4F4F8, 0.42, 15);
         rimLight.position.set(0, -1.5, 0);
         this.scene.add(rimLight);
         this.rimLight = rimLight;
 
         // Back accent
-        var backLight = new THREE.DirectionalLight(0x6644aa, 0.25);
+        var backLight = new THREE.DirectionalLight(0xf6f6fa, 0.22);
         backLight.position.set(0, 3, -6);
         this.scene.add(backLight);
 
@@ -1497,7 +1510,7 @@ var VC = {
 
     openColorModal: function() {
         var overlay = document.getElementById('colorModal');
-        if (!overlay) return;
+        if (!overlay || !this.baseColor) return;
         this._setColorModalDraft(
             '#' + this.baseColor.clone().convertLinearToSRGB().getHexString());
         overlay.classList.add('visible');
@@ -1593,6 +1606,9 @@ var VC = {
     },
 
     setColor: function(hex, activeSwatch) {
+        // The row is populated while the vendor stack is still downloading, so
+        // there may be no THREE and no baseColor to paint into yet.
+        if (!this.baseColor) return;
         this.applyColor(hex, false);
 
         var swatches = document.querySelectorAll('.vc-swatch');
@@ -2015,6 +2031,10 @@ var VC = {
         }
         if (panelId === 'panelClimate') {
             this.fetchClimateSchedule();
+        }
+        if (panelId === 'panelLights') {
+            var self = this;
+            requestAnimationFrame(function() { self.updateLightsUI(); });
         }
         if (panelId === 'panelSound') {
             this.fetchEngineSoundState();
@@ -3366,7 +3386,13 @@ var VC = {
         fetch('/api/vehicle/state').then(function(resp) {
             return resp.json();
         }).then(function(data) {
-            if (!data.success) return;
+            if (!data.success) {
+                if (window.BYD && BYD.skeleton) {
+                    BYD.skeleton.resolve('vcLock');
+                    BYD.skeleton.resolve('vcTyres');
+                }
+                return;
+            }
 
             var wasLocked = self.vehicleState.locked;
             var wasLockScope = self.vehicleState.lockScope;
@@ -3408,7 +3434,7 @@ var VC = {
             if (data.windows) {
                 var w = data.windows;
                 // Keep -1 ("no reading") distinct from 0 ("closed"). Coercing it to 0 asserted
-                // "window closed" for a window we could not read — and it made the '--%' branch in
+                // "window closed" for a window we could not read — and it made the '—%' branch in
                 // updateWindowBars unreachable, so an unreadable window rendered as fully shut.
                 var winPct = function(v) {
                     return (typeof v === 'number' && v >= 0 && v <= 100) ? v : -1;
@@ -3508,9 +3534,18 @@ var VC = {
             self.updateTabIndicators();
             self.updateLightsUI();
             self.updateAdasUI();
+            if (window.BYD && BYD.skeleton) {
+                BYD.skeleton.resolve('vcLock');
+                if (!data.tyres) BYD.skeleton.resolve('vcTyres');
+            }
 
         }).catch(function(e) {
             console.warn('[VC] State fetch error:', e);
+            if (window.BYD && BYD.skeleton) {
+                BYD.skeleton.resolve('vcLock');
+                BYD.skeleton.resolve('vcTyres');
+            }
+            self.updateHUD();
         });
     },
 
@@ -3740,7 +3775,7 @@ var VC = {
         if (lockStatus) {
             var label;
             if (locked !== true && locked !== false) {
-                label = this.translatedText('common.unknown', 'Unknown');
+                label = this.translatedText('vehicle.tyre_no_data', 'NO DATA');
             } else if (scope === 'driver_door') {
                 label = locked
                     ? this.translatedText('vehicle.driver_door_locked', 'Driver door locked')
@@ -3778,7 +3813,7 @@ var VC = {
             var display = hasReading ? val : 0;
             if (fill) fill.style.width = display + '%';
             if (pct) pct.textContent = display + '%';
-            if (label) label.textContent = hasReading ? (val + '%') : '--%';
+            if (label) label.textContent = hasReading ? (val + '%') : '—%';
             // Reconcile the highlighted preset with the live position. Pick
             // the closest preset within the same ±5% tolerance the backend
             // uses to stop.
@@ -3926,6 +3961,9 @@ var VC = {
         var dot = pillEl.querySelector('.dot');
         var state = this.vehicleState.cloudState || 'checking';
         pillEl.setAttribute('data-cloud-state', state);
+        if (state !== 'checking' && window.BYD && BYD.skeleton) {
+            BYD.skeleton.resolve('vcCloud');
+        }
         if (state === 'connected') {
             if (dot) dot.className = 'dot compact-status-pill__dot green';
             if (textEl) {
@@ -4036,8 +4074,6 @@ var VC = {
             if (typeof colour === 'number') {
                 slider.value = colour;
                 var options = this.vehicleState.lights.ambientOptions;
-                var wrap = slider.parentNode;
-                var swatch = document.getElementById('ambientSwatch');
                 var picked = options && colour >= 1 && colour <= options.length
                     ? options[colour - 1] : null;
                 if (options && options.length) {
@@ -4046,15 +4082,29 @@ var VC = {
                 } else {
                     slider.disabled = true;
                 }
-                // Hidden rather than neutral-filled: an empty palette means the
-                // car has not reported a colour, which is not the same as grey.
-                if (wrap && wrap.style) {
-                    if (picked) wrap.style.setProperty('--ambient-swatch', picked);
-                    else wrap.style.removeProperty('--ambient-swatch');
-                }
-                if (swatch) swatch.style.display = picked ? '' : 'none';
+                this._paintAmbientThumb(slider, picked);
             }
         }
+    },
+
+    _paintAmbientThumb: function(slider, picked) {
+        var thumb = document.getElementById('ambientThumb');
+        if (!thumb || !slider) return;
+        thumb.style.background = picked || '#fff';
+        var min = parseFloat(slider.min);
+        var max = parseFloat(slider.max);
+        if (!(max > min)) return;
+        var ratio = (parseFloat(slider.value) - min) / (max - min);
+        if (ratio < 0) ratio = 0;
+        if (ratio > 1) ratio = 1;
+        // Ends are inset so the chip never rides over the bar's rounded corners;
+        // the 3px centres the 14px chip on the 20px native thumb.
+        var travel = slider.clientWidth - 20 - 12;
+        if (travel < 0) travel = 0;
+        var px = (6 + (ratio * travel) + 3) + 'px';
+        var rtl = document.documentElement.getAttribute('dir') === 'rtl';
+        thumb.style.left = rtl ? 'auto' : px;
+        thumb.style.right = rtl ? px : 'auto';
     },
 
     updateAdasUI: function() {
@@ -4179,7 +4229,7 @@ var VC = {
             else slider.value = slider.min;
         }
         if (readout) {
-            readout.textContent = (typeof s.percent === 'number') ? (s.percent + '%') : '--';
+            readout.textContent = (typeof s.percent === 'number') ? (s.percent + '%') : '—';
         }
     },
 
@@ -4201,7 +4251,7 @@ var VC = {
             var s = self.vehicleState.chargeCap;
             // Only accept a verified charge-stop limit (50..100). A HAL sentinel that
             // slipped past the server (e.g. 65535) is ignored so the readout
-            // shows '--' rather than "65535%".
+            // shows '—' rather than "65535%".
             s.percent = (typeof data.percent === 'number'
                     && data.percent >= 50 && data.percent <= 100) ? data.percent : null;
             s.enabled = typeof data.enabled === 'boolean' ? data.enabled : null;
@@ -6066,9 +6116,9 @@ var VC = {
                         // 4-quadrant mean as the "sky" colour for IBL ambient.
                         var avg = new THREE.Vector3();
                         avg.copy(front).add(right).add(rear).add(left).multiplyScalar(0.25);
-                        // Blend against original sky colour 0x88aacc so a
-                        // dark bowl doesn't kill car contrast entirely.
-                        var origSky = new THREE.Color(0x88aacc);
+                        // Blend against the showroom sky so a dark bowl doesn't
+                        // kill car contrast entirely.
+                        var origSky = new THREE.Color(VC.SHOWROOM_SKY_HEX);
                         var blended = new THREE.Color(
                             origSky.r * 0.55 + avg.x * 0.45,
                             origSky.g * 0.55 + avg.y * 0.45,
@@ -6077,7 +6127,7 @@ var VC = {
                         hemi.color.copy(blended);
                         // Ground is dimmer; scale by 0.4 so under-car pickup
                         // stays plausibly shadowed.
-                        var origGround = new THREE.Color(0x222244);
+                        var origGround = new THREE.Color(VC.SHOWROOM_GROUND_HEX);
                         var dimAvg = new THREE.Color(avg.x * 0.4, avg.y * 0.4, avg.z * 0.4);
                         hemi.groundColor.copy(origGround.lerp(dimAvg, 0.6));
                     }
@@ -6251,6 +6301,8 @@ var VC = {
                 criticalLow: typeof L.criticalLow === 'number' ? L.criticalLow : cur.criticalLow
             };
         }
+        // First resolved paint only. The 3s poll must not put the placeholders back.
+        if (window.BYD && BYD.skeleton) BYD.skeleton.resolve('vcTyres');
         var corners = ['fl', 'fr', 'rl', 'rr'];
         for (var i = 0; i < corners.length; i++) {
             var key = corners[i];
@@ -6293,14 +6345,14 @@ var VC = {
                         : (data.kPa || 0) + ' kPa';
                 }
             } else {
-                if (psiEl)  psiEl.textContent  = '--';
-                if (kpaEl)  kpaEl.textContent  = (mode === 'kpa') ? '-- PSI' : '-- kPa';
+                if (psiEl)  psiEl.textContent  = '—';
+                if (kpaEl)  kpaEl.textContent  = (mode === 'kpa') ? '— PSI' : '— kPa';
             }
             if (typeof data.temperatureC === 'number') {
                 if (tempEl)  tempEl.textContent  = data.temperatureC;
                 if (tempBox) tempBox.style.display = '';
             } else {
-                if (tempEl)  tempEl.textContent  = '--';
+                if (tempEl)  tempEl.textContent  = '—';
                 if (tempBox) tempBox.style.display = 'none';
             }
             if (stateEl) stateEl.textContent = label;

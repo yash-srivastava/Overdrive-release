@@ -98,7 +98,9 @@ object DashboardStatusParser {
         }
 
         if (root.has("vehicleDataReady") && !root.optBoolean("vehicleDataReady", true)) {
-            return DashboardStatusResult.Loading
+            return DashboardStatusResult.Unavailable(
+                DashboardStatusResult.Reason.VEHICLE_DATA_UNAVAILABLE
+            )
         }
 
         val soc = root.optJSONObject("soc")

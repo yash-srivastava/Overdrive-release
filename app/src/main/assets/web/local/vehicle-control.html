@@ -11,6 +11,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
     <script src="../shared/theme.js?v=6"></script>
+    <script src="../shared/skeleton.js?v=4"></script>
     <!-- View-mode bootstrap. Runs before first paint so the lite/immersive
          chrome renders without flicker. 'lite' (default) boots controls-only:
          no three.js/gsap/loaders/SotaPlayer, no GLB download, no WebGL
@@ -24,11 +25,14 @@
             window.VC_LITE = (mode !== 'immersive');
             document.documentElement.className +=
                 window.VC_LITE ? ' vc-mode-lite' : ' vc-mode-immersive';
+            if (typeof window.AndroidBridge !== 'undefined') {
+                document.documentElement.className += ' is-app-webview';
+            }
         })();
     </script>
     <script src="../shared/app-shell.js?v=5"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=24">
-    <link rel="stylesheet" href="../shared/vehicle-control.css?v=32">
+    <link rel="stylesheet" href="../shared/styles.css?v=32">
+    <link rel="stylesheet" href="../shared/vehicle-control.css?v=42">
 </head>
 <body>
     <div class="app-layout">
@@ -65,8 +69,9 @@
 
                     <div class="vc-status-bar">
                         <div class="vc-status-slot vc-status-slot--start">
-                            <div class="vc-pill compact-status-pill">
-                                <span class="dot grey compact-status-pill__dot"></span><span id="lockStatus">Unknown</span>
+                            <div class="vc-pill compact-status-pill is-sk">
+                                <span class="dot grey compact-status-pill__dot"></span><span id="lockStatus">NO DATA</span>
+                                <div class="sk sk-cover vc-sk-pill" data-sk-group="vcLock"></div>
                             </div>
                         </div>
                         <div class="vc-status-slot vc-status-slot--mid">
@@ -94,8 +99,9 @@
                             </button>
                         </div>
                         <div class="vc-status-slot vc-status-slot--end">
-                            <div class="vc-pill compact-status-pill" id="cloudStatus">
+                            <div class="vc-pill compact-status-pill is-sk" id="cloudStatus">
                                 <span class="dot amber compact-status-pill__dot"></span><span id="cloudStatusText">Checking...</span>
+                                <div class="sk sk-cover vc-sk-pill" data-sk-group="vcCloud"></div>
                             </div>
                         </div>
                     </div>
@@ -146,25 +152,29 @@
 
                     <!-- Tyre pressure, one cell per corner. -->
                     <div class="vc-tyre-strip" id="vcTyreOverlay">
-                        <div class="vc-tyre-cell" data-corner="fl" id="tyreFL">
-                            <div class="vc-tyre-head compact-status-pill"><span class="vc-tyre-dot compact-status-pill__dot"></span><span class="vc-tyre-label" data-i18n="vehicle.pos_front_left">Front left</span><span class="vc-tyre-state">--</span></div>
-                            <div class="vc-tyre-psi"><span class="vc-tyre-psi-val">--</span><span class="vc-tyre-psi-unit">PSI</span></div>
-                            <div class="vc-tyre-sub"><span class="vc-tyre-kpa">-- kPa</span><span class="vc-tyre-temp"><span class="vc-tyre-temp-val">--</span><span class="vc-tyre-temp-unit">°C</span></span></div>
+                        <div class="vc-tyre-cell is-sk" data-corner="fl" data-state="muted" id="tyreFL">
+                            <div class="vc-tyre-head compact-status-pill"><span class="vc-tyre-dot compact-status-pill__dot"></span><span class="vc-tyre-label" data-i18n="vehicle.pos_front_left">Front left</span><span class="vc-tyre-state">—</span></div>
+                            <div class="vc-tyre-psi"><span class="vc-tyre-psi-val">—</span><span class="vc-tyre-psi-unit">PSI</span></div>
+                            <div class="vc-tyre-sub"><span class="vc-tyre-kpa">— kPa</span><span class="vc-tyre-temp"><span class="vc-tyre-temp-val">—</span><span class="vc-tyre-temp-unit">°C</span></span></div>
+                            <div class="sk sk-cover vc-sk-tyre-fill" data-sk-group="vcTyres"></div>
                         </div>
-                        <div class="vc-tyre-cell" data-corner="fr" id="tyreFR">
-                            <div class="vc-tyre-head compact-status-pill"><span class="vc-tyre-dot compact-status-pill__dot"></span><span class="vc-tyre-label" data-i18n="vehicle.pos_front_right">Front right</span><span class="vc-tyre-state">--</span></div>
-                            <div class="vc-tyre-psi"><span class="vc-tyre-psi-val">--</span><span class="vc-tyre-psi-unit">PSI</span></div>
-                            <div class="vc-tyre-sub"><span class="vc-tyre-kpa">-- kPa</span><span class="vc-tyre-temp"><span class="vc-tyre-temp-val">--</span><span class="vc-tyre-temp-unit">°C</span></span></div>
+                        <div class="vc-tyre-cell is-sk" data-corner="fr" data-state="muted" id="tyreFR">
+                            <div class="vc-tyre-head compact-status-pill"><span class="vc-tyre-dot compact-status-pill__dot"></span><span class="vc-tyre-label" data-i18n="vehicle.pos_front_right">Front right</span><span class="vc-tyre-state">—</span></div>
+                            <div class="vc-tyre-psi"><span class="vc-tyre-psi-val">—</span><span class="vc-tyre-psi-unit">PSI</span></div>
+                            <div class="vc-tyre-sub"><span class="vc-tyre-kpa">— kPa</span><span class="vc-tyre-temp"><span class="vc-tyre-temp-val">—</span><span class="vc-tyre-temp-unit">°C</span></span></div>
+                            <div class="sk sk-cover vc-sk-tyre-fill" data-sk-group="vcTyres"></div>
                         </div>
-                        <div class="vc-tyre-cell" data-corner="rl" id="tyreRL">
-                            <div class="vc-tyre-head compact-status-pill"><span class="vc-tyre-dot compact-status-pill__dot"></span><span class="vc-tyre-label" data-i18n="vehicle.pos_rear_left">Rear left</span><span class="vc-tyre-state">--</span></div>
-                            <div class="vc-tyre-psi"><span class="vc-tyre-psi-val">--</span><span class="vc-tyre-psi-unit">PSI</span></div>
-                            <div class="vc-tyre-sub"><span class="vc-tyre-kpa">-- kPa</span><span class="vc-tyre-temp"><span class="vc-tyre-temp-val">--</span><span class="vc-tyre-temp-unit">°C</span></span></div>
+                        <div class="vc-tyre-cell is-sk" data-corner="rl" data-state="muted" id="tyreRL">
+                            <div class="vc-tyre-head compact-status-pill"><span class="vc-tyre-dot compact-status-pill__dot"></span><span class="vc-tyre-label" data-i18n="vehicle.pos_rear_left">Rear left</span><span class="vc-tyre-state">—</span></div>
+                            <div class="vc-tyre-psi"><span class="vc-tyre-psi-val">—</span><span class="vc-tyre-psi-unit">PSI</span></div>
+                            <div class="vc-tyre-sub"><span class="vc-tyre-kpa">— kPa</span><span class="vc-tyre-temp"><span class="vc-tyre-temp-val">—</span><span class="vc-tyre-temp-unit">°C</span></span></div>
+                            <div class="sk sk-cover vc-sk-tyre-fill" data-sk-group="vcTyres"></div>
                         </div>
-                        <div class="vc-tyre-cell" data-corner="rr" id="tyreRR">
-                            <div class="vc-tyre-head compact-status-pill"><span class="vc-tyre-dot compact-status-pill__dot"></span><span class="vc-tyre-label" data-i18n="vehicle.pos_rear_right">Rear right</span><span class="vc-tyre-state">--</span></div>
-                            <div class="vc-tyre-psi"><span class="vc-tyre-psi-val">--</span><span class="vc-tyre-psi-unit">PSI</span></div>
-                            <div class="vc-tyre-sub"><span class="vc-tyre-kpa">-- kPa</span><span class="vc-tyre-temp"><span class="vc-tyre-temp-val">--</span><span class="vc-tyre-temp-unit">°C</span></span></div>
+                        <div class="vc-tyre-cell is-sk" data-corner="rr" data-state="muted" id="tyreRR">
+                            <div class="vc-tyre-head compact-status-pill"><span class="vc-tyre-dot compact-status-pill__dot"></span><span class="vc-tyre-label" data-i18n="vehicle.pos_rear_right">Rear right</span><span class="vc-tyre-state">—</span></div>
+                            <div class="vc-tyre-psi"><span class="vc-tyre-psi-val">—</span><span class="vc-tyre-psi-unit">PSI</span></div>
+                            <div class="vc-tyre-sub"><span class="vc-tyre-kpa">— kPa</span><span class="vc-tyre-temp"><span class="vc-tyre-temp-val">—</span><span class="vc-tyre-temp-unit">°C</span></span></div>
+                            <div class="sk sk-cover vc-sk-tyre-fill" data-sk-group="vcTyres"></div>
                         </div>
                     </div>
 
@@ -386,7 +396,7 @@
                              its own position readout and preset row. -->
                         <div class="vc-panel-row vc-window-grid" id="panelWindows" style="display:none;">
                             <div class="vc-window-row" data-area="lf" data-area-num="1">
-                                <div class="vc-window-label"><span class="label-area" data-i18n="vehicle.pos_front_left">Front left</span><span class="label-pct" id="winLabel_lf">--%</span></div>
+                                <div class="vc-window-label"><span class="label-area" data-i18n="vehicle.pos_front_left">Front left</span><span class="label-pct" id="winLabel_lf">—%</span></div>
                                 <div class="vc-window-presets">
                                     <button class="vc-preset" data-preset="0" title="Closed">0%</button>
                                     <button class="vc-preset" data-preset="25" title="25% open">25%</button>
@@ -396,7 +406,7 @@
                                 </div>
                             </div>
                             <div class="vc-window-row" data-area="rf" data-area-num="2">
-                                <div class="vc-window-label"><span class="label-area" data-i18n="vehicle.pos_front_right">Front right</span><span class="label-pct" id="winLabel_rf">--%</span></div>
+                                <div class="vc-window-label"><span class="label-area" data-i18n="vehicle.pos_front_right">Front right</span><span class="label-pct" id="winLabel_rf">—%</span></div>
                                 <div class="vc-window-presets">
                                     <button class="vc-preset" data-preset="0" title="Closed">0%</button>
                                     <button class="vc-preset" data-preset="25" title="25% open">25%</button>
@@ -406,7 +416,7 @@
                                 </div>
                             </div>
                             <div class="vc-window-row" data-area="lr" data-area-num="3">
-                                <div class="vc-window-label"><span class="label-area" data-i18n="vehicle.pos_rear_left">Rear left</span><span class="label-pct" id="winLabel_lr">--%</span></div>
+                                <div class="vc-window-label"><span class="label-area" data-i18n="vehicle.pos_rear_left">Rear left</span><span class="label-pct" id="winLabel_lr">—%</span></div>
                                 <div class="vc-window-presets">
                                     <button class="vc-preset" data-preset="0" title="Closed">0%</button>
                                     <button class="vc-preset" data-preset="25" title="25% open">25%</button>
@@ -416,7 +426,7 @@
                                 </div>
                             </div>
                             <div class="vc-window-row" data-area="rr" data-area-num="4">
-                                <div class="vc-window-label"><span class="label-area" data-i18n="vehicle.pos_rear_right">Rear right</span><span class="label-pct" id="winLabel_rr">--%</span></div>
+                                <div class="vc-window-label"><span class="label-area" data-i18n="vehicle.pos_rear_right">Rear right</span><span class="label-pct" id="winLabel_rr">—%</span></div>
                                 <div class="vc-window-presets">
                                     <button class="vc-preset" data-preset="0" title="Closed">0%</button>
                                     <button class="vc-preset" data-preset="25" title="25% open">25%</button>
@@ -436,7 +446,7 @@
                                 </div>
                             </div>
                             <div class="vc-window-row" data-area="sunroof" data-area-num="5">
-                                <div class="vc-window-label"><span class="label-area" data-i18n="vehicle.sunroof">Sunroof</span><span class="label-pct" id="winLabel_sunroof">--%</span></div>
+                                <div class="vc-window-label"><span class="label-area" data-i18n="vehicle.sunroof">Sunroof</span><span class="label-pct" id="winLabel_sunroof">—%</span></div>
                                 <div class="vc-window-presets">
                                     <button class="vc-preset" data-preset="0" title="Closed">0%</button>
                                     <button class="vc-preset" data-preset="25" title="25% open">25%</button>
@@ -446,7 +456,7 @@
                                 </div>
                             </div>
                             <div class="vc-window-row" data-area="sunshade" data-area-num="6">
-                                <div class="vc-window-label"><span class="label-area" data-i18n="vehicle.sunshade">Sunshade</span><span class="label-pct" id="winLabel_sunshade">--%</span></div>
+                                <div class="vc-window-label"><span class="label-area" data-i18n="vehicle.sunshade">Sunshade</span><span class="label-pct" id="winLabel_sunshade">—%</span></div>
                                 <div class="vc-window-presets">
                                     <button class="vc-preset" data-preset="0" title="Closed">0%</button>
                                     <button class="vc-preset" data-preset="25" title="25% open">25%</button>
@@ -467,9 +477,11 @@
                             <div class="ambient-wrapper">
                                 <div class="ambient-head">
                                     <span class="ambient-title" data-i18n="vehicle.ambient_lights">Ambient Lights</span>
-                                    <span class="ambient-swatch" id="ambientSwatch" style="display:none;" aria-hidden="true"></span>
                                 </div>
-                                <input type="range" id="ambientColourSlider" class="vc-ambient-slider" min="1" max="31" step="1" value="1" aria-label="Ambient Colour" />
+                                <div class="ambient-track">
+                                    <input type="range" id="ambientColourSlider" class="vc-ambient-slider" min="1" max="31" step="1" value="1" aria-label="Ambient Colour" />
+                                    <span class="ambient-thumb" id="ambientThumb" aria-hidden="true"></span>
+                                </div>
                             </div>
                         </div>
                         <!-- ADAS controls -->
@@ -528,7 +540,7 @@
                                 <section class="vc-block vc-block--divider" id="chargeCapSection">
                                     <div class="vc-block-head">
                                         <span class="vc-block-title" data-i18n="vehicle_control.section_charge_cap">Charge limit</span>
-                                        <span class="vc-readout" id="chargeCapReadout">--</span>
+                                        <span class="vc-readout" id="chargeCapReadout">—</span>
                                         <button class="vc-charge-switch" id="btnChargeCapToggle" title="Charge limit" data-i18n-attr="title:vehicle_control.section_charge_cap">On</button>
                                     </div>
                                     <input type="range" id="chargeCapSlider" class="vc-soc-slider" min="50" max="100" step="5" value="50" aria-label="Charge limit" />
@@ -574,7 +586,7 @@
                         </button>
                         <button class="vc-tab" data-panel="panelWindows" onclick="VC.togglePanel('panelWindows', this)">
                             <span class="tab-dot"></span>
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 10h20"/><path d="M10 4v6"/></svg>
+                            <svg viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true"><path d="M583-620q-10 0-18-6t-11-16l-57-200q-4-14 5-26t24-12h263q10 0 18 6t11 16l57 200q4 14-5 26t-24 12H583Zm23-60h200l-40-140H566l40 140Zm-341 0q-29 0-49-20t-20-49q0-29 20-50t49-21q29 0 50 21t21 50q0 29-21 49t-50 20Zm257 560H241q-26 0-44.5-17T173-180L80-645h63l87 465h292v60ZM762-20 644-225H330q-26 0-46.5-15T258-280l-47-248q-9-46 23-81.5t80-35.5q35 0 60 22.5t32 56.5l46 240h166q20 0 35 12t25 29L815-50l-53 30ZM606-680l-40-140 40 140Z"/></svg>
                             <span data-i18n="vehicle.tab_windows">Windows</span>
                         </button>
                         <button class="vc-tab" data-panel="panelLights" onclick="VC.togglePanel('panelLights', this)">
@@ -621,7 +633,7 @@
     <script src="../shared/pwa-init.js?v=index1"></script>
     <!-- core.js polls /status every 5s and populates the sidebar status card
          (12V, ACC, SOC, range, SOH, fuel, network). Without it those values
-         all stay at "--" since vehicle-control.js only manages the 3D scene. -->
+         all stay unread since vehicle-control.js only manages the 3D scene. -->
     <script src="../shared/core.js?v=20"></script>
     <script src="../shared/update-flow.js"></script>
     <!-- Mode-gated loader. In immersive mode this injects the heavy stack
@@ -644,7 +656,7 @@
                 '../shared/vendor/gsap.min.js?v=12'
             ];
             var chain = window.VC_LITE ? [] : window.VC_VENDOR_CHAIN.slice();
-            chain.push('../shared/vehicle-control.js?v=vclite18');
+            chain.push('../shared/vehicle-control.js?v=vclite26');
             for (var i = 0; i < chain.length; i++) {
                 var s = document.createElement('script');
                 s.src = chain[i];

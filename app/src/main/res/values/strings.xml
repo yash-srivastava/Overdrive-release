@@ -553,6 +553,7 @@
     <string name="recording_lib_storage_internal">INT</string>
     <!-- Toast shown when a multi-select share is dispatched. -->
     <string name="toast_share_recordings">Sharing %1$d recordings</string>
+    <string name="toast_share_failed">Share failed</string>
 
     <!-- fragment_sentry_config -->
 

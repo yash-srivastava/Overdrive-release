@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Toast stack. Same column as #toastContainer on Vehicle / Seats. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/appToastStack"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_gravity="bottom|center_horizontal"
+    android:layout_marginHorizontal="@dimen/page_padding_horizontal"
+    android:layout_marginBottom="24dp"
+    android:elevation="8dp"
+    android:gravity="center_horizontal"
+    android:orientation="vertical" />

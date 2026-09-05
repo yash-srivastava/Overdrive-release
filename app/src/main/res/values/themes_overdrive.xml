@@ -79,6 +79,7 @@
         <item name="materialButtonOutlinedStyle">@style/Widget.Overdrive.M3.Button.Outlined</item>
         <item name="toolbarStyle">@style/Widget.Overdrive.M3.Toolbar</item>
         <item name="sliderStyle">@style/Widget.Overdrive.M3.Slider</item>
+        <item name="linearProgressIndicatorStyle">@style/Widget.Overdrive.M3.LinearProgress</item>
         <item name="bottomSheetDialogTheme">@style/Theme.Overdrive.M3.BottomSheet</item>
         <!-- Auto-pick up our M3 dialog overlay for every MaterialAlertDialogBuilder. -->
         <item name="materialAlertDialogTheme">@style/ThemeOverlay.Overdrive.M3.MaterialAlertDialog</item>
@@ -246,6 +247,13 @@
     </style>
 
     <!-- Slider -->
+    <!-- Determinate bars read as a track, not a track plus a stray dot. -->
+    <style name="Widget.Overdrive.M3.LinearProgress" parent="Widget.Material3.LinearProgressIndicator">
+        <item name="trackStopIndicatorSize">0dp</item>
+        <item name="indicatorColor">?attr/colorPrimary</item>
+        <item name="trackColor">?attr/colorSurfaceContainerHighest</item>
+    </style>
+
     <style name="Widget.Overdrive.M3.Slider" parent="Widget.Material3.Slider">
         <item name="trackColorActive">?attr/colorPrimary</item>
         <item name="trackColorInactive">?attr/colorSurfaceContainerHighest</item>

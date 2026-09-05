@@ -33,13 +33,17 @@
     cardPlaceSearch, etPlaceSearch, btnClearPlaceSearch (place substring search),
     btnTogglePlaceSearch (expands/collapses the search card).
 -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="?android:attr/colorBackground"
-    android:orientation="vertical">
+    android:background="?android:attr/colorBackground">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
 
     <!-- ============ Header: counts + page actions ============ -->
     <LinearLayout
@@ -59,17 +63,30 @@
 
             <!-- Counts line. Populated by refreshCounts(); the pending string
                  holds its height until the first scan lands. -->
-            <TextView
-                android:id="@+id/tvRecordingsSummary"
+            <FrameLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:singleLine="true"
-                android:ellipsize="end"
-                android:text="@string/recordings_summary_pending"
-                android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
-                android:textColor="?attr/colorOnSurfaceVariant"
-                tools:text="12 today · 320 total · 42 GB" />
+                android:layout_weight="1">
+
+                <TextView
+                    android:id="@+id/tvRecordingsSummary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:singleLine="true"
+                    android:ellipsize="end"
+                    android:text="@string/recordings_summary_pending"
+                    android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    tools:text="12 today · 320 total · 42 GB" />
+
+                <View
+                    android:id="@+id/tvRecordingsSummarySkeleton"
+                    android:layout_width="196dp"
+                    android:layout_height="14dp"
+                    android:layout_gravity="start|center_vertical"
+                    android:background="@drawable/skeleton_block"
+                    android:visibility="gone" />
+            </FrameLayout>
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnSelectRecordings"
@@ -678,4 +695,7 @@
         android:layout_height="0dp"
         android:importantForAccessibility="noHideDescendants"
         android:visibility="gone" />
-</LinearLayout>
+    </LinearLayout>
+
+    <include layout="@layout/app_toast" />
+</FrameLayout>

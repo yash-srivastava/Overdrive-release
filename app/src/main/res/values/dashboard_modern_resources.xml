@@ -15,6 +15,14 @@
     <item name="dashboard_hero_body_weight" format="float" type="dimen">60</item>
     <item name="dashboard_hero_art_weight" format="float" type="dimen">40</item>
 
+    <!-- Ribbon's share of the same split. Wider than the render column so the
+         line work still sweeps in behind the car. -->
+    <item name="dashboard_hero_ribbon_body_weight" format="float" type="dimen">45</item>
+    <item name="dashboard_hero_ribbon_art_weight" format="float" type="dimen">55</item>
+
+    <dimen name="dashboard_hero_ribbon_portrait_max_height">96dp</dimen>
+    <dimen name="dashboard_hero_ribbon_portrait_shift_y">10dp</dimen>
+
     <!-- Measurement ceiling for the ribbon backdrop, not a display height. The
          nodpi bitmap measures at 900 x 400dp and would stretch the card on the
          first pass. ImageView honours maxHeight only while a dimension is

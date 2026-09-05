@@ -38,6 +38,7 @@ import com.overdrive.app.ui.util.RecordingScanner
 import com.overdrive.app.ui.util.RecordingUiText
 import com.overdrive.app.ui.util.RecordingsApiClient
 import com.overdrive.app.ui.util.navigateDrillDown
+import com.overdrive.app.ui.widget.Skeleton
 import java.lang.ref.WeakReference
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -175,6 +176,7 @@ class RecordingsFragment : Fragment() {
 
     /** Single-thread executor for filesystem scans. Recreated per view. */
     private var metricsExecutor: ExecutorService? = null
+    private var skeleton: Skeleton? = null
 
     /** Main-thread handler for posting scan results back to the UI. */
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -248,6 +250,9 @@ class RecordingsFragment : Fragment() {
             Thread(r, "RecordingsMetrics").apply { isDaemon = true }
         }
 
+        skeleton = Skeleton(view).apply {
+            bind(R.id.tvRecordingsSummarySkeleton, view.findViewById(R.id.tvRecordingsSummary))
+        }
         attachLibraryFragment()
         setupSegmentedControl(view)
         setupSettingsAction(view)
@@ -350,6 +355,8 @@ class RecordingsFragment : Fragment() {
             onDurationResolved = null
         }
         libraryFragment = null
+        skeleton?.cancel()
+        skeleton = null
         metricsExecutor?.shutdownNow()
         metricsExecutor = null
         super.onDestroyView()
@@ -685,13 +692,13 @@ class RecordingsFragment : Fragment() {
                 .format(Date(recording.timestamp))
         root.findViewById<TextView>(R.id.tvPreviewDurationValue)?.text =
             recording.formattedDuration.takeIf { recording.durationMs > 0 }
-                ?: getString(R.string.player_time_zero)
+                ?: getString(R.string.recording_preview_not_available)
         root.findViewById<TextView>(R.id.tvPreviewStorageValue)?.text =
             when (recording.storageType?.uppercase(Locale.ROOT)) {
                 "INTERNAL" -> getString(R.string.recording_preview_storage_internal)
                 "SD_CARD" -> getString(R.string.recording_preview_storage_sd)
                 "USB" -> getString(R.string.recording_preview_storage_usb)
-                else -> getString(R.string.recording_preview_storage_unknown)
+                else -> getString(R.string.recording_preview_not_available)
             }
         root.findViewById<TextView>(R.id.tvPreviewSizeValue)?.text = recording.formattedSize
     }
@@ -1696,6 +1703,7 @@ class RecordingsFragment : Fragment() {
                 synchronized(pendingPosts) { pendingPosts.remove(this) }
                 val v = viewRef.get() ?: return
                 val activeCtx = v.context ?: return
+                skeleton?.markLoaded(R.id.tvRecordingsSummarySkeleton)
                 val sizeText = Formatter.formatShortFileSize(activeCtx, totalBytes)
 
                 val baseSummary = activeCtx.getString(

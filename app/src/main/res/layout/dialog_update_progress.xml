@@ -46,6 +46,7 @@
         app:indicatorColor="?attr/colorPrimary"
         app:trackColor="?attr/colorSurfaceContainerHighest"
         app:trackCornerRadius="4dp"
+        app:trackStopIndicatorSize="0dp"
         app:trackThickness="8dp" />
 
     <TextView

@@ -11,7 +11,6 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
-import android.widget.Toast
 import androidx.core.content.FileProvider
 import androidx.core.view.doOnLayout
 import androidx.fragment.app.Fragment
@@ -23,6 +22,8 @@ import com.overdrive.app.ui.util.RecordingScanner
 import com.overdrive.app.ui.util.RecordingSectionHeaderDecoration
 import com.overdrive.app.ui.util.RecordingLibraryFilterState
 import com.overdrive.app.ui.util.RecordingsApiClient
+import com.overdrive.app.ui.widget.AppToast
+import com.overdrive.app.ui.widget.Skeleton
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
@@ -136,6 +137,9 @@ class RecordingLibraryFragment : Fragment() {
     // -------- Empty state CTA (filter clear) --------
     private var btnEmptyClearFilters: View? = null
     private var tvEmptyStateBody: TextView? = null
+
+    private var appToast: AppToast? = null
+    private var skeleton: Skeleton? = null
 
     // -------- Filter sheet (lazily inflated) --------
     private var filterSheet: BottomSheetDialog? = null
@@ -329,6 +333,8 @@ class RecordingLibraryFragment : Fragment() {
         }
 
         initViews(view)
+        appToast = AppToast(view)
+        skeleton = Skeleton(view).apply { follow(R.id.initialLoadingContainer) }
         setupRecordingsList()
         restoreSelectionState(savedInstanceState)
         setupClickListeners()
@@ -1067,13 +1073,8 @@ class RecordingLibraryFragment : Fragment() {
         setSelectionActionsEnabled(true)
         hideLoadStatus()
         if (showError) {
-            context?.let {
-                Toast.makeText(
-                    it,
-                    R.string.recording_library_page_error,
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
+            appToast?.show(
+                getString(R.string.recording_library_page_error), AppToast.Kind.ERROR)
         }
     }
 
@@ -1097,11 +1098,9 @@ class RecordingLibraryFragment : Fragment() {
     }
 
     /**
-     * Public entry point preserved for callers that previously triggered a
-     * full reload (delete, filter sheet apply, date change, post-resume).
-     * Now delegates to [resetPaging] + [loadFirstPage] so the paged path is
-     * always exercised. The function name is kept to avoid touching every
-     * call-site.
+     * Full reload entry point for delete, filter apply, date change and
+     * post-resume. Routes through [resetPaging] so the paged path is the only
+     * one that ever loads a list.
      */
     private fun loadRecordingsForSelectedDate() {
         resetPaging()
@@ -1771,7 +1770,9 @@ class RecordingLibraryFragment : Fragment() {
                 }
                 startActivity(Intent.createChooser(intent, getString(R.string.play_with_chooser)))
             } catch (e2: Exception) {
-                Toast.makeText(context, getString(R.string.toast_cannot_play_video, e2.message ?: ""), Toast.LENGTH_SHORT).show()
+                appToast?.show(
+                    getString(R.string.toast_cannot_play_video, e2.message ?: ""),
+                    AppToast.Kind.ERROR)
             }
         }
     }
@@ -1797,7 +1798,7 @@ class RecordingLibraryFragment : Fragment() {
             startActivity(Intent.createChooser(intent, getString(R.string.action_share)))
         } catch (e: Exception) {
             Log.e(TAG, "Share failed", e)
-            Toast.makeText(ctx, e.message ?: "share failed", Toast.LENGTH_SHORT).show()
+            appToast?.show(e.message ?: getString(R.string.toast_share_failed), AppToast.Kind.ERROR)
         }
     }
 
@@ -1826,15 +1827,12 @@ class RecordingLibraryFragment : Fragment() {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             startActivity(Intent.createChooser(intent, getString(R.string.action_share)))
-            Toast.makeText(
-                ctx,
-                getString(R.string.toast_share_recordings, selected.size),
-                Toast.LENGTH_SHORT
-            ).show()
+            appToast?.show(
+                getString(R.string.toast_share_recordings, selected.size), AppToast.Kind.INFO)
             exitSelectMode()
         } catch (e: Exception) {
             Log.e(TAG, "Bulk share failed", e)
-            Toast.makeText(ctx, e.message ?: "share failed", Toast.LENGTH_SHORT).show()
+            appToast?.show(e.message ?: getString(R.string.toast_share_failed), AppToast.Kind.ERROR)
         }
     }
 
@@ -1857,19 +1855,13 @@ class RecordingLibraryFragment : Fragment() {
             activity?.runOnUiThread {
                 if (!isAdded || view == null) return@runOnUiThread
                 if (deleted) {
-                    Toast.makeText(
-                        context,
-                        getString(R.string.toast_recording_deleted),
-                        Toast.LENGTH_SHORT,
-                    ).show()
+                    appToast?.show(
+                        getString(R.string.toast_recording_deleted), AppToast.Kind.SUCCESS)
                     loadRecordingsForSelectedDate()
                     onContentChanged?.invoke()
                 } else {
-                    Toast.makeText(
-                        context,
-                        getString(R.string.toast_recording_delete_failed),
-                        Toast.LENGTH_SHORT,
-                    ).show()
+                    appToast?.show(
+                        getString(R.string.toast_recording_delete_failed), AppToast.Kind.ERROR)
                 }
             }
         }
@@ -1907,12 +1899,16 @@ class RecordingLibraryFragment : Fragment() {
 
             activity?.runOnUiThread {
                 if (isAdded) {
-                    val msg = if (failed > 0) {
-                        getString(R.string.toast_batch_delete_partial, deleted, failed)
+                    if (failed > 0) {
+                        appToast?.show(
+                            getString(R.string.toast_batch_delete_partial, deleted, failed),
+                            AppToast.Kind.WARNING)
                     } else {
-                        resources.getQuantityString(R.plurals.recordings_deleted_count, deleted, deleted)
+                        appToast?.show(
+                            resources.getQuantityString(
+                                R.plurals.recordings_deleted_count, deleted, deleted),
+                            AppToast.Kind.SUCCESS)
                     }
-                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                     exitSelectMode()
                     loadRecordingsForSelectedDate()
                     // Same notification as single-delete — keeps the
@@ -1959,6 +1955,10 @@ class RecordingLibraryFragment : Fragment() {
         }
         warmupPollRunnable?.let { mainHandler.removeCallbacks(it) }
         warmupPollRunnable = null
+        appToast?.cancel()
+        appToast = null
+        skeleton?.cancel()
+        skeleton = null
         pendingRestoredSelectionPaths = emptySet()
         pendingSelectAll = false
         allMatchingSelected = false

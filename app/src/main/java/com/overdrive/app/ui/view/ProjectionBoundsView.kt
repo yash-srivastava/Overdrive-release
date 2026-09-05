@@ -37,7 +37,7 @@ import kotlin.math.roundToInt
  *    Optional [aspectLocked] keeps the box at the panel aspect.
  *  - [Mode.CONTROL]: taps/swipes ANYWHERE on the stage forward to the app (normalized 0..1 of the
  *    whole view = whole cluster, which the fragment maps through the full-cluster mirror to cluster px).
- *  - [Mode.IDLE]: a faint placeholder outline of the current preview rect.
+ *  - [Mode.IDLE]: the "Mirror preview" hint, no frame.
  *
  * Modeled on DashCast's {@code ResizeFrameView} (cluster-space frame, uniform scale), extended
  * with move, side handles, aspect lock, presets (driven from the fragment) and live control.
@@ -85,10 +85,6 @@ class ProjectionBoundsView @JvmOverloads constructor(
     }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL; color = Color.argb(0x2E, 0x00, 0xD4, 0xAA)
-    }
-    private val idleOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE; strokeWidth = dp(1.5f)
-        color = Color.argb(0x66, 0xFF, 0xFF, 0xFF)
     }
     private val handleFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL; color = Color.WHITE
@@ -223,7 +219,6 @@ class ProjectionBoundsView @JvmOverloads constructor(
         val b = box.bottom * sy
         when (mode) {
             Mode.IDLE -> {
-                canvas.drawRoundRect(l, t, r, b, dp(6f), dp(6f), idleOutline)
                 canvas.drawText(context.getString(
                     com.overdrive.app.R.string.projection_bounds_hint_idle),
                     (l + r) / 2f, (t + b) / 2f, hint)

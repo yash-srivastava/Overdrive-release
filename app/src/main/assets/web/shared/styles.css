@@ -183,6 +183,56 @@ textarea:focus,
     border-top-color: var(--primary);
 }
 
+/* First-load placeholder blocks. Not a gradient sweep: the head-unit WebView is
+   Chrome 58, where animating background-position costs a repaint per frame. */
+.sk {
+    display: block;
+    border-radius: var(--radius-md);
+    background: var(--surface-container-highest);
+    animation: skPulse 1.24s ease-in-out infinite;
+}
+
+/* Two opaque shades, never opacity: a cover sits on top of the real value, and
+   a translucent frame shows that value and the host's own border through it. */
+@keyframes skPulse {
+    0%, 100% { background-color: var(--surface-container-high); }
+    50% { background-color: var(--surface-container-highest); }
+}
+
+.sk-line {
+    width: 96px;
+    height: 18px;
+}
+
+.sk-pill {
+    width: 72px;
+    height: 12px;
+    border-radius: 999px;
+}
+
+.sk-cover {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+}
+
+/* A cover is positioned against the padding box, so the host's border ring keeps
+   painting: pulse the host in step. Page CSS sets that border after this file. */
+.is-sk {
+    border-color: transparent !important;
+    animation: skPulse 1.24s ease-in-out infinite;
+}
+.is-sk > :not(.sk) {
+    visibility: hidden;
+}
+
+.sk-tile {
+    width: 100%;
+    height: 80px;
+}
+
 /* === APP LAYOUT === */
 .app-layout {
     display: flex;

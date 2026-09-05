@@ -189,27 +189,25 @@
             android:paddingTop="4dp"
             android:paddingBottom="72dp" />
 
+        <!-- First-load placeholders stand in for clip cards, so the list keeps its
+             shape instead of collapsing to a centred spinner. -->
         <LinearLayout
             android:id="@+id/initialLoadingContainer"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:gravity="center"
+            android:contentDescription="@string/recording_library_loading"
             android:orientation="vertical"
-            android:padding="24dp"
+            android:paddingHorizontal="20dp"
+            android:paddingTop="4dp"
             android:visibility="gone">
 
-            <ProgressBar
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:indeterminateTint="?attr/colorPrimary" />
+            <include layout="@layout/skeleton_tile" />
 
-            <TextView
-                android:layout_width="wrap_content"
+            <include
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:text="@string/recording_library_loading"
-                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                android:textColor="?attr/colorOnSurfaceVariant" />
+                layout="@layout/skeleton_tile" />
         </LinearLayout>
 
         <!-- SOTA empty state mirrors the portrait layout. Tonal disc +

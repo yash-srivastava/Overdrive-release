@@ -147,6 +147,11 @@ BYD.map = {
         if (!gpsData) return;
         
         const lastUpdateEl = document.getElementById('lastGpsUpdate');
+        // First resolved paint only, including "No GPS" — that is an answer, not loading.
+        if (window.BYD && BYD.skeleton) {
+            BYD.skeleton.resolve('gpsFreshness');
+            BYD.skeleton.resolve('gpsDistance');
+        }
         
         // Show location even if stale/cached (last known position when ACC was on)
         if (gpsData.hasLocation) {
@@ -157,23 +162,30 @@ BYD.map = {
                 const ago = this.formatTimeAgo(gpsData.lastUpdate);
                 if (gpsData.isCached) {
                     // Location is from cache (ACC likely off, no recent GPS)
-                    lastUpdateEl.textContent = ago + ' (cached)';
-                    lastUpdateEl.classList.add('stale');
+                    this._setFreshness(lastUpdateEl, ago + ' (cached)', 'is-stale');
                 } else if (gpsData.isStale) {
                     // Location is stale but not too old
-                    lastUpdateEl.textContent = ago + ' (stale)';
-                    lastUpdateEl.classList.add('stale');
+                    this._setFreshness(lastUpdateEl, ago + ' (stale)', 'is-stale');
                 } else {
-                    lastUpdateEl.textContent = ago;
-                    lastUpdateEl.classList.remove('stale');
+                    this._setFreshness(lastUpdateEl, ago, 'is-live');
                 }
             }
         } else {
             if (lastUpdateEl) {
-                lastUpdateEl.textContent = 'No GPS';
-                lastUpdateEl.classList.add('stale');
+                this._setFreshness(lastUpdateEl, 'No GPS', 'is-down');
             }
         }
+    },
+
+    /** Freshness reads as a state dot plus a plain label, never coloured text. */
+    _setFreshness(labelEl, text, dotState) {
+        labelEl.textContent = text;
+        labelEl.classList.remove('stale');
+        const row = labelEl.closest
+            ? labelEl.closest('.location-freshness')
+            : document.querySelector('.location-freshness');
+        const dot = row && row.querySelector('.location-freshness-dot');
+        if (dot) dot.className = 'location-freshness-dot ' + dotState;
     },
     
     /**

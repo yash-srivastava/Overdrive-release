@@ -12,8 +12,9 @@
     <meta name="theme-color" content="#00876C">
     <script src="../shared/theme.js?v=6"></script>
     <script src="../shared/app-shell.js?v=2"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=24">
-    <link rel="stylesheet" href="../shared/seat-positions.css?v=5">
+    <script src="../shared/skeleton.js?v=4"></script>
+    <link rel="stylesheet" href="../shared/styles.css?v=32">
+    <link rel="stylesheet" href="../shared/seat-positions.css?v=7">
 </head>
 <body>
     <div class="app-layout">
@@ -39,11 +40,16 @@
 
                 <div class="card sp-now">
                     <div class="card-body sp-now-body">
-                        <div class="sp-now-art" id="spCurrentGlyph"></div>
+                        <div class="sp-now-art" id="spCurrentGlyph" data-sk-real="seatCurrent"></div>
+                        <div class="sk sp-sk-art" data-sk-group="seatCurrent"></div>
                         <div class="sp-now-main">
                             <div class="sp-now-eyebrow" data-i18n="seatpos.current">Current position</div>
-                            <div class="sp-match" id="spCurrentMatch"></div>
-                            <div id="spCurrentAxes"></div>
+                            <div class="sp-match" id="spCurrentMatch" data-sk-real="seatCurrent"></div>
+                            <div id="spCurrentAxes" data-sk-real="seatCurrent"></div>
+                            <div class="sp-sk-main" data-sk-group="seatCurrent">
+                                <div class="sk sk-line sp-sk-match"></div>
+                                <div class="sk sk-line sp-sk-axes"></div>
+                            </div>
                         </div>
                         <div class="sp-now-actions">
                             <button class="btn btn-primary" id="spSaveNew">
@@ -59,12 +65,20 @@
                         <span class="sp-status-text" id="spStatusText" data-i18n="seatpos.gate_acc_off">The car is off, so the seat motors have no power. Apply and save will do nothing until you turn it on.</span>
                     </div>
                     <div class="sp-batches" id="spBatches" style="display:none;">
-                        <span class="sp-batch" id="spBatch1"><span class="led"></span>batch 1 · mirrors</span>
-                        <span class="sp-batch" id="spBatch2"><span class="led"></span>batch 2 · seat</span>
+                        <span class="sp-batch" id="spBatch1"><span class="led"></span>batch 1 � mirrors</span>
+                        <span class="sp-batch" id="spBatch2"><span class="led"></span>batch 2 � seat</span>
                     </div>
                 </div>
 
-                <div id="spList"></div>
+                <div id="spList" data-sk-real="seatList"></div>
+
+                <div class="card sp-sk-list" data-sk-group="seatList">
+                    <div class="card-body">
+                        <div class="sk sk-line sp-sk-row"></div>
+                        <div class="sk sk-line sp-sk-row"></div>
+                        <div class="sk sk-line sp-sk-row"></div>
+                    </div>
+                </div>
 
             </div>
         </main>
@@ -88,7 +102,7 @@
     <script src="../shared/auth.js"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
     <script src="../shared/core.js?v=20"></script>
-    <script src="../shared/seat-positions.js?v=5"></script>
+    <script src="../shared/seat-positions.js?v=6"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');

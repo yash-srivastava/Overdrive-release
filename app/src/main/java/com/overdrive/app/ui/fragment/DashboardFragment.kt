@@ -16,7 +16,6 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
-import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
@@ -48,6 +47,8 @@ import com.overdrive.app.ui.vehicle.VehicleArt
 import com.overdrive.app.ui.viewmodel.DaemonsViewModel
 import com.overdrive.app.ui.viewmodel.MainViewModel
 import com.overdrive.app.ui.viewmodel.RecordingViewModel
+import com.overdrive.app.ui.widget.AppToast
+import com.overdrive.app.ui.widget.Skeleton
 import com.overdrive.app.util.DeviceIdGenerator
 import java.util.Calendar
 import java.util.concurrent.ExecutorService
@@ -154,10 +155,16 @@ class DashboardFragment : Fragment() {
     // out of the UI thread without contending with itself.
     private val mainHandler = Handler(Looper.getMainLooper())
     private var metricsExecutor: ExecutorService? = null
+    private var appToast: AppToast? = null
+    private var skeleton: Skeleton? = null
 
     private var dashboardState = DashboardUiState()
     private var todayClipCount: Int? = null
     private var storageSummary: DashboardUiState.StorageSummary? = null
+    // Clips and storage answer on separate hops, so each retires its own placeholder. A null
+    // count with storage already in hand means "still counting", not "no clips".
+    private var clipCountResolved: Boolean = false
+    private var storageResolved: Boolean = false
     private var viewGeneration: Int = 0
     private var dashboardResumed: Boolean = false
     private var recordingStatsRetryCount: Int = 0
@@ -178,11 +185,16 @@ class DashboardFragment : Fragment() {
         viewGeneration += 1
 
         bindViews(view)
+        appToast = AppToast(view)
+        bindSkeletons(view)
         wireClicks()
         observeViewModels()
 
+        // Carry the resolved sections across a view recreation (rotation): starting from a
+        // fresh DashboardUiState would repaint every value as Loading and re-flash the
+        // placeholders for data this fragment instance already has.
         dashboardState = DashboardStateReducer.remoteExpanded(
-            DashboardUiState(),
+            dashboardState,
             savedInstanceState?.getBoolean(STATE_REMOTE_EXPANDED, false) == true,
         )
         selectedTunnel = savedInstanceState
@@ -228,6 +240,10 @@ class DashboardFragment : Fragment() {
         viewGeneration += 1
         mainHandler.removeCallbacks(statusRefreshRunnable)
         mainHandler.removeCallbacks(recordingStatsRefreshRunnable)
+        appToast?.cancel()
+        appToast = null
+        skeleton?.cancel()
+        skeleton = null
         if (::ivQrCode.isInitialized) ivQrCode.setImageDrawable(null)
         lastRenderedQrUrl = null
         hasRenderedQrForView = false
@@ -241,6 +257,22 @@ class DashboardFragment : Fragment() {
         outState.putBoolean(STATE_AI_INSIGHT_EXPANDED, aiInsightExpanded)
         selectedTunnel?.let { outState.putString(STATE_SELECTED_TUNNEL, it.name) }
         super.onSaveInstanceState(outState)
+    }
+
+    /**
+     * Places the first-load placeholders. Each retires for good once its value resolves, so the
+     * 2s/15s status poll and the per-resume tile refresh never blank a slot again.
+     */
+    private fun bindSkeletons(view: View) {
+        val skeleton = Skeleton(view)
+        this.skeleton = skeleton
+        skeleton.bind(R.id.vehicleSocSkeleton, vehicleSocValue)
+        skeleton.bind(R.id.vehicleRangeSkeleton, vehicleRangeValue)
+        skeleton.bind(R.id.metricRecordingsSkeleton, metricRecordingsValue)
+        skeleton.bind(R.id.metricStorageSkeleton, metricStorageValue)
+        activityRows.firstOrNull()?.let {
+            skeleton.bind(R.id.activityRow1Skeleton, it.icon, it.text)
+        }
     }
 
     private fun bindViews(view: View) {
@@ -392,6 +424,7 @@ class DashboardFragment : Fragment() {
                         totalBytes = it.totalBytes,
                     )
                 }
+            storageResolved = true
             updateRecordingState()
         }
     }
@@ -493,12 +526,14 @@ class DashboardFragment : Fragment() {
             mainHandler.post {
                 if (!isAdded || view == null || generation != viewGeneration) return@post
                 todayClipCount = clipCountToday
-                updateRecordingState()
                 mainHandler.removeCallbacks(recordingStatsRefreshRunnable)
-                if (shouldRetry &&
+                val willRetry = shouldRetry &&
                     dashboardResumed &&
                     recordingStatsRetryCount < MAX_RECORDING_STATS_RETRIES
-                ) {
+                // A warming index has not answered yet, so the placeholder stays for the retry.
+                if (!willRetry) clipCountResolved = true
+                updateRecordingState()
+                if (willRetry) {
                     recordingStatsRetryCount += 1
                     mainHandler.postDelayed(
                         recordingStatsRefreshRunnable,
@@ -522,10 +557,17 @@ class DashboardFragment : Fragment() {
 
     private fun renderRecordingsValue() {
         if (!::metricRecordingsValue.isInitialized) return
+        val unavailable = dashboardState.recordings == DashboardUiState.RecordingState.Unavailable
+        if (clipCountResolved || unavailable) {
+            skeleton?.markLoaded(R.id.metricRecordingsSkeleton)
+        }
+        if (storageResolved || unavailable) {
+            skeleton?.markLoaded(R.id.metricStorageSkeleton)
+        }
         when (val recording = dashboardState.recordings) {
             DashboardUiState.RecordingState.Loading -> {
                 metricRecordingsValue.setText(R.string.dashboard_metric_value_pending)
-                metricStorageValue.setText(R.string.dashboard_modern_updating)
+                metricStorageValue.setText(R.string.dashboard_metric_value_pending)
                 recordingStorageProgress.visibility = View.INVISIBLE
             }
             DashboardUiState.RecordingState.Unavailable -> {
@@ -574,6 +616,8 @@ class DashboardFragment : Fragment() {
             mainHandler.post {
                 if (!isAdded || view == null || generation != viewGeneration) return@post
                 dashboardState = DashboardStateReducer.status(dashboardState, result)
+                skeleton?.markLoaded(R.id.vehicleSocSkeleton)
+                skeleton?.markLoaded(R.id.vehicleRangeSkeleton)
                 renderVehicleState()
                 if (dashboardResumed) {
                     val isAccOn = (dashboardState.vehicle as? DashboardUiState.VehicleState.Ready)?.snapshot?.isAccOn == true
@@ -652,6 +696,10 @@ class DashboardFragment : Fragment() {
 
     private fun renderVehicleState() {
         if (!::vehicleSocValue.isInitialized) return
+        if (dashboardState.vehicle != DashboardUiState.VehicleState.Loading) {
+            skeleton?.markLoaded(R.id.vehicleSocSkeleton)
+            skeleton?.markLoaded(R.id.vehicleRangeSkeleton)
+        }
         when (val vehicle = dashboardState.vehicle) {
             DashboardUiState.VehicleState.Loading -> {
                 heroGreeting.setText(R.string.dashboard_modern_vehicle_status)
@@ -1002,6 +1050,13 @@ class DashboardFragment : Fragment() {
 
     private fun renderActivityState() {
         if (activityRows.isEmpty()) return
+        // The placeholder is the loading state, so there is nothing to paint until it retires.
+        if (dashboardState.activity == DashboardUiState.ActivityState.Loading &&
+            skeleton?.isLoaded(R.id.activityRow1Skeleton) != true
+        ) {
+            return
+        }
+        skeleton?.markLoaded(R.id.activityRow1Skeleton)
         val rows = when (val activity = dashboardState.activity) {
             DashboardUiState.ActivityState.Loading -> listOf(
                 DashboardUiState.ActivityRow(
@@ -1023,15 +1078,19 @@ class DashboardFragment : Fragment() {
             views.container.visibility = if (row == null) View.GONE else View.VISIBLE
             if (row == null) return@forEachIndexed
             views.text.text = row.text
-            // Placeholder rows carry no icon; the slot stays to hold the text's
-            // left edge.
             val placeholder = row.icon == 0
+            val textLp = views.text.layoutParams as ViewGroup.MarginLayoutParams
             if (placeholder) {
-                views.icon.visibility = View.INVISIBLE
+                views.icon.visibility = View.GONE
+                textLp.marginStart = 0
             } else {
                 views.icon.setImageResource(row.icon)
                 views.icon.visibility = View.VISIBLE
+                textLp.marginStart = views.text.resources.getDimensionPixelSize(
+                    R.dimen.dashboard_modern_gap
+                )
             }
+            views.text.layoutParams = textLp
             val textAttr = if (placeholder) {
                 com.google.android.material.R.attr.colorOnSurfaceVariant
             } else {
@@ -1310,7 +1369,7 @@ class DashboardFragment : Fragment() {
         val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val clip = ClipData.newPlainText(getString(R.string.clip_label_access_code), state.secret)
         clipboard.setPrimaryClip(clip)
-        Toast.makeText(requireContext(), getString(R.string.toast_access_code_copied), Toast.LENGTH_SHORT).show()
+        appToast?.show(getString(R.string.toast_access_code_copied), AppToast.Kind.SUCCESS)
     }
 
     private fun showRegenerateConfirmation() {
@@ -1327,41 +1386,36 @@ class DashboardFragment : Fragment() {
         val newToken = AuthManager.regenerateToken()
         // Use the lifecycle-managed metricsExecutor (shut down in onDestroyView)
         // instead of a bare Thread that would outlive the fragment and leak
-        // its Activity reference. The applicationContext for the Toast also
-        // bypasses requireContext()'s detach-aware throw.
+        // its Activity reference.
         val ctx = context?.applicationContext ?: return
         if (newToken == null) {
             // Persistence failed — usually means the daemon hasn't booted
             // yet so the unified config file isn't writable from app UID.
             // Better to surface this than to claim success and leave the
             // user wondering why login still rejects the new code.
-            Toast.makeText(ctx, ctx.getString(R.string.toast_token_regenerated_restart), Toast.LENGTH_LONG).show()
+            appToast?.show(
+                ctx.getString(R.string.toast_token_regenerated_restart), AppToast.Kind.WARNING)
             loadAuthState()
             return
         }
         val executor = metricsExecutor ?: Executors.newSingleThreadExecutor()
             .also { metricsExecutor = it }
         executor.execute {
-            val msgRes = try {
+            val outcome = try {
                 val client = CameraDaemonClient()
                 if (client.connect()) {
                     val ok = client.invalidateAuthCacheSync()
                     client.disconnect()
-                    if (ok) R.string.toast_token_regenerated_logged_out
-                    else R.string.toast_token_regenerated_restart
+                    if (ok) R.string.toast_token_regenerated_logged_out to AppToast.Kind.SUCCESS
+                    else R.string.toast_token_regenerated_restart to AppToast.Kind.WARNING
                 } else {
-                    R.string.toast_token_regenerated_no_notify
+                    R.string.toast_token_regenerated_no_notify to AppToast.Kind.WARNING
                 }
             } catch (_: Exception) {
-                R.string.toast_token_regenerated
+                R.string.toast_token_regenerated to AppToast.Kind.SUCCESS
             }
-            // Use the application context for Toast — survives fragment detach
-            // and is the recommended pattern for "fire-and-forget" notifications
-            // from a background thread.
             mainHandler.post {
-                if (isAdded) {
-                    Toast.makeText(ctx, ctx.getString(msgRes), Toast.LENGTH_SHORT).show()
-                }
+                if (isAdded) appToast?.show(ctx.getString(outcome.first), outcome.second)
             }
         }
         loadAuthState()

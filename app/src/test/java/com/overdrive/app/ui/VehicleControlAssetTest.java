@@ -37,7 +37,9 @@ public class VehicleControlAssetTest {
         String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
         String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
 
-        assertEquals(4, count(html, "class=\"vc-tyre-cell\""));
+        assertEquals(4, count(html, "class=\"vc-tyre-cell is-sk\""));
+        // No reading yet reads grey, so a corner never opens on the healthy colour.
+        assertEquals(4, count(html, "data-state=\"muted\""));
         assertFalse(html.contains("vc-tyre-callout"));
         assertFalse(css.contains(".vc-tyre-callout"));
         // The strip is a bar sibling of the stage, so the 3D-surround flag
@@ -88,6 +90,39 @@ public class VehicleControlAssetTest {
     }
 
     /**
+     * The app WebView has no surround-view host, so the toggle must never reach
+     * the screen: revealing it with the stage flashed it until the vendors landed.
+     */
+    @Test
+    public void surroundViewToggleNeverFlashesInsideTheAppWebView() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
+        String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
+        String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
+
+        // Marked in the pre-paint bootstrap, alongside the view-mode class.
+        assertTrue(html.contains("typeof window.AndroidBridge !== 'undefined'"));
+        assertTrue(html.contains("document.documentElement.className += ' is-app-webview';"));
+        assertTrue(css.replace("\r", "").contains(
+                "html.is-app-webview #btn3dView {\n    display: none;"));
+        // An inline display would beat that rule, so the stage must not re-show it.
+        assertFalse(script.contains("var show = ['colorPicker', 'modelMenu', 'btn3dView'];"));
+        assertTrue(script.contains("if (!window.AndroidBridge) show.push('btn3dView');"));
+    }
+
+    /**
+     * Windows tab uses Material {@code seat_window}, not the Lucide window pane.
+     */
+    @Test
+    public void windowsTabUsesTheMaterialSeatWindow() throws IOException {
+        String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
+        String seatWindow = "M583-620q-10 0-18-6t-11-16l-57-200";
+        assertTrue(html.contains(seatWindow));
+        assertEquals(1, count(html, seatWindow));
+        assertFalse(html.contains("rect x=\"2\" y=\"4\" width=\"20\" height=\"16\""));
+        assertFalse(html.contains("M2 10h20"));
+    }
+
+    /**
      * Seats tab and memory tiles use Material {@code airline_seat_recline_extra},
      * not the Lucide armchair that reads as a couch at 20px.
      */
@@ -124,32 +159,42 @@ public class VehicleControlAssetTest {
     }
 
     /**
-     * The handle stays one fixed colour. Tinting it per tick read as the ramp
-     * glitching, and a tint surrounded by 31 neighbouring hues never reads as
-     * the selected colour — the header swatch is the readout.
+     * The sliding chip is the selected colour. Chrome 58 will not paint a CSS
+     * variable onto ::-webkit-slider-thumb, so a sibling chip follows the
+     * native handle. The header no longer has a second circle.
      */
     @Test
-    public void ambientHandleIsFixedAndTheSwatchCarriesTheColour() throws IOException {
+    public void ambientHandleCarriesTheSelectedColour() throws IOException {
         String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
         String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
         String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
 
-        String thumb = ruleFor(css, ".vc-ambient-slider::-webkit-slider-thumb");
-        assertTrue(thumb.contains("background: #fff"));
-        assertFalse("the handle must not be tinted per tick",
-                thumb.contains("var(--ambient-thumb"));
-        assertFalse(thumb.contains("background: var(--color, var(--primary))"));
-        // A ring of the card background, not a white rim: the rim read as a bullseye.
-        assertTrue(thumb.contains("box-shadow: 0 0 0 3px var(--vc-tile-bg)"));
-        assertFalse(thumb.contains("border: 2px solid #fff"));
+        String nativeThumb = ruleFor(css, ".vc-ambient-slider::-webkit-slider-thumb");
+        assertTrue(nativeThumb.contains("background: transparent"));
+        String chip = ruleFor(css, ".ambient-thumb");
+        assertTrue(chip.contains("background: #fff"));
+        assertTrue(chip.contains("box-shadow: 0 0 0 2px var(--vc-tile-bg)"));
+        assertTrue(chip.contains("pointer-events: none"));
+        // The input paints the gradient, so the chip has to stack above it.
+        assertTrue(chip.contains("z-index: 2"));
+        assertTrue(ruleFor(css, ".vc-ambient-slider").contains("z-index: 1"));
+        // A rounded square, like the paint swatches — not a circle.
+        assertTrue(chip.contains("border-radius: 4px"));
+        assertFalse(chip.contains("border-radius: 50%"));
         assertTrue("a bordered thumb without border-box overflows the 20px track",
-                thumb.contains("box-sizing: border-box"));
+                chip.contains("box-sizing: border-box"));
+        // Inset inside the 20px track rather than filling it edge to edge.
+        assertTrue(chip.contains("width: 14px"));
+        assertTrue(chip.contains("height: 14px"));
+        assertTrue(chip.contains("top: 3px"));
+        assertTrue(script.contains("var travel = slider.clientWidth - 20 - 12"));
+        assertTrue(script.contains("var px = (6 + (ratio * travel) + 3) + 'px'"));
 
-        assertTrue(html.contains("class=\"ambient-swatch\" id=\"ambientSwatch\""));
-        assertTrue(ruleFor(css, ".ambient-swatch").contains("var(--ambient-swatch, transparent)"));
-        assertTrue(script.contains("wrap.style.setProperty('--ambient-swatch'"));
-        // An unread palette hides the swatch instead of showing a grey dot.
-        assertTrue(script.contains("swatch.style.display = picked ? '' : 'none';"));
+        assertTrue(html.contains("id=\"ambientThumb\""));
+        assertFalse(html.contains("ambientSwatch"));
+        assertFalse(css.contains(".ambient-swatch"));
+        assertTrue(script.contains("_paintAmbientThumb: function(slider, picked)"));
+        assertTrue(script.contains("thumb.style.background = picked || '#fff'"));
         assertFalse(ruleFor(css, ".ambient-head").contains("gap:"));
     }
 
@@ -162,8 +207,13 @@ public class VehicleControlAssetTest {
         String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
 
         assertTrue(script.contains("this.renderer.toneMappingExposure = 0.95;"));
-        assertTrue(script.contains("new THREE.HemisphereLight(0x88aacc, 0x222244, 0.75)"));
+        assertTrue(script.contains("VC.SHOWROOM_SKY_HEX, VC.SHOWROOM_GROUND_HEX, 0.78)"));
         assertTrue(script.contains("new THREE.DirectionalLight(0xffffff, 0.8)"));
+        // Neutral ambient, so the body paint reads its own colour and not a blue cast. The AVM
+        // sky-tint sampler blends against the same two constants.
+        assertTrue(script.contains("SHOWROOM_SKY_HEX: 0xF2F4F8"));
+        assertTrue(script.contains("new THREE.Color(VC.SHOWROOM_SKY_HEX)"));
+        assertTrue(script.contains("new THREE.Color(VC.SHOWROOM_GROUND_HEX)"));
         assertTrue(script.contains("mat.envMapIntensity = 0.6;"));
         // Restore-on-bowl-exit must read the live intensities; a second copy of
         // the numbers here silently un-dims the rig.
@@ -352,6 +402,13 @@ public class VehicleControlAssetTest {
         assertFalse(script.contains("location.reload();"));
         assertTrue(script.contains("switchViewMode: function()"));
         assertTrue(script.contains("_startImmersiveScene: function()"));
+        // The paint row appears with the stage, not after the vendor download: its
+        // presets are local, and the swatches stay inert until the scene exists.
+        assertTrue(script.contains("_showImmersiveStage: function() {"));
+        assertTrue(script.replace("\r", "").contains(
+                "// the vendor download. _startImmersiveScene rebuilds it from scratch.\n"
+                        + "        this.initColorPicker();"));
+        assertTrue(script.contains("if (!this.baseColor) return;"));
         assertTrue(script.contains("_teardownImmersiveScene: function()"));
 
         // The toggle loads the vendor stack from the page's own list rather
@@ -532,7 +589,7 @@ public class VehicleControlAssetTest {
                 + count(html, "data-state=\"3\" disabled")
                 + count(html, "data-state=\"4\" disabled")
                 + count(html, "data-state=\"5\" disabled"));
-        assertTrue(html.contains("vehicle-control.js?v=vclite18"));
+        assertTrue(html.contains("vehicle-control.js?v=vclite26"));
         assertTrue(script.contains("fetch('/api/vehicle/ac-charge-current-limit')"));
         assertTrue(script.contains("self.apiPost('/api/vehicle/ac-charge-current-limit'"));
         assertTrue(script.contains("startAcChargeCurrentSync: function()"));

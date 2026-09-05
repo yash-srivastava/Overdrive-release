@@ -438,9 +438,11 @@ class DashboardStatusParserTest {
     }
 
     @Test
-    fun vehicleNotReadyRemainsLoadingInsteadOfShowingAnError() {
+    fun vehicleNotReadySettlesAsUnavailable() {
         assertEquals(
-            DashboardStatusResult.Loading,
+            DashboardStatusResult.Unavailable(
+                DashboardStatusResult.Reason.VEHICLE_DATA_UNAVAILABLE
+            ),
             DashboardStatusParser.parse(
                 """{"status":"ok","vehicleDataReady":false,"recording":[]}"""
             ),

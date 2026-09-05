@@ -2,6 +2,7 @@ package com.overdrive.app.ui.fragment
 
 import android.content.Context
 import android.content.res.Configuration
+import android.graphics.Outline
 import android.graphics.SurfaceTexture
 import android.os.Bundle
 import android.os.Handler
@@ -11,12 +12,14 @@ import android.view.Surface
 import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.ProgressBar
 import android.widget.Spinner
 import android.widget.TextView
+import androidx.annotation.DrawableRes
 import androidx.fragment.app.Fragment
 import com.google.android.material.button.MaterialButtonToggleGroup
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -25,6 +28,7 @@ import com.overdrive.app.R
 import com.overdrive.app.ui.view.ClusterViewMirrorClient
 import com.overdrive.app.ui.view.ProjectionBoundsGeometry
 import com.overdrive.app.ui.view.ProjectionBoundsView
+import com.overdrive.app.ui.widget.AppToast
 import com.overdrive.app.util.DaemonHttpClient
 import org.json.JSONObject
 import java.io.OutputStream
@@ -66,6 +70,9 @@ class ProjectionFragment : Fragment() {
     private var btnStop: Button? = null
     private var btnAdjust: Button? = null
     private var statusText: TextView? = null
+    private var statusDot: View? = null
+    private var appToast: AppToast? = null
+    private var lastStickyError: String? = null
     private var stage: View? = null
     private var bounds: ProjectionBoundsView? = null
     private var progress: ProgressBar? = null
@@ -181,6 +188,8 @@ class ProjectionFragment : Fragment() {
             btnStop = view.findViewById(R.id.projectionStopButton)
             btnAdjust = view.findViewById(R.id.projectionAdjustButton)
             statusText = view.findViewById(R.id.projectionStatus)
+            statusDot = view.findViewById(R.id.projectionStatusDot)
+            appToast = AppToast(view)
             stage = view.findViewById(R.id.projectionStage)
             bounds = view.findViewById(R.id.projectionBounds)
             progress = view.findViewById(R.id.projectionProgress)
@@ -202,6 +211,7 @@ class ProjectionFragment : Fragment() {
             wireAspectLockSwitch()
             wireAutoStartSwitch()
             restoreScaleMode()
+            clipMirrorToCard()
             // Per-app window restore happens in loadApps() once the spinner selection settles
             // (the app list loads async in onResume, so there's no selected package yet here).
             // Seed the stage to the default panel aspect (8:3) IMMEDIATELY so the preview pane is
@@ -289,7 +299,10 @@ class ProjectionFragment : Fragment() {
         stageLayoutListener?.let { listener -> stage?.removeOnLayoutChangeListener(listener) }
         stageLayoutListener = null
         spinnerApps = null; btnCast = null; btnStop = null; btnAdjust = null
-        statusText = null; stage = null; bounds = null; progress = null
+        appToast?.cancel()
+        appToast = null
+        lastStickyError = null
+        statusText = null; statusDot = null; stage = null; bounds = null; progress = null
         scaleGroup = null; presetGroup = null; aspectLockSwitch = null
         autoStartSwitch = null; texture = null
         super.onDestroyView()
@@ -731,7 +744,7 @@ class ProjectionFragment : Fragment() {
         val idx = spinnerApps?.selectedItemPosition ?: -1
         if (idx < 0 || idx >= appPackages.size) {
             setAutoStartChecked(false)
-            setStatus(getString(R.string.projection_autostart_need_app))
+            notifyToast(getString(R.string.projection_autostart_need_app), AppToast.Kind.WARNING)
             return
         }
         val pkg = appPackages[idx]
@@ -841,7 +854,7 @@ class ProjectionFragment : Fragment() {
             postMain {
                 appPackages.clear(); appPackages.addAll(pkgs)
                 val ctx = context ?: return@postMain
-                val adapter = ArrayAdapter(ctx, android.R.layout.simple_spinner_item, labels)
+                val adapter = ArrayAdapter(ctx, R.layout.item_projection_spinner, labels)
                 adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
                 spinnerApps?.adapter = adapter
                 // Setting a fresh adapter resets the spinner to position 0 — restore the
@@ -900,10 +913,10 @@ class ProjectionFragment : Fragment() {
                     // Distinguish "app no longer installed" from a generic failure so the
                     // user knows to pick another (and refresh the picker to drop it).
                     if (result.reason == "not_installed") {
-                        setStatus(getString(R.string.projection_app_uninstalled))
+                        notifyToast(getString(R.string.projection_app_uninstalled), AppToast.Kind.ERROR)
                         loadApps()
                     } else {
-                        setStatus(getString(R.string.projection_cast_failed))
+                        notifyToast(getString(R.string.projection_cast_failed), AppToast.Kind.ERROR)
                     }
                 }
             }
@@ -1041,7 +1054,26 @@ class ProjectionFragment : Fragment() {
             prepareForSurfaceResize()
             params.height = target
             s.layoutParams = params
+            s.invalidateOutline()
+            texture?.invalidateOutline()
             scheduleMirrorRestart()
+        }
+    }
+
+    private fun clipMirrorToCard() {
+        val radius = resources.getDimension(R.dimen.dashboard_modern_radius)
+        val provider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setRoundRect(0, 0, view.width, view.height, radius)
+            }
+        }
+        stage?.let {
+            it.outlineProvider = provider
+            it.clipToOutline = true
+        }
+        texture?.let {
+            it.outlineProvider = provider
+            it.clipToOutline = true
         }
     }
 
@@ -1050,13 +1082,40 @@ class ProjectionFragment : Fragment() {
         // Don't stomp the "drag to move" hint while the user is actively adjusting.
         if (!adjusting) {
             when (mode) {
-                MODE_ACTIVE -> setStatus(getString(R.string.projection_status_live))
-                MODE_NO_PROJECTION -> setStatus(getString(R.string.projection_status_none))
-                MODE_UNSUPPORTED -> setStatus(getString(R.string.projection_status_unsupported))
-                MODE_SERVICE_DOWN -> setStatus(getString(R.string.projection_status_service_down))
-                else -> setStatus(
-                    if (casting) getString(R.string.projection_status_none)
-                    else getString(R.string.projection_status_idle))
+                MODE_ACTIVE -> {
+                    lastStickyError = null
+                    setStatus(getString(R.string.projection_status_live))
+                    setStatusDot(R.drawable.status_dot_online)
+                }
+                MODE_NO_PROJECTION -> {
+                    setStatus(getString(R.string.projection_status_none))
+                    setStatusDot(
+                        if (casting) R.drawable.status_dot_starting
+                        else R.drawable.status_dot_neutral)
+                }
+                MODE_UNSUPPORTED -> {
+                    setStatus(
+                        if (casting) getString(R.string.projection_status_none)
+                        else getString(R.string.projection_status_idle))
+                    setStatusDot(R.drawable.status_dot_offline)
+                    notifyStickyError(getString(R.string.projection_status_unsupported))
+                }
+                MODE_SERVICE_DOWN -> {
+                    setStatus(
+                        if (casting) getString(R.string.projection_status_none)
+                        else getString(R.string.projection_status_idle))
+                    setStatusDot(R.drawable.status_dot_offline)
+                    notifyStickyError(getString(R.string.projection_status_service_down))
+                }
+                else -> {
+                    lastStickyError = null
+                    setStatus(
+                        if (casting) getString(R.string.projection_status_none)
+                        else getString(R.string.projection_status_idle))
+                    setStatusDot(
+                        if (casting) R.drawable.status_dot_starting
+                        else R.drawable.status_dot_neutral)
+                }
             }
         }
         applyBoundsMode()
@@ -1077,6 +1136,19 @@ class ProjectionFragment : Fragment() {
     }
 
     private fun setStatus(text: String) { statusText?.text = text }
+
+    private fun setStatusDot(@DrawableRes dot: Int) { statusDot?.setBackgroundResource(dot) }
+
+    private fun notifyToast(message: String, kind: AppToast.Kind) {
+        appToast?.show(message, kind)
+    }
+
+    private fun notifyStickyError(message: String) {
+        if (message == lastStickyError) return
+        lastStickyError = message
+        appToast?.show(message, AppToast.Kind.ERROR)
+    }
+
     private fun setBusy(busy: Boolean) { progress?.visibility = if (busy) View.VISIBLE else View.GONE }
 
     private fun postMain(block: () -> Unit) {
@@ -1186,9 +1258,8 @@ class ProjectionFragment : Fragment() {
         // Trust THAT over any live inference: while a cast runs the spinner can be browsed freely
         // (the pick is deliberately not applied to the box), and after a Stop `casting`/`castPackage`
         // are cleared while the box still shows the stopped app's rect — so inferring the key from
-        // the spinner would write app X's geometry under app Z. Harmless when it was UI-only prefs;
-        // now that the same rect is mirrored to the daemon store that every headless cast reads, it
-        // would make Z open at X's scale on every ACC-on / key-mapping / automation cast.
+        // the spinner would write app X's geometry under app Z, and the daemon store every headless
+        // cast reads would then open Z at X's scale on ACC-on / key-mapping / automation casts.
         val bound = boxPackage
         if (bound.isNotEmpty()) return bound
         val cast = castPackage

@@ -1,12 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.core.widget.NestedScrollView
+<FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="?android:attr/colorBackground"
-    android:clipToPadding="false"
-    android:fillViewport="true">
+    android:background="?android:attr/colorBackground">
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clipToPadding="false"
+        android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -169,15 +173,28 @@
                                         android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
                                         android:textColor="?attr/colorOnSurfaceVariant" />
 
-                                    <TextView
-                                        android:id="@+id/vehicleSocValue"
+                                    <FrameLayout
                                         android:layout_width="match_parent"
                                         android:layout_height="wrap_content"
-                                        android:layout_marginTop="4dp"
-                                        android:text="@string/dashboard_metric_value_pending"
-                                        android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
-                                        android:textColor="?attr/colorOnSurface"
-                                        android:textStyle="bold" />
+                                        android:layout_marginTop="4dp">
+
+                                        <TextView
+                                            android:id="@+id/vehicleSocValue"
+                                            android:layout_width="match_parent"
+                                            android:layout_height="wrap_content"
+                                            android:text="@string/dashboard_metric_value_pending"
+                                            android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
+                                            android:textColor="?attr/colorOnSurface"
+                                            android:textStyle="bold" />
+
+                                        <View
+                                            android:id="@+id/vehicleSocSkeleton"
+                                            android:layout_width="72dp"
+                                            android:layout_height="20dp"
+                                            android:layout_gravity="start|center_vertical"
+                                            android:background="@drawable/skeleton_block"
+                                            android:visibility="gone" />
+                                    </FrameLayout>
                                 </LinearLayout>
 
                                 <LinearLayout
@@ -197,15 +214,28 @@
                                         android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
                                         android:textColor="?attr/colorOnSurfaceVariant" />
 
-                                    <TextView
-                                        android:id="@+id/vehicleRangeValue"
+                                    <FrameLayout
                                         android:layout_width="match_parent"
                                         android:layout_height="wrap_content"
-                                        android:layout_marginTop="4dp"
-                                        android:text="@string/dashboard_metric_value_pending"
-                                        android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
-                                        android:textColor="?attr/colorOnSurface"
-                                        android:textStyle="bold" />
+                                        android:layout_marginTop="4dp">
+
+                                        <TextView
+                                            android:id="@+id/vehicleRangeValue"
+                                            android:layout_width="match_parent"
+                                            android:layout_height="wrap_content"
+                                            android:text="@string/dashboard_metric_value_pending"
+                                            android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
+                                            android:textColor="?attr/colorOnSurface"
+                                            android:textStyle="bold" />
+
+                                        <View
+                                            android:id="@+id/vehicleRangeSkeleton"
+                                            android:layout_width="88dp"
+                                            android:layout_height="20dp"
+                                            android:layout_gravity="start|center_vertical"
+                                            android:background="@drawable/skeleton_block"
+                                            android:visibility="gone" />
+                                    </FrameLayout>
 
                                     <!-- Vehicle's own (HAL) range — visible only
                                          when a personalized figure headlines this
@@ -936,16 +966,29 @@
                             android:src="@drawable/ic_recording"
                             app:tint="?attr/colorPrimary" />
 
-                        <TextView
-                            android:id="@+id/metricRecordingsValue"
+                        <FrameLayout
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_marginStart="12dp"
-                            android:layout_weight="1"
-                            android:text="@string/dashboard_metric_value_pending"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleLarge"
-                            android:textColor="?attr/colorOnSurface"
-                            android:textStyle="bold" />
+                            android:layout_weight="1">
+
+                            <TextView
+                                android:id="@+id/metricRecordingsValue"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="@string/dashboard_metric_value_pending"
+                                android:textAppearance="@style/TextAppearance.Material3.TitleLarge"
+                                android:textColor="?attr/colorOnSurface"
+                                android:textStyle="bold" />
+
+                            <View
+                                android:id="@+id/metricRecordingsSkeleton"
+                                android:layout_width="64dp"
+                                android:layout_height="18dp"
+                                android:layout_gravity="start|center_vertical"
+                                android:background="@drawable/skeleton_block"
+                                android:visibility="gone" />
+                        </FrameLayout>
 
                         <ImageView
                             android:layout_width="24dp"
@@ -955,14 +998,27 @@
                             app:tint="?attr/colorOnSurfaceVariant" />
                     </LinearLayout>
 
-                    <TextView
-                        android:id="@+id/metricStorageValue"
+                    <FrameLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:text="@string/dashboard_modern_updating"
-                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
+                        android:layout_marginTop="6dp">
+
+                        <TextView
+                            android:id="@+id/metricStorageValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/dashboard_metric_value_pending"
+                            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                            android:textColor="?attr/colorOnSurfaceVariant" />
+
+                        <View
+                            android:id="@+id/metricStorageSkeleton"
+                            android:layout_width="164dp"
+                            android:layout_height="12dp"
+                            android:layout_gravity="start|center_vertical"
+                            android:background="@drawable/skeleton_block"
+                            android:visibility="gone" />
+                    </FrameLayout>
 
                     <com.google.android.material.progressindicator.LinearProgressIndicator
                         android:id="@+id/recordingStorageProgress"
@@ -1000,37 +1056,48 @@
                         android:textColor="?attr/colorOnSurface"
                         android:textStyle="bold" />
 
-                    <!-- One row per insight, each carrying the icon for its kind.
-                         DashboardFragment fills them top-down and hides the
-                         rows it has no insight for; the icon slot stays
-                         reserved on placeholder rows so text keeps its edge. -->
-                    <LinearLayout
-                        android:id="@+id/activityItem1"
+                    <!-- One row per insight. Empty copy (no icon) starts on
+                         the same edge as the card title. -->
+                    <FrameLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:baselineAligned="false"
-                        android:gravity="center_vertical"
-                        android:minHeight="32dp"
-                        android:orientation="horizontal">
+                        android:layout_marginTop="12dp">
 
-                        <ImageView
-                            android:id="@+id/activityIcon1"
-                            android:layout_width="20dp"
-                            android:layout_height="20dp"
-                            android:contentDescription="@null"
-                            app:tint="?attr/colorPrimary" />
-
-                        <TextView
-                            android:id="@+id/activityRow1"
-                            android:layout_width="0dp"
+                        <LinearLayout
+                            android:id="@+id/activityItem1"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginStart="12dp"
-                            android:layout_weight="1"
-                            android:text="@string/dashboard_modern_activity_loading"
-                            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                            android:textColor="?attr/colorOnSurface" />
-                    </LinearLayout>
+                            android:baselineAligned="false"
+                            android:gravity="center_vertical"
+                            android:minHeight="32dp"
+                            android:orientation="horizontal">
+
+                            <ImageView
+                                android:id="@+id/activityIcon1"
+                                android:layout_width="20dp"
+                                android:layout_height="20dp"
+                                android:contentDescription="@null"
+                                app:tint="?attr/colorPrimary" />
+
+                            <TextView
+                                android:id="@+id/activityRow1"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="12dp"
+                                android:layout_weight="1"
+                                android:text="@string/dashboard_modern_activity_loading"
+                                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                                android:textColor="?attr/colorOnSurface" />
+                        </LinearLayout>
+
+                        <View
+                            android:id="@+id/activityRow1Skeleton"
+                            android:layout_width="match_parent"
+                            android:layout_height="12dp"
+                            android:layout_gravity="start|center_vertical"
+                            android:background="@drawable/skeleton_block"
+                            android:visibility="gone" />
+                    </FrameLayout>
 
                     <LinearLayout
                         android:id="@+id/activityItem2"
@@ -1092,4 +1159,7 @@
         </LinearLayout>
         </LinearLayout>
     </LinearLayout>
-</androidx.core.widget.NestedScrollView>
+    </androidx.core.widget.NestedScrollView>
+
+    <include layout="@layout/app_toast" />
+</FrameLayout>

@@ -19,7 +19,7 @@ public class VehicleControlAvailabilityAssetTest {
         String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
         String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
 
-        assertTrue(html.contains("<span id=\"lockStatus\">Unknown</span>"));
+        assertTrue(html.contains("<span id=\"lockStatus\">NO DATA</span>"));
         assertTrue(html.contains("<span id=\"cloudStatusText\">Checking...</span>"));
         assertFalse(html.contains("id=\"lockStatus\" data-i18n="));
         assertFalse(html.contains("id=\"cloudStatusText\" data-i18n="));

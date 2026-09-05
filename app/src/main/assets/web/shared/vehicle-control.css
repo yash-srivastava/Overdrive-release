@@ -109,6 +109,7 @@
     -webkit-justify-content: flex-start; justify-content: flex-start;
 }
 .vc-pill {
+    position: relative;
     display: -webkit-inline-flex; display: inline-flex;
     -webkit-align-items: center; align-items: center;
     box-sizing: border-box;
@@ -313,6 +314,7 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
     color: var(--vc-text-strong);
 }
 .vc-tyre-cell {
+    position: relative;
     -webkit-flex: 1; flex: 1;
     min-width: 0;
     box-sizing: border-box;
@@ -430,6 +432,10 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
 
 .vc-tyre-cell[data-state="muted"]   .vc-tyre-dot     { background: var(--outline); }
 .vc-tyre-cell[data-state="muted"]   .vc-tyre-state   { color: var(--vc-text-muted); }
+
+/* First-load placeholders for the status pills and the tyre corners. */
+.vc-sk-pill { border-radius: var(--radius-md); }
+.vc-sk-tyre-fill { border-radius: var(--radius-sm); }
 
 /* Hidden only under Surround view; tyre data is independent of the GLB, so
    model load must not hide it. */
@@ -815,19 +821,15 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
     font-weight: 600;
     color: var(--vc-text-strong);
 }
-/* Reads the selected colour off a neutral surface. On the ramp itself every
-   swatch sits against a different neighbour, so none of them read true. */
-.ambient-swatch {
-    -webkit-box-sizing: border-box; box-sizing: border-box;
-    width: 14px; height: 14px;
-    margin-left: auto;
-    border: 1px solid var(--vc-border-subtle);
-    border-radius: 50%;
-    background: var(--ambient-swatch, transparent);
+.ambient-track {
+    position: relative;
+    width: 100%;
+    height: 20px;
 }
-[dir="rtl"] .ambient-swatch { margin-left: 0; margin-right: auto; }
 .vc-ambient-slider {
     -webkit-appearance: none; appearance: none;
+    position: relative;
+    z-index: 1;
     width: 100%;
     height: 20px;
     border-radius: var(--radius-sm);
@@ -839,27 +841,43 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
     opacity: .45;
     cursor: not-allowed;
 }
-/* A fixed white handle. Tinting it per tick made the ramp look like it was
-   glitching, and against 31 neighbouring hues the tint never read as the
-   selected colour anyway — the header swatch carries that. */
+/* Native thumb is the hit target only. Chrome 58 will not paint a CSS
+   variable onto ::-webkit-slider-thumb, so the coloured chip is a sibling. */
 .vc-ambient-slider::-webkit-slider-thumb {
     -webkit-appearance: none; appearance: none;
     -webkit-box-sizing: border-box; box-sizing: border-box;
     width: 20px; height: 20px;
-    border: 1px solid rgba(0, 0, 0, 0.35);
-    border-radius: 50%;
-    background: #fff;
-    box-shadow: 0 0 0 3px var(--vc-tile-bg);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    box-shadow: none;
     cursor: pointer;
 }
 .vc-ambient-slider::-moz-range-thumb {
     box-sizing: border-box;
     width: 20px; height: 20px;
-    border: 1px solid rgba(0, 0, 0, 0.35);
-    border-radius: 50%;
-    background: #fff;
-    box-shadow: 0 0 0 3px var(--vc-tile-bg);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    box-shadow: none;
     cursor: pointer;
+}
+/* Above the track: the input paints its own gradient background, which would
+   otherwise cover this. Input still takes the drag — the chip ignores pointers. */
+.ambient-thumb {
+    position: absolute;
+    z-index: 2;
+    top: 3px;
+    left: 0;
+    width: 14px;
+    height: 14px;
+    -webkit-box-sizing: border-box; box-sizing: border-box;
+    border: 1px solid rgba(0, 0, 0, 0.35);
+    border-radius: 4px;
+    background: #fff;
+    /* Gaps the ramp around the cube without reading as a second border. */
+    box-shadow: 0 0 0 2px var(--vc-tile-bg);
+    pointer-events: none;
 }
 .vc-ambient-slider:disabled::-webkit-slider-thumb {
     cursor: not-allowed;
@@ -1475,6 +1493,12 @@ html.vc-mode-lite .vc-loading,
 html.vc-mode-lite .vc-colors,
 html.vc-mode-lite .vc-model-menu,
 html.vc-mode-lite #btn3dView {
+    display: none;
+}
+
+/* The surround stream has no host in the app WebView. Hidden from the first
+   paint here so no entry path can show it before init3dButton runs. */
+html.is-app-webview #btn3dView {
     display: none;
 }
 
