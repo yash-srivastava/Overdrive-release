@@ -3,8 +3,9 @@
   Vehicle capacity / model picker dialog.
 
   Two surfaces:
-    - Summary block (read-only): current capacity, SOH, effective kWh, model,
-      last calibration. Each line shows itself only when its data is real.
+    - Summary panel (read-only): detection mode, current capacity, SOH,
+      effective kWh, model, last calibration, and the reset that returns
+      detection to automatic.
     - Editable controls: M3 outlined capacity input + M3 ExposedDropdownMenu
       for model selection. The dropdown expands like a Material menu, not a
       legacy Spinner.
@@ -25,60 +26,139 @@
         android:paddingTop="8dp"
         android:paddingBottom="8dp">
 
-        <!-- Summary block. Each TextView is GONE by default and gets populated +
-             revealed by the fragment when its source data is meaningful. -->
-        <TextView
-            android:id="@+id/vehicleSummaryCapacity"
+        <!-- What the daemon currently holds. Detection, capacity, SOH and model
+             hold a placeholder until the fetch lands; the derived readings stay
+             GONE without data. -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-            android:textColor="?attr/colorOnSurface"
-            android:visibility="gone" />
+            android:background="@drawable/dialog_inset_panel"
+            android:orientation="vertical"
+            android:padding="@dimen/dashboard_modern_card_padding">
 
-        <TextView
-            android:id="@+id/vehicleSummarySoh"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-            android:textColor="?attr/colorOnSurface"
-            android:visibility="gone" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:baselineAligned="false"
+                android:orientation="horizontal">
 
-        <TextView
-            android:id="@+id/vehicleSummaryEffective"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-            android:textColor="?attr/colorOnSurfaceVariant"
-            android:visibility="gone" />
+                <TextView
+                    android:id="@+id/vehicleSummaryDetection"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_vertical"
+                    android:layout_weight="1"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
+                    android:textColor="?attr/colorOnSurface" />
 
-        <TextView
-            android:id="@+id/vehicleSummaryModel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-            android:textColor="?attr/colorOnSurfaceVariant"
-            android:visibility="gone" />
+                <!-- Clears the manual capacity and model. Disabled while
+                     detection is already automatic — see DashboardFragment. -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/vehicleResetAuto"
+                    style="@style/Widget.Overdrive.M3.Button.Outlined"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_vertical"
+                    android:layout_marginStart="16dp"
+                    android:text="@string/vehicle_dialog_reset" />
+            </LinearLayout>
 
-        <TextView
-            android:id="@+id/vehicleSummaryCalibration"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-            android:textColor="?attr/colorOnSurfaceVariant"
-            android:visibility="gone" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:baselineAligned="false"
+                android:orientation="horizontal">
 
-        <View
-            android:id="@+id/vehicleSummaryDivider"
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:layout_marginTop="16dp"
-            android:layout_marginBottom="20dp"
-            android:background="?attr/colorOutlineVariant"
-            android:visibility="gone" />
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/vehicle_dialog_capacity_label"
+                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <TextView
+                        android:id="@+id/vehicleSummaryCapacity"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:textColor="?attr/colorOnSurface" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="16dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/diagnostics_section_battery"
+                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <TextView
+                        android:id="@+id/vehicleSummarySoh"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:textColor="?attr/colorOnSurface" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="16dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/vehicle_dialog_model_label"
+                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <TextView
+                        android:id="@+id/vehicleSummaryModel"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:textColor="?attr/colorOnSurface" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Footnotes: derived values that exist only once the daemon has
+                 learned something. -->
+            <TextView
+                android:id="@+id/vehicleSummaryEffective"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/vehicleSummaryCalibration"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:visibility="gone" />
+        </LinearLayout>
 
         <!-- Model dropdown — M3 ExposedDropdownMenu. The MaterialAutoCompleteTextView
              is non-editable so users tap the field and pick from the menu rather
@@ -88,6 +168,7 @@
             style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
             android:hint="@string/vehicle_dialog_model_label">
 
             <com.google.android.material.textfield.MaterialAutoCompleteTextView
@@ -100,6 +181,7 @@
 
         <!-- Capacity input — M3 outlined text field with kWh suffix. -->
         <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/vehicleCapacityLayout"
             style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

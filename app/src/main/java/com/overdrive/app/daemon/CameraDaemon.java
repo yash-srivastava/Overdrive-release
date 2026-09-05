@@ -388,6 +388,15 @@ public class CameraDaemon {
     /** Get the shared app context (for use by other components in this process). */
     public static android.content.Context getAppContext() { return sharedAppContext; }
 
+    // Under uid 2000 the shared context is a com.android.shell package context,
+    // so its Resources carry SHELL's resource table and any R.* lookup throws
+    // NotFoundException. This is the only handle in the daemon that reaches our
+    // own assets and resource table.
+    private static volatile android.content.res.AssetManager apkAssets = null;
+
+    /** APK-backed AssetManager, or null before the surveillance init runs. */
+    public static android.content.res.AssetManager getApkAssets() { return apkAssets; }
+
     /** Check if the shared context is a broken fallback (null base). */
     private static boolean isContextBroken() {
         if (sharedAppContext == null) return true;
@@ -4140,6 +4149,7 @@ public class CameraDaemon {
 
                     if (cookie != 0) {
                         assetManager = mgr;
+                        apkAssets = mgr;
                         log("AssetManager created from APK: " + apkPath);
 
                         // Extract web assets for HTTP server

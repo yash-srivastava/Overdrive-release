@@ -580,7 +580,7 @@
     <string name="setup_traffic_body">BYD Traffic Monitor blokerer tredjeparts-apps fra at nå internettet. Deaktivering af det giver OverDrive og alle andre apps, du installerer, faktisk bruger netværket. En harddisk genstart er påkrævet bagefter.</string>
     <string name="setup_traffic_button">Åben Trafik Overvågning</string>
     <string name="setup_camera_fix_title">Kamera feeds sort eller forkert?</string>
-    <string name="setup_camera_fix_body">Åbn Diagnostik → Kameraprobe, sæt Kamera-id til 0, tryk Gem og genstart derefter kameradæmonen. Hvis feeds stadig er forkert, gentag med Kamera ID 1. Efterlad mapping sektionen uberørt.</string>
+    <string name="setup_camera_fix_body">Kameraprobe, sæt Kamera-id til 0, tryk Gem og genstart derefter kameradæmonen. Hvis feeds stadig er forkert, gentag med Kamera ID 1. Efterlad mapping sektionen uberørt.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Nuværende: Kamera %1$d (Manual)</string>
@@ -759,6 +759,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">På ur</string>
+    <string name="dashboard_modern_vehicle_status">Køretøjsstatus</string>
     <string name="dashboard_subtitle_all_systems">Alle systemer online</string>
     <string name="dashboard_subtitle_some_offline">%1$d af %2$d tjenester online</string>
     <string name="dashboard_subtitle_no_tunnel">Fjernadgang offline</string>
@@ -782,11 +783,11 @@
     <string name="vehicle_dialog_model_label">Model</string>
     <string name="vehicle_dialog_save">Gem</string>
     <string name="vehicle_dialog_reset">Nulstil til auto-detektering</string>
+    <string name="vehicle_dialog_detection">Registrering: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Automatisk</string>
+    <string name="vehicle_dialog_detection_manual">Manuel</string>
     <string name="vehicle_dialog_invalid_capacity">Kapaciteten skal være 15 - 120 kWh</string>
-    <string name="vehicle_dialog_summary_capacity">Kapacitet: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">Effektiv: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">Model: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">Sidst kalibreret: %1$.1f%% på %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">unavailable</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->
@@ -1173,4 +1174,11 @@
     <string name="dialog_cloudflared_settings_message">Definer om du bruger betalt Cloudflare eller trycloudflare. Hvis du bruger betalt Cloudflare, skal du indtaste dit tunneltoken.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">Hvis den er indstillet til betalt version, må token ikke være tom</string>
     <string name="toast_cloudflared_saved_settings">Cloudflared-indstillinger gemt</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Kameraer</string>
+    <string name="rail_section_controls">Kontrol</string>
+    <string name="rail_section_driving">Kørsel</string>
+    <string name="rail_section_automation">Automatisering</string>
+    <string name="rail_section_system">System</string>
+    <string name="rail_collapse_label">Skjul</string>
 </resources>

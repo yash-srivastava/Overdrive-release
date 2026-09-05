@@ -17,6 +17,8 @@ import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
+import androidx.annotation.AttrRes
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.commit
 import androidx.navigation.fragment.findNavController
@@ -25,6 +27,7 @@ import com.google.android.material.button.MaterialButtonToggleGroup
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
+import com.google.android.material.color.MaterialColors
 import com.google.android.material.datepicker.CalendarConstraints
 import com.google.android.material.datepicker.DateValidatorPointBackward
 import com.google.android.material.datepicker.MaterialDatePicker
@@ -34,6 +37,8 @@ import com.overdrive.app.ui.model.RecordingFile
 import com.overdrive.app.ui.util.RecordingScanner
 import com.overdrive.app.ui.util.RecordingUiText
 import com.overdrive.app.ui.util.RecordingsApiClient
+import com.overdrive.app.ui.util.navigateDrillDown
+import com.overdrive.app.ui.widget.Skeleton
 import java.lang.ref.WeakReference
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -171,6 +176,7 @@ class RecordingsFragment : Fragment() {
 
     /** Single-thread executor for filesystem scans. Recreated per view. */
     private var metricsExecutor: ExecutorService? = null
+    private var skeleton: Skeleton? = null
 
     /** Main-thread handler for posting scan results back to the UI. */
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -244,6 +250,9 @@ class RecordingsFragment : Fragment() {
             Thread(r, "RecordingsMetrics").apply { isDaemon = true }
         }
 
+        skeleton = Skeleton(view).apply {
+            bind(R.id.tvRecordingsSummarySkeleton, view.findViewById(R.id.tvRecordingsSummary))
+        }
         attachLibraryFragment()
         setupSegmentedControl(view)
         setupSettingsAction(view)
@@ -346,6 +355,8 @@ class RecordingsFragment : Fragment() {
             onDurationResolved = null
         }
         libraryFragment = null
+        skeleton?.cancel()
+        skeleton = null
         metricsExecutor?.shutdownNow()
         metricsExecutor = null
         super.onDestroyView()
@@ -654,13 +665,21 @@ class RecordingsFragment : Fragment() {
         root.findViewById<TextView>(R.id.tvPreviewSeverityBadge)?.apply {
             visibility = if (severity == null) View.GONE else View.VISIBLE
             text = severity.orEmpty()
-            setBackgroundColor(
-                when (severity) {
-                    "CRITICAL" -> 0xCCEF4444.toInt()
-                    "ALERT" -> 0xCCF59E0B.toInt()
-                    else -> 0xCC475569.toInt()
-                }
-            )
+            // Same tonal fill / status label pairing as the dashboard chips.
+            val tone = when (severity) {
+                "CRITICAL" -> R.color.overdrive_status_danger_container to
+                    R.color.overdrive_status_danger
+                "ALERT" -> R.color.overdrive_status_warning_container to
+                    R.color.overdrive_status_warning
+                else -> null
+            }
+            if (tone == null) {
+                setBackgroundColor(themeColor(SURFACE_HIGHEST_ATTR))
+                setTextColor(themeColor(ON_SURFACE_VARIANT_ATTR))
+            } else {
+                setBackgroundColor(ContextCompat.getColor(hostContext, tone.first))
+                setTextColor(ContextCompat.getColor(hostContext, tone.second))
+            }
         }
         root.findViewById<TextView>(R.id.tvPreviewDetectedValue)?.text =
             RecordingUiText.actorSummary(hostContext, recording)
@@ -673,13 +692,13 @@ class RecordingsFragment : Fragment() {
                 .format(Date(recording.timestamp))
         root.findViewById<TextView>(R.id.tvPreviewDurationValue)?.text =
             recording.formattedDuration.takeIf { recording.durationMs > 0 }
-                ?: getString(R.string.player_time_zero)
+                ?: getString(R.string.recording_preview_not_available)
         root.findViewById<TextView>(R.id.tvPreviewStorageValue)?.text =
             when (recording.storageType?.uppercase(Locale.ROOT)) {
                 "INTERNAL" -> getString(R.string.recording_preview_storage_internal)
                 "SD_CARD" -> getString(R.string.recording_preview_storage_sd)
                 "USB" -> getString(R.string.recording_preview_storage_usb)
-                else -> getString(R.string.recording_preview_storage_unknown)
+                else -> getString(R.string.recording_preview_not_available)
             }
         root.findViewById<TextView>(R.id.tvPreviewSizeValue)?.text = recording.formattedSize
     }
@@ -1100,14 +1119,22 @@ class RecordingsFragment : Fragment() {
 
     private fun setupSettingsAction(view: View) {
         view.findViewById<MaterialButton>(R.id.btnRecordingsSettings)?.setOnClickListener {
-            val target = when (currentSource) {
-                // Replays are produced by the dashcam encoder's pre-record
-                // ring; their knobs live on the same recording settings page.
-                Source.ALL, Source.DASHCAM, Source.REPLAYS ->
-                    R.id.recordingSettingsWebFragment
-                Source.SURVEILLANCE -> R.id.surveillanceSettingsWebFragment
+            when (currentSource) {
+                // Replays share the dashcam encoder knobs, so they open Settings
+                // on the Recording section.
+                Source.ALL, Source.DASHCAM, Source.REPLAYS -> {
+                    val args = Bundle().apply {
+                        putString(
+                            SettingsFragment.KEY_SECTION,
+                            SettingsFragment.SECTION_RECORDING
+                        )
+                        putBoolean(SettingsFragment.KEY_FROM_RECORDINGS, true)
+                    }
+                    findNavController().navigateDrillDown(R.id.settingsFragment, args)
+                }
+                Source.SURVEILLANCE ->
+                    findNavController().navigate(R.id.surveillanceSettingsWebFragment)
             }
-            findNavController().navigate(target)
         }
     }
 
@@ -1676,6 +1703,7 @@ class RecordingsFragment : Fragment() {
                 synchronized(pendingPosts) { pendingPosts.remove(this) }
                 val v = viewRef.get() ?: return
                 val activeCtx = v.context ?: return
+                skeleton?.markLoaded(R.id.tvRecordingsSummarySkeleton)
                 val sizeText = Formatter.formatShortFileSize(activeCtx, totalBytes)
 
                 val baseSummary = activeCtx.getString(
@@ -1690,16 +1718,6 @@ class RecordingsFragment : Fragment() {
                     else -> baseSummary
                 }
 
-                v.findViewById<TextView>(R.id.tvTitleCountBadge)?.let { badge ->
-                    // Hide rather than show "0" while the index is down — the
-                    // count is unknown, not zero.
-                    if (totalCount > 0 && !indexDown) {
-                        badge.visibility = View.VISIBLE
-                        badge.text = totalCount.toString()
-                    } else {
-                        badge.visibility = View.GONE
-                    }
-                }
                 // While the index is down the per-segment counts are unknown,
                 // so drop the "· N" suffix instead of asserting zero.
                 v.findViewById<MaterialButton>(R.id.segmentDashcam)?.text =
@@ -1810,6 +1828,15 @@ class RecordingsFragment : Fragment() {
     }
 
     /**
+     * Chips created in code can't take a style attribute, so the app's
+     * component corner size has to be applied here.
+     */
+    private fun Chip.applyAppCornerShape() {
+        shapeAppearanceModel = shapeAppearanceModel
+            .withCornerSize(resources.getDimension(R.dimen.card_radius_accent))
+    }
+
+    /**
      * (Re)build the Place chip row from [availablePlaces]. Hidden when no
      * geocoded clips exist — legacy users never see the row appear unless
      * they enable the feature and capture at least one tagged clip.
@@ -1842,6 +1869,7 @@ class RecordingsFragment : Fragment() {
 
         // "Any" — clears row.
         val anyChip = Chip(ctx)
+        anyChip.applyAppCornerShape()
         anyChip.text = ctx.getString(R.string.recording_lib_chip_any)
         anyChip.isCheckable = true
         anyChip.isChecked = placeFilter.isEmpty()
@@ -1865,6 +1893,7 @@ class RecordingsFragment : Fragment() {
         for (label in availablePlaces) {
             val key = label.lowercase()
             val chip = Chip(ctx)
+            chip.applyAppCornerShape()
             chip.text = label
             chip.isCheckable = true
             chip.isChecked = key in placeFilter
@@ -1954,5 +1983,14 @@ class RecordingsFragment : Fragment() {
         private const val WARMING_POLL_CAP_MS: Long = 10_000L
         /** Max shift exponent for backoff doubling — saturates the cap. */
         private const val WARMING_POLL_MAX_ATTEMPTS_FOR_BACKOFF = 8
+
+        // Surface roles resolve against material's attr namespace here, not the
+        // app's (nonTransitiveRClass).
+        private val SURFACE_HIGHEST_ATTR =
+            com.google.android.material.R.attr.colorSurfaceContainerHighest
+        private val ON_SURFACE_VARIANT_ATTR =
+            com.google.android.material.R.attr.colorOnSurfaceVariant
     }
 }
+
+private fun View.themeColor(@AttrRes attr: Int): Int = MaterialColors.getColor(this, attr)

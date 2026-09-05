@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Category header for the navigation rail. Non-interactive.
+
+  MainActivity.applySectionForm cross-fades the label (expanded width) and the
+  hairline (compact width) across the slide; the fixed height keeps the swap
+  free of relayout.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="28dp">
+
+    <View
+        android:id="@+id/railSectionRule"
+        android:layout_width="40dp"
+        android:layout_height="1dp"
+        android:layout_gravity="center"
+        android:background="?attr/colorOutlineVariant" />
+
+    <TextView
+        android:id="@+id/railSectionLabel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_vertical"
+        android:alpha="0"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:paddingStart="@dimen/rail_section_label_inset"
+        android:paddingEnd="@dimen/rail_item_pill_inset_horizontal"
+        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:visibility="invisible" />
+</FrameLayout>

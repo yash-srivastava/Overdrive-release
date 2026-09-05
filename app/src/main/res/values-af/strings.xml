@@ -580,7 +580,7 @@
     <string name="setup_traffic_body">The BYD Traffic Monitor blocks third-party apps from reaching the internet. Disabling it lets OverDrive and any other apps you install actually use the network. A hard reboot is required afterwards.</string>
     <string name="setup_traffic_button">Open Traffic Monitor</string>
     <string name="setup_camera_fix_title">Camera feeds black or incorrect?</string>
-    <string name="setup_camera_fix_body">Open Diagnostics → Camera probe, set Camera ID to 0, tap Save, then restart the camera daemon. If the feeds are still wrong, repeat with Camera ID 1. Leave the mapping section untouched.</string>
+    <string name="setup_camera_fix_body">Camera probe, set Camera ID to 0, tap Save, then restart the camera daemon. If the feeds are still wrong, repeat with Camera ID 1. Leave the mapping section untouched.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Current: Camera %1$d (Manual)</string>
@@ -759,6 +759,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">On watch</string>
+    <string name="dashboard_modern_vehicle_status">Vehicle status</string>
     <string name="dashboard_subtitle_all_systems">All systems online</string>
     <string name="dashboard_subtitle_some_offline">%1$d of %2$d services online</string>
     <string name="dashboard_subtitle_no_tunnel">Remote access offline</string>
@@ -782,11 +783,11 @@
     <string name="vehicle_dialog_model_label">Model</string>
     <string name="vehicle_dialog_save">Save</string>
     <string name="vehicle_dialog_reset">Reset to auto-detect</string>
+    <string name="vehicle_dialog_detection">Detection: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Automatic</string>
+    <string name="vehicle_dialog_detection_manual">Manual</string>
     <string name="vehicle_dialog_invalid_capacity">Capacity must be 15 - 120 kWh</string>
-    <string name="vehicle_dialog_summary_capacity">Capacity: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">Effective: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">Model: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">Last calibrated: %1$.1f%% on %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">unavailable</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->
@@ -1173,4 +1174,11 @@
     <string name="dialog_cloudflared_settings_message">Definieer of jy betaalde Cloudflare of trycloudflare gebruik. As jy betaalde Cloudflare gebruik, voer jou tonnelteken in.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">As dit op die betaalde weergawe gestel is, mag die teken nie leeg wees nie</string>
     <string name="toast_cloudflared_saved_settings">Cloudflared-instellings gestoor</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Kameras</string>
+    <string name="rail_section_controls">Beheer</string>
+    <string name="rail_section_driving">Bestuur</string>
+    <string name="rail_section_automation">Outomatisering</string>
+    <string name="rail_section_system">Stelsel</string>
+    <string name="rail_collapse_label">Vou toe</string>
 </resources>

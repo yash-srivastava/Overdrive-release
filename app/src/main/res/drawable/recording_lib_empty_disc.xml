@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Tonal disc behind the empty-state icon. Sits at 80dp x 80dp, picks up
-     the M3 surface-variant tone so the cluster reads as an illustrated
-     empty state rather than a stray icon centred on background. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="oval">
-    <solid android:color="?attr/colorSurfaceVariant" />
-</shape>

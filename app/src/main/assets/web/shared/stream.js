@@ -123,17 +123,17 @@ BYD.stream = {
             // lastStartError is the canonical case.
             if (data && data.success === false && !data.starting) break;
             if (!toastShown && data && data.success === false && data.starting) {
-                if (BYD.utils && BYD.utils.toast) {
-                    // Prefer backend-provided errorCode (oem_starting,
-                    // pano_starting, stream_starting) so the toast text
-                    // matches the actual gate that's still warming up.
-                    // Fall back to the mode-based heuristic for older
-                    // backends that don't emit errorCode on the starting
-                    // path.
-                    const key = (data.errorCode && typeof data.errorCode === 'string')
-                        ? 'stream.' + data.errorCode
-                        : (mode === 6 ? 'stream.oem_starting' : 'stream.pano_starting');
-                    BYD.utils.toast(BYD.i18n.t(key), 'info');
+                // Backend-provided errorCode names the gate that's still
+                // warming up; older backends don't emit it on the starting
+                // path, hence the mode-based fallback.
+                const key = (data.errorCode && typeof data.errorCode === 'string')
+                    ? 'stream.' + data.errorCode
+                    : (mode === 6 ? 'stream.oem_starting' : 'stream.pano_starting');
+                const message = BYD.i18n.t(key);
+                if (typeof this.showStartupStatus === 'function') {
+                    this.showStartupStatus(message);
+                } else if (BYD.utils && BYD.utils.toast) {
+                    BYD.utils.toast(message, 'info');
                 }
                 toastShown = true;
             }
@@ -1181,6 +1181,9 @@ BYD.stream = {
                 const selector = document.getElementById('qualitySelector');
                 if (selector) {
                     selector.value = data.current;
+                    // Assigning .value fires no event, so mirrored menus
+                    // need an explicit sync.
+                    if (BYD.qualityMenu) BYD.qualityMenu.sync();
                     console.log('[Stream] Loaded saved quality:', data.current);
                 }
             }

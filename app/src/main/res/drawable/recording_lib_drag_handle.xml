@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Drag handle on the filter bottom sheet. Sits at 32dp x 4dp, so the
+     radius only needs to take the hard edges off the bar. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="?attr/colorOutlineVariant" />
+    <corners android:radius="2dp" />
+</shape>

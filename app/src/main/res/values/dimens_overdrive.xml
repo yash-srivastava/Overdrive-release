@@ -15,6 +15,10 @@
   Material 3 1.13.0.
 -->
 <resources>
+    <!-- App bar. One height for both orientations; the platform actionBarSize
+         drops to 48dp in landscape, which is the head unit's default. -->
+    <dimen name="app_bar_height">60dp</dimen>
+
     <!-- Page padding / outer rhythm -->
     <dimen name="page_padding_horizontal">24dp</dimen>
     <dimen name="page_padding_top">20dp</dimen>
@@ -28,8 +32,13 @@
     <!-- Card radii -->
     <dimen name="card_radius_standard">8dp</dimen>      <!-- Operational cards and grouped surfaces -->
     <dimen name="card_radius_hero">8dp</dimen>          <!-- Large content surfaces remain restrained -->
-    <dimen name="card_radius_dialog">28dp</dimen>       <!-- M3 dialog spec; already wired via theme -->
+    <dimen name="card_radius_dialog">8dp</dimen>        <!-- Matches the cards and the rail pill -->
     <dimen name="card_radius_accent">8dp</dimen>        <!-- buttons and segmented controls -->
+
+    <!-- Horizontal inset on each dialog action button. The alert dialog's
+         button bar spacing is fixed, so the gap between filled actions comes
+         from insetting their backgrounds. -->
+    <dimen name="dialog_button_gap_inset">4dp</dimen>
 
     <!-- Card padding -->
     <dimen name="card_padding_standard">20dp</dimen>
@@ -46,6 +55,18 @@
     <!-- Section overline gap -->
     <dimen name="section_overline_top">12dp</dimen>
     <dimen name="section_overline_bottom">8dp</dimen>
+
+    <!-- Navigation rail row plate. Shared by rail_item_indicator.xml, which
+         paints it, and MainActivity.applyRailRowLayout, which pads the row's
+         content inside it. -->
+    <dimen name="rail_item_pill_inset_horizontal">12dp</dimen>
+    <dimen name="rail_item_pill_inset_vertical">4dp</dimen>
+    <dimen name="rail_item_pill_radius">8dp</dimen>
+    <dimen name="rail_item_pill_content_inset">16dp</dimen>   <!-- M3 navigation-drawer item spec -->
+
+    <!-- Category header label inset. Equals the plate's horizontal inset plus
+         its content inset so header text lines up with the row icons. -->
+    <dimen name="rail_section_label_inset">28dp</dimen>
 
     <!-- PIN unlock keypad (PinLockActivity). 72dp keys give a 14.4mm hit
          target on the BYD Seal 15.6" panel — well above Material's 48dp

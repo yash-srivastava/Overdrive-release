@@ -259,9 +259,11 @@ tasks.register("extractWebAssets") {
             commandLine("adb", "shell", "mkdir", "-p", "/data/local/tmp/web/local")
         }
         
-        // Push files
+        // Push files. The device path has to use forward slashes whatever the
+        // host separator is, or a Windows run pushes files literally named
+        // "local\live-view.html" and never updates the real nested ones.
         webSrcDir.walkTopDown().filter { it.isFile }.forEach { file ->
-            val relativePath = file.relativeTo(webSrcDir).path
+            val relativePath = file.relativeTo(webSrcDir).invariantSeparatorsPath
             val targetPath = "/data/local/tmp/web/${relativePath}"
             println("  → ${relativePath}")
             exec {

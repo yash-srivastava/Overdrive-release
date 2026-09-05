@@ -12,10 +12,13 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.PopupMenu
 import android.widget.TextView
+import androidx.annotation.ColorRes
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.card.MaterialCardView
+import com.google.android.material.color.MaterialColors
 import com.overdrive.app.ui.model.RecordingFile
 import com.overdrive.app.R
 import com.overdrive.app.ui.util.RecordingUiText
@@ -222,17 +225,23 @@ class RecordingAdapter(
                 when (recording.storageType?.uppercase()) {
                     "SD_CARD" -> {
                         sb.text = ctx.getString(R.string.recording_lib_storage_sd)
-                        sb.setBackgroundColor(0xCC10B981.toInt())
+                        sb.tintAsStatusBadge(
+                            R.color.overdrive_status_success_container,
+                            R.color.overdrive_status_success
+                        )
                         sb.visibility = View.VISIBLE
                     }
                     "USB" -> {
                         sb.text = ctx.getString(R.string.recording_lib_storage_usb)
-                        sb.setBackgroundColor(0xCC3B82F6.toInt())
+                        sb.tintAsStatusBadge(
+                            R.color.overdrive_status_info_container,
+                            R.color.overdrive_status_info
+                        )
                         sb.visibility = View.VISIBLE
                     }
                     "INTERNAL" -> {
                         sb.text = ctx.getString(R.string.recording_lib_storage_internal)
-                        sb.setBackgroundColor(0x99000000.toInt())
+                        sb.tintAsNeutralBadge()
                         sb.visibility = View.VISIBLE
                     }
                     else -> sb.visibility = View.GONE
@@ -244,16 +253,30 @@ class RecordingAdapter(
                 "CRITICAL" -> {
                     tvSeverity?.visibility = View.VISIBLE
                     tvSeverity?.text = "CRITICAL"
-                    tvSeverity?.setBackgroundColor(0xCCEF4444.toInt())
-                    severityStripe?.visibility = View.VISIBLE
-                    severityStripe?.setBackgroundColor(0xFFEF4444.toInt())
+                    tvSeverity?.tintAsStatusBadge(
+                        R.color.overdrive_status_danger_container,
+                        R.color.overdrive_status_danger
+                    )
+                    severityStripe?.let { stripe ->
+                        stripe.visibility = View.VISIBLE
+                        stripe.setBackgroundColor(
+                            stripe.resolveColor(R.color.overdrive_status_danger)
+                        )
+                    }
                 }
                 "ALERT" -> {
                     tvSeverity?.visibility = View.VISIBLE
                     tvSeverity?.text = "ALERT"
-                    tvSeverity?.setBackgroundColor(0xCCFF8800.toInt())
-                    severityStripe?.visibility = View.VISIBLE
-                    severityStripe?.setBackgroundColor(0xFFFF9B3D.toInt())
+                    tvSeverity?.tintAsStatusBadge(
+                        R.color.overdrive_status_warning_container,
+                        R.color.overdrive_status_warning
+                    )
+                    severityStripe?.let { stripe ->
+                        stripe.visibility = View.VISIBLE
+                        stripe.setBackgroundColor(
+                            stripe.resolveColor(R.color.overdrive_status_warning)
+                        )
+                    }
                 }
                 else -> {
                     tvSeverity?.visibility = View.GONE
@@ -557,4 +580,32 @@ class RecordingAdapter(
         private const val THUMBNAIL_WIDTH_PX = 480
         private const val THUMBNAIL_HEIGHT_PX = 270
     }
+}
+
+private fun View.resolveColor(@ColorRes colorRes: Int): Int =
+    ContextCompat.getColor(context, colorRes)
+
+/**
+ * Paint a badge in a status tone: the tonal container carries the fill and the
+ * matching status colour the label.
+ */
+private fun TextView.tintAsStatusBadge(@ColorRes fill: Int, @ColorRes label: Int) {
+    setBackgroundColor(resolveColor(fill))
+    setTextColor(resolveColor(label))
+}
+
+/**
+ * The same treatment for a badge that carries no status meaning. Surface roles
+ * resolve against material's attr namespace, not the app's (nonTransitiveRClass).
+ */
+private fun TextView.tintAsNeutralBadge() {
+    setBackgroundColor(
+        MaterialColors.getColor(
+            this,
+            com.google.android.material.R.attr.colorSurfaceContainerHighest
+        )
+    )
+    setTextColor(
+        MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurfaceVariant)
+    )
 }

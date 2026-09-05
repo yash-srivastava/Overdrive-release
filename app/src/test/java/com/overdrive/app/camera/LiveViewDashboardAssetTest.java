@@ -52,6 +52,10 @@ public class LiveViewDashboardAssetTest {
         assertTrue(liveView.contains("panel.classList.toggle('map-expanded', expanded)"));
         assertTrue(liveView.contains("BYD.map.map.invalidateSize()"));
         assertTrue(liveView.contains("BYD.liveLayout.setMapExpanded(false)"));
+        assertTrue(liveView.contains("class=\"location-close-button\""));
+        assertTrue(liveView.contains("data-i18n-attr=\"aria-label:liveview.back_to_cameras\""));
+        assertTrue(liveView.contains("M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l8.92-7.92L13.5 5.5 8 11h12z"));
+        assertFalse(liveView.contains("data-i18n=\"common.back\""));
         assertTrue(english.contains("\"expand_map\": \"Expand map\""));
         assertTrue(english.contains("\"back_to_cameras\": \"Back to cameras\""));
     }

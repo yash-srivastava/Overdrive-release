@@ -129,6 +129,11 @@ public class ModelsApiHandler {
             handleSetSelected(out, body);
             return true;
         }
+        // Vehicle render for a model id — the same drawable the native Dashboard uses.
+        if (pathOnly.equals("/api/models/art") && method.equals("GET")) {
+            handleGetArt(out, queryParam(path, "id"));
+            return true;
+        }
         // Effective manifest (cached-remote if newer, else bundled). The JS calls this
         // instead of reading the bundled .json directly so users with a remote-cached
         // copy see the up-to-date model list across reloads.
@@ -296,6 +301,80 @@ public class ModelsApiHandler {
         // notifications page reads this field to paint the LHD/RHD picker.
         response.put("driveSide", vehicle.optString("driveSide", "rhd"));
         HttpResponse.sendJson(out, response.toString());
+    }
+
+    /**
+     * Stream the vehicle render for {@code id} as image/webp. VehicleArt maps
+     * every id it doesn't recognise (including null) onto a generic drawable,
+     * so this only 404s when our resource table can't be reached at all.
+     */
+    private static void handleGetArt(OutputStream out, String id) throws Exception {
+        android.content.res.Resources res = appResources();
+        if (res == null) {
+            HttpResponse.sendError(out, 503, "App resources unavailable");
+            return;
+        }
+        int drawableId = com.overdrive.app.ui.vehicle.VehicleArt.INSTANCE.drawableFor(id);
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        try (InputStream in = res.openRawResource(drawableId)) {
+            byte[] chunk = new byte[8192];
+            int count;
+            while ((count = in.read(chunk)) != -1) {
+                buffer.write(chunk, 0, count);
+            }
+        } catch (Exception e) {
+            logger.warn(TAG + ": art read failed for id=" + id + ": " + e.getMessage());
+            HttpResponse.sendError(out, 404, "Art not found");
+            return;
+        }
+        HttpResponse.sendImageBytes(out, buffer.toByteArray(), "image/webp");
+    }
+
+    private static volatile android.content.res.Resources appResources = null;
+
+    /**
+     * Our own resource table.
+     *
+     * <p>In the app process the shared context already owns it. In the uid-2000
+     * daemon it does not: its context is created for com.android.shell, so
+     * {@code getResources()} returns SHELL's table and every
+     * {@code R.drawable.*} lookup throws NotFoundException. Wrapping the
+     * daemon's APK-backed AssetManager in a Resources gives the real table.
+     */
+    private static android.content.res.Resources appResources() {
+        android.content.res.Resources cached = appResources;
+        if (cached != null) return cached;
+
+        // Probe rather than compare package names: the daemon's context wrapper
+        // reports our package even when its resources belong to shell.
+        android.content.Context ctx = CameraDaemon.getAppContext();
+        if (ctx != null) {
+            try {
+                android.content.res.Resources direct = ctx.getResources();
+                direct.getResourceName(com.overdrive.app.R.drawable.vehicle_fallback);
+                appResources = direct;
+                return direct;
+            } catch (Throwable ignored) {
+                // Not our table — fall through to the APK-backed one.
+            }
+        }
+
+        android.content.res.AssetManager assets =
+                com.overdrive.app.daemon.CameraDaemon.getApkAssets();
+        if (assets == null) return null;
+        try {
+            android.util.DisplayMetrics metrics = new android.util.DisplayMetrics();
+            metrics.setToDefaults();
+            android.content.res.Configuration config = new android.content.res.Configuration();
+            config.setToDefaults();
+            android.content.res.Resources built =
+                    new android.content.res.Resources(assets, metrics, config);
+            appResources = built;
+            return built;
+        } catch (Throwable t) {
+            logger.warn(TAG + ": could not build APK resources: " + t.getMessage());
+            return null;
+        }
     }
 
     private static void handleSetSelected(OutputStream out, String body) throws Exception {

@@ -553,6 +553,7 @@
     <string name="recording_lib_storage_internal">INT</string>
     <!-- Toast shown when a multi-select share is dispatched. -->
     <string name="toast_share_recordings">Sharing %1$d recordings</string>
+    <string name="toast_share_failed">Share failed</string>
 
     <!-- fragment_sentry_config -->
 
@@ -878,7 +879,7 @@
     <string name="setup_traffic_body">The BYD Traffic Monitor blocks third-party apps from reaching the internet. Disabling it lets OverDrive and any other apps you install actually use the network. A hard reboot is required afterwards.</string>
     <string name="setup_traffic_button">Open Traffic Monitor</string>
     <string name="setup_camera_fix_title">Camera feeds black or incorrect?</string>
-    <string name="setup_camera_fix_body">Open Diagnostics → Camera probe, set Camera ID to 0, tap Save, then restart the camera daemon. If the feeds are still wrong, repeat with Camera ID 1. Leave the mapping section untouched.</string>
+    <string name="setup_camera_fix_body">Camera probe, set Camera ID to 0, tap Save, then restart the camera daemon. If the feeds are still wrong, repeat with Camera ID 1. Leave the mapping section untouched.</string>
 
     <!-- Recording storage path -->
 
@@ -940,6 +941,14 @@
     <string name="rail_settings">Settings</string>
     <string name="rail_expand">Show navigation labels</string>
     <string name="rail_collapse">Hide navigation labels</string>
+    <string name="rail_collapse_label">Collapse</string>
+
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Cameras</string>
+    <string name="rail_section_controls">Controls</string>
+    <string name="rail_section_driving">Driving</string>
+    <string name="rail_section_automation">Automation</string>
+    <string name="rail_section_system">System</string>
 
     <!-- Settings sub-rail -->
     <string name="settings_section_appearance">Appearance</string>
@@ -1275,13 +1284,14 @@
     <string name="vehicle_model_seagull">BYD Seagull</string>
     <string name="vehicle_dialog_save">Save</string>
     <string name="vehicle_dialog_reset">Reset to auto-detect</string>
+    <string name="vehicle_dialog_detection">Detection: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Automatic</string>
+    <string name="vehicle_dialog_detection_manual">Manual</string>
     <string name="vehicle_dialog_invalid_capacity">Capacity must be 15 - 120 kWh</string>
-    <string name="vehicle_dialog_summary_capacity">Capacity: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">Effective: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">Model: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">Last calibrated: %1$.1f%% on %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">unavailable</string>
+    <string name="vehicle_dialog_value_pending">—</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->
     <string name="dashboard_metric_storage_chip">%1$s used · %2$s free</string>
     <string name="dashboard_metric_storage_chip_pending">Storage —</string>

@@ -71,6 +71,7 @@
                 android:visibility="gone"
                 app:indicatorColor="?attr/colorPrimary"
                 app:trackColor="?attr/colorSurfaceVariant"
+                app:trackStopIndicatorSize="0dp"
                 xmlns:app="http://schemas.android.com/apk/res-auto" />
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>

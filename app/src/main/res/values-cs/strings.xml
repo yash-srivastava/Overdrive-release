@@ -586,7 +586,7 @@
     <string name="setup_traffic_body">BYD Traffic Monitor blokuje aplikace třetích stran v přístupu k internetu. Zakázání umožňuje OverDrive a všem dalším aplikacím, které skutečně instalujete, používat síť. Poté je nutný tvrdý restart.</string>
     <string name="setup_traffic_button">Otevřít sledování provozu</string>
     <string name="setup_camera_fix_title">Kamera je černá nebo nesprávná?</string>
-    <string name="setup_camera_fix_body">Otevřete Diagnostiku → Sonda kamery, nastavte ID kamery na 0, klepněte na Uložit, poté restartujte daemon. Pokud jsou zdroje stále špatné, opakujte s ID kamery 1. Nechte sekci mapování nedotčeno.</string>
+    <string name="setup_camera_fix_body">Sonda kamery, nastavte ID kamery na 0, klepněte na Uložit, poté restartujte daemon. Pokud jsou zdroje stále špatné, opakujte s ID kamery 1. Nechte sekci mapování nedotčeno.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Aktuální: Kamera %1$d (Manual)</string>
@@ -765,6 +765,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">Na hodinkách</string>
+    <string name="dashboard_modern_vehicle_status">Stav vozidla</string>
     <string name="dashboard_subtitle_all_systems">Všechny systémy online</string>
     <string name="dashboard_subtitle_some_offline">%1$d služeb %2$d online</string>
     <string name="dashboard_subtitle_no_tunnel">Vzdálený přístup offline</string>
@@ -788,11 +789,11 @@
     <string name="vehicle_dialog_model_label">Vzor</string>
     <string name="vehicle_dialog_save">Uložit</string>
     <string name="vehicle_dialog_reset">Obnovit automatické rozpoznání</string>
+    <string name="vehicle_dialog_detection">Rozpoznání: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Automatické</string>
+    <string name="vehicle_dialog_detection_manual">Ruční</string>
     <string name="vehicle_dialog_invalid_capacity">Kapacita musí být 15–120 kWh</string>
-    <string name="vehicle_dialog_summary_capacity">Kapacita: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">Efektní: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">Model: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">Poslední kalibrace: %1$.1f%% na %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">unavailable</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->
@@ -1193,4 +1194,11 @@
     <string name="dialog_cloudflared_settings_message">Definujte, zda používáte placený Cloudflare nebo trycloudflare. Pokud používáte placený Cloudflare, zadejte svůj token tunelu.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">Pokud je nastavena placená verze, token nemůže být prázdný</string>
     <string name="toast_cloudflared_saved_settings">Nastavení Cloudflared uloženo</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Kamery</string>
+    <string name="rail_section_controls">Ovládání</string>
+    <string name="rail_section_driving">Jízda</string>
+    <string name="rail_section_automation">Automatizace</string>
+    <string name="rail_section_system">Systém</string>
+    <string name="rail_collapse_label">Sbalit</string>
 </resources>

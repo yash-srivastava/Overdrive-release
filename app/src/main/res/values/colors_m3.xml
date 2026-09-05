@@ -62,6 +62,14 @@
     <color name="overdrive_status_danger_light">#BA1A1A</color>
     <color name="overdrive_status_info_light">#00658F</color>
 
+    <!-- Container tones for the status colors above, for status pills that need
+         a fill rather than just text. Alpha lets the hero card's ribbon carry
+         through the pills. -->
+    <color name="overdrive_status_success_container_light">#CCB5EFCB</color>
+    <color name="overdrive_status_warning_container_light">#CCFFDDB8</color>
+    <color name="overdrive_status_danger_container_light">#CCFFDAD6</color>
+    <color name="overdrive_status_info_container_light">#CCCBE6FF</color>
+
     <!--
       Theme-neutral semantic aliases. These are the public color contract for
       layouts and styles; values-night overrides the same names for dark mode.
@@ -106,5 +114,9 @@
     <color name="overdrive_status_warning">@color/overdrive_status_warning_light</color>
     <color name="overdrive_status_danger">@color/overdrive_status_danger_light</color>
     <color name="overdrive_status_info">@color/overdrive_status_info_light</color>
+    <color name="overdrive_status_success_container">@color/overdrive_status_success_container_light</color>
+    <color name="overdrive_status_warning_container">@color/overdrive_status_warning_container_light</color>
+    <color name="overdrive_status_danger_container">@color/overdrive_status_danger_container_light</color>
+    <color name="overdrive_status_info_container">@color/overdrive_status_info_container_light</color>
 
 </resources>

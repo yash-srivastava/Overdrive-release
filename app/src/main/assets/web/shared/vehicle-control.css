@@ -2,58 +2,29 @@
  * Vehicle Control — Compact bottom bar, no tabs
  * Chrome 58+
  *
- * Theme tokens. The page used to bake the dark palette into every floating
- * pill, tile, and panel as raw rgba(15,15,18,…) literals, which left the
- * page black under the new light theme even though the rest of the WebView
- * (sidebar, page-body, etc.) uses var(--bg-base). The tokens below are the
- * single source of truth for the surfaces specific to this page; the light
- * variants under [data-theme="light"] flip them in lockstep with shared
- * styles.css. Brand teal (--brand-primary in shared/styles.css) is reused
- * for accents so identity is preserved across themes.
+ * The --vc-* names below are aliases onto the shared M3 tokens in
+ * design-tokens.css, so this page inherits both palettes without a
+ * per-theme block of its own.
  */
 :root {
-    --vc-canvas-bg: var(--bg-base);
-    --vc-pill-bg: rgba(15,15,18,0.85);
-    --vc-pill-bg-strong: rgba(15,15,18,0.92);
-    --vc-pill-bg-hover: rgba(38,38,46,0.9);
-    --vc-bar-bg: rgba(10, 10, 14, 0.88);
-    --vc-modal-bg: #1A1A1F;
-    --vc-modal-overlay: rgba(0, 0, 0, 0.7);
-    --vc-tile-bg: rgba(255,255,255,0.025);
-    --vc-tile-bg-disabled: rgba(255,255,255,0.015);
-    --vc-tile-bg-hover: rgba(0,212,170,0.06);
-    --vc-border: rgba(255,255,255,0.08);
-    --vc-border-subtle: rgba(255,255,255,0.06);
-    --vc-border-faint: rgba(255,255,255,0.04);
-    --vc-text-primary: #fff;
-    --vc-text-strong: #E4E4E7;
-    --vc-text-soft: #C4C4CD;
-    --vc-text-secondary: #A1A1AA;
-    --vc-text-muted: #71717A;
-}
-:root[data-theme="light"] {
-    /* The pills sit over the 3D car canvas (which has its own scene
-       lighting), so they need a translucent surface that reads on either
-       a sky-bright or shadow-dark slice of the render. A light tinted
-       glass with a darker text colour does that without going pure white. */
-    --vc-canvas-bg: var(--bg-base);
-    --vc-pill-bg: rgba(247,250,247,0.82);
-    --vc-pill-bg-strong: rgba(247,250,247,0.92);
-    --vc-pill-bg-hover: rgba(224,228,225,0.92);
-    --vc-bar-bg: rgba(247,250,247,0.92);
-    --vc-modal-bg: #ECEFEC;
-    --vc-modal-overlay: rgba(24, 28, 26, 0.45);
-    --vc-tile-bg: rgba(0,0,0,0.04);
-    --vc-tile-bg-disabled: rgba(0,0,0,0.02);
-    --vc-tile-bg-hover: rgba(0,135,108,0.08);
-    --vc-border: rgba(0,0,0,0.10);
-    --vc-border-subtle: rgba(0,0,0,0.06);
-    --vc-border-faint: rgba(0,0,0,0.04);
-    --vc-text-primary: #181C1A;
-    --vc-text-strong: #2A2F2C;
-    --vc-text-soft: #3F4944;
-    --vc-text-secondary: #6F7975;
-    --vc-text-muted: #8B948F;
+    --vc-canvas-bg: var(--surface);
+    --vc-pill-bg: var(--surface-container);
+    --vc-pill-bg-strong: var(--surface-container);
+    --vc-pill-bg-hover: var(--surface-container-high);
+    --vc-bar-bg: var(--surface-container);
+    --vc-modal-bg: var(--surface-container);
+    --vc-modal-overlay: rgba(0, 0, 0, 0.55);
+    --vc-tile-bg: var(--surface-container-high);
+    --vc-tile-bg-disabled: var(--surface-container-low);
+    --vc-tile-bg-hover: var(--surface-container-highest);
+    --vc-border: var(--outline-variant);
+    --vc-border-subtle: var(--outline-variant);
+    --vc-border-faint: var(--outline-variant);
+    --vc-text-primary: var(--on-surface);
+    --vc-text-strong: var(--on-surface);
+    --vc-text-soft: var(--on-surface-variant);
+    --vc-text-secondary: var(--on-surface-variant);
+    --vc-text-muted: var(--outline);
 }
 /* No prefers-color-scheme fallback by design — pages default DARK in
    Chrome / external browsers, matching the primary in-car experience and
@@ -102,49 +73,56 @@
 .vc-nav-btn:hover { background: var(--vc-pill-bg-hover); }
 .vc-nav-btn:active { -webkit-transform: scale(0.92); transform: scale(0.92); }
 
-/* Status bar floating on 3D — two rows.
-   Row 1 (.vc-status-bar) holds connection state pills (lock, cloud).
-   Row 2 (.vc-status-bar-secondary) holds appearance controls (color, model picker).
-   Splitting the rows guarantees the model dropdown never overlaps the cloud pill on
-   narrow screens, no matter how long the model name or how cramped the device. */
 .vc-status-bar {
     position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); left: 10px; right: 10px;
     display: -webkit-flex; display: flex;
-    -webkit-justify-content: space-between; justify-content: space-between;
     -webkit-align-items: center; align-items: center;
+    height: 48px;
     z-index: 10; pointer-events: none;
 }
-.vc-status-bar > * { pointer-events: auto; margin: 0 3px; }
-
-.vc-status-bar-secondary {
-    position: absolute; top: calc(56px + env(safe-area-inset-top, 0px)); left: 10px; right: 10px;
+.vc-status-slot {
     display: -webkit-flex; display: flex;
     -webkit-align-items: center; align-items: center;
-    -webkit-flex-wrap: wrap; flex-wrap: wrap;
-    -webkit-justify-content: flex-start; justify-content: flex-start;
-    z-index: 10; pointer-events: none;
-}
-.vc-status-bar-secondary > * {
+    height: 48px;
     pointer-events: auto;
-    margin-right: 6px;
-    margin-bottom: 6px;
+    box-sizing: border-box;
 }
-[dir="rtl"] .vc-status-bar-secondary > * {
-    margin-right: 0;
-    margin-left: 6px;
+.vc-status-slot--start,
+.vc-status-slot--end {
+    -webkit-flex: 1 1 0; flex: 1 1 0;
+    min-width: 0;
+}
+.vc-status-slot--end {
+    -webkit-justify-content: flex-end; justify-content: flex-end;
+}
+.vc-status-slot--mid {
+    -webkit-flex: 0 1 auto; flex: 0 1 auto;
+    -webkit-justify-content: center; justify-content: center;
+    min-width: 0;
+}
+.vc-status-slot--mid > * + * { margin-left: 6px; }
+[dir="rtl"] .vc-status-slot--mid > * + * { margin-left: 0; margin-right: 6px; }
+[dir="rtl"] .vc-status-slot--start {
+    -webkit-justify-content: flex-end; justify-content: flex-end;
+}
+[dir="rtl"] .vc-status-slot--end {
+    -webkit-justify-content: flex-start; justify-content: flex-start;
 }
 .vc-pill {
+    position: relative;
     display: -webkit-inline-flex; display: inline-flex;
     -webkit-align-items: center; align-items: center;
+    box-sizing: border-box;
+    height: 48px;
     background: var(--vc-pill-bg); border: 1px solid var(--vc-border);
-    border-radius: 20px; padding: 5px 12px; font-size: 11px; font-weight: 500; color: var(--vc-text-primary);
+    border-radius: var(--radius-md); padding: 0 12px; font-size: 12px; font-weight: 600; color: var(--vc-text-primary);
     white-space: nowrap; -webkit-flex-shrink: 0; flex-shrink: 0;
 }
-.vc-pill .dot { width: 6px; height: 6px; border-radius: 50%; }
-.dot.green { background: var(--status-success); box-shadow: 0 0 5px var(--status-success); }
-.dot.red { background: var(--status-danger); box-shadow: 0 0 5px var(--status-danger); }
-.dot.amber { background: var(--status-warning); box-shadow: 0 0 5px var(--status-warning); }
-.dot.grey { background: #71717A; box-shadow: 0 0 5px #71717A; }
+.vc-pill .dot { width: 8px; height: 8px; border-radius: 50%; }
+.dot.green { background: var(--status-success); }
+.dot.red { background: var(--status-danger); }
+.dot.amber { background: var(--status-warning); }
+.dot.grey { background: var(--outline); }
 /* Partial reading (driver door only, no whole-vehicle confirmation): keep the
    lock colour but hollow the dot so it doesn't read as a full-car state. */
 .dot.partial { background: transparent; box-shadow: none; border: 1.5px solid currentColor; }
@@ -153,43 +131,108 @@
 
 .vc-colors {
     display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center;
+    box-sizing: border-box;
+    height: 48px;
     background: var(--vc-pill-bg); border: 1px solid var(--vc-border);
-    border-radius: 20px; padding: 3px 8px;
+    border-radius: var(--radius-md); padding: 0 8px;
 }
-.vc-swatch { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; margin: 0 3px; -webkit-transition: all .15s; transition: all .15s; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
-.vc-swatch { min-width: 48px; min-height: 48px; }
-.vc-swatch:hover { -webkit-transform: scale(1.05); transform: scale(1.05); }
-.vc-swatch.active { border-color: var(--vc-text-primary); box-shadow: 0 0 6px currentColor; -webkit-transform: scale(1.1); transform: scale(1.1); }
-.vc-swatch-custom { width: 24px; height: 24px; min-width: 48px; min-height: 48px; border-radius: 50%; border: 2px dashed var(--vc-text-muted); position: relative; overflow: hidden; cursor: pointer; margin: 0 3px; touch-action: manipulation; }
-.vc-swatch-custom input { position: absolute; top: -4px; left: -4px; width: 32px; height: 32px; opacity: 0; cursor: pointer; }
+.vc-swatch {
+    width: 32px; height: 32px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--vc-border);
+    cursor: pointer; margin: 0 3px;
+    -webkit-transition: box-shadow .15s; transition: box-shadow .15s;
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+.vc-swatch.active { box-shadow: 0 0 0 2px var(--vc-pill-bg), 0 0 0 4px var(--primary); }
+.vc-swatch-custom {
+    display: -webkit-inline-flex; display: inline-flex;
+    -webkit-align-items: center; align-items: center;
+    -webkit-justify-content: center; justify-content: center;
+    width: 32px; height: 32px;
+    border-radius: var(--radius-md);
+    border: 1px dashed var(--outline);
+    background: var(--vc-tile-bg);
+    color: var(--vc-text-secondary);
+    cursor: pointer; margin: 0 3px;
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+.vc-swatch-custom svg { width: 16px; height: 16px; }
+.vc-swatch-custom.active { color: var(--primary); border-color: var(--primary); }
 
-.vc-model-select {
-    background: var(--vc-pill-bg); color: var(--vc-text-strong);
-    border: 1px solid var(--vc-border); border-radius: 18px;
-    padding: 5px 26px 5px 12px;
-    font-size: 12px; font-weight: 500;
-    -webkit-appearance: none; -moz-appearance: none; appearance: none;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%23A1A1AA' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
-    background-repeat: no-repeat; background-position: right 9px center;
+/* Custom listbox: the WebView paints a native <select> popup with its own
+   orange highlight that CSS cannot reach. The hidden <select> stays the
+   value + i18n source of truth. */
+.vc-model-select { display: none; }
+.vc-model-menu { position: relative; -webkit-flex-shrink: 0; flex-shrink: 0; }
+.vc-model-menu__trigger {
+    display: -webkit-inline-flex; display: inline-flex;
+    -webkit-align-items: center; align-items: center;
+    box-sizing: border-box;
+    height: 48px;
+    max-width: 160px;
+    padding: 0 10px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--vc-border);
+    background: var(--vc-pill-bg);
+    color: var(--vc-text-primary);
+    font-size: 12px; font-weight: 600;
     cursor: pointer; touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
-    max-width: 140px; text-overflow: ellipsis;
-    min-height: 48px;
 }
-.vc-model-select:focus { outline: 2px solid var(--primary); outline-offset: 2px; border-color: var(--primary); }
-
-/* Stale indicator — most recent manifest refresh failed (network, GitHub, parse).
-   The select itself stays fully usable; this dot just signals "newly released
-   models may not appear here." Tapping the dropdown auto-retries the refresh.
-   The amber dot sits to the LEFT of the existing chevron so they don't fight
-   for the same pixel; padding-right grows to keep the dot off the model name. */
-.vc-model-select.stale {
-    background-image:
-        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%23A1A1AA' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>"),
-        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='6' viewBox='0 0 6 6'><circle cx='3' cy='3' r='2.5' fill='%23F59E0B'/></svg>");
-    background-repeat: no-repeat, no-repeat;
-    background-position: right 9px center, right 22px center;
-    padding-right: 36px;
+.vc-model-menu__value {
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.vc-model-menu__chevron {
+    width: 14px; height: 14px;
+    margin-left: 6px;
+    -webkit-flex-shrink: 0; flex-shrink: 0;
+    color: var(--vc-text-secondary);
+    -webkit-transition: -webkit-transform .15s; transition: transform .15s;
+}
+[dir="rtl"] .vc-model-menu__chevron { margin-left: 0; margin-right: 6px; }
+.vc-model-menu.open .vc-model-menu__chevron {
+    -webkit-transform: rotate(180deg); transform: rotate(180deg);
+}
+/* Kept in the DOM so a failed manifest refresh can still retry on open. */
+.vc-model-menu__stale { display: none; }
+.vc-model-menu__list {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    min-width: 100%;
+    max-height: 240px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 4px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--vc-border);
+    background: var(--surface-container-high);
+    z-index: 60;
+}
+[dir="rtl"] .vc-model-menu__list { left: auto; right: 0; }
+.vc-model-menu.open .vc-model-menu__list { display: block; }
+.vc-model-menu__option {
+    display: -webkit-flex; display: flex;
+    -webkit-align-items: center; align-items: center;
+    width: 100%;
+    min-height: 44px;
+    padding: 0 10px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--vc-text-primary);
+    font-size: 12px; font-weight: 600;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+}
+[dir="rtl"] .vc-model-menu__option { text-align: right; }
+.vc-model-menu__option:hover { background: var(--vc-tile-bg); }
+.vc-model-menu__option[aria-selected="true"] {
+    background: var(--primary-container);
+    color: var(--on-primary-container);
 }
 
 .vc-loading { position: absolute; top: 40%; left: 50%; -webkit-transform: translate(-50%,-50%); transform: translate(-50%,-50%); text-align: center; z-index: 20; }
@@ -203,115 +246,86 @@
     margin-top: 14px;
     min-height: 48px;
     padding: 8px 22px;
-    border-radius: 10px;
-    border: 1px solid rgba(0,212,170,0.4);
-    background: rgba(0,212,170,0.08);
-    color: var(--primary);
-    font-size: 12px;
+    border-radius: var(--radius-md);
+    border: none;
+    background: var(--primary);
+    color: var(--on-primary);
+    font-size: 13px;
     font-weight: 600;
-    letter-spacing: .3px;
-    text-transform: uppercase;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
-    -webkit-transition: all .15s; transition: all .15s;
 }
-.vc-loading-retry:hover { background: rgba(0,212,170,0.16); }
-.vc-loading-retry:active { -webkit-transform: scale(.95); transform: scale(.95); }
 
-.vc-toast { position: absolute; top: 44px; left: 50%; -webkit-transform: translateX(-50%) translateY(-12px); transform: translateX(-50%) translateY(-12px); background: var(--vc-pill-bg-strong); border: 1px solid var(--vc-border); border-radius: 8px; padding: 6px 14px; font-size: 11px; font-weight: 500; color: var(--vc-text-primary); z-index: 100; opacity: 0; pointer-events: none; -webkit-transition: all .2s; transition: all .2s; }
-.vc-toast.show { opacity: 1; -webkit-transform: translateX(-50%) translateY(0); transform: translateX(-50%) translateY(0); }
-.vc-toast.success { border-color: var(--status-success); color: var(--status-success); }
-.vc-toast.error { border-color: var(--status-danger); color: var(--status-danger); }
-.vc-toast.info { border-color: var(--status-info); color: var(--status-info); }
+/* The shared toast rides in the bottom bar's flex column so it clears the dock
+   in every panel state without tracking the panel's height. */
+.vc-bar > .toast-container {
+    position: static;
+    -webkit-transform: none;
+    transform: none;
+    margin-bottom: 8px;
+    z-index: auto;
+}
 
-/* 3D Surround View button — laid out as a flex item inside .vc-status-bar-secondary
-   so vertical alignment is automatic, no manual top:50px to keep in sync with the row. */
 .vc-3d-btn {
     display: -webkit-inline-flex; display: inline-flex;
-    -webkit-flex-direction: column; flex-direction: column;
     -webkit-align-items: center; align-items: center;
     -webkit-justify-content: center; justify-content: center;
-    width: 48px; height: 48px;
+    box-sizing: border-box;
+    height: 48px;
+    padding: 0 12px;
     -webkit-flex-shrink: 0; flex-shrink: 0;
     -webkit-flex-grow: 0; flex-grow: 0;
-    margin-left: auto;  /* push to far right within the secondary row */
-    border-radius: 22px;
+    border-radius: var(--radius-md);
     border: 1px solid var(--vc-border);
     background: var(--vc-pill-bg);
     color: var(--vc-text-secondary);
     cursor: pointer;
-    -webkit-transition: all .2s; transition: all .2s;
+    -webkit-transition: background .15s, border-color .15s, color .15s;
+    transition: background .15s, border-color .15s, color .15s;
 }
-.vc-3d-btn svg { width: 18px; height: 18px; }
-.vc-3d-btn span { font-size: 7px; font-weight: 700; text-transform: uppercase; margin-top: 1px; }
-.vc-3d-btn:hover { border-color: var(--primary); color: var(--primary); }
-.vc-3d-btn.on { border-color: var(--primary); background: rgba(0,212,170,0.15); color: var(--primary); box-shadow: 0 0 12px rgba(0,212,170,0.3); }
-
-/* ===== TYRE PRESSURE CALLOUTS =====
-   Four floating cards, one per wheel, connected to the rendered car by SVG
-   leader lines. JS projects fixed wheel-anchor world positions to screen and
-   updates box positions + line endpoints on each animation frame, so the
-   callouts orbit with the car as the camera moves. Hidden whenever the
-   viewport is in 3D Surround mode (data-3d-on="true") or the user has toggled
-   them off (data-tyres-off="true") via the TYRE button. */
-/* Tyre callouts use no leader lines — purely screen-space pinned cards.
-   The data overlay container below holds the four boxes. */
-
-.vc-tyre-overlay {
-    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-    pointer-events: none;
-    z-index: 9;
-    -webkit-transition: opacity .25s; transition: opacity .25s;
+.vc-3d-btn svg { width: 18px; height: 18px; -webkit-flex-shrink: 0; flex-shrink: 0; }
+.vc-3d-btn span {
+    margin-left: 8px;
+    font-size: 12px; font-weight: 600;
+    text-transform: none; letter-spacing: 0;
 }
+[dir="rtl"] .vc-3d-btn span { margin-left: 0; margin-right: 8px; }
+.vc-3d-btn:hover { background: var(--vc-pill-bg-hover); color: var(--vc-text-primary); }
+.vc-3d-btn.on { border-color: var(--primary); background: var(--primary-container); color: var(--on-primary-container); }
+/* Both labels live in the chip; the page-mode class (set before first paint)
+   picks which one shows, so a late i18n catalog cannot blank the text. */
+html.vc-mode-lite .vc-view-to-lite { display: none; }
+html.vc-mode-immersive .vc-view-to-3d { display: none; }
 
-/* Layout is pure CSS — no JS measurement of canvas width. Each callout
-   pins to its corner of the overlay container (which fills the visible
-   viewport), so the right pair lands on the visible right edge regardless
-   of canvas backing-buffer size. FRONT pair on the bottom, REAR on top. */
-.vc-tyre-callout {
-    position: absolute;
+/* ===== TYRE PRESSURE STRIP =====
+   One cell per corner, sitting in the bottom bar above the category dock. */
+
+.vc-tyre-strip {
+    display: -webkit-flex; display: flex;
+    -webkit-align-items: stretch; align-items: stretch;
     box-sizing: border-box;
-    width: 168px;
-    min-width: 168px;
-    padding: 11px 13px 12px;
-    /* No backdrop-filter: four blurred layers over a repainting WebGL canvas
-       force a backdrop re-capture per frame on Chrome 58, and at 0.92 alpha the
-       blur is invisible anyway. */
-    background: var(--vc-pill-bg-strong);
-    border: 1px solid var(--vc-border);
-    border-radius: 14px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.14);
+    width: 100%;
+    margin-bottom: 8px;
+    padding: 4px;
+    background: var(--vc-bar-bg);
+    border: 1px solid var(--vc-border-subtle);
+    border-radius: var(--radius-md);
     color: var(--vc-text-strong);
+}
+.vc-tyre-cell {
+    position: relative;
+    -webkit-flex: 1; flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    background: var(--vc-tile-bg);
     font-family: var(--family-mono);
-    pointer-events: auto;
-    -webkit-transition: border-color .2s, box-shadow .2s, opacity .2s;
-    transition: border-color .2s, box-shadow .2s, opacity .2s;
 }
-/* Vertical bands frame the car: FRONT pair (FL/FR) at the BOTTOM,
-   REAR pair (RL/RR) at the TOP. Matches the convention the user
-   expects when looking at the rendered car. */
-.vc-tyre-callout[data-corner="rl"],
-.vc-tyre-callout[data-corner="rr"] { top: 168px; }
-.vc-tyre-callout[data-corner="fl"],
-.vc-tyre-callout[data-corner="fr"] { bottom: 110px; }
-
-/* Horizontal pinning. The car renders facing the camera at the
-   default orbit pose, so the car's LEFT (driver-side) wheels sit on
-   the RIGHT of the screen (mirror image), and vice versa. Swap the
-   screen-side for each corner accordingly. */
-.vc-tyre-callout[data-corner="fr"],
-.vc-tyre-callout[data-corner="rr"] { left: 22px; }
-.vc-tyre-callout[data-corner="fl"],
-.vc-tyre-callout[data-corner="rl"] { right: 22px; }
-@media (min-width: 1200px) {
-    .vc-tyre-callout[data-corner="fr"],
-    .vc-tyre-callout[data-corner="rr"] { left: 6%; }
-    .vc-tyre-callout[data-corner="fl"],
-    .vc-tyre-callout[data-corner="rl"] { right: 6%; }
-}
-/* No accent strip — the box itself carries the state colour via the
-   border + dot + state label. Cleaner read with no leader lines. */
+/* Hairline gutters instead of `gap`, which the Chrome 58 WebView ignores. */
+.vc-tyre-cell + .vc-tyre-cell { margin-left: 4px; }
+[dir="rtl"] .vc-tyre-cell + .vc-tyre-cell { margin-left: 0; margin-right: 4px; }
 
 .vc-tyre-head {
     --compact-status-pill-dot-gap: 8px;
@@ -319,36 +333,38 @@
     -webkit-align-items: center; align-items: center;
     width: 100%;
     font-size: 11px;
-    font-weight: 700;
-    letter-spacing: .7px;
-    text-transform: uppercase;
+    font-weight: 600;
     color: var(--vc-text-secondary);
 }
 .vc-tyre-dot {
     width: 8px; height: 8px;
     border-radius: 50%;
     background: var(--primary);
-    box-shadow: 0 0 7px rgba(0,212,170,0.82);
     -webkit-flex-shrink: 0; flex-shrink: 0;
-    -webkit-transition: background .2s, box-shadow .2s;
-    transition: background .2s, box-shadow .2s;
+    -webkit-transition: background .2s; transition: background .2s;
 }
-.vc-tyre-label { color: var(--vc-text-strong); }
+.vc-tyre-label {
+    color: var(--vc-text-strong);
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
 .vc-tyre-state {
     margin-left: auto;
+    padding-left: 8px;
     font-size: 10px;
     font-weight: 700;
-    letter-spacing: .6px;
+    letter-spacing: .4px;
     color: var(--primary);
+    -webkit-flex-shrink: 0; flex-shrink: 0;
     -webkit-transition: color .2s; transition: color .2s;
 }
+[dir="rtl"] .vc-tyre-state { margin-left: 0; margin-right: auto; padding-left: 0; padding-right: 8px; }
 .vc-tyre-psi {
     display: -webkit-flex; display: flex;
     -webkit-align-items: baseline; align-items: baseline;
-    margin-top: 7px;
+    margin-top: 6px;
 }
 .vc-tyre-psi-val {
-    font-size: 28px;
+    font-size: 26px;
     font-weight: 700;
     color: var(--vc-text-primary);
     line-height: 1;
@@ -366,22 +382,20 @@
 }
 .vc-tyre-sub {
     display: -webkit-flex; display: flex;
+    -webkit-align-items: baseline; align-items: baseline;
     -webkit-justify-content: space-between; justify-content: space-between;
-    -webkit-align-items: center; align-items: center;
-    margin-top: 7px;
+    margin-top: 6px;
     font-size: 11px;
     color: var(--vc-text-muted);
 }
 .vc-tyre-kpa { letter-spacing: .3px; }
 .vc-tyre-temp {
-    display: -webkit-flex; display: flex;
+    display: -webkit-inline-flex; display: inline-flex;
     -webkit-align-items: baseline; align-items: baseline;
-    margin-top: 6px;
-    font-size: 12px;
     color: var(--vc-text-secondary);
 }
 .vc-tyre-temp-val {
-    font-size: 16px;
+    font-size: 13px;
     font-weight: 600;
     color: var(--vc-text-strong);
     line-height: 1;
@@ -398,82 +412,61 @@
     margin-right: 3px;
 }
 
-/* State colour scale — healthy values use the OverDrive teal while
-   attention states retain the familiar amber/red escalation. Both dot and PSI
-   colour shift so a low-pressure tyre is unmistakable from across
-   the cabin without reading the state label. */
-.vc-tyre-callout[data-state="normal"]                   { border-color: rgba(0, 212, 170, 0.28); }
-.vc-tyre-callout[data-state="normal"]  .vc-tyre-dot     { background: var(--primary); box-shadow: 0 0 7px rgba(0,212,170,0.82); }
-.vc-tyre-callout[data-state="normal"]  .vc-tyre-state   { color: var(--primary); }
-.vc-tyre-callout[data-state="normal"]  .vc-tyre-psi-val { color: var(--primary); }
+/* State colour scale. */
+.vc-tyre-cell[data-state="normal"]  .vc-tyre-dot     { background: var(--primary); }
+.vc-tyre-cell[data-state="normal"]  .vc-tyre-state   { color: var(--primary); }
 
-.vc-tyre-callout[data-state="caution"] .vc-tyre-dot     { background: var(--status-warning); box-shadow: 0 0 6px var(--status-warning); }
-.vc-tyre-callout[data-state="caution"] .vc-tyre-state   { color: var(--status-warning); }
-.vc-tyre-callout[data-state="caution"] .vc-tyre-psi-val { color: var(--status-warning); }
-.vc-tyre-callout[data-state="caution"]                  { border-color: rgba(251, 191, 36, 0.40); }
+.vc-tyre-cell[data-state="caution"] .vc-tyre-dot,
+.vc-tyre-cell[data-state="warn"]    .vc-tyre-dot     { background: var(--status-warning); }
+.vc-tyre-cell[data-state="caution"] .vc-tyre-state,
+.vc-tyre-cell[data-state="warn"]    .vc-tyre-state   { color: var(--status-warning); }
+.vc-tyre-cell[data-state="caution"] .vc-tyre-psi-val,
+.vc-tyre-cell[data-state="warn"]    .vc-tyre-psi-val { color: var(--status-warning); }
+.vc-tyre-cell[data-state="caution"],
+.vc-tyre-cell[data-state="warn"]    { background: var(--status-warning-container); }
 
-.vc-tyre-callout[data-state="warn"]    .vc-tyre-dot     { background: var(--status-warning); box-shadow: 0 0 6px var(--status-warning); }
-.vc-tyre-callout[data-state="warn"]    .vc-tyre-state   { color: var(--status-warning); }
-.vc-tyre-callout[data-state="warn"]    .vc-tyre-psi-val { color: var(--status-warning); }
-.vc-tyre-callout[data-state="warn"]                     { border-color: rgba(245, 158, 11, 0.55); }
+.vc-tyre-cell[data-state="alert"]   .vc-tyre-dot     { background: var(--status-danger); }
+.vc-tyre-cell[data-state="alert"]   .vc-tyre-state   { color: var(--status-danger); }
+.vc-tyre-cell[data-state="alert"]   .vc-tyre-psi-val { color: var(--status-danger); }
+.vc-tyre-cell[data-state="alert"]   { background: var(--status-danger-container); }
 
-.vc-tyre-callout[data-state="alert"]   .vc-tyre-dot     { background: var(--status-danger); box-shadow: 0 0 8px var(--status-danger); -webkit-animation: vcTyrePulse 1.4s ease-in-out infinite; animation: vcTyrePulse 1.4s ease-in-out infinite; }
-.vc-tyre-callout[data-state="alert"]   .vc-tyre-state   { color: var(--status-danger); }
-.vc-tyre-callout[data-state="alert"]   .vc-tyre-psi-val { color: var(--status-danger); }
-.vc-tyre-callout[data-state="alert"]                    { border-color: rgba(239, 68, 68, 0.65); box-shadow: 0 0 16px rgba(239, 68, 68, 0.22); }
+.vc-tyre-cell[data-state="muted"]   .vc-tyre-dot     { background: var(--outline); }
+.vc-tyre-cell[data-state="muted"]   .vc-tyre-state   { color: var(--vc-text-muted); }
 
-.vc-tyre-callout[data-state="muted"]   .vc-tyre-dot     { background: #71717A; box-shadow: 0 0 4px #71717A; }
-.vc-tyre-callout[data-state="muted"]   .vc-tyre-state   { color: var(--vc-text-muted); }
-.vc-tyre-callout[data-state="muted"]                    { opacity: 0.78; }
+/* First-load placeholders for the status pills and the tyre corners. */
+.vc-sk-pill { border-radius: var(--radius-md); }
+.vc-sk-tyre-fill { border-radius: var(--radius-sm); }
 
-@-webkit-keyframes vcTyrePulse { 0%,100% { -webkit-transform: scale(1); opacity: 1; } 50% { -webkit-transform: scale(1.35); opacity: 0.7; } }
-@keyframes vcTyrePulse { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.35); opacity: 0.7; } }
-
-/* Hide tyre callouts when 3D Surround is active or the model is still
-   loading. Extend this selector list when adding new default-view
-   overlays. */
-.vc-viewport[data-3d-on="true"] .vc-tyre-overlay,
-.vc-viewport[data-model-loading="true"] .vc-tyre-overlay {
-    opacity: 0; pointer-events: none;
+/* Hidden only under Surround view; tyre data is independent of the GLB, so
+   model load must not hide it. */
+.vc-viewport[data-3d-on="true"] ~ .vc-bar .vc-tyre-strip {
+    display: none;
 }
 
-/* Compact on small screens — same min-width tightening pattern as the rest
-   of the floating UI. */
-@media (max-width: 768px) {
-    .vc-tyre-callout { width: 156px; min-width: 156px; padding: 10px 12px 11px; border-radius: 13px; }
-    .vc-tyre-dot { width: 8px; height: 8px; }
-    .vc-tyre-psi-val { font-size: 26px; }
-    .vc-tyre-psi-unit { margin-left: 6px; font-size: 10px; }
-    .vc-tyre-head { font-size: 10px; }
-    .vc-tyre-state { font-size: 9px; }
-    .vc-tyre-sub { margin-top: 6px; font-size: 10px; }
-    .vc-tyre-temp { font-size: 11px; margin-top: 5px; }
-    .vc-tyre-temp-val { font-size: 15px; }
-    .vc-tyre-temp-unit { font-size: 10px; }
-    /* Rear pair on top (below the mobile engine row at top:102),
-       front pair on the bottom. Mirror: car-left → screen-right. */
-    .vc-tyre-callout[data-corner="rl"],
-    .vc-tyre-callout[data-corner="rr"] { top: 158px; bottom: auto; }
-    .vc-tyre-callout[data-corner="fr"],
-    .vc-tyre-callout[data-corner="rr"] { left: 8px; }
-    .vc-tyre-callout[data-corner="fl"],
-    .vc-tyre-callout[data-corner="rl"] { right: 8px; }
-    .vc-tyre-callout[data-corner="fl"],
-    .vc-tyre-callout[data-corner="fr"] { bottom: 120px; top: auto; }
+/* Narrow viewports: two rows of two rather than four squeezed columns. */
+@media (max-width: 640px) {
+    .vc-tyre-strip { -webkit-flex-wrap: wrap; flex-wrap: wrap; }
+    .vc-tyre-cell {
+        -webkit-flex: none; flex: none;
+        width: 50%;
+        /* Halves must account for the 4px gutter and the 4px strip padding. */
+        width: calc(50% - 2px);
+    }
+    .vc-tyre-cell + .vc-tyre-cell { margin-left: 0; }
+    [dir="rtl"] .vc-tyre-cell + .vc-tyre-cell { margin-right: 0; }
+    .vc-tyre-cell[data-corner="fr"], .vc-tyre-cell[data-corner="rr"] { margin-left: 4px; }
+    [dir="rtl"] .vc-tyre-cell[data-corner="fr"],
+    [dir="rtl"] .vc-tyre-cell[data-corner="rr"] { margin-left: 0; margin-right: 4px; }
+    .vc-tyre-cell[data-corner="rl"], .vc-tyre-cell[data-corner="rr"] { margin-top: 4px; }
+    .vc-tyre-psi-val { font-size: 22px; }
 }
-@media (max-width: 480px) {
-    .vc-tyre-callout { width: 104px; min-width: 104px; padding: 7px 8px 8px; border-radius: 9px; }
-    .vc-tyre-psi-val { font-size: 19px; }
-    .vc-tyre-head { font-size: 8px; }
-    .vc-tyre-sub { font-size: 8px; }
-    .vc-tyre-temp { font-size: 9px; margin-top: 3px; }
-    .vc-tyre-temp-val { font-size: 12px; }
-    .vc-tyre-callout[data-corner="rl"],
-    .vc-tyre-callout[data-corner="rr"] { top: 152px; bottom: auto; }
-    .vc-tyre-callout[data-corner="fr"],
-    .vc-tyre-callout[data-corner="rr"] { left: 6px; }
-    .vc-tyre-callout[data-corner="fl"],
-    .vc-tyre-callout[data-corner="rl"] { right: 6px; }
+
+/* Short landscape head units: drop the secondary line so the strip stays one
+   row tall and the render keeps its height. */
+@media (max-height: 500px) {
+    .vc-tyre-cell { padding: 6px 8px; }
+    .vc-tyre-psi-val { font-size: 20px; }
+    .vc-tyre-sub { display: none; }
 }
 
 /* ===== BOTTOM CONTROL BAR — Tabbed Expandable ===== */
@@ -489,16 +482,25 @@
 }
 .vc-bar > * { pointer-events: auto; }
 
+.vc-dock {
+    width: 100%;
+    overflow: hidden;
+    background: var(--vc-bar-bg);
+    border: 1px solid var(--vc-border-subtle);
+    border-radius: var(--radius-md);
+}
+.vc-dock.is-open .vc-tabs {
+    border-top: 1px solid var(--vc-border-subtle);
+}
+
 /* Expanded panel — slides up above tabs */
 .vc-panel {
     width: 100%;
     max-height: 0;
     overflow: hidden;
-    background: var(--vc-bar-bg);
-    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
-    border: 1px solid var(--vc-border-subtle);
-    border-bottom: none;
-    border-radius: 16px 16px 0 0;
+    background: transparent;
+    border: none;
+    border-radius: 0;
     -webkit-transition: max-height .3s cubic-bezier(0.4, 0, 0.2, 1), padding .3s; transition: max-height .3s cubic-bezier(0.4, 0, 0.2, 1), padding .3s;
     padding: 0 12px;
 }
@@ -523,7 +525,7 @@
     -webkit-justify-content: center; justify-content: center;
     -webkit-flex-wrap: wrap; flex-wrap: wrap;
 }
-.vc-panel-row > * { margin: 2px; }
+.vc-panel-row > * { margin: 4px; }
 
 /* Sound panel: engine-sound sub-group (toggle + preset stepper) sits together
    on its own line below the tone tiles. */
@@ -538,68 +540,88 @@
     -webkit-flex-basis: 100%; flex-basis: 100%;
     text-align: center;
     font-size: 12px;
-    color: #71717A;
+    color: var(--vc-text-muted);
     padding: 8px 12px;
 }
 
-/* Windows panel: 4 rows × 5 preset tiles */
+/* Windows panel: one card per aperture, two per row. Gutters are margins,
+   not `gap` — Chrome 58 ignores flex gap. The grid's negative right margin
+   absorbs the trailing card gutter. */
 .vc-window-grid {
     display: -webkit-flex; display: flex;
-    -webkit-flex-direction: column; flex-direction: column;
-    -webkit-align-items: stretch; align-items: stretch;
-    gap: 4px;
+    -webkit-flex-wrap: wrap; flex-wrap: wrap;
+    -webkit-align-items: flex-start; align-items: flex-start;
+    -webkit-justify-content: flex-start; justify-content: flex-start;
     width: 100%;
+    margin-right: -8px;
 }
+[dir="rtl"] .vc-window-grid { margin-right: 0; margin-left: -8px; }
 .vc-window-row {
-    display: -webkit-flex; display: flex;
-    -webkit-align-items: center; align-items: center;
-    -webkit-justify-content: center; justify-content: center;
-    gap: 4px;
+    box-sizing: border-box;
+    width: calc(50% - 8px);
+    margin: 0 8px 8px 0;
+    padding: 10px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--vc-border-subtle);
+    background: var(--vc-tile-bg);
 }
+[dir="rtl"] .vc-window-row { margin: 0 0 8px 8px; }
+.vc-window-row-wide { width: calc(100% - 8px); }
 .vc-window-label {
-    display: -webkit-inline-flex; display: inline-flex;
-    -webkit-flex-direction: column; flex-direction: column;
-    -webkit-align-items: center; align-items: center;
-    -webkit-justify-content: center; justify-content: center;
-    width: 48px;
-    -webkit-flex-shrink: 0; flex-shrink: 0;
-    font-family: var(--family-mono);
+    display: -webkit-flex; display: flex;
+    -webkit-align-items: baseline; align-items: baseline;
+    -webkit-justify-content: space-between; justify-content: space-between;
+    margin-bottom: 8px;
 }
 .vc-window-label .label-area {
-    font-size: 10px; font-weight: 700; color: var(--vc-text-soft);
-    text-transform: uppercase; letter-spacing: .4px;
+    font-size: 12px; font-weight: 600; color: var(--vc-text-strong);
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
 .vc-window-label .label-pct {
-    font-size: 9px; color: var(--vc-text-muted); margin-top: 2px;
+    -webkit-flex-shrink: 0; flex-shrink: 0;
+    margin-left: 8px;
+    font-family: var(--family-mono);
+    font-size: 12px; font-weight: 600; color: var(--vc-text-secondary);
 }
-/* "All Windows" row has no data-area and a longer label — give it room so the
-   text doesn't wrap awkwardly inside the 48px width used for LF/RF/LR/RR. */
-.vc-window-row:not([data-area]) .vc-window-label { width: 86px; }
-.vc-window-row:not([data-area]) .vc-window-label .label-area { font-size: 9px; }
+[dir="rtl"] .vc-window-label .label-pct { margin-left: 0; margin-right: 8px; }
 .vc-window-presets {
-    display: -webkit-inline-flex; display: inline-flex;
+    display: -webkit-flex; display: flex;
     -webkit-align-items: center; align-items: center;
-    gap: 2px;
 }
+.vc-window-presets > .vc-preset { -webkit-flex: 1; flex: 1; }
+.vc-window-row-wide .vc-window-presets > .vc-preset { -webkit-flex: none; flex: none; padding: 0 16px; }
+.vc-window-presets > .vc-preset + .vc-preset { margin-left: 4px; }
+[dir="rtl"] .vc-window-presets > .vc-preset + .vc-preset { margin-left: 0; margin-right: 4px; }
 .vc-preset {
     display: -webkit-inline-flex; display: inline-flex;
     -webkit-align-items: center; align-items: center;
     -webkit-justify-content: center; justify-content: center;
-    width: 38px; height: 32px;
     min-width: 48px; min-height: 48px;
-    border-radius: 8px;
+    padding: 0 4px;
+    border-radius: var(--radius-sm);
     border: 1px solid var(--vc-border-subtle);
-    background: var(--vc-tile-bg);
+    background: var(--surface-container);
     color: var(--vc-text-soft);
-    font-size: 11px; font-weight: 700;
+    font-size: 12px; font-weight: 600;
     font-family: var(--family-mono);
     cursor: pointer;
-    -webkit-flex-shrink: 0; flex-shrink: 0;
-    -webkit-transition: all .15s; transition: all .15s;
+    -webkit-transition: background .15s, border-color .15s, color .15s;
+    transition: background .15s, border-color .15s, color .15s;
 }
-.vc-preset:hover { border-color: rgba(0,212,170,.3); color: var(--vc-text-primary); background: rgba(0,212,170,.06); }
+
+/* Stacked panels (Lights) — full-width rows. */
+.vc-stack-grid {
+    -webkit-flex-direction: column; flex-direction: column;
+    -webkit-align-items: stretch; align-items: stretch;
+    width: 100%;
+}
+.vc-stack-row {
+    display: -webkit-flex; display: flex;
+    -webkit-align-items: center; align-items: center;
+}
+.vc-preset:hover { color: var(--vc-text-primary); background: var(--vc-tile-bg-hover); }
 .vc-preset:active { -webkit-transform: scale(.9); transform: scale(.9); }
-.vc-preset.active { border-color: var(--primary); background: rgba(0,212,170,.12); color: var(--primary); }
+.vc-preset.active { border-color: var(--primary); background: var(--primary-container); color: var(--on-primary-container); }
 .vc-preset.pending { opacity: .4; pointer-events: none; }
 
 /* Tab bar — always visible.
@@ -617,10 +639,9 @@
        overflow runs cleanly to the right. On wider screens each tab's
        `flex: 1` stretches to fill, so the visual outcome is unchanged. */
     -webkit-justify-content: flex-start; justify-content: flex-start;
-    background: var(--vc-bar-bg);
-    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
-    border: 1px solid var(--vc-border-subtle);
-    border-radius: var(--radius-sm);
+    background: transparent;
+    border: none;
+    border-radius: 0;
     padding: 6px 10px;
     width: 100%;
     overflow-x: auto;
@@ -639,7 +660,7 @@
     min-width: 56px;
     min-height: 48px;
     height: 52px;
-    border-radius: 12px;
+    border-radius: var(--radius-md);
     border: 1px solid transparent;
     background: transparent;
     color: var(--vc-text-muted);
@@ -649,15 +670,15 @@
     touch-action: manipulation;
     position: relative;
 }
-.vc-tab svg { width: 20px; height: 20px; margin-bottom: 2px; }
-.vc-tab span { font-size: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: .3px; }
+.vc-tab svg { width: 20px; height: 20px; margin-bottom: 3px; }
+.vc-tab span { font-size: 10px; font-weight: 600; letter-spacing: 0; }
 .vc-tab:active { -webkit-transform: scale(.92); transform: scale(.92); }
-.vc-tab.active { border-color: rgba(0,212,170,0.4); background: rgba(0,212,170,0.08); color: var(--primary); }
+.vc-tab.active { border-color: var(--primary); background: var(--primary-container); color: var(--on-primary-container); }
 .vc-tab.has-active { color: var(--vc-text-secondary); }
 .vc-tab .tab-dot {
     position: absolute; top: 6px; right: 6px;
-    width: 5px; height: 5px; border-radius: 50%;
-    background: var(--primary); box-shadow: 0 0 4px var(--primary);
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--primary);
     display: none;
 }
 .vc-tab.has-active .tab-dot { display: block; }
@@ -686,7 +707,7 @@
     -webkit-justify-content: center; justify-content: center;
     width: 56px; height: 58px;
     min-width: 48px; min-height: 48px;
-    border-radius: 10px;
+    border-radius: var(--radius-md);
     /* Always-visible neutral background tier — tiles never disappear against
        the canvas (the body paint flash effect could otherwise wash them out). */
     border: 1px solid var(--vc-border-subtle);
@@ -696,63 +717,38 @@
     -webkit-flex-shrink: 0; flex-shrink: 0;
     -webkit-transition: all .15s; transition: all .15s;
 }
-.vc-tile svg { width: 22px; height: 22px; margin-bottom: 2px; stroke: currentColor; }
-.vc-tile span { font-size: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: .3px; color: inherit; }
-.vc-tile:hover { border-color: rgba(0,212,170,.3); color: var(--vc-text-primary); background: rgba(0,212,170,.06); }
+.vc-tile svg { width: 22px; height: 22px; margin-bottom: 2px; }
+.vc-tile span { font-size: 10px; font-weight: 600; letter-spacing: 0; color: inherit; }
+.vc-tile:hover { color: var(--vc-text-primary); background: var(--vc-tile-bg-hover); }
 .vc-tile:active { -webkit-transform: scale(.9); transform: scale(.9); }
-.vc-tile.on { border-color: var(--primary); background: rgba(0,212,170,.12); color: var(--primary); box-shadow: 0 0 12px rgba(0,212,170,.2); }
-.vc-tile.active { border-color: var(--primary); background: rgba(0,212,170,.10); color: var(--primary); }
+.vc-tile.on { border-color: var(--primary); background: var(--primary-container); color: var(--on-primary-container); }
+.vc-tile.active { border-color: var(--primary); background: var(--primary-container); color: var(--on-primary-container); }
 /* Disable highlight stays readable: outline grey, not greyed-out invisible. */
 .vc-tile:disabled, .vc-tile[disabled] { color: var(--vc-text-muted); border-color: var(--vc-border-faint); background: var(--vc-tile-bg-disabled); cursor: not-allowed; }
-/* Cloud-only controls stay tappable so they can explain how to connect an
-   account, but carry an explicit cloud marker. A dashed outline means the
-   capability is currently unavailable; local SDK controls remain unchanged. */
-.vc-tile[data-requires-cloud="true"],
-.vc-preset[data-requires-cloud="true"] { position: relative; }
-.vc-tile[data-requires-cloud="true"]::after,
-.vc-preset[data-requires-cloud="true"]::after {
-    /* Draw the cloud from CSS primitives. Android 7 otherwise forces U+2601
-       through its blue colour-emoji font and ignores the state colour. */
-    content: '';
-    position: absolute; top: 7px; right: 6px;
-    width: 9px; height: 4px;
-    border-radius: 5px;
-    background: currentColor;
-    box-shadow:
-        -3px 1px 0 -1px currentColor,
-        3px 1px 0 -1px currentColor,
-        0 -3px 0 -1px currentColor;
-    color: var(--vc-text-muted);
-    pointer-events: none;
-}
-/* The vent preset is narrower than a tile — tuck its badge into the top-left so
-   it never overlaps the centred label. */
-.vc-preset[data-requires-cloud="true"]::after { top: 5px; right: auto; left: 5px; }
-[dir="rtl"] .vc-tile[data-requires-cloud="true"]::after {
-    right: auto; left: 5px;
-}
-[dir="rtl"] .vc-preset[data-requires-cloud="true"]::after { left: auto; right: 5px; }
-.vc-tile[data-cloud-state="connected"]::after,
-.vc-preset[data-cloud-state="connected"]::after { color: var(--primary); }
-.vc-tile[data-cloud-state="checking"]::after,
-.vc-preset[data-cloud-state="checking"]::after { color: var(--status-warning); }
+/* Cloud-only controls carry no per-button marker: a fixed badge cannot fit a
+   32px switch and a 58px tile, and on a connected account it marks every
+   control for nothing. Unavailability is the only state worth drawing, so these
+   go dashed and dimmed until the account connects; the account chip in the
+   status bar explains why. They stay tappable to open the connect modal. */
 .vc-tile[data-cloud-state="not_configured"],
 .vc-tile[data-cloud-state="unavailable"],
 .vc-preset[data-cloud-state="not_configured"],
-.vc-preset[data-cloud-state="unavailable"] {
+.vc-preset[data-cloud-state="unavailable"],
+.vc-charge-action[data-cloud-state="not_configured"],
+.vc-charge-action[data-cloud-state="unavailable"],
+.vc-charge-save[data-cloud-state="not_configured"],
+.vc-charge-save[data-cloud-state="unavailable"],
+.vc-charge-switch[data-cloud-state="not_configured"],
+.vc-charge-switch[data-cloud-state="unavailable"] {
     border-style: dashed;
+    border-color: var(--vc-border-faint);
     background: var(--vc-tile-bg-disabled);
+    color: var(--vc-text-muted);
 }
-.vc-tile[data-cloud-state="not_configured"]::after,
-.vc-preset[data-cloud-state="not_configured"]::after { color: var(--vc-text-muted); }
-.vc-tile[data-cloud-state="unavailable"]::after,
-.vc-preset[data-cloud-state="unavailable"]::after { color: var(--status-danger); }
-.vc-tile.heat:hover { border-color: rgba(239,68,68,.3); color: var(--status-danger); }
-.vc-tile.heat.on1 { border-color: var(--status-danger); background: rgba(239,68,68,.12); color: var(--status-danger); box-shadow: 0 0 12px rgba(239,68,68,.2); }
-.vc-tile.heat.on2 { border-color: var(--status-danger); background: rgba(239,68,68,.12); color: var(--status-danger); box-shadow: 0 0 12px rgba(239,68,68,.2); }
-.vc-tile.cool:hover { border-color: rgba(56,189,248,.3); color: var(--status-info); }
-.vc-tile.cool.on1 { border-color: var(--status-info); background: rgba(56,189,248,.12); color: var(--status-info); box-shadow: 0 0 12px rgba(56,189,248,.2); }
-.vc-tile.cool.on2 { border-color: var(--status-info); background: rgba(56,189,248,.12); color: var(--status-info); box-shadow: 0 0 12px rgba(56,189,248,.2); }
+.vc-tile.heat:hover { color: var(--status-danger); }
+.vc-tile.heat.on1, .vc-tile.heat.on2 { border-color: var(--status-danger); background: var(--status-danger-container); color: var(--status-danger); }
+.vc-tile.cool:hover { color: var(--status-info); }
+.vc-tile.cool.on1, .vc-tile.cool.on2 { border-color: var(--status-info); background: var(--status-info-container); color: var(--status-info); }
 .vc-tile.pending { opacity: .4; pointer-events: none; }
 
 /* Seat-memory tap-and-hold: TAP recalls, LONG-PRESS saves. The `.arming` class
@@ -761,7 +757,7 @@
 .vc-tile.memory { position: relative; overflow: hidden; }
 .vc-tile.memory::after {
     content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 0;
-    background: rgba(0,212,170,.18); pointer-events: none;
+    background: var(--primary-container); pointer-events: none;
     transition: height 0s;
 }
 .vc-tile.memory.arming::after {
@@ -769,24 +765,17 @@
     -webkit-transition: height var(--vc-hold-ms, 650ms) linear;
     transition: height var(--vc-hold-ms, 650ms) linear;
 }
-.vc-tile.memory.armed { border-color: var(--primary); color: var(--primary); box-shadow: 0 0 14px rgba(0,212,170,.35); }
+.vc-tile.memory.armed { border-color: var(--primary); color: var(--primary); }
 .vc-tile.memory.armed::after { height: 0; }
-
-/* "Hold to save" helper line under the seat-memory tiles. */
-.vc-hold-hint {
-    -ms-flex-preferred-size: 100%; flex-basis: 100%;
-    margin: 4px 2px 0; font-size: 9px; font-weight: 600; letter-spacing: .3px;
-    text-transform: uppercase; color: var(--vc-text-muted); text-align: center;
-}
 
 /* Small +/- button */
 .vc-mini {
     display: -webkit-inline-flex; display: inline-flex;
     -webkit-align-items: center; align-items: center;
     -webkit-justify-content: center; justify-content: center;
-    width: 34px; height: 34px;
+    width: 48px; height: 48px;
     min-width: 48px; min-height: 48px;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     border: 1px solid var(--vc-border-subtle);
     background: transparent;
     color: var(--vc-text-secondary); cursor: pointer;
@@ -795,7 +784,7 @@
     -webkit-transition: all .12s; transition: all .12s;
 }
 .vc-mini svg { width: 16px; height: 16px; }
-.vc-mini:hover { border-color: var(--primary); color: var(--primary); }
+.vc-mini:hover { background: var(--vc-tile-bg-hover); color: var(--vc-text-primary); }
 .vc-mini:active { -webkit-transform: scale(.88); transform: scale(.88); }
 
 /* Value readout */
@@ -810,50 +799,85 @@
     -webkit-flex-shrink: 0; flex-shrink: 0;
 }
 
-/* Ambient lights colour slider */
+/* Ambient lights colour ramp — its own full-width card under the DRL row. */
 .ambient-wrapper {
     display: flex;
     flex-flow: column;
-    text-align: center;
-    margin: 0px 10px;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 8px 0 0;
+    padding: 10px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--vc-border-subtle);
+    background: var(--vc-tile-bg);
+}
+.ambient-head {
+    display: -webkit-flex; display: flex;
+    -webkit-align-items: center; align-items: center;
+    margin-bottom: 8px;
 }
 .ambient-title {
-    font-size: 8px;
+    font-size: 12px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: .3px;
-    color: inherit;
-    margin-bottom: 5px;
+    color: var(--vc-text-strong);
+}
+.ambient-track {
+    position: relative;
+    width: 100%;
+    height: 20px;
 }
 .vc-ambient-slider {
     -webkit-appearance: none; appearance: none;
-    width: 220px;
+    position: relative;
+    z-index: 1;
+    width: 100%;
     height: 20px;
-    border-radius: 3px;
+    border-radius: var(--radius-sm);
     background: var(--vc-tile-bg);
     outline: none;
-    margin: 0 6px;
+    margin: 0;
 }
 .vc-ambient-slider:disabled {
     opacity: .45;
     cursor: not-allowed;
 }
+/* Native thumb is the hit target only. Chrome 58 will not paint a CSS
+   variable onto ::-webkit-slider-thumb, so the coloured chip is a sibling. */
 .vc-ambient-slider::-webkit-slider-thumb {
     -webkit-appearance: none; appearance: none;
-    width: 15px; height: 15px;
-    border: 1px solid black;
-    border-radius: 50%;
-    background: var(--color, var(--primary));
+    -webkit-box-sizing: border-box; box-sizing: border-box;
+    width: 20px; height: 20px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    box-shadow: none;
     cursor: pointer;
-    box-shadow: 0 0 8px rgba(0,212,170,0.4);
 }
 .vc-ambient-slider::-moz-range-thumb {
-    width: 15px; height: 15px;
-    border: 1px solid black;
-    border-radius: 50%;
-    background: var(--color, var(--primary));
+    box-sizing: border-box;
+    width: 20px; height: 20px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    box-shadow: none;
     cursor: pointer;
-    box-shadow: 0 0 8px rgba(0,212,170,0.4);
+}
+/* Above the track: the input paints its own gradient background, which would
+   otherwise cover this. Input still takes the drag — the chip ignores pointers. */
+.ambient-thumb {
+    position: absolute;
+    z-index: 2;
+    top: 3px;
+    left: 0;
+    width: 14px;
+    height: 14px;
+    -webkit-box-sizing: border-box; box-sizing: border-box;
+    border: 1px solid rgba(0, 0, 0, 0.35);
+    border-radius: 4px;
+    background: #fff;
+    /* Gaps the ramp around the cube without reading as a second border. */
+    box-shadow: 0 0 0 2px var(--vc-tile-bg);
+    pointer-events: none;
 }
 .vc-ambient-slider:disabled::-webkit-slider-thumb {
     cursor: not-allowed;
@@ -862,22 +886,169 @@
     cursor: not-allowed;
 }
 
-/* Charging panel — Schedule and Charge limit stacked, divider between. */
+/* Charging panel — labelled blocks, not cards nested inside the sheet. */
+#panelCharging.vc-panel-row {
+    -webkit-justify-content: stretch; justify-content: stretch;
+    -webkit-align-items: stretch; align-items: stretch;
+}
+#panelCharging.vc-panel-row > * { margin: 0; width: 100%; }
 .vc-charging-grid {
     display: -webkit-flex; display: flex;
     -webkit-flex-direction: column; flex-direction: column;
     width: 100%;
-    gap: 8px;
-    padding: 0 12px;
 }
-.vc-charging-section {
+/* A titled section with an optional caption. Shared by Charging's blocks, the
+   Climate steppers and precondition row, and the Seats memory tiles, so every
+   panel that needs more than a row of tiles reads the same way.
+   Not `.vc-group` — that name is already the segmented button-group primitive. */
+.vc-block {
     display: -webkit-flex; display: flex;
     -webkit-flex-direction: column; flex-direction: column;
+    box-sizing: border-box;
 }
-.vc-charging-divider {
-    border-top: 1px solid var(--vc-border-faint);
-    padding-top: 8px;
+/* flex-basis, not width: `.vc-panel-row > *` carries 4px of horizontal margin,
+   and a fixed 100% width cannot shrink to absorb it. */
+.vc-block--full {
+    -webkit-flex-basis: 100%; -ms-flex-preferred-size: 100%; flex-basis: 100%;
 }
+.vc-block--divider {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--vc-border-subtle);
+}
+/* Outbids the `.vc-panel-row > * { margin: 4px }` shorthand. */
+.vc-panel-row > .vc-block--divider { margin-top: 10px; }
+.vc-block-head {
+    display: -webkit-flex; display: flex;
+    -webkit-align-items: center; align-items: center;
+    margin-bottom: 8px;
+}
+.vc-block-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--vc-text-strong);
+}
+.vc-block-caption {
+    margin-top: 8px;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--vc-text-muted);
+}
+/* Equal-width pair at the trailing edge, so a lone Save is not a full-width
+   slab across the sheet. */
+.vc-block-actions {
+    -webkit-justify-content: flex-end; justify-content: flex-end;
+}
+.vc-block-actions > .vc-charge-action,
+.vc-block-actions > .vc-charge-save {
+    -webkit-flex: 1 1 0px; flex: 1 1 0px;
+    max-width: 160px;
+}
+
+/* Two steppers side by side on their own row, each under its own label. */
+.vc-block-row {
+    display: -webkit-flex; display: flex;
+    -webkit-flex-basis: 100%; -ms-flex-preferred-size: 100%; flex-basis: 100%;
+    -webkit-flex-wrap: wrap; flex-wrap: wrap;
+    -webkit-justify-content: center; justify-content: center;
+}
+.vc-block--stepper {
+    -webkit-flex: 1; flex: 1;
+    min-width: 120px;
+    max-width: 220px;
+    margin-right: 8px;
+}
+.vc-block--stepper:last-child { margin-right: 0; }
+[dir="rtl"] .vc-block--stepper { margin-right: 0; margin-left: 8px; }
+[dir="rtl"] .vc-block--stepper:last-child { margin-left: 0; }
+.vc-block--stepper > .vc-block-title { margin-bottom: 6px; }
+.vc-stepper {
+    display: -webkit-flex; display: flex;
+    -webkit-align-items: center; align-items: center;
+    -webkit-justify-content: space-between; justify-content: space-between;
+    box-sizing: border-box;
+    height: 48px;
+    padding: 0;
+    border: 1px solid var(--vc-border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--surface-container);
+}
+.vc-stepper > .vc-readout { height: auto; }
+.vc-stepper > .vc-mini {
+    width: 48px;
+    height: 48px;
+    margin: 0;
+    border: none;
+    background: transparent;
+    border-radius: 0;
+}
+.vc-stepper > .vc-mini:first-child {
+    border-radius: var(--radius-md) 0 0 var(--radius-md);
+}
+.vc-stepper > .vc-mini:last-child {
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+[dir="rtl"] .vc-stepper > .vc-mini:first-child {
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+[dir="rtl"] .vc-stepper > .vc-mini:last-child {
+    border-radius: var(--radius-md) 0 0 var(--radius-md);
+}
+
+.vc-block-head .vc-readout {
+    margin-left: auto;
+    height: auto;
+    font-size: 14px;
+}
+[dir="rtl"] .vc-block-head .vc-readout { margin-left: 0; margin-right: auto; }
+.vc-block-head > .vc-charge-switch { margin-left: auto; }
+[dir="rtl"] .vc-block-head > .vc-charge-switch { margin-left: 0; margin-right: auto; }
+.vc-block-head .vc-readout + .vc-charge-switch { margin-left: 8px; }
+[dir="rtl"] .vc-block-head .vc-readout + .vc-charge-switch { margin-left: 0; margin-right: 8px; }
+.vc-charge-switch {
+    min-width: 56px; min-height: 40px;
+    margin-left: 8px;
+    padding: 0 12px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--vc-border-subtle);
+    background: var(--surface-container);
+    color: var(--vc-text-secondary);
+    font-size: 12px; font-weight: 600;
+    cursor: pointer;
+}
+[dir="rtl"] .vc-charge-switch { margin-left: 0; margin-right: 8px; }
+.vc-charge-switch.on {
+    border-color: var(--primary);
+    background: var(--primary-container);
+    color: var(--on-primary-container);
+}
+.vc-charge-switch:disabled { opacity: .45; cursor: not-allowed; }
+.vc-charge-action,
+.vc-charge-save {
+    -webkit-box-sizing: border-box; box-sizing: border-box;
+    height: 40px;
+    padding: 0 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--vc-border-subtle);
+    background: var(--surface-container);
+    color: var(--vc-text-strong);
+    font-size: 13px; font-weight: 600;
+    cursor: pointer;
+}
+.vc-charge-action.on,
+.vc-charge-save.on {
+    border-color: var(--primary);
+    background: var(--primary-container);
+    color: var(--on-primary-container);
+}
+.vc-charge-save {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--on-primary);
+}
+.vc-segmented-full { width: 100%; }
+.vc-segmented-full .vc-seg { -webkit-flex: 1; flex: 1; }
 
 .vc-inline-control-label {
     color: var(--vc-text-secondary);
@@ -886,11 +1057,10 @@
     white-space: nowrap;
 }
 
-/* Charge-cap slider — fixed width so it sits next to the toggle tile and
-   readout as a compact cluster, not stretched across the panel. */
+/* Charge-cap slider — full width under the title so it cannot clip the block. */
 .vc-soc-slider {
     -webkit-appearance: none; appearance: none;
-    width: 220px;
+    width: 100%;
     height: 6px;
     border-radius: 3px;
     background: var(--vc-tile-bg);
@@ -904,7 +1074,6 @@
     border-radius: 50%;
     background: var(--primary);
     cursor: pointer;
-    box-shadow: 0 0 8px rgba(0,212,170,0.4);
 }
 .vc-soc-slider::-moz-range-thumb {
     width: 18px; height: 18px;
@@ -912,22 +1081,21 @@
     border-radius: 50%;
     background: var(--primary);
     cursor: pointer;
-    box-shadow: 0 0 8px rgba(0,212,170,0.4);
 }
 
 /* Tiles inside the charging panel are inline-shaped: icon next to label,
-   34px tall to baseline-match the time inputs and segmented control. The
-   square 60px tile look elsewhere stays untouched. */
+   48px tall to baseline-match the time inputs and segmented control. The
+   square tile look elsewhere stays untouched. */
 .vc-schedule-bar .vc-tile {
     width: auto;
     min-width: 0;
-    height: 34px;
-    padding: 0 10px;
+    height: 48px;
+    padding: 0 12px;
     -webkit-flex-direction: row; flex-direction: row;
-    gap: 6px;
 }
-.vc-schedule-bar .vc-tile svg { width: 16px; height: 16px; margin-bottom: 0; }
-.vc-schedule-bar .vc-tile span { font-size: 11px; text-transform: none; letter-spacing: normal; }
+.vc-schedule-bar .vc-tile svg { width: 18px; height: 18px; margin-bottom: 0; margin-right: 8px; }
+[dir="rtl"] .vc-schedule-bar .vc-tile svg { margin-right: 0; margin-left: 8px; }
+.vc-schedule-bar .vc-tile span { font-size: 13px; letter-spacing: normal; }
 
 /* Charging schedule — stacked rows (window / repeat / days).
    Wraps the existing flex panel-row into a column grid for proper alignment
@@ -938,29 +1106,26 @@
     -webkit-flex-direction: column; flex-direction: column;
     -webkit-align-items: stretch; align-items: stretch;
     width: 100%;
-    gap: 8px;
-    padding: 0 12px;
 }
+/* Sibling margins rather than `gap` for the Chrome 58 WebView. */
 .vc-schedule-bar {
     display: -webkit-flex; display: flex;
     -webkit-align-items: center; align-items: center;
-    -webkit-justify-content: center; justify-content: center;
-    gap: 8px;
     -webkit-flex-wrap: wrap; flex-wrap: wrap;
 }
-/* Spacer is intentionally a no-op — controls sit in a tight centered cluster
-   instead of being pushed to opposite edges of the panel. */
+.vc-schedule-bar + .vc-schedule-bar { margin-top: 8px; }
+.vc-schedule-bar > * { margin-right: 8px; }
+[dir="rtl"] .vc-schedule-bar > * { margin-right: 0; margin-left: 8px; }
 .vc-schedule-spacer { display: none; }
 .vc-schedule-arrow {
     color: var(--vc-text-muted); font-size: 16px; line-height: 1;
     -webkit-flex-shrink: 0; flex-shrink: 0;
 }
 .vc-time {
-    height: 34px; min-width: 92px;
-    min-height: 48px;
+    height: 40px; min-width: 92px;
     border: 1px solid var(--vc-border-subtle);
-    border-radius: 8px;
-    background: var(--vc-tile-bg);
+    border-radius: var(--radius-md);
+    background: var(--surface-container);
     color: var(--vc-text-primary);
     font-family: var(--family-mono);
     font-size: 14px; font-weight: 600;
@@ -979,7 +1144,7 @@
     min-height: 48px;
     background: var(--vc-tile-bg);
     border: 1px solid var(--vc-border-subtle);
-    border-radius: 10px;
+    border-radius: var(--radius-md);
     padding: 2px;
     gap: 2px;
 }
@@ -987,7 +1152,7 @@
     height: 28px;
     min-height: 48px;
     padding: 0 12px;
-    border: none; border-radius: 8px;
+    border: none; border-radius: var(--radius-sm);
     background: transparent;
     color: var(--vc-text-secondary);
     font-size: 11px; font-weight: 600;
@@ -997,58 +1162,83 @@
 }
 .vc-seg:hover { color: var(--vc-text-primary); }
 .vc-seg.on {
-    background: rgba(0,212,170,.16);
-    color: var(--primary);
-    box-shadow: inset 0 0 0 1px rgba(0,212,170,.35);
+    background: var(--primary-container);
+    color: var(--on-primary-container);
 }
 .vc-seg:active { -webkit-transform: scale(.96); transform: scale(.96); }
 
-/* Remote preconditioning row inside the Climate panel. Reuses the charging panel's
-   schedule primitives (.vc-schedule-bar / .vc-time / .vc-segmented) so both schedules
-   read as one system; only the full-width break is new.
-   Full-width via flex-basis only — NOT width:100%. `.vc-panel-row > *` adds 2px of
-   horizontal margin, so an explicit 100% width would overflow the row by 4px. Matches
-   how .vc-sound-engine / .vc-hold-hint claim their own line. */
-.vc-climate-schedule {
-    -webkit-flex-basis: 100%; -ms-flex-preferred-size: 100%; flex-basis: 100%;
-    margin-top: 8px;
+.vc-block--wide {
+    max-width: 300px;
+    -webkit-flex: 1.6; flex: 1.6;
 }
-.vc-climate-schedule .vc-schedule-grid { padding: 0; }
-/* Duration is a 5-way pick; keep each segment narrow so the row still fits. */
-#climateDurationSegmented .vc-seg { padding: 0 8px; min-width: 34px; }
+.vc-block-title--ghost { visibility: hidden; }
+.vc-climate-schedule .vc-block--stepper { min-width: 100px; }
+.vc-climate-schedule .vc-time {
+    display: block;
+    width: 100%;
+    height: 48px;
+    min-width: 0;
+    -webkit-box-sizing: border-box; box-sizing: border-box;
+}
+.vc-climate-schedule .vc-segmented {
+    display: -webkit-flex; display: flex;
+    width: 100%;
+    height: 48px;
+    min-height: 48px;
+    gap: 0;
+    -webkit-box-sizing: border-box; box-sizing: border-box;
+}
+.vc-climate-schedule .vc-seg {
+    -webkit-flex: 1; flex: 1;
+    height: 44px;
+    min-height: 44px;
+    min-width: 0;
+    padding: 0 4px;
+    margin: 0 1px;
+}
+.vc-climate-schedule .vc-seg:first-child { margin-left: 0; }
+.vc-climate-schedule .vc-seg:last-child { margin-right: 0; }
+.vc-climate-actions {
+    display: -webkit-flex; display: flex;
+    -webkit-align-items: stretch; align-items: stretch;
+    height: 48px;
+}
+.vc-climate-actions > * {
+    -webkit-flex: 1; flex: 1;
+    width: auto;
+    max-width: none;
+    height: 48px;
+    margin: 0;
+    border-radius: var(--radius-md);
+}
+.vc-climate-actions > * + * { margin-left: 6px; }
+[dir="rtl"] .vc-climate-actions > * + * { margin-left: 0; margin-right: 6px; }
 .vc-schedule-label {
-    font-size: 9px; font-weight: 700; letter-spacing: .3px;
-    text-transform: uppercase; color: var(--vc-text-muted);
+    min-width: 64px;
+    font-size: 12px; font-weight: 600;
+    color: var(--vc-text-secondary);
     -webkit-flex-shrink: 0; flex-shrink: 0;
 }
 .vc-schedule-unit {
     font-size: 10px; font-weight: 600; color: var(--vc-text-muted);
     -webkit-flex-shrink: 0; flex-shrink: 0;
 }
-/* Booking summary line under the preconditioning row. A plain block, not a
-   .vc-schedule-bar: it holds one text node, so flex centring would be redundant
-   and text-align is what actually centres wrapped lines. */
-.vc-schedule-note {
-    font-size: 10px; font-weight: 600; letter-spacing: .2px; line-height: 1.4;
-    color: var(--vc-text-soft); text-align: center;
-}
-
 /* Day chips — only shown when repeat=custom. */
-.vc-day-chips { gap: 4px; }
+.vc-day-chips > * { margin-right: 4px; }
+[dir="rtl"] .vc-day-chips > * { margin-right: 0; margin-left: 4px; }
 .vc-day {
-    height: 30px; min-width: 36px;
     min-height: 48px; min-width: 48px;
     padding: 0 8px;
     border: 1px solid var(--vc-border-subtle);
-    border-radius: 8px;
-    background: var(--vc-tile-bg);
+    border-radius: var(--radius-sm);
+    background: var(--surface-container);
     color: var(--vc-text-secondary);
     font-size: 10px; font-weight: 700;
     text-transform: uppercase; letter-spacing: .3px;
     cursor: pointer;
 }
-.vc-day:hover { border-color: rgba(0,212,170,.3); color: var(--vc-text-primary); }
-.vc-day.on { border-color: var(--primary); background: rgba(0,212,170,.12); color: var(--primary); }
+.vc-day:hover { background: var(--vc-tile-bg-hover); color: var(--vc-text-primary); }
+.vc-day.on { border-color: var(--primary); background: var(--primary-container); color: var(--on-primary-container); }
 .vc-day:active { -webkit-transform: scale(.92); transform: scale(.92); }
 
 /* Reuse .vc-pill as a clickable chip in the schedule row.
@@ -1058,10 +1248,10 @@ button.vc-pill {
     cursor: pointer;
     background: var(--vc-tile-bg);
 }
-/* Inside the schedule bar, match the row's 34px baseline. */
+/* Inside the schedule bar, match the row's 48dp baseline. */
 .vc-schedule-bar button.vc-pill { height: 48px; min-height: 48px; padding: 0 12px; }
-button.vc-pill:hover { border-color: rgba(0,212,170,.3); color: var(--vc-text-primary); }
-button.vc-pill.on { border-color: var(--primary); background: rgba(0,212,170,.12); color: var(--primary); }
+button.vc-pill:hover { background: var(--vc-tile-bg-hover); color: var(--vc-text-primary); }
+button.vc-pill.on { border-color: var(--primary); background: var(--primary-container); color: var(--on-primary-container); }
 button.vc-pill:active { -webkit-transform: scale(.95); transform: scale(.95); }
 
 /* ===== MOBILE RESPONSIVE ===== */
@@ -1075,61 +1265,47 @@ button.vc-pill:active { -webkit-transform: scale(.95); transform: scale(.95); }
     .vc-tile svg { width: 20px; height: 20px; }
     .vc-mini { width: 32px; height: 32px; }
     .vc-readout { font-size: 14px; min-width: 36px; }
-    .vc-pill { padding: 4px 9px; font-size: 10px; }
-    .vc-colors { padding: 2px 5px; }
-    .vc-swatch { width: 20px; height: 20px; margin: 0 2px; }
-    .vc-swatch-custom { width: 20px; height: 20px; margin: 0 2px; }
-    .vc-model-select { padding: 4px 22px 4px 10px; font-size: 11px; max-width: 140px; }
-    /* Clear the hamburger button (left:10 width:40 = right edge at 50) so the
-       secondary row can't slide under it. Drop the row a touch since the smaller
-       pills make the primary row shorter. */
-    .vc-status-bar-secondary { top: calc(56px + env(safe-area-inset-top, 0px)); left: 56px; right: 10px; }
-    .vc-3d-btn { width: 40px; height: 40px; border-radius: 20px; }
+    .vc-pill { padding: 0 10px; font-size: 11px; }
+    .vc-colors { padding: 0 6px; }
+    .vc-swatch { width: 28px; height: 28px; margin: 0 2px; }
+    .vc-swatch-custom { width: 28px; height: 28px; margin: 0 2px; }
+    .vc-model-menu__trigger { font-size: 11px; max-width: 140px; }
+    .vc-3d-btn { padding: 0 10px; }
     .vc-3d-btn svg { width: 16px; height: 16px; }
 
-    /* Charging panel — keep the centered cluster, just shrink controls to fit. */
+    /* Charging panel — narrow the readouts but keep the 48dp touch targets. */
     .vc-panel.open.vc-panel-tall { max-height: 390px; }
-    .vc-charging-grid { padding: 0 8px; gap: 6px; }
-    .vc-schedule-bar { gap: 6px; }
-    .vc-time { min-width: 80px; height: 32px; font-size: 13px; }
-    .vc-seg { padding: 0 10px; height: 26px; font-size: 10px; }
-    #climateDurationSegmented .vc-seg { padding: 0 6px; min-width: 30px; }
-    .vc-day { height: 28px; min-width: 32px; font-size: 9px; padding: 0 6px; }
-    .vc-day-chips { gap: 3px; }
-    .vc-soc-slider { width: 160px; }
-    .vc-charging-divider { padding-top: 6px; }
+    .vc-time { min-width: 76px; font-size: 13px; }
+    .vc-seg { padding: 0 10px; font-size: 11px; }
+    #climateDurationSegmented .vc-seg { padding: 0 6px; }
+    .vc-day { padding: 0 6px; }
+    .vc-schedule-label { min-width: 56px; font-size: 11px; }
+    .vc-soc-slider { width: 100%; }
+
+    /* Windows go single-column: two aperture cards side by side leave no room
+       for five presets each once the panel is this narrow. */
+    .vc-window-row, .vc-window-row-wide { width: calc(100% - 8px); }
 }
 
 /* Physical-position fallbacks for the Chrome 58 WebView. */
 [dir="rtl"] .vc-nav-btn { left: auto; right: 10px; }
 [dir="rtl"] .vc-status-bar { left: 10px; right: 66px; }
-[dir="rtl"] .vc-status-bar-secondary { left: 10px; right: 66px; }
-[dir="rtl"] .vc-3d-btn { margin-left: 0; margin-right: auto; }
-[dir="rtl"] .vc-model-select {
-    padding-right: 12px;
-    padding-left: 26px;
-    background-position: left 9px center;
-}
 
 @media (max-width: 768px) {
     [dir="rtl"] .vc-status-bar { left: 10px; right: 66px; }
-    [dir="rtl"] .vc-status-bar-secondary { left: 10px; right: 66px; }
 }
 
 @media (max-width: 480px) {
     .vc-status-bar { left: 54px; right: 8px; }
-    .vc-status-bar > * { margin: 0 2px; }
-    .vc-pill { padding: 3px 7px; font-size: 9px; }
-    /* Spacing comes from the shared RTL-aware .compact-status-pill__dot rule. */
+    .vc-pill { padding: 0 8px; font-size: 10px; }
     .vc-pill .dot { width: 5px; height: 5px; }
-    .vc-colors { padding: 2px 4px; }
-    .vc-swatch { width: 18px; height: 18px; margin: 0 1px; }
-    .vc-swatch-custom { width: 18px; height: 18px; margin: 0 1px; }
-    .vc-model-select { padding: 3px 20px 3px 8px; font-size: 10px; max-width: 110px; border-radius: 14px; }
-    .vc-status-bar-secondary { top: 50px; left: 54px; right: 8px; gap: 4px; }
-    .vc-3d-btn { width: 36px; height: 36px; border-radius: 18px; }
+    .vc-colors { padding: 0 5px; }
+    .vc-swatch { width: 26px; height: 26px; margin: 0 1px; }
+    .vc-swatch-custom { width: 26px; height: 26px; margin: 0 1px; }
+    .vc-model-menu__trigger { font-size: 11px; max-width: 110px; }
+    .vc-3d-btn { padding: 0 9px; }
     .vc-3d-btn svg { width: 14px; height: 14px; }
-    .vc-3d-btn span { font-size: 6px; }
+    .vc-3d-btn span { font-size: 11px; margin-left: 6px; }
     .vc-bar { left: 1%; right: 1%; }
     .vc-tabs { padding: 5px 6px; }
     .vc-tabs > * { margin: 0 1px; }
@@ -1150,29 +1326,9 @@ button.vc-pill:active { -webkit-transform: scale(.95); transform: scale(.95); }
     .vc-segmented { padding: 1px; gap: 1px; }
     .vc-seg { padding: 0 7px; height: 24px; font-size: 9px; }
     .vc-day { height: 26px; min-width: 28px; font-size: 8px; padding: 0 4px; }
-    .vc-soc-slider { width: 120px; }
 }
 
 /* Ultra-short viewports (landscape phone) — keep labels but compact heights. */
-/* Short landscape panels: the size rules above are width-keyed, so a 1280x480
-   head unit keeps full-size callouts and the front/rear pair on one side can
-   overlap. Clamp on height too. */
-@media (max-height: 560px) {
-    .vc-tyre-callout { width: 132px; min-width: 132px; padding: 7px 9px 8px; }
-    .vc-tyre-psi-val { font-size: 20px; }
-    /* Clear the floating chrome instead of sliding under it:
-       - Rear pair must start BELOW the appearance row (.vc-status-bar-secondary
-         top:56px + 48px touch-target swatches ≈ 112px bottom edge), which also
-         clears the view-mode (LITE) toggle pinned at that row's right end.
-       - Front pair must end ABOVE the tab bar (bottom:12px + ~66px bar height
-         ≈ 78px top edge). The old 96px/72px values left both pairs partially
-         hidden behind the chrome on 1024×5xx viewports. */
-    .vc-tyre-callout[data-corner="rl"],
-    .vc-tyre-callout[data-corner="rr"] { top: 120px; }
-    .vc-tyre-callout[data-corner="fl"],
-    .vc-tyre-callout[data-corner="fr"] { bottom: 86px; }
-}
-
 @media (max-height: 500px) {
     .vc-tab { height: 40px; min-width: 56px; }
     .vc-tab svg { width: 14px; height: 14px; margin-bottom: 0; }
@@ -1188,7 +1344,6 @@ button.vc-pill:active { -webkit-transform: scale(.95); transform: scale(.95); }
 .vc-modal-overlay {
     position: fixed; top: 0; left: 0; right: 0; bottom: 0;
     background: var(--vc-modal-overlay);
-    -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
     z-index: 9999;
     display: -webkit-flex; display: flex;
     -webkit-align-items: center; align-items: center;
@@ -1204,85 +1359,146 @@ button.vc-pill:active { -webkit-transform: scale(.95); transform: scale(.95); }
 .vc-modal {
     background: var(--vc-modal-bg);
     border: 1px solid var(--vc-border);
-    border-radius: 20px;
-    padding: 32px 28px 24px;
-    max-width: 340px;
+    border-radius: var(--radius-md);
+    padding: 24px 24px 20px;
+    max-width: 360px;
     width: 90%;
-    text-align: center;
-    -webkit-transform: scale(0.92) translateY(10px);
-    transform: scale(0.92) translateY(10px);
-    -webkit-transition: transform .25s ease; transition: transform .25s ease;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 40px rgba(239,68,68,0.05);
+    -webkit-transform: scale(0.96);
+    transform: scale(0.96);
+    -webkit-transition: transform .2s ease; transition: transform .2s ease;
+    box-shadow: var(--shadow-lg);
 }
 .vc-modal-overlay.visible .vc-modal {
-    -webkit-transform: scale(1) translateY(0);
-    transform: scale(1) translateY(0);
+    -webkit-transform: scale(1); transform: scale(1);
 }
 .vc-modal-icon {
-    width: 56px; height: 56px;
-    margin: 0 auto 16px;
-    border-radius: 50%;
-    background: rgba(239,68,68,0.1);
-    border: 1px solid rgba(239,68,68,0.2);
+    width: 48px; height: 48px;
+    margin-bottom: 16px;
+    border-radius: var(--radius-md);
+    background: var(--status-info-container);
     display: -webkit-flex; display: flex;
     -webkit-align-items: center; align-items: center;
     -webkit-justify-content: center; justify-content: center;
 }
 .vc-modal-icon svg {
-    width: 28px; height: 28px;
-    color: var(--status-danger);
+    width: 26px; height: 26px;
+    color: var(--status-info);
 }
 .vc-modal-title {
-    font-size: 16px;
-    font-weight: 700;
+    font-size: 18px;
+    font-weight: 600;
     color: var(--vc-text-primary);
     margin-bottom: 8px;
 }
 .vc-modal-text {
-    font-size: 13px;
+    font-size: 14px;
     color: var(--vc-text-secondary);
     line-height: 1.5;
-    margin-bottom: 24px;
+    margin-bottom: 20px;
 }
 .vc-modal-text strong {
     color: var(--vc-text-strong);
 }
+.vc-modal-actions {
+    display: -webkit-flex; display: flex;
+    -webkit-justify-content: flex-end; justify-content: flex-end;
+    -webkit-flex-wrap: wrap; flex-wrap: wrap;
+}
+.vc-modal-actions > * { margin-left: 8px; }
+[dir="rtl"] .vc-modal-actions > * { margin-left: 0; margin-right: 8px; }
 .vc-modal-btn {
-    display: inline-block;
-    padding: 10px 28px;
+    display: -webkit-inline-flex; display: inline-flex;
+    -webkit-align-items: center; align-items: center;
+    -webkit-justify-content: center; justify-content: center;
+    padding: 0 20px;
     min-height: 48px;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
+    border: none;
+    background: var(--surface-container-highest);
+    color: var(--vc-text-primary);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.vc-modal-btn.primary {
+    background: var(--primary);
+    color: var(--on-primary);
+}
+.vc-modal-btn:active {
+    -webkit-transform: scale(0.97); transform: scale(0.97);
+}
+
+/* ===== CUSTOM PAINT MODAL =====
+   In-app replacement for <input type="color">, whose OS picker arrives with its
+   own chrome (blue title bar on Android 7) that no page style can reach. */
+.vc-color-grid {
+    display: -webkit-flex; display: flex;
+    -webkit-flex-wrap: wrap; flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+.vc-color-cell {
+    width: 44px; height: 44px;
+    margin: 0 8px 8px 0;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--vc-border);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+[dir="rtl"] .vc-color-cell { margin: 0 0 8px 8px; }
+.vc-color-cell.active { box-shadow: 0 0 0 2px var(--vc-modal-bg), 0 0 0 4px var(--primary); }
+.vc-color-hex-row {
+    display: -webkit-flex; display: flex;
+    -webkit-align-items: center; align-items: center;
+    margin-bottom: 20px;
+}
+.vc-color-preview {
+    width: 48px; height: 48px;
+    -webkit-flex-shrink: 0; flex-shrink: 0;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--vc-border);
+}
+.vc-color-hex {
+    -webkit-flex: 1; flex: 1;
+    min-width: 0;
+    height: 48px;
+    margin-left: 12px;
+    padding: 0 12px;
+    border-radius: var(--radius-md);
     border: 1px solid var(--vc-border);
     background: var(--vc-tile-bg);
     color: var(--vc-text-primary);
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    -webkit-transition: all .15s; transition: all .15s;
+    font-family: var(--family-mono);
+    font-size: 15px;
+    text-transform: uppercase;
+    outline: none;
 }
-.vc-modal-btn:hover {
-    border-color: var(--primary);
-    background: rgba(0,212,170,0.08);
-    color: var(--primary);
-}
-.vc-modal-btn:active {
-    -webkit-transform: scale(0.95); transform: scale(0.95);
-}
+[dir="rtl"] .vc-color-hex { margin-left: 0; margin-right: 12px; }
+.vc-color-hex:focus { border-color: var(--primary); }
+.vc-color-hex.invalid { border-color: var(--status-danger); }
 
 /* ==================== LITE MODE ====================
    html.vc-mode-lite is set by the inline bootstrap in vehicle-control.html
-   BEFORE first paint (localStorage 'vc.viewMode'; default lite). Lite never
-   loads three.js / gsap / SotaPlayer or the GLB — the viewport shows a
-   static silhouette instead of the canvas. The tyre callouts are already
-   pure-CSS corner-pinned in both modes, so they need no lite overrides.
+   BEFORE first paint (localStorage 'vc.viewMode'; default lite), and rewritten
+   by VC._syncViewModeChip() when the user toggles modes. A lite boot skips
+   three.js / gsap / SotaPlayer and the GLB entirely — the viewport shows a
+   static render instead of the canvas; toggling into 3D fetches the vendor
+   stack on demand. The tyre callouts are already pure-CSS corner-pinned in
+   both modes, so they need no lite overrides.
    The appearance controls (paint swatches, model picker, 3D surround
    toggle) act on the 3D scene and hide with it; VC.initLiteMode() also
    hides them inline as belt-and-braces. */
 html.vc-mode-lite #vehicleCanvas,
 html.vc-mode-lite .vc-loading,
 html.vc-mode-lite .vc-colors,
-html.vc-mode-lite .vc-model-select,
+html.vc-mode-lite .vc-model-menu,
 html.vc-mode-lite #btn3dView {
+    display: none;
+}
+
+/* The surround stream has no host in the app WebView. Hidden from the first
+   paint here so no entry path can show it before init3dButton runs. */
+html.is-app-webview #btn3dView {
     display: none;
 }
 
@@ -1295,12 +1511,19 @@ html.vc-mode-lite .vc-lite-hero {
     -webkit-align-items: center; align-items: center;
     -webkit-justify-content: center; justify-content: center;
     pointer-events: none;
-    /* Inherits the themed text colour; heavy fade so it reads as a
-       backdrop, not content. */
-    opacity: 0.35;
+    /* Insets keep the car clear of the two floating chrome rows above and the
+       tyre strip + category dock below. */
+    box-sizing: border-box;
+    padding: 112px 24px 190px;
 }
-.vc-lite-hero svg {
-    width: 46%;
-    max-width: 430px;
+.vc-lite-hero img {
+    display: none;
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
     height: auto;
+}
+.vc-lite-hero.has-art img { display: block; }
+@media (max-height: 560px) {
+    .vc-lite-hero { padding: 96px 16px 150px; }
 }

@@ -580,7 +580,7 @@
     <string name="setup_traffic_body">BYD ट्रैफिक मॉनिटर इंटरनेट तक पहुंचने से तृतीय-पक्ष ऐप्स को ब्लॉक करता है। इसे अक्षम करने से OverDrive और आपके द्वारा स्थापित किए जाने वाले किसी भी अन्य ऐप को वास्तव में नेटवर्क का उपयोग करने की अनुमति मिलती है। इसके बाद हार्ड रीबूट की आवश्यकता होती है।</string>
     <string name="setup_traffic_button">खुले यातायात मॉनिटर</string>
     <string name="setup_camera_fix_title">कैमरा काली या गलत फीड करता है?</string>
-    <string name="setup_camera_fix_body">खोलें डायग्नोस्टिक्स → कैमरा जांच, कैमरा आईडी को 0 पर सेट करें, सहेजें टैप करें, फिर कैमरा डेमन को पुनरारंभ करें। यदि फ़ीड अभी भी गलत हैं, तो कैमरा आईडी 1 के साथ दोहराएं। मानचित्रण अनुभाग को छुआ हुआ छोड़ दें।</string>
+    <string name="setup_camera_fix_body">कैमरा जांच, कैमरा आईडी को 0 पर सेट करें, सहेजें टैप करें, फिर कैमरा डेमन को पुनरारंभ करें। यदि फ़ीड अभी भी गलत हैं, तो कैमरा आईडी 1 के साथ दोहराएं। मानचित्रण अनुभाग को छुआ हुआ छोड़ दें।</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">वर्तमानः कैमरा %1$d (मैनुअल)</string>
@@ -760,6 +760,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">निगरानी पर</string>
+    <string name="dashboard_modern_vehicle_status">वाहन की स्थिति</string>
     <string name="dashboard_subtitle_all_systems">सभी प्रणाली ऑनलाइन</string>
     <string name="dashboard_subtitle_some_offline">%1$d की %2$d सेवाएं ऑनलाइन</string>
     <string name="dashboard_subtitle_no_tunnel">दूरस्थ पहुँच ऑफ़लाइन</string>
@@ -783,11 +784,11 @@
     <string name="vehicle_dialog_model_label">मॉडल</string>
     <string name="vehicle_dialog_save">सहेजें</string>
     <string name="vehicle_dialog_reset">ऑटो-डिटेक्ट करने के लिए रीसेट करें</string>
+    <string name="vehicle_dialog_detection">पहछान: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">स्वचालित</string>
+    <string name="vehicle_dialog_detection_manual">मैन्युअल</string>
     <string name="vehicle_dialog_invalid_capacity">क्षमता 15 से 120 kWh होनी चाहिए</string>
-    <string name="vehicle_dialog_summary_capacity">क्षमताः %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">प्रभावी: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">मॉडल: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">अंतिम माप: %1$.1f%% पर %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">अनुपलब्ध</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->
@@ -1340,4 +1341,11 @@
     <string name="projection_autostart_conflict_confirm">इस ऐप का उपयोग करें</string>
     <string name="projection_app_uninstalled">वह ऐप अब इंस्टॉल नहीं है।</string>
     <string name="projection_status_service_down">मिरर सेवा तैयार नहीं है — ऐप (या कैमरा डेमन) पुनः आरंभ करें और फिर से प्रयास करें।</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">कैमरे</string>
+    <string name="rail_section_controls">नियंत्रण</string>
+    <string name="rail_section_driving">ड्राइविंग</string>
+    <string name="rail_section_automation">स्वचालन</string>
+    <string name="rail_section_system">सिस्टम</string>
+    <string name="rail_collapse_label">समेटें</string>
 </resources>

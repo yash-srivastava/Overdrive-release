@@ -53,7 +53,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnPrevDay"
-            style="@style/Widget.Material3.Button.IconButton"
+            style="@style/Widget.Overdrive.M3.HeaderIconButton"
             android:layout_width="48dp"
             android:layout_height="48dp"
             android:contentDescription="@string/cd_previous_day"
@@ -71,11 +71,12 @@
             android:layout_marginHorizontal="@dimen/card_gap_vertical"
             android:clickable="true"
             android:focusable="true"
-            app:cardBackgroundColor="?attr/colorSurfaceVariant"
+            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
             app:cardElevation="0dp"
             app:cardCornerRadius="@dimen/card_radius_accent"
             app:rippleColor="?attr/colorPrimary"
-            app:strokeWidth="0dp">
+            app:strokeColor="?attr/colorOutlineVariant"
+            app:strokeWidth="1dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -132,7 +133,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnNextDay"
-            style="@style/Widget.Material3.Button.IconButton"
+            style="@style/Widget.Overdrive.M3.HeaderIconButton"
             android:layout_width="48dp"
             android:layout_height="48dp"
             android:contentDescription="@string/cd_next_day"
@@ -175,7 +176,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnOpenFilters"
-            style="@style/Widget.Material3.Button.OutlinedButton"
+            style="@style/Widget.Overdrive.M3.Button.Outlined"
             android:layout_width="wrap_content"
             android:layout_height="48dp"
             android:layout_marginStart="8dp"
@@ -210,27 +211,31 @@
             android:paddingTop="4dp"
             android:paddingBottom="76dp" />
 
+        <!-- First-load placeholders stand in for clip cards, so the list keeps its
+             shape instead of collapsing to a centred spinner. -->
         <LinearLayout
             android:id="@+id/initialLoadingContainer"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:gravity="center"
+            android:contentDescription="@string/recording_library_loading"
             android:orientation="vertical"
-            android:padding="32dp"
+            android:paddingHorizontal="20dp"
+            android:paddingTop="4dp"
             android:visibility="gone">
 
-            <ProgressBar
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:indeterminateTint="?attr/colorPrimary" />
+            <include layout="@layout/skeleton_tile" />
 
-            <TextView
-                android:layout_width="wrap_content"
+            <include
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
-                android:text="@string/recording_library_loading"
-                android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
-                android:textColor="?attr/colorOnSurfaceVariant" />
+                layout="@layout/skeleton_tile" />
+
+            <include
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                layout="@layout/skeleton_tile" />
         </LinearLayout>
 
         <!-- SOTA empty state: tonal icon disc + headline + body + CTA.
@@ -248,14 +253,14 @@
             <FrameLayout
                 android:layout_width="80dp"
                 android:layout_height="80dp"
-                android:background="@drawable/recording_lib_empty_disc">
+                android:background="@drawable/recording_lib_empty_tile">
 
                 <ImageView
                     android:layout_width="40dp"
                     android:layout_height="40dp"
                     android:layout_gravity="center"
                     android:contentDescription="@null"
-                    android:src="@drawable/ic_videocam_off"
+                    android:src="@drawable/ic_recording_file"
                     app:tint="?attr/colorOnSurfaceVariant" />
             </FrameLayout>
 
@@ -286,7 +291,7 @@
                  case via [setEmptyStateMode]. -->
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnEmptyClearFilters"
-                style="@style/Widget.Material3.Button.TonalButton"
+                style="@style/Widget.Overdrive.M3.Button.Tonal"
                 android:layout_width="wrap_content"
                 android:layout_height="48dp"
                 android:layout_marginTop="20dp"
@@ -299,7 +304,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnEmptyRetry"
-                style="@style/Widget.Material3.Button.TonalButton"
+                style="@style/Widget.Overdrive.M3.Button.Tonal"
                 android:layout_width="wrap_content"
                 android:layout_height="48dp"
                 android:layout_marginTop="16dp"
@@ -316,8 +321,10 @@
             android:layout_margin="16dp"
             android:visibility="gone"
             app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-            app:cardCornerRadius="8dp"
-            app:cardElevation="4dp">
+            app:cardCornerRadius="@dimen/card_radius_standard"
+            app:cardElevation="0dp"
+            app:strokeColor="?attr/colorOutlineVariant"
+            app:strokeWidth="1dp">
 
             <LinearLayout
                 android:layout_width="wrap_content"
@@ -346,7 +353,7 @@
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnLoadRetry"
-                    style="@style/Widget.Material3.Button.TextButton"
+                    style="@style/Widget.Overdrive.M3.Button.Text"
                     android:layout_width="wrap_content"
                     android:layout_height="48dp"
                     android:layout_marginStart="8dp"
@@ -374,8 +381,9 @@
         android:visibility="gone"
         app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
         app:cardCornerRadius="@dimen/card_radius_accent"
-        app:cardElevation="6dp"
-        app:strokeWidth="0dp">
+        app:cardElevation="0dp"
+        app:strokeColor="?attr/colorOutlineVariant"
+        app:strokeWidth="1dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -397,7 +405,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnSelectAll"
-                style="@style/Widget.Material3.Button.TextButton"
+                style="@style/Widget.Overdrive.M3.Button.Text"
                 android:layout_width="wrap_content"
                 android:layout_height="48dp"
                 android:text="@string/action_select_all_short"
@@ -406,7 +414,7 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnShareSelected"
-                style="@style/Widget.Material3.Button.TextButton"
+                style="@style/Widget.Overdrive.M3.Button.Text"
                 android:layout_width="wrap_content"
                 android:layout_height="48dp"
                 android:contentDescription="@string/cd_share"
@@ -418,15 +426,15 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnDeleteSelected"
-                style="@style/Widget.Material3.Button.TextButton"
+                style="@style/Widget.Overdrive.M3.Button.Text"
                 android:layout_width="wrap_content"
                 android:layout_height="48dp"
                 android:text="@string/action_delete"
                 android:textSize="12sp"
                 android:textAllCaps="false"
-                android:textColor="@color/status_danger"
+                android:textColor="@color/overdrive_status_danger"
                 app:icon="@drawable/ic_delete"
-                app:iconTint="@color/status_danger"
+                app:iconTint="@color/overdrive_status_danger"
                 app:iconSize="16dp" />
 
             <com.google.android.material.button.MaterialButton

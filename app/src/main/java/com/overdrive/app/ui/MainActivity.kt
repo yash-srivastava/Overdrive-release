@@ -23,7 +23,7 @@ import androidx.navigation.NavController
 import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.ui.AppBarConfiguration
 import androidx.navigation.ui.navigateUp
-import androidx.navigation.ui.setupWithNavController
+import androidx.navigation.ui.setupActionBarWithNavController
 import com.overdrive.app.logging.LogLevel
 import com.overdrive.app.logging.LogManager
 // import com.overdrive.app.shell.PrivilegedShellSetup
@@ -33,6 +33,7 @@ import com.overdrive.app.ui.model.DaemonStatus
 import com.overdrive.app.ui.model.DaemonType
 import com.overdrive.app.ui.model.NavigationRailSwipePolicy
 import com.overdrive.app.ui.model.TunnelDisplayPolicy
+import com.overdrive.app.ui.fragment.SettingsFragment
 import com.overdrive.app.ui.navigation.NavigationRailCatalog
 import com.overdrive.app.ui.privacy.ScreenshotPrivacyController
 import com.overdrive.app.ui.util.PreferencesManager
@@ -79,9 +80,11 @@ open class MainActivity : AppCompatActivity() {
     // Floor for a re-toggle that interrupts a slide part-way: the duration
     // scales with the distance left, but never gets so short it reads as a snap.
     private val RAIL_ANIMATION_MIN_MS = 140L
-    // Chevron's distance from the rail's trailing edge when expanded:
-    // 8dp margin + half of the 48dp button.
-    private val RAIL_CHEVRON_EDGE_INSET_DP = 32
+    // The always-pinned rows. Every other key lives in NavigationRailCatalog,
+    // which is the set the user can hide.
+    private val RAIL_KEY_DASHBOARD = "dashboard"
+    private val RAIL_KEY_SETTINGS = "settings"
+    private val RAIL_KEY_ABOUT = "about"
     private val KEY_RAIL_EXPANDED = "navigation_rail_expanded"
     // M3 emphasized-decelerate — same curve ZoomableVideoView uses, so the rail
     // shares the app's motion vocabulary instead of a stock Decelerate.
@@ -107,6 +110,11 @@ open class MainActivity : AppCompatActivity() {
     private lateinit var toolbar: MaterialToolbar
     private lateinit var navigationRail: LinearLayout
     private lateinit var navigationRailScroll: SwipeExpandableRailScrollView
+    // The rail's outer column: wordmark, scrolling destinations, pinned
+    // collapse row. Width animates here, not on the scroller.
+    private lateinit var navigationRailContainer: LinearLayout
+    private var navigationRailBrand: TextView? = null
+    private var navigationRailCollapseRow: LinearLayout? = null
     private var navigationRailExpanded = false
     private var navigationRailAnimator: ValueAnimator? = null
     // Which form the rows currently hold. Rows sit in expanded form for the
@@ -116,6 +124,48 @@ open class MainActivity : AppCompatActivity() {
     private var navigationRailRowsExpandedForm = false
     private var railItems: List<RailItem> = emptyList()
     private var railActionItems: List<RailActionItem> = emptyList()
+    // Order here must track the include order in both activity_main_new.xml
+    // variants; the layouts are what actually place headers among the rows.
+    private val railSections = listOf(
+        RailSection(
+            R.id.railSectionCameras, R.string.rail_section_cameras,
+            setOf(NavigationRailCatalog.LIVE, NavigationRailCatalog.RECORDINGS)
+        ),
+        RailSection(
+            R.id.railSectionControls, R.string.rail_section_controls,
+            setOf(
+                NavigationRailCatalog.VEHICLE,
+                NavigationRailCatalog.SEAT_POSITIONS,
+                NavigationRailCatalog.PROJECTION,
+                NavigationRailCatalog.CHARGING,
+            )
+        ),
+        RailSection(
+            R.id.railSectionDriving, R.string.rail_section_driving,
+            setOf(
+                NavigationRailCatalog.TRIPS,
+                NavigationRailCatalog.ROAD_SENSE,
+                NavigationRailCatalog.MAP,
+            )
+        ),
+        RailSection(
+            R.id.railSectionAutomation, R.string.rail_section_automation,
+            setOf(
+                NavigationRailCatalog.AUTOMATIONS,
+                NavigationRailCatalog.KEY_MAPPING,
+                NavigationRailCatalog.INTEGRATIONS,
+            )
+        ),
+        RailSection(
+            R.id.railSectionSystem, R.string.rail_section_system,
+            setOf(
+                NavigationRailCatalog.NETWORK,
+                NavigationRailCatalog.DIAGNOSTICS,
+                RAIL_KEY_SETTINGS,
+                RAIL_KEY_ABOUT,
+            )
+        ),
+    )
     private lateinit var tvCurrentUrl: TextView
     private lateinit var urlBar: View
     private lateinit var statusPill: View
@@ -1404,6 +1454,9 @@ open class MainActivity : AppCompatActivity() {
         toolbar = findViewById(R.id.toolbar)
         navigationRail = findViewById(R.id.navigationRail)
         navigationRailScroll = findViewById(R.id.navigationRailScroll)
+        navigationRailContainer = findViewById(R.id.navigationRailContainer)
+        navigationRailBrand = findViewById(R.id.railBrand)
+        navigationRailCollapseRow = findViewById(R.id.railCollapseRow)
         tvCurrentUrl = findViewById(R.id.tvCurrentUrl)
         urlBar = findViewById(R.id.urlBar)
         statusPill = findViewById(R.id.statusPill)
@@ -1435,6 +1488,7 @@ open class MainActivity : AppCompatActivity() {
                 R.id.liveViewFragment,
                 R.id.recordingsFragment,
                 R.id.vehicleControlFragment,
+                R.id.seatPositionsFragment,
                 R.id.projectionFragment,
                 R.id.tripsFragment,
                 R.id.chargingFragment,
@@ -1449,7 +1503,19 @@ open class MainActivity : AppCompatActivity() {
             )
         )
 
-        toolbar.setupWithNavController(navController, appBarConfiguration)
+        // The ActionBar wrapper marks the title as explicitly set, which stops
+        // AppCompat re-applying the activity label over the destination label.
+        setupActionBarWithNavController(navController, appBarConfiguration)
+
+        // Settings is a top-level rail destination, so NavigationUI hides the
+        // up caret; it has to be restored when Recordings opens it as a child.
+        navController.addOnDestinationChangedListener { _, destination, arguments ->
+            if (destination.id == R.id.settingsFragment &&
+                arguments?.getBoolean(SettingsFragment.KEY_FROM_RECORDINGS) == true
+            ) {
+                supportActionBar?.setDisplayHomeAsUpEnabled(true)
+            }
+        }
 
         setupCustomRail(savedInstanceState)
     }
@@ -1464,10 +1530,10 @@ open class MainActivity : AppCompatActivity() {
      * code-driven nav also light up the right rail item.
      */
     private fun setupCustomRail(savedInstanceState: Bundle?) {
-        // Order matches the previous rail_menu.xml so user's mental model
-        // stays the same.
+        // Order mirrors the include order in activity_main_new.xml, which is
+        // where the category headers sit between these rows.
         val items = listOf(
-            RailItem("dashboard", R.id.railDestDashboard, R.id.dashboardFragment,
+            RailItem(RAIL_KEY_DASHBOARD, R.id.railDestDashboard, R.id.dashboardFragment,
                 R.drawable.ic_dashboard, R.string.rail_dashboard),
             RailItem(NavigationRailCatalog.ASSISTANT, R.id.railDestAssistant,
                 R.id.genAiFragment, R.drawable.ic_smart_toy, R.string.rail_assistant),
@@ -1489,11 +1555,19 @@ open class MainActivity : AppCompatActivity() {
             RailItem(NavigationRailCatalog.PROJECTION, R.id.railDestProjection,
                 R.id.projectionFragment,
                 R.drawable.ic_projection, R.string.rail_projection),
-            RailItem(NavigationRailCatalog.TRIPS, R.id.railDestTrips, R.id.tripsFragment,
-                R.drawable.ic_trips, R.string.rail_trips),
             RailItem(NavigationRailCatalog.CHARGING, R.id.railDestCharging,
                 R.id.chargingFragment,
                 R.drawable.ic_charging, R.string.rail_charging),
+            RailItem(NavigationRailCatalog.TRIPS, R.id.railDestTrips, R.id.tripsFragment,
+                R.drawable.ic_trips, R.string.rail_trips),
+            RailItem(NavigationRailCatalog.ROAD_SENSE, R.id.railDestRoadSense,
+                R.id.roadSenseFragment,
+                R.drawable.ic_roadsense, R.string.rail_roadsense),
+            // Hazard Map is a standalone Activity, not a nav-graph fragment,
+            // so it launches via startActivity (destinationId = 0).
+            RailItem(NavigationRailCatalog.MAP, R.id.railDestMap, 0,
+                R.drawable.ic_roadsense_map, R.string.rail_hazard_map,
+                launchActivity = com.overdrive.app.navmap.RoadSenseMapActivity::class.java),
             RailItem(NavigationRailCatalog.AUTOMATIONS, R.id.railDestAutomations,
                 R.id.automationsFragment,
                 R.drawable.ic_automations, R.string.rail_automations),
@@ -1509,14 +1583,6 @@ open class MainActivity : AppCompatActivity() {
                     R.id.mqttFragment,
                     R.id.bydCloudFragment,
                 )),
-            RailItem(NavigationRailCatalog.ROAD_SENSE, R.id.railDestRoadSense,
-                R.id.roadSenseFragment,
-                R.drawable.ic_roadsense, R.string.rail_roadsense),
-            // Hazard Map is a standalone Activity, not a nav-graph fragment,
-            // so it launches via startActivity (destinationId = 0).
-            RailItem(NavigationRailCatalog.MAP, R.id.railDestMap, 0,
-                R.drawable.ic_roadsense_map, R.string.rail_hazard_map,
-                launchActivity = com.overdrive.app.navmap.RoadSenseMapActivity::class.java),
             RailItem(NavigationRailCatalog.NETWORK, R.id.railDestNetwork,
                 R.id.networkFragment,
                 R.drawable.ic_hotspot, R.string.rail_network),
@@ -1524,13 +1590,13 @@ open class MainActivity : AppCompatActivity() {
                 R.id.diagnosticsFragment,
                 R.drawable.ic_diagnostics, R.string.rail_diagnostics,
                 ownedDestinationIds = setOf(R.id.adbConsoleFragment)),
-            RailItem("settings", R.id.railDestSettings, R.id.settingsFragment,
+            RailItem(RAIL_KEY_SETTINGS, R.id.railDestSettings, R.id.settingsFragment,
                 R.drawable.ic_settings, R.string.rail_settings,
                 ownedDestinationIds = setOf(
                     R.id.daemonsFragment,
                     R.id.settingsSecurityFragment,
                 )),
-            RailItem("about", R.id.railDestAbout, R.id.settingsAboutFragment,
+            RailItem(RAIL_KEY_ABOUT, R.id.railDestAbout, R.id.settingsAboutFragment,
                 R.drawable.ic_update, R.string.settings_section_about)
         )
         railItems = items
@@ -1585,14 +1651,27 @@ open class MainActivity : AppCompatActivity() {
             row.setOnClickListener(item.onClick)
         }
 
+        railSections.forEach { section ->
+            navigationRail.findViewById<View>(section.headerId)
+                ?.findViewById<TextView>(R.id.railSectionLabel)
+                ?.setText(section.labelRes)
+        }
+
         // Portrait keeps these actions in the toolbar. Landscape renders
         // them as full rail rows after the destination list.
         findViewById<View>(R.id.toolbarLanguageButton)?.setOnClickListener(languageClick)
         findViewById<View>(R.id.toolbarHelpButton)?.setOnClickListener(helpClick)
 
-        val expandButton = navigationRail.findViewById<ImageButton>(R.id.railExpandButton)
-        expandButton?.setOnClickListener {
-            setNavigationRailExpanded(!navigationRailExpanded, animate = true)
+        navigationRailCollapseRow?.let { row ->
+            row.findViewById<ImageView>(R.id.railItemIcon)
+                ?.setImageResource(R.drawable.ic_chevron_right)
+            // The label is only visible while the rail is expanded; the
+            // collapsed state names the action via tooltip and contentDescription.
+            row.findViewById<TextView>(R.id.railItemLabel)
+                ?.setText(R.string.rail_collapse_label)
+            row.setOnClickListener {
+                setNavigationRailExpanded(!navigationRailExpanded, animate = true)
+            }
         }
         navigationRailScroll.onRailSwipe = { action ->
             when (action) {
@@ -1675,11 +1754,19 @@ open class MainActivity : AppCompatActivity() {
     private fun applyNavigationRailVisibility(activeKey: String?) {
         val customizableKeys = NavigationRailCatalog.customizableKeys
         val visibleKeys = PreferencesManager.getVisibleNavigationKeys(customizableKeys)
+        val shownKeys = mutableSetOf<String>()
         railItems.forEach { item ->
             val fixed = item.key !in customizableKeys
             val visible = fixed || item.key in visibleKeys || item.key == activeKey
+            if (visible) shownKeys += item.key
             navigationRail.findViewById<View>(item.rowId)?.visibility =
                 if (visible) View.VISIBLE else View.GONE
+        }
+        // Unpinning every row in a group would otherwise leave its header
+        // titling nothing.
+        railSections.forEach { section ->
+            navigationRail.findViewById<View>(section.headerId)?.visibility =
+                if (section.itemKeys.any { it in shownKeys }) View.VISIBLE else View.GONE
         }
     }
 
@@ -1688,6 +1775,17 @@ open class MainActivity : AppCompatActivity() {
         val iconRes: Int,
         val labelRes: Int,
         val onClick: View.OnClickListener
+    )
+
+    /**
+     * A category header and the destination keys filed under it. [itemKeys]
+     * drives nothing but the header's own visibility — row order lives in the
+     * layouts, so a header and its rows are only associated by position.
+     */
+    private data class RailSection(
+        val headerId: Int,
+        val labelRes: Int,
+        val itemKeys: Set<String>
     )
 
     /**
@@ -1706,8 +1804,8 @@ open class MainActivity : AppCompatActivity() {
         navigationRailExpanded = expanded
         // Capture the in-flight width before cancelling so an interrupted slide
         // resumes from where it is rather than jumping to a stale edge.
-        val startWidth = navigationRailScroll.width
-            .takeIf { it > 0 } ?: navigationRailScroll.layoutParams.width
+        val startWidth = navigationRailContainer.width
+            .takeIf { it > 0 } ?: navigationRailContainer.layoutParams.width
         // Clear the field BEFORE cancelling: cancel() delivers onAnimationEnd
         // synchronously, and the identity check there is what stops the outgoing
         // slide from settling rows to a state this call is about to replace.
@@ -1718,15 +1816,16 @@ open class MainActivity : AppCompatActivity() {
         val targetWidth = dp(
             if (expanded) RAIL_EXPANDED_WIDTH_DP else RAIL_COMPACT_WIDTH_DP
         )
-        if (!animate || !stateChanged || !navigationRailScroll.isLaidOut) {
+        if (!animate || !stateChanged || !navigationRailContainer.isLaidOut) {
             updateRailExpandButton(expanded, animate = false, durationMs = 0L)
-            navigationRailScroll.layoutParams =
-                navigationRailScroll.layoutParams.apply { width = targetWidth }
+            navigationRailContainer.layoutParams =
+                navigationRailContainer.layoutParams.apply { width = targetWidth }
             // force: this is the assert-the-truth path (first bind, rotation,
             // density change), so it must re-apply even if the memo agrees —
             // dp() padding is density-derived and can go stale.
             applyRailItemLayout(expanded, force = true)
             if (expanded) setRailLabelsVisible(true, durationMs = 0L)
+            setRailSectionsExpanded(expanded, durationMs = 0L)
             return
         }
 
@@ -1743,13 +1842,14 @@ open class MainActivity : AppCompatActivity() {
         // Expanded row geometry for the entire slide — see the kdoc above.
         applyRailItemLayout(true)
         setRailLabelsVisible(expanded, durationMs = slideMs)
+        setRailSectionsExpanded(expanded, durationMs = slideMs)
 
         navigationRailAnimator = ValueAnimator.ofInt(startWidth, targetWidth).apply {
             duration = slideMs
             interpolator = RAIL_EASING
             addUpdateListener { animator ->
-                navigationRailScroll.layoutParams =
-                    navigationRailScroll.layoutParams.apply {
+                navigationRailContainer.layoutParams =
+                    navigationRailContainer.layoutParams.apply {
                         width = animator.animatedValue as Int
                     }
             }
@@ -1804,15 +1904,71 @@ open class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Cross-fade each category header between its label and the hairline that
+     * stands in for it at the compact 80dp width. Header height is fixed, so
+     * neither state relayouts the rail. A duration of 0 applies the end state
+     * immediately.
+     */
+    private fun setRailSectionsExpanded(expanded: Boolean, durationMs: Long) {
+        railSections.forEach { section ->
+            val header = navigationRail.findViewById<View>(section.headerId)
+                ?: return@forEach
+            val label = header.findViewById<TextView>(R.id.railSectionLabel)
+                ?: return@forEach
+            val rule = header.findViewById<View>(R.id.railSectionRule) ?: return@forEach
+            label.animate().cancel()
+            rule.animate().cancel()
+            if (durationMs <= 0L) {
+                label.alpha = if (expanded) 1f else 0f
+                // INVISIBLE, not GONE: the fixed height stays either way, and
+                // this keeps the hidden label out of the a11y tree.
+                label.visibility = if (expanded) View.VISIBLE else View.INVISIBLE
+                rule.alpha = if (expanded) 0f else 1f
+                return@forEach
+            }
+            label.visibility = View.VISIBLE
+            label.animate()
+                .alpha(if (expanded) 1f else 0f)
+                // Same halves as the row labels: text arrives once the rail has
+                // the width for it, and leaves before the rail narrows.
+                .setStartDelay(if (expanded) durationMs / 2 else 0L)
+                .setDuration(durationMs / 2)
+                .setInterpolator(RAIL_EASING)
+                .withEndAction { if (!expanded) label.visibility = View.INVISIBLE }
+                .start()
+            rule.animate()
+                .alpha(if (expanded) 0f else 1f)
+                .setStartDelay(if (expanded) 0L else durationMs / 2)
+                .setDuration(durationMs / 2)
+                .setInterpolator(RAIL_EASING)
+                .start()
+        }
+    }
+
     /** Drops any queued label / chevron view animations. */
     private fun cancelRailViewAnimations() {
         forEachRailRow { row, _ ->
             row.findViewById<TextView>(R.id.railItemLabel)?.animate()?.cancel()
         }
-        navigationRail.findViewById<ImageButton>(R.id.railExpandButton)?.animate()?.cancel()
+        railSections.forEach { section ->
+            val header = navigationRail.findViewById<View>(section.headerId)
+                ?: return@forEach
+            header.findViewById<TextView>(R.id.railSectionLabel)?.animate()?.cancel()
+            header.findViewById<View>(R.id.railSectionRule)?.animate()?.cancel()
+        }
+        navigationRailCollapseRow
+            ?.findViewById<ImageView>(R.id.railItemIcon)
+            ?.animate()
+            ?.cancel()
     }
 
-    /** Walks every rail row — destinations then secondary actions. */
+    /**
+     * Walks every rail row — destinations, secondary actions, then the pinned
+     * collapse row, which lives outside [navigationRail] but takes the same
+     * compact/expanded treatment. The label res passed for it is the
+     * collapsed-state one, which is where the tooltip stands in for the label.
+     */
     private inline fun forEachRailRow(action: (LinearLayout, Int) -> Unit) {
         railItems.forEach { item ->
             navigationRail.findViewById<LinearLayout>(item.rowId)?.let {
@@ -1824,6 +1980,7 @@ open class MainActivity : AppCompatActivity() {
                 action(it, item.labelRes)
             }
         }
+        navigationRailCollapseRow?.let { action(it, R.string.rail_expand) }
     }
 
     /**
@@ -1840,11 +1997,30 @@ open class MainActivity : AppCompatActivity() {
         if (!force && navigationRailRowsExpandedForm == expanded) return
         navigationRailRowsExpandedForm = expanded
         forEachRailRow { row, labelRes -> applyRailRowLayout(row, labelRes, expanded) }
+        navigationRailBrand?.let { brand ->
+            val inset = resources.getDimensionPixelSize(
+                R.dimen.rail_item_pill_inset_horizontal
+            ) + resources.getDimensionPixelSize(R.dimen.rail_item_pill_content_inset)
+            brand.gravity = if (expanded) {
+                Gravity.START or Gravity.CENTER_VERTICAL
+            } else {
+                Gravity.CENTER
+            }
+            brand.setPadding(if (expanded) inset else dp(8), 0, dp(8), 0)
+        }
     }
 
     private fun applyRailRowLayout(row: LinearLayout, labelRes: Int, expanded: Boolean) {
         val label = row.findViewById<TextView>(R.id.railItemLabel) ?: return
-        val horizontalPadding = if (expanded) dp(12) else 0
+        // Must stay the insets rail_item_indicator.xml uses: content sits inside
+        // the selected plate, and with the 24dp icon this also holds the icon
+        // centre on the 40dp line at both rail widths.
+        val horizontalPadding = if (expanded) {
+            resources.getDimensionPixelSize(R.dimen.rail_item_pill_inset_horizontal) +
+                resources.getDimensionPixelSize(R.dimen.rail_item_pill_content_inset)
+        } else {
+            0
+        }
         val verticalPadding = dp(6)
 
         row.orientation =
@@ -1892,41 +2068,21 @@ open class MainActivity : AppCompatActivity() {
         animate: Boolean,
         durationMs: Long
     ) {
-        val button = navigationRail.findViewById<ImageButton>(R.id.railExpandButton)
-            ?: return
+        val row = navigationRailCollapseRow ?: return
+        val icon = row.findViewById<ImageView>(R.id.railItemIcon) ?: return
         val descriptionRes = if (expanded) R.string.rail_collapse else R.string.rail_expand
         val description = getString(descriptionRes)
-        button.contentDescription = description
-        TooltipCompat.setTooltipText(button, description)
+        row.contentDescription = description
 
-        button.animate().cancel()
+        icon.animate().cancel()
         // The vector auto-mirrors in RTL, so expansion alone controls rotation.
-        // Translation still mirrors because the rail grows from the other edge.
-        //
-        // Read the direction off the Configuration, not the View: this first runs
-        // from onCreate, and a View resolves its layoutDirection during layout —
-        // until then it reports LTR, which left the collapsed chevron pointing
-        // into the rail in RTL locales until the first toggle.
-        val rtl = resources.configuration.layoutDirection == View.LAYOUT_DIRECTION_RTL
         val targetRotation = if (expanded) 180f else 0f
-        // Translate rather than re-gravity: the button is centred by the rail's
-        // own gravity, so a gravity flip would jump. Offset runs from where the
-        // expanded rail centres it (half of 216dp) out to the trailing inset.
-        val trailingOffset =
-            dp(RAIL_EXPANDED_WIDTH_DP / 2 - RAIL_CHEVRON_EDGE_INSET_DP).toFloat()
-        val targetTranslation = when {
-            !expanded -> 0f
-            rtl -> -trailingOffset
-            else -> trailingOffset
-        }
         if (!animate) {
-            button.rotation = targetRotation
-            button.translationX = targetTranslation
+            icon.rotation = targetRotation
             return
         }
-        button.animate()
+        icon.animate()
             .rotation(targetRotation)
-            .translationX(targetTranslation)
             .setDuration(durationMs)
             .setInterpolator(RAIL_EASING)
             .start()
@@ -2087,6 +2243,12 @@ open class MainActivity : AppCompatActivity() {
     }
     
     override fun onSupportNavigateUp(): Boolean {
+        val fromRecordings = navController.currentDestination?.id == R.id.settingsFragment &&
+            navController.currentBackStackEntry?.arguments
+                ?.getBoolean(SettingsFragment.KEY_FROM_RECORDINGS) == true
+        if (fromRecordings) {
+            return navController.popBackStack()
+        }
         return navController.navigateUp(appBarConfiguration) || super.onSupportNavigateUp()
     }
     
@@ -4414,6 +4576,9 @@ open class MainActivity : AppCompatActivity() {
     fun openExpertTourEntry() {
         try { navController.navigate(R.id.diagnosticsFragment) } catch (_: Throwable) {}
     }
+
+    /** Setup-guide camera tip: land the user on Diagnostics, where the camera probe lives. */
+    fun invokeDiagnosticsScreen() = navigateToRailDestination(R.id.diagnosticsFragment)
 
     /**
      * A nav-rail ROW view by id (e.g. R.id.railDestMap), for the Expert tour to spotlight

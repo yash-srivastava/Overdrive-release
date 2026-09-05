@@ -7,7 +7,7 @@
     android:layout_marginBottom="8dp"
     android:foreground="?attr/selectableItemBackground"
     app:cardBackgroundColor="?attr/colorSurfaceContainer"
-    app:cardCornerRadius="8dp"
+    app:cardCornerRadius="@dimen/card_radius_standard"
     app:cardElevation="0dp">
 
     <LinearLayout
@@ -43,7 +43,7 @@
                 android:layout_height="wrap_content"
                 android:layout_gravity="top|start"
                 android:layout_margin="4dp"
-                android:background="#A6000000"
+                android:background="@color/recording_thumb_scrim"
                 android:paddingHorizontal="6dp"
                 android:paddingVertical="2dp"
                 android:textColor="@android:color/white"
@@ -56,7 +56,7 @@
                 android:layout_height="wrap_content"
                 android:layout_gravity="bottom|end"
                 android:layout_margin="4dp"
-                android:background="#A6000000"
+                android:background="@color/recording_thumb_scrim"
                 android:paddingHorizontal="6dp"
                 android:paddingVertical="2dp"
                 android:textColor="@android:color/white"

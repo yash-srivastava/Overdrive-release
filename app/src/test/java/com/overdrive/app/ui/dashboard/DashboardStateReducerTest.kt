@@ -21,7 +21,7 @@ class DashboardStateReducerTest {
         )
         state = DashboardStateReducer.activity(
             state,
-            listOf("Latest surveillance event", "Last charge"),
+            activityRows("Latest surveillance event", "Last charge"),
         )
         state = DashboardStateReducer.status(
             state,
@@ -36,7 +36,7 @@ class DashboardStateReducerTest {
         assertEquals(25, recordings.storage?.usagePercent)
         assertEquals(
             listOf("Latest surveillance event", "Last charge"),
-            (state.activity as DashboardUiState.ActivityState.Ready).rows,
+            activityTexts(state),
         )
     }
 
@@ -61,13 +61,28 @@ class DashboardStateReducerTest {
     fun activityRowsAreStableDeduplicatedAndBounded() {
         val state = DashboardStateReducer.activity(
             DashboardUiState(),
-            listOf(" Alert ", "Charge", "Alert", "Parking", "Extra"),
+            activityRows(" Alert ", "Charge", "Alert", "Parking", "Extra"),
         )
 
         assertEquals(
             listOf("Alert", "Charge", "Parking"),
-            (state.activity as DashboardUiState.ActivityState.Ready).rows,
+            activityTexts(state),
         )
+    }
+
+    @Test
+    fun activityRowsKeepTheIconOfTheirSourceInsight() {
+        val state = DashboardStateReducer.activity(
+            DashboardUiState(),
+            listOf(
+                DashboardUiState.ActivityRow(" Alert ", icon = 7),
+                DashboardUiState.ActivityRow("Charge"),
+            ),
+        )
+
+        val rows = (state.activity as DashboardUiState.ActivityState.Ready).rows
+        assertEquals(listOf(7, 0), rows.map { it.icon })
+        assertEquals("Alert", rows.first().text.toString())
     }
 
     @Test
@@ -93,4 +108,12 @@ class DashboardStateReducerTest {
             DashboardStateReducer.remoteExpanded(expanded, false).remoteExpanded
         )
     }
+
+    private fun activityRows(vararg texts: String) =
+        texts.map { DashboardUiState.ActivityRow(it) }
+
+    private fun activityTexts(state: DashboardUiState) =
+        (state.activity as DashboardUiState.ActivityState.Ready)
+            .rows
+            .map { it.text.toString() }
 }

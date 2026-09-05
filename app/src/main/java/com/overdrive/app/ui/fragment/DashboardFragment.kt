@@ -3,6 +3,7 @@ package com.overdrive.app.ui.fragment
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.res.ColorStateList
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -13,10 +14,10 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
-import android.widget.Toast
+import androidx.core.content.ContextCompat
+import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.Observer
@@ -42,9 +43,12 @@ import com.overdrive.app.ui.model.localizedName
 import com.overdrive.app.ui.util.QrCodeGenerator
 import com.overdrive.app.ui.util.RecordingScanner
 import com.overdrive.app.ui.util.RecordingsApiClient
+import com.overdrive.app.ui.vehicle.VehicleArt
 import com.overdrive.app.ui.viewmodel.DaemonsViewModel
 import com.overdrive.app.ui.viewmodel.MainViewModel
 import com.overdrive.app.ui.viewmodel.RecordingViewModel
+import com.overdrive.app.ui.widget.AppToast
+import com.overdrive.app.ui.widget.Skeleton
 import com.overdrive.app.util.DeviceIdGenerator
 import java.util.Calendar
 import java.util.concurrent.ExecutorService
@@ -58,7 +62,6 @@ class DashboardFragment : Fragment() {
     private val recordingViewModel: RecordingViewModel by activityViewModels()
 
     // Hero
-    private lateinit var heroCard: MaterialCardView
     private lateinit var heroGreeting: TextView
     private lateinit var heroSubtitle: TextView
     private lateinit var heroChipTunnel: Chip
@@ -92,10 +95,13 @@ class DashboardFragment : Fragment() {
     private lateinit var recordingStorageProgress:
         com.google.android.material.progressindicator.LinearProgressIndicator
 
-    // Stable activity rows.
-    private lateinit var activityRow1: TextView
-    private lateinit var activityRow2: TextView
-    private lateinit var activityRow3: TextView
+    private class ActivityRowViews(
+        val container: View,
+        val icon: ImageView,
+        val text: TextView,
+    )
+
+    private var activityRows: List<ActivityRowViews> = emptyList()
 
     // Existing operational actions.
     private lateinit var metricTunnel: MaterialCardView
@@ -112,7 +118,7 @@ class DashboardFragment : Fragment() {
     private lateinit var tvDeviceId: TextView
     private lateinit var chipGroupTunnels: ChipGroup
     private lateinit var remoteDetails: View
-    private lateinit var btnExpandRemote: ImageButton
+    private lateinit var btnExpandRemote: ImageView
     private var selectedTunnel: DaemonType? = null
     private var lastRenderedQrUrl: String? = null
     private var hasRenderedQrForView = false
@@ -139,8 +145,8 @@ class DashboardFragment : Fragment() {
     // Side-by-side HAL range column — visible only while a personalized
     // figure occupies the main range column.
     private var vehicleHalRangeColumn: View? = null
-    private var vehicleHalRangeDivider: View? = null
     private var vehicleHalRangeValue: TextView? = null
+    private var vehicleArt: ImageView? = null
     private var quickTrips: View? = null
     private var quickVehicleControl: View? = null
 
@@ -149,10 +155,16 @@ class DashboardFragment : Fragment() {
     // out of the UI thread without contending with itself.
     private val mainHandler = Handler(Looper.getMainLooper())
     private var metricsExecutor: ExecutorService? = null
+    private var appToast: AppToast? = null
+    private var skeleton: Skeleton? = null
 
     private var dashboardState = DashboardUiState()
     private var todayClipCount: Int? = null
     private var storageSummary: DashboardUiState.StorageSummary? = null
+    // Clips and storage answer on separate hops, so each retires its own placeholder. A null
+    // count with storage already in hand means "still counting", not "no clips".
+    private var clipCountResolved: Boolean = false
+    private var storageResolved: Boolean = false
     private var viewGeneration: Int = 0
     private var dashboardResumed: Boolean = false
     private var recordingStatsRetryCount: Int = 0
@@ -173,11 +185,16 @@ class DashboardFragment : Fragment() {
         viewGeneration += 1
 
         bindViews(view)
+        appToast = AppToast(view)
+        bindSkeletons(view)
         wireClicks()
         observeViewModels()
 
+        // Carry the resolved sections across a view recreation (rotation): starting from a
+        // fresh DashboardUiState would repaint every value as Loading and re-flash the
+        // placeholders for data this fragment instance already has.
         dashboardState = DashboardStateReducer.remoteExpanded(
-            DashboardUiState(),
+            dashboardState,
             savedInstanceState?.getBoolean(STATE_REMOTE_EXPANDED, false) == true,
         )
         selectedTunnel = savedInstanceState
@@ -223,6 +240,10 @@ class DashboardFragment : Fragment() {
         viewGeneration += 1
         mainHandler.removeCallbacks(statusRefreshRunnable)
         mainHandler.removeCallbacks(recordingStatsRefreshRunnable)
+        appToast?.cancel()
+        appToast = null
+        skeleton?.cancel()
+        skeleton = null
         if (::ivQrCode.isInitialized) ivQrCode.setImageDrawable(null)
         lastRenderedQrUrl = null
         hasRenderedQrForView = false
@@ -238,8 +259,23 @@ class DashboardFragment : Fragment() {
         super.onSaveInstanceState(outState)
     }
 
+    /**
+     * Places the first-load placeholders. Each retires for good once its value resolves, so the
+     * 2s/15s status poll and the per-resume tile refresh never blank a slot again.
+     */
+    private fun bindSkeletons(view: View) {
+        val skeleton = Skeleton(view)
+        this.skeleton = skeleton
+        skeleton.bind(R.id.vehicleSocSkeleton, vehicleSocValue)
+        skeleton.bind(R.id.vehicleRangeSkeleton, vehicleRangeValue)
+        skeleton.bind(R.id.metricRecordingsSkeleton, metricRecordingsValue)
+        skeleton.bind(R.id.metricStorageSkeleton, metricStorageValue)
+        activityRows.firstOrNull()?.let {
+            skeleton.bind(R.id.activityRow1Skeleton, it.icon, it.text)
+        }
+    }
+
     private fun bindViews(view: View) {
-        heroCard = view.findViewById(R.id.heroCard)
         heroGreeting = view.findViewById(R.id.heroGreeting)
         heroSubtitle = view.findViewById(R.id.heroSubtitle)
         heroChipTunnel = view.findViewById(R.id.heroChipTunnel)
@@ -266,9 +302,17 @@ class DashboardFragment : Fragment() {
         metricRecordingsValue = view.findViewById(R.id.metricRecordingsValue)
         metricStorageValue = view.findViewById(R.id.metricStorageValue)
         recordingStorageProgress = view.findViewById(R.id.recordingStorageProgress)
-        activityRow1 = view.findViewById(R.id.activityRow1)
-        activityRow2 = view.findViewById(R.id.activityRow2)
-        activityRow3 = view.findViewById(R.id.activityRow3)
+        activityRows = listOf(
+            Triple(R.id.activityItem1, R.id.activityIcon1, R.id.activityRow1),
+            Triple(R.id.activityItem2, R.id.activityIcon2, R.id.activityRow2),
+            Triple(R.id.activityItem3, R.id.activityIcon3, R.id.activityRow3),
+        ).map { (containerId, iconId, textId) ->
+            ActivityRowViews(
+                view.findViewById(containerId),
+                view.findViewById(iconId),
+                view.findViewById(textId),
+            )
+        }
         metricTunnel = view.findViewById(R.id.metricTunnel)
         metricTunnelValue = view.findViewById(R.id.metricTunnelValue)
         tunnelStateDot = view.findViewById(R.id.tunnelStateDot)
@@ -296,8 +340,8 @@ class DashboardFragment : Fragment() {
         vehicleRangeLabel = view.findViewById(R.id.vehicleRangeLabel)
         heroRangeBreakdown = view.findViewById(R.id.heroRangeBreakdown)
         vehicleHalRangeColumn = view.findViewById(R.id.vehicleHalRangeColumn)
-        vehicleHalRangeDivider = view.findViewById(R.id.vehicleHalRangeDivider)
         vehicleHalRangeValue = view.findViewById(R.id.vehicleHalRangeValue)
+        vehicleArt = view.findViewById(R.id.vehicleArt)
 
         // Vehicle tile present in both portrait and landscape layouts.
         metricVehicle = view.findViewById(R.id.metricVehicle)
@@ -311,9 +355,6 @@ class DashboardFragment : Fragment() {
         val fadeThrough = com.overdrive.app.ui.util.NavOptionsExt.m3FadeThrough()
         metricRecordings.setOnClickListener {
             findNavController().navigate(R.id.recordingsFragment, null, fadeThrough)
-        }
-        metricTunnel.setOnClickListener {
-            findNavController().navigate(R.id.daemonsFragment, null, fadeThrough)
         }
         cardDaemons.setOnClickListener {
             findNavController().navigate(R.id.daemonsFragment, null, fadeThrough)
@@ -331,18 +372,18 @@ class DashboardFragment : Fragment() {
             aiInsightExpanded = !aiInsightExpanded
             renderAiInsightExpansion()
         }
-        metricVehicle?.setOnClickListener { showVehicleCapacityDialog() }
-
-        btnToggleToken.setOnClickListener { toggleTokenVisibility() }
-        btnCopyToken.setOnClickListener { copyTokenToClipboard() }
-        btnRegenerateToken.setOnClickListener { showRegenerateConfirmation() }
-        btnExpandRemote.setOnClickListener {
+        metricTunnel.setOnClickListener {
             dashboardState = DashboardStateReducer.remoteExpanded(
                 dashboardState,
                 !dashboardState.remoteExpanded,
             )
             renderRemoteExpansion()
         }
+        metricVehicle?.setOnClickListener { showVehicleCapacityDialog() }
+
+        btnToggleToken.setOnClickListener { toggleTokenVisibility() }
+        btnCopyToken.setOnClickListener { copyTokenToClipboard() }
+        btnRegenerateToken.setOnClickListener { showRegenerateConfirmation() }
     }
 
     private fun observeViewModels() {
@@ -351,11 +392,6 @@ class DashboardFragment : Fragment() {
             val running = states.values.count { it.status == DaemonStatus.RUNNING }
             val total = states.size
             tvDaemonsStatus.text = getString(R.string.dashboard_daemons_running, running, total)
-            // Hero tile alert vs. ok is driven only by *core* daemons — tunnels
-            // and bots are opt-in services and missing them shouldn't paint the
-            // dashboard red. STARTING counts as ok so the hero flips green the
-            // moment a daemon is being launched, without waiting for RUNNING.
-            updateHeroSubtitle(computeCoreHealth(states))
             rebuildTunnelChips()
             updateTunnelTile()
             refreshHeroChips()
@@ -388,6 +424,7 @@ class DashboardFragment : Fragment() {
                         totalBytes = it.totalBytes,
                     )
                 }
+            storageResolved = true
             updateRecordingState()
         }
     }
@@ -408,6 +445,42 @@ class DashboardFragment : Fragment() {
         } else {
             getString(R.string.dashboard_chip_recording_idle)
         }
+
+        // Chip text is localized, so tone comes from the same source the text
+        // does and is never parsed back out of it.
+        tintStatusChip(
+            heroChipTunnel,
+            if (collectAvailableTunnels().isEmpty()) StatusTone.DOWN else StatusTone.LIVE
+        )
+        tintStatusChip(
+            heroChipServices,
+            when (computeCoreHealth(daemonsViewModel.daemonStates.value)) {
+                CoreHealth.OK -> StatusTone.LIVE
+                CoreHealth.ALERT -> StatusTone.DOWN
+                CoreHealth.UNKNOWN -> StatusTone.IDLE
+            }
+        )
+        tintStatusChip(heroChipRecording, if (recording) StatusTone.LIVE else StatusTone.IDLE)
+    }
+
+    private enum class StatusTone { LIVE, IDLE, DOWN }
+
+    /**
+     * Paint a hero chip by what it is reporting: green live, amber idle, red
+     * down. The layout carries the resting tone for the pre-poll state.
+     */
+    private fun tintStatusChip(chip: Chip, tone: StatusTone) {
+        val ctx = context ?: return
+        val (fill, label) = when (tone) {
+            StatusTone.LIVE ->
+                R.color.overdrive_status_success_container to R.color.overdrive_status_success
+            StatusTone.IDLE ->
+                R.color.overdrive_status_warning_container to R.color.overdrive_status_warning
+            StatusTone.DOWN ->
+                R.color.overdrive_status_danger_container to R.color.overdrive_status_danger
+        }
+        chip.chipBackgroundColor = ColorStateList.valueOf(ContextCompat.getColor(ctx, fill))
+        chip.setTextColor(ContextCompat.getColor(ctx, label))
     }
 
     // ============== Metric tiles (storage + today's recordings) ==============
@@ -453,12 +526,14 @@ class DashboardFragment : Fragment() {
             mainHandler.post {
                 if (!isAdded || view == null || generation != viewGeneration) return@post
                 todayClipCount = clipCountToday
-                updateRecordingState()
                 mainHandler.removeCallbacks(recordingStatsRefreshRunnable)
-                if (shouldRetry &&
+                val willRetry = shouldRetry &&
                     dashboardResumed &&
                     recordingStatsRetryCount < MAX_RECORDING_STATS_RETRIES
-                ) {
+                // A warming index has not answered yet, so the placeholder stays for the retry.
+                if (!willRetry) clipCountResolved = true
+                updateRecordingState()
+                if (willRetry) {
                     recordingStatsRetryCount += 1
                     mainHandler.postDelayed(
                         recordingStatsRefreshRunnable,
@@ -482,10 +557,17 @@ class DashboardFragment : Fragment() {
 
     private fun renderRecordingsValue() {
         if (!::metricRecordingsValue.isInitialized) return
+        val unavailable = dashboardState.recordings == DashboardUiState.RecordingState.Unavailable
+        if (clipCountResolved || unavailable) {
+            skeleton?.markLoaded(R.id.metricRecordingsSkeleton)
+        }
+        if (storageResolved || unavailable) {
+            skeleton?.markLoaded(R.id.metricStorageSkeleton)
+        }
         when (val recording = dashboardState.recordings) {
             DashboardUiState.RecordingState.Loading -> {
                 metricRecordingsValue.setText(R.string.dashboard_metric_value_pending)
-                metricStorageValue.setText(R.string.dashboard_modern_updating)
+                metricStorageValue.setText(R.string.dashboard_metric_value_pending)
                 recordingStorageProgress.visibility = View.INVISIBLE
             }
             DashboardUiState.RecordingState.Unavailable -> {
@@ -534,6 +616,8 @@ class DashboardFragment : Fragment() {
             mainHandler.post {
                 if (!isAdded || view == null || generation != viewGeneration) return@post
                 dashboardState = DashboardStateReducer.status(dashboardState, result)
+                skeleton?.markLoaded(R.id.vehicleSocSkeleton)
+                skeleton?.markLoaded(R.id.vehicleRangeSkeleton)
                 renderVehicleState()
                 if (dashboardResumed) {
                     val isAccOn = (dashboardState.vehicle as? DashboardUiState.VehicleState.Ready)?.snapshot?.isAccOn == true
@@ -612,9 +696,13 @@ class DashboardFragment : Fragment() {
 
     private fun renderVehicleState() {
         if (!::vehicleSocValue.isInitialized) return
+        if (dashboardState.vehicle != DashboardUiState.VehicleState.Loading) {
+            skeleton?.markLoaded(R.id.vehicleSocSkeleton)
+            skeleton?.markLoaded(R.id.vehicleRangeSkeleton)
+        }
         when (val vehicle = dashboardState.vehicle) {
             DashboardUiState.VehicleState.Loading -> {
-                heroGreeting.setText(R.string.dashboard_modern_vehicle_now)
+                heroGreeting.setText(R.string.dashboard_modern_vehicle_status)
                 heroSubtitle.setText(R.string.dashboard_modern_updating)
                 vehicleSocValue.setText(R.string.dashboard_metric_value_pending)
                 vehicleRangeValue.setText(R.string.dashboard_metric_value_pending)
@@ -625,7 +713,7 @@ class DashboardFragment : Fragment() {
                 renderRangeBreakdown(null)
             }
             is DashboardUiState.VehicleState.Unavailable -> {
-                heroGreeting.setText(R.string.dashboard_modern_vehicle_now)
+                heroGreeting.setText(R.string.dashboard_modern_vehicle_status)
                 heroSubtitle.setText(R.string.dashboard_modern_vehicle_unavailable)
                 vehicleSocValue.setText(R.string.dashboard_metric_value_pending)
                 vehicleRangeValue.setText(R.string.dashboard_metric_value_pending)
@@ -637,7 +725,7 @@ class DashboardFragment : Fragment() {
             }
             is DashboardUiState.VehicleState.Ready -> {
                 val snapshot = vehicle.snapshot
-                heroGreeting.setText(R.string.dashboard_modern_vehicle_now)
+                heroGreeting.setText(R.string.dashboard_modern_vehicle_status)
                 val isPowerOn = snapshot.isAccOn == true
                 val gear = snapshot.gear
                 val speed = snapshot.speedKmh
@@ -707,11 +795,8 @@ class DashboardFragment : Fragment() {
         }
     }
 
-    /** Show/hide the side-by-side HAL range column and its divider together. */
     private fun setHalRangeColumnVisible(visible: Boolean) {
-        val visibility = if (visible) View.VISIBLE else View.GONE
-        vehicleHalRangeColumn?.visibility = visibility
-        vehicleHalRangeDivider?.visibility = visibility
+        vehicleHalRangeColumn?.visibility = if (visible) View.VISIBLE else View.GONE
     }
 
     /**
@@ -751,16 +836,16 @@ class DashboardFragment : Fragment() {
     }
 
     /**
-     * Visual battery gauge under the numeric SOC. INVISIBLE (not GONE) when
-     * SOC is unknown so the hero card's height never jumps between the
-     * loading and ready states. Indicator colour flips to the theme's error
-     * colour at ≤20% so a low battery reads at a glance; both attrs resolve
-     * per-theme, so light/dark are handled automatically.
+     * Visual battery gauge under the numeric SOC. An unknown SOC keeps the
+     * empty track on screen instead of hiding the widget; the indicator turns
+     * the theme's error colour at or below [LOW_SOC_THRESHOLD_PERCENT].
      */
     private fun renderSocGauge(socPercent: Double?) {
         val gauge = heroSocProgress ?: return
+        gauge.visibility = View.VISIBLE
         if (socPercent == null) {
-            gauge.visibility = View.INVISIBLE
+            // Zero draws the track only, standing in for "no reading".
+            gauge.setProgressCompat(0, /* animated = */ false)
             return
         }
         val clamped = socPercent.coerceIn(0.0, 100.0).toInt()
@@ -776,7 +861,6 @@ class DashboardFragment : Fragment() {
         gauge.setIndicatorColor(
             com.google.android.material.color.MaterialColors.getColor(gauge, colorAttr)
         )
-        gauge.visibility = View.VISIBLE
     }
 
     private fun renderCharging(charging: com.overdrive.app.ui.dashboard.DashboardChargingSnapshot?) {
@@ -857,53 +941,10 @@ class DashboardFragment : Fragment() {
         }
     }
 
-    private fun updateHeroSubtitle(coreHealth: CoreHealth) {
-        applyGreetingTint(coreHealth)
-    }
-
-    /**
-     * Tint the hero card by *core* daemon health. Uses M3 Container tones so
-     * the wash is soft rather than the saturated colorPrimary/Error.
-     *
-     * - OK   → primaryContainer (green wash, On*Container fg).
-     * - ALERT → errorContainer (red wash) — only when at least one CORE daemon
-     *           is in a hard-failed state. Tunnels (cloudflared/zrok/tailscale)
-     *           and the Telegram bot are opt-in and never trigger ALERT.
-     * - UNKNOWN → neutral surface — used pre-bind / before the daemon-states
-     *           LiveData has fired so a fresh install doesn't flash red.
-     *
-     * STARTING is treated as OK (not ALERT) so the hero flips green the
-     * instant a daemon is being launched, instead of waiting for RUNNING.
-     */
-    private fun applyGreetingTint(coreHealth: CoreHealth) {
-        if (!::heroCard.isInitialized) return
-        val ctx = context ?: return
-        val (bgAttr, fgAttr, subAttr) = when (coreHealth) {
-            CoreHealth.UNKNOWN -> Triple(
-                com.google.android.material.R.attr.colorSurfaceContainer,
-                com.google.android.material.R.attr.colorOnSurface,
-                com.google.android.material.R.attr.colorOnSurfaceVariant
-            )
-            CoreHealth.OK -> Triple(
-                com.google.android.material.R.attr.colorPrimaryContainer,
-                com.google.android.material.R.attr.colorOnPrimaryContainer,
-                com.google.android.material.R.attr.colorOnPrimaryContainer
-            )
-            CoreHealth.ALERT -> Triple(
-                com.google.android.material.R.attr.colorErrorContainer,
-                com.google.android.material.R.attr.colorOnErrorContainer,
-                com.google.android.material.R.attr.colorOnErrorContainer
-            )
-        }
-        resolveAttrColor(ctx, bgAttr)?.let { heroCard.setCardBackgroundColor(it) }
-        resolveAttrColor(ctx, fgAttr)?.let { heroGreeting.setTextColor(it) }
-        resolveAttrColor(ctx, subAttr)?.let { heroSubtitle.setTextColor(it) }
-    }
-
     private enum class CoreHealth { UNKNOWN, OK, ALERT }
 
     /**
-     * Reduce the daemon-state map to a tri-state for the hero tint.
+     * Reduce the daemon-state map to a tri-state for the services chip.
      *
      * Rule: green when every core daemon is started (RUNNING / STARTING /
      * STOPPING — anything that means a process exists or is being managed),
@@ -912,7 +953,7 @@ class DashboardFragment : Fragment() {
      * doing its job.
      *
      * "Core" = Camera + Sentry + ACC Sentry. Sing-box, tunnels, and the
-     * Telegram bot are all opt-in — they don't gate the hero tint.
+     * Telegram bot are all opt-in — they don't turn the chip red.
      */
     private fun computeCoreHealth(states: Map<DaemonType, DaemonState>?): CoreHealth {
         if (states.isNullOrEmpty()) return CoreHealth.UNKNOWN
@@ -930,11 +971,6 @@ class DashboardFragment : Fragment() {
             }
         }
         return if (sawCore) CoreHealth.OK else CoreHealth.UNKNOWN
-    }
-
-    private fun resolveAttrColor(ctx: Context, attr: Int): Int? {
-        val tv = android.util.TypedValue()
-        return if (ctx.theme.resolveAttribute(attr, tv, true)) tv.data else null
     }
 
     // ============== Stable recent activity ==============
@@ -968,7 +1004,7 @@ class DashboardFragment : Fragment() {
         val rows = built
             ?.asSequence()
             ?.filter { it.priority < WELCOME_INSIGHT_PRIORITY }
-            ?.map { it.text.toString() }
+            ?.map { DashboardUiState.ActivityRow(it.text, it.icon) }
             ?.toList()
         dashboardState = DashboardStateReducer.activity(dashboardState, rows)
         renderActivityState()
@@ -1013,20 +1049,59 @@ class DashboardFragment : Fragment() {
     }
 
     private fun renderActivityState() {
-        if (!::activityRow1.isInitialized) return
-        val rows = when (val activity = dashboardState.activity) {
-            DashboardUiState.ActivityState.Loading ->
-                listOf(getString(R.string.dashboard_modern_activity_loading))
-            DashboardUiState.ActivityState.Unavailable ->
-                listOf(getString(R.string.dashboard_modern_activity_unavailable))
-            is DashboardUiState.ActivityState.Ready ->
-                activity.rows.ifEmpty { listOf(getString(R.string.dashboard_modern_no_activity)) }
+        if (activityRows.isEmpty()) return
+        // The placeholder is the loading state, so there is nothing to paint until it retires.
+        if (dashboardState.activity == DashboardUiState.ActivityState.Loading &&
+            skeleton?.isLoaded(R.id.activityRow1Skeleton) != true
+        ) {
+            return
         }
-        val views = listOf(activityRow1, activityRow2, activityRow3)
-        views.forEachIndexed { index, textView ->
-            val text = rows.getOrNull(index)
-            textView.visibility = if (text == null) View.GONE else View.VISIBLE
-            if (text != null) textView.text = text
+        skeleton?.markLoaded(R.id.activityRow1Skeleton)
+        val rows = when (val activity = dashboardState.activity) {
+            DashboardUiState.ActivityState.Loading -> listOf(
+                DashboardUiState.ActivityRow(
+                    getString(R.string.dashboard_modern_activity_loading))
+            )
+            DashboardUiState.ActivityState.Unavailable -> listOf(
+                DashboardUiState.ActivityRow(
+                    getString(R.string.dashboard_modern_activity_unavailable))
+            )
+            is DashboardUiState.ActivityState.Ready -> activity.rows.ifEmpty {
+                listOf(
+                    DashboardUiState.ActivityRow(
+                        getString(R.string.dashboard_modern_no_activity))
+                )
+            }
+        }
+        activityRows.forEachIndexed { index, views ->
+            val row = rows.getOrNull(index)
+            views.container.visibility = if (row == null) View.GONE else View.VISIBLE
+            if (row == null) return@forEachIndexed
+            views.text.text = row.text
+            val placeholder = row.icon == 0
+            val textLp = views.text.layoutParams as ViewGroup.MarginLayoutParams
+            if (placeholder) {
+                views.icon.visibility = View.GONE
+                textLp.marginStart = 0
+            } else {
+                views.icon.setImageResource(row.icon)
+                views.icon.visibility = View.VISIBLE
+                textLp.marginStart = views.text.resources.getDimensionPixelSize(
+                    R.dimen.dashboard_modern_gap
+                )
+            }
+            views.text.layoutParams = textLp
+            val textAttr = if (placeholder) {
+                com.google.android.material.R.attr.colorOnSurfaceVariant
+            } else {
+                com.google.android.material.R.attr.colorOnSurface
+            }
+            views.text.setTextColor(
+                com.google.android.material.color.MaterialColors.getColor(
+                    views.text,
+                    textAttr
+                )
+            )
         }
     }
 
@@ -1208,7 +1283,7 @@ class DashboardFragment : Fragment() {
         val expanded = dashboardState.remoteExpanded
         remoteDetails.visibility = if (expanded) View.VISIBLE else View.GONE
         btnExpandRemote.rotation = if (expanded) 180f else 0f
-        btnExpandRemote.contentDescription = getString(
+        metricTunnel.contentDescription = getString(
             if (expanded) {
                 R.string.dashboard_modern_collapse_remote
             } else {
@@ -1294,7 +1369,7 @@ class DashboardFragment : Fragment() {
         val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val clip = ClipData.newPlainText(getString(R.string.clip_label_access_code), state.secret)
         clipboard.setPrimaryClip(clip)
-        Toast.makeText(requireContext(), getString(R.string.toast_access_code_copied), Toast.LENGTH_SHORT).show()
+        appToast?.show(getString(R.string.toast_access_code_copied), AppToast.Kind.SUCCESS)
     }
 
     private fun showRegenerateConfirmation() {
@@ -1311,41 +1386,36 @@ class DashboardFragment : Fragment() {
         val newToken = AuthManager.regenerateToken()
         // Use the lifecycle-managed metricsExecutor (shut down in onDestroyView)
         // instead of a bare Thread that would outlive the fragment and leak
-        // its Activity reference. The applicationContext for the Toast also
-        // bypasses requireContext()'s detach-aware throw.
+        // its Activity reference.
         val ctx = context?.applicationContext ?: return
         if (newToken == null) {
             // Persistence failed — usually means the daemon hasn't booted
             // yet so the unified config file isn't writable from app UID.
             // Better to surface this than to claim success and leave the
             // user wondering why login still rejects the new code.
-            Toast.makeText(ctx, ctx.getString(R.string.toast_token_regenerated_restart), Toast.LENGTH_LONG).show()
+            appToast?.show(
+                ctx.getString(R.string.toast_token_regenerated_restart), AppToast.Kind.WARNING)
             loadAuthState()
             return
         }
         val executor = metricsExecutor ?: Executors.newSingleThreadExecutor()
             .also { metricsExecutor = it }
         executor.execute {
-            val msgRes = try {
+            val outcome = try {
                 val client = CameraDaemonClient()
                 if (client.connect()) {
                     val ok = client.invalidateAuthCacheSync()
                     client.disconnect()
-                    if (ok) R.string.toast_token_regenerated_logged_out
-                    else R.string.toast_token_regenerated_restart
+                    if (ok) R.string.toast_token_regenerated_logged_out to AppToast.Kind.SUCCESS
+                    else R.string.toast_token_regenerated_restart to AppToast.Kind.WARNING
                 } else {
-                    R.string.toast_token_regenerated_no_notify
+                    R.string.toast_token_regenerated_no_notify to AppToast.Kind.WARNING
                 }
             } catch (_: Exception) {
-                R.string.toast_token_regenerated
+                R.string.toast_token_regenerated to AppToast.Kind.SUCCESS
             }
-            // Use the application context for Toast — survives fragment detach
-            // and is the recommended pattern for "fire-and-forget" notifications
-            // from a background thread.
             mainHandler.post {
-                if (isAdded) {
-                    Toast.makeText(ctx, ctx.getString(msgRes), Toast.LENGTH_SHORT).show()
-                }
+                if (isAdded) appToast?.show(ctx.getString(outcome.first), outcome.second)
             }
         }
         loadAuthState()
@@ -1413,6 +1483,9 @@ class DashboardFragment : Fragment() {
                 } else {
                     tile.text = getString(R.string.dashboard_vehicle_tap_to_set)
                 }
+                // Follows the model, not nominalKwh — a model can be selected
+                // before a capacity is entered.
+                vehicleArt?.setImageResource(VehicleArt.drawableFor(modelId))
             }
         }
     }
@@ -1431,17 +1504,34 @@ class DashboardFragment : Fragment() {
         val dialogView = layoutInflater.inflate(
             R.layout.dialog_vehicle_capacity, null, false)
 
+        val summaryDetection = dialogView.findViewById<TextView>(R.id.vehicleSummaryDetection)
         val summaryCapacity = dialogView.findViewById<TextView>(R.id.vehicleSummaryCapacity)
         val summarySoh = dialogView.findViewById<TextView>(R.id.vehicleSummarySoh)
         val summaryEffective = dialogView.findViewById<TextView>(R.id.vehicleSummaryEffective)
         val summaryModel = dialogView.findViewById<TextView>(R.id.vehicleSummaryModel)
         val summaryCalibration = dialogView.findViewById<TextView>(R.id.vehicleSummaryCalibration)
-        val summaryDivider = dialogView.findViewById<View>(R.id.vehicleSummaryDivider)
         val capInput = dialogView.findViewById<
             com.google.android.material.textfield.TextInputEditText>(R.id.vehicleCapacityInput)
+        val capLayout = dialogView.findViewById<
+            com.google.android.material.textfield.TextInputLayout>(R.id.vehicleCapacityLayout)
         val modelDropdown = dialogView.findViewById<
             com.google.android.material.textfield.MaterialAutoCompleteTextView>(
             R.id.vehicleModelDropdown)
+        val resetButton = dialogView.findViewById<
+            com.google.android.material.button.MaterialButton>(R.id.vehicleResetAuto)
+
+        // Nothing is known to reset until the fetch lands.
+        resetButton.isEnabled = false
+
+        capInput.doAfterTextChanged { capLayout.error = null }
+
+        // Placeholders from the start: the fetch below is off the main thread,
+        // and filling empty rows on its return would resize the live dialog.
+        val pendingValue = getString(R.string.vehicle_dialog_value_pending)
+        summaryDetection.text = getString(R.string.vehicle_dialog_detection, pendingValue)
+        summaryCapacity.text = pendingValue
+        summarySoh.text = pendingValue
+        summaryModel.text = pendingValue
 
         // Track the selected model's id locally (the dropdown's text holds
         // the user-facing title; the id is what we POST). Each entry also
@@ -1478,7 +1568,6 @@ class DashboardFragment : Fragment() {
             var nominalKwh = 0.0
             var nominalSource = "unset"
             var displaySoh = -1.0
-            var displaySource = "unavailable"
             var estimatedKwh = 0.0
             var statusModelId: String? = null
             var calSoh = 0.0
@@ -1503,7 +1592,6 @@ class DashboardFragment : Fragment() {
                     nominalKwh = json.optDouble("nominalCapacityKwh", 0.0)
                     nominalSource = json.optString("nominalSource", "unset")
                     displaySoh = json.optDouble("displaySoh", -1.0)
-                    displaySource = json.optString("displaySource", "unavailable")
                     val est = json.optDouble("estimatedCapacityKwh", -1.0)
                     if (est > 0) estimatedKwh = est
                     if (!json.isNull("modelId")) {
@@ -1575,7 +1663,6 @@ class DashboardFragment : Fragment() {
             val finalNominalKwh = nominalKwh
             val finalNominalSource = nominalSource
             val finalDisplaySoh = displaySoh
-            val finalDisplaySource = displaySource
             val finalEstimatedKwh = estimatedKwh
             val finalStatusModelId = statusModelId ?: initialModelId
             val finalCalSoh = calSoh
@@ -1606,33 +1693,35 @@ class DashboardFragment : Fragment() {
                     }
                 }
 
-                // Populate summary section. Each line shows only when its data
-                // is meaningful — keeps the dialog tight when the daemon is
-                // still seeding.
-                val capacityText = if (finalNominalKwh > 0) {
-                    val suffix = when (finalNominalSource) {
-                        "user" -> " (" + getString(R.string.soh_dialog_source_user) + ")"
-                        "auto" -> " (" + getString(R.string.soh_dialog_source_auto) + ")"
-                        else -> ""
-                    }
-                    String.format("%.1f kWh", finalNominalKwh) + suffix
+                // A typed capacity or a picked model takes the pack out of
+                // auto-detection. Model state has to come from
+                // /api/models/selected: the status modelId also reports
+                // auto-detected models.
+                val manual = finalNominalSource == "user" || initialModelId != null
+                summaryDetection.text = getString(
+                    R.string.vehicle_dialog_detection,
+                    getString(
+                        if (manual) {
+                            R.string.vehicle_dialog_detection_manual
+                        } else {
+                            R.string.vehicle_dialog_detection_auto
+                        }
+                    )
+                )
+                resetButton.isEnabled = manual
+
+                summaryCapacity.text = if (finalNominalKwh > 0) {
+                    String.format("%.1f kWh", finalNominalKwh)
                 } else {
                     getString(R.string.soh_dialog_capacity_not_detected)
                 }
-                summaryCapacity.text = getString(R.string.vehicle_dialog_summary_capacity, capacityText)
-                summaryCapacity.visibility = View.VISIBLE
 
-                val sohText = when {
-                    finalDisplaySoh > 0 && finalDisplaySource == "oem" ->
-                        String.format("%.1f%% (vehicle)", finalDisplaySoh)
-                    finalDisplaySoh > 0 && finalDisplaySource == "live" ->
-                        String.format("%.1f%% (live)", finalDisplaySoh)
-                    finalDisplaySoh > 0 && finalDisplaySource == "calibration" ->
-                        String.format("%.1f%% (from last charge)", finalDisplaySoh)
-                    else -> getString(R.string.vehicle_dialog_soh_unavailable)
+                summarySoh.text = if (finalDisplaySoh > 0) {
+                    String.format("%.1f%%", finalDisplaySoh)
+                } else {
+                    getString(R.string.vehicle_dialog_soh_unavailable)
+                        .replaceFirstChar { it.uppercase() }
                 }
-                summarySoh.text = getString(R.string.vehicle_dialog_summary_soh, sohText)
-                summarySoh.visibility = View.VISIBLE
 
                 if (finalEstimatedKwh > 0) {
                     summaryEffective.text = getString(
@@ -1640,10 +1729,11 @@ class DashboardFragment : Fragment() {
                     summaryEffective.visibility = View.VISIBLE
                 }
 
-                val modelText = if (finalStatusModelId != null) modelDisplayName(finalStatusModelId)
-                else getString(R.string.soh_dialog_model_not_selected)
-                summaryModel.text = getString(R.string.vehicle_dialog_summary_model, modelText)
-                summaryModel.visibility = View.VISIBLE
+                summaryModel.text = if (finalStatusModelId != null) {
+                    modelDisplayName(finalStatusModelId)
+                } else {
+                    getString(R.string.soh_dialog_model_not_selected)
+                }
 
                 if (finalCalSoh > 0 && finalCalTs > 0) {
                     val date = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
@@ -1652,8 +1742,6 @@ class DashboardFragment : Fragment() {
                         R.string.vehicle_dialog_summary_calibration, finalCalSoh, date)
                     summaryCalibration.visibility = View.VISIBLE
                 }
-
-                summaryDivider.visibility = View.VISIBLE
             }
         }
 
@@ -1673,28 +1761,27 @@ class DashboardFragment : Fragment() {
             // Install button listeners after show so invalid capacity does not
             // trigger AlertDialog's default auto-dismiss behavior.
             .setPositiveButton(getString(R.string.vehicle_dialog_save), null)
-            .setNeutralButton(getString(R.string.vehicle_dialog_reset), null)
             .setNegativeButton(getString(R.string.action_cancel), null)
             .create()
+        resetButton.setOnClickListener {
+            completionDeferred = true
+            postNominal(
+                kwh = null,
+                clearModelSelection = true,
+                onComplete = { finishOnce() },
+            )
+            dialog.dismiss()
+        }
         dialog.setOnShowListener {
             dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
                 val raw = capInput.text?.toString()?.trim().orEmpty()
                 val kwh = raw.toDoubleOrNull()
                 if (kwh == null || kwh < 15.0 || kwh > 120.0) {
-                    Toast.makeText(ctx, getString(R.string.vehicle_dialog_invalid_capacity), Toast.LENGTH_SHORT).show()
+                    capLayout.error = getString(R.string.vehicle_dialog_invalid_capacity)
                     return@setOnClickListener
                 }
                 completionDeferred = true
                 postNominalAndModel(kwh, selectedModelId) { finishOnce() }
-                dialog.dismiss()
-            }
-            dialog.getButton(android.content.DialogInterface.BUTTON_NEUTRAL).setOnClickListener {
-                completionDeferred = true
-                postNominal(
-                    kwh = null,
-                    clearModelSelection = true,
-                    onComplete = { finishOnce() },
-                )
                 dialog.dismiss()
             }
             dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).setOnClickListener {

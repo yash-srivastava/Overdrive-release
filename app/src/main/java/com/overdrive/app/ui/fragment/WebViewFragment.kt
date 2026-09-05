@@ -24,6 +24,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.google.android.material.button.MaterialButton
 import com.overdrive.app.R
+import com.overdrive.app.ui.util.navigateDrillDown
 import com.overdrive.app.daemon.CameraDaemon
 
 /**
@@ -40,6 +41,29 @@ class WebViewFragment : Fragment() {
     companion object {
         const val ARG_PAGE_PATH = "page_path"
         private const val KEY_SAVED_URL = "saved_url"
+
+        // Hides the in-page PWA chrome before the first paint. INJECT_JS runs
+        // on onPageFinished, which is late enough for the sidebar to flash.
+        // Keyed on data-android-embed and NOT data-app-shell: app-shell.js
+        // tags the standalone HTML dashboard with that attribute, and it must
+        // keep its nav.
+        private const val EMBED_ATTR = "data-android-embed"
+        private const val EMBED_CHROME = """<script>document.documentElement.setAttribute('data-android-embed','1');</script><style>[data-android-embed="1"] .sidebar,[data-android-embed="1"] .sidebar-overlay,[data-android-embed="1"] .mobile-header,[data-android-embed="1"] .page-header{display:none !important;}[data-android-embed="1"]{--sidebar-width:0px !important;}[data-android-embed="1"] .main-content{margin-left:0 !important;padding-top:0 !important;}[data-android-embed="1"] .bottom-tabs{left:0 !important;right:0 !important;}</style>"""
+
+        /** Splice [EMBED_CHROME] into a page's `<head>`, falling back to
+         *  `<html>` and then the document start. */
+        @JvmStatic
+        fun spliceEmbedChrome(html: String): String {
+            if (html.contains(EMBED_ATTR)) return html
+            for (tag in arrayOf("<head", "<html")) {
+                val open = html.indexOf(tag, ignoreCase = true)
+                if (open < 0) continue
+                val close = html.indexOf('>', open)
+                if (close < 0) continue
+                return html.substring(0, close + 1) + EMBED_CHROME + html.substring(close + 1)
+            }
+            return EMBED_CHROME + html
+        }
 
         // ── Key-mapping capture bridge ────────────────────────────────────
         // The Key Mapping "press a button to capture it" box lives in the
@@ -226,16 +250,12 @@ class WebViewFragment : Fragment() {
         // the destination and the button's request would be denied here.
         '[data-app-shell="1"] .top-bar-btn { display: none !important; }',
         // Pull the absolute-positioned camera top bar in by a hair so the
-        // connection-status pill and quality dropdown breathe at narrow
-        // landscape widths (head-unit windowed mode, ~600-900px wide).
-        '[data-app-shell="1"] .camera-top-bar { padding: 12px 14px !important; gap: 8px; }',
+        // status dot and quality dropdown breathe at narrow landscape widths
+        // (head-unit windowed mode, ~600-900px wide).
+        '[data-app-shell="1"] .camera-top-bar { padding: 14px !important; }',
         '[data-app-shell="1"] .camera-top-bar .top-bar-left,',
         '[data-app-shell="1"] .camera-top-bar .top-bar-right { min-width: 0; flex-wrap: nowrap; }',
-        '[data-app-shell="1"] .quality-select-sota { min-width: 96px; max-width: 140px; }',
-        // Map overlay buttons (My Location / Directions) — keep them clear
-        // of the top-bar pill. The default top: 16px lands underneath the
-        // pill on narrow viewports.
-        '[data-app-shell="1"] #panelMap .map-overlay-actions { top: 14px !important; right: 14px !important; gap: 10px !important; }',
+        '[data-app-shell="1"] .quality-menu__trigger { min-width: 96px; max-width: 140px; }',
         '[data-app-shell="1"] .btn-map-float { width: 44px !important; height: 44px !important; }',
         '[data-app-shell="1"] .btn-map-float svg { width: 20px !important; height: 20px !important; }',
         // Camera hotspot labels — keep a generous translated-label clamp,
@@ -779,7 +799,24 @@ class WebViewFragment : Fragment() {
                         }
                         if (url.endsWith(".mp4")) mime = "video/mp4"
 
-                        val response = WebResourceResponse(mime, encoding, stream)
+                        // Only the app's WebView reaches this intercept, so the
+                        // embed chrome never lands on the tunnel / PWA clients.
+                        var bodyStream: java.io.InputStream = stream
+                        var splicedHtml = false
+                        if (mime == "text/html" && connection.responseCode == 200) {
+                            try {
+                                val patched = spliceEmbedChrome(
+                                    String(stream.readBytes(), Charsets.UTF_8))
+                                bodyStream = java.io.ByteArrayInputStream(
+                                    patched.toByteArray(Charsets.UTF_8))
+                                splicedHtml = true
+                            } catch (e: Exception) {
+                                android.util.Log.w("WebViewProxy",
+                                    "HTML splice failed: ${e.message}")
+                            }
+                        }
+
+                        val response = WebResourceResponse(mime, encoding, bodyStream)
 
                         // 4. Pass Status Code (206 vs 200)
                         response.setStatusCodeAndReasonPhrase(
@@ -822,7 +859,7 @@ class WebViewFragment : Fragment() {
                         // MANUAL OVERRIDES: Ensure these exist even if server forgot them
                         headers["Access-Control-Allow-Origin"] = "*"
                         headers["Accept-Ranges"] = "bytes"  // Tells player "You can seek"
-                        if (length > 0) {
+                        if (length > 0 && !splicedHtml) {
                             headers["Content-Length"] = length.toString()
                         }
                         response.responseHeaders = headers
@@ -904,7 +941,7 @@ class WebViewFragment : Fragment() {
                     // load.
                     pageLoadFailed = false
                     loadInProgress = true
-                    showLoading()
+                    applyLoadChrome()
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
@@ -1300,6 +1337,37 @@ class WebViewFragment : Fragment() {
         }
 
         /**
+         * Navigate to a native destination named by the page. `dest` is matched
+         * against an allowlist — a page must never be able to name an arbitrary
+         * navigation id. Posted to the UI thread because bridge calls arrive on
+         * a WebView worker thread.
+         */
+        @android.webkit.JavascriptInterface
+        fun navigate(dest: String): String {
+            val destinationId = when (dest) {
+                "bydCloud" -> R.id.bydCloudFragment
+                else -> return "unknown_destination"
+            }
+            return try {
+                val act = activity ?: return "no_context"
+                act.runOnUiThread {
+                    try {
+                        if (!isAdded || isDetached || view == null) return@runOnUiThread
+                        androidx.navigation.fragment.NavHostFragment
+                            .findNavController(this@WebViewFragment)
+                            .navigateDrillDown(destinationId)
+                    } catch (e: Exception) {
+                        android.util.Log.w("WebViewFragment", "navigate($dest) failed: ${e.message}")
+                    }
+                }
+                "ok"
+            } catch (e: Exception) {
+                android.util.Log.w("WebViewFragment", "navigate bridge failed: ${e.message}")
+                "error"
+            }
+        }
+
+        /**
          * Key Mapping capture toggle. The capture box calls this with true when
          * "Capture a key" is armed and false when it disarms. While armed, the
          * native AccessibilityService (KeyMapDispatcher) forwards the next
@@ -1567,7 +1635,7 @@ class WebViewFragment : Fragment() {
 
     private fun loadPage() {
         pageLoadFailed = false
-        showLoading()
+        applyLoadChrome()
         currentUrl?.let { webView?.loadUrl(it) }
     }
 
@@ -1576,14 +1644,32 @@ class WebViewFragment : Fragment() {
         loadPage()
     }
 
+    /** Every WebView load shows the overlay, warm or cold, so the whole app
+     *  behaves the same way on navigation. */
+    private fun applyLoadChrome() {
+        showLoading()
+    }
+
     private fun showLoading() {
+        loadingOverlay?.animate()?.cancel()
         loadingOverlay?.alpha = 1f
         loadingOverlay?.visibility = View.VISIBLE
         errorOverlay?.visibility = View.GONE
         webView?.visibility = View.VISIBLE
     }
 
+    private fun hideLoading() {
+        loadingOverlay?.animate()?.cancel()
+        loadingOverlay?.visibility = View.GONE
+        errorOverlay?.visibility = View.GONE
+        webView?.visibility = View.VISIBLE
+    }
+
     private fun showContent() {
+        if (loadingOverlay?.visibility != View.VISIBLE) {
+            hideLoading()
+            return
+        }
         loadingOverlay?.animate()?.alpha(0f)?.setDuration(200)
             ?.withEndAction { loadingOverlay?.visibility = View.GONE }?.start()
         errorOverlay?.visibility = View.GONE
@@ -1591,6 +1677,7 @@ class WebViewFragment : Fragment() {
     }
 
     private fun showError() {
+        loadingOverlay?.animate()?.cancel()
         loadingOverlay?.visibility = View.GONE
         errorOverlay?.visibility = View.VISIBLE
         webView?.visibility = View.INVISIBLE

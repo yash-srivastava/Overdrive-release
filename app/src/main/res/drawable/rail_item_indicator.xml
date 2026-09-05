@@ -1,34 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Selected/unselected pill behind the rail-item icon.
-
-  Selected state uses M3 colorSecondaryContainer — the M3 Expressive spec
-  for a navigation-rail active indicator. Reads as a tonal "selected"
-  signal that stays AA-contrast with the icon (tinted by
-  colorOnSecondaryContainer in the rail item tint state list) while still
-  carrying the brand identity through the secondary tone of the M3 palette.
-
-  Pressed state uses surfaceContainerHigh as a press affordance, one tier
-  lower than the active selected pill so the press is visible against an
-  unselected row.
+  Navigation-rail row background — the whole row is the button. Selected rows
+  get a colorPrimaryContainer plate, inset from the rail edges by the
+  rail_item_pill_* tokens that MainActivity.applyRailRowLayout pads against.
+  The ripple is masked to the plate so it never paints into the rail gutters.
 -->
-<selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:state_selected="true">
-        <shape android:shape="rectangle">
-            <solid android:color="?attr/colorSecondaryContainer" />
-            <corners android:radius="16dp" />
-        </shape>
-    </item>
-    <item android:state_pressed="true">
-        <shape android:shape="rectangle">
-            <solid android:color="?attr/colorSurfaceContainerHigh" />
-            <corners android:radius="16dp" />
-        </shape>
-    </item>
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="?attr/colorControlHighlight">
+
     <item>
-        <shape android:shape="rectangle">
-            <solid android:color="@android:color/transparent" />
-            <corners android:radius="16dp" />
-        </shape>
+        <selector>
+            <item android:state_selected="true">
+                <inset
+                    android:insetBottom="@dimen/rail_item_pill_inset_vertical"
+                    android:insetLeft="@dimen/rail_item_pill_inset_horizontal"
+                    android:insetRight="@dimen/rail_item_pill_inset_horizontal"
+                    android:insetTop="@dimen/rail_item_pill_inset_vertical">
+                    <shape android:shape="rectangle">
+                        <solid android:color="?attr/colorPrimaryContainer" />
+                        <corners android:radius="@dimen/rail_item_pill_radius" />
+                    </shape>
+                </inset>
+            </item>
+            <item android:drawable="@android:color/transparent" />
+        </selector>
     </item>
-</selector>
+
+    <item android:id="@android:id/mask">
+        <inset
+            android:insetBottom="@dimen/rail_item_pill_inset_vertical"
+            android:insetLeft="@dimen/rail_item_pill_inset_horizontal"
+            android:insetRight="@dimen/rail_item_pill_inset_horizontal"
+            android:insetTop="@dimen/rail_item_pill_inset_vertical">
+            <shape android:shape="rectangle">
+                <solid android:color="@android:color/white" />
+                <corners android:radius="@dimen/rail_item_pill_radius" />
+            </shape>
+        </inset>
+    </item>
+</ripple>

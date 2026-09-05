@@ -41,6 +41,11 @@
     <color name="overlay_pill_background">#E6F7FAF7</color>
     <color name="overlay_pill_stroke">#33007A62</color>
 
+    <!-- Scrim behind labels that sit on a recording thumbnail. Fixed black
+         alpha rather than a surface role because the backdrop is arbitrary
+         camera imagery, not an app surface, in either theme. -->
+    <color name="recording_thumb_scrim">#B3000000</color>
+
     <!-- Status — AA on light surfaces -->
     <color name="status_success">@color/overdrive_status_success</color>
     <color name="status_warning">@color/overdrive_status_warning</color>

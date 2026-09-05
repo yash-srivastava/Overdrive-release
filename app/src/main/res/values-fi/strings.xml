@@ -580,7 +580,7 @@
     <string name="setup_traffic_body">BYD Traffic Monitor estää kolmannen osapuolen sovelluksia pääsemästä internetiin. Kun poistat sen käytöstä, OverDrive ja muut asentamasi sovellukset käyttävät todella verkkoa. Jälkeen tarvitaan kova uudelleenkäynnistys.</string>
     <string name="setup_traffic_button">Avaa Liikenteen Valvonta</string>
     <string name="setup_camera_fix_title">Kamera syöttää mustia tai virheellisiä?</string>
-    <string name="setup_camera_fix_body">Avaa Diagnostiikka → Camera probe, aseta kameran tunnus arvoon 0, napauta Talleta ja käynnistä kameran taustakuva uudelleen. Jos syötteet ovat edelleen väärässä, toista kameran tunnuksella 1. Jätä kartoitusosio koskematta.</string>
+    <string name="setup_camera_fix_body">Camera probe, aseta kameran tunnus arvoon 0, napauta Talleta ja käynnistä kameran taustakuva uudelleen. Jos syötteet ovat edelleen väärässä, toista kameran tunnuksella 1. Jätä kartoitusosio koskematta.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Nykyinen: Kamera %1$d (manuaalinen)</string>
@@ -759,6 +759,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">Kellossa</string>
+    <string name="dashboard_modern_vehicle_status">Ajoneuvon tila</string>
     <string name="dashboard_subtitle_all_systems">Kaikki järjestelmät verkossa</string>
     <string name="dashboard_subtitle_some_offline">%1$d / %2$d palvelua verkossa</string>
     <string name="dashboard_subtitle_no_tunnel">Etäkäyttö offline-tilassa</string>
@@ -782,11 +783,11 @@
     <string name="vehicle_dialog_model_label">Malli</string>
     <string name="vehicle_dialog_save">Tallenna</string>
     <string name="vehicle_dialog_reset">Palauta automaattinen tunnistus</string>
+    <string name="vehicle_dialog_detection">Tunnistus: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Automaattinen</string>
+    <string name="vehicle_dialog_detection_manual">Manuaalinen</string>
     <string name="vehicle_dialog_invalid_capacity">Kapasiteetin on oltava 15 - 120 kWh</string>
-    <string name="vehicle_dialog_summary_capacity">Tilavuus: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">Teho: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">Malli: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">Viimeksi kalibroitu: %1$.1f%% %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">unavailable</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->
@@ -1173,4 +1174,11 @@
     <string name="dialog_cloudflared_settings_message">Määritä, käytätkö maksullista Cloudflarea vai trycloudflare-palvelua. Jos käytät maksullista Cloudflarea, syötä tunnelitunnuksesi.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">Jos asetettu maksulliseen versioon, tunnus ei voi olla tyhjä</string>
     <string name="toast_cloudflared_saved_settings">Cloudflared-asetukset tallennettu</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Kamerat</string>
+    <string name="rail_section_controls">Hallinta</string>
+    <string name="rail_section_driving">Ajo</string>
+    <string name="rail_section_automation">Automaatio</string>
+    <string name="rail_section_system">Järjestelmä</string>
+    <string name="rail_collapse_label">Kutista</string>
 </resources>

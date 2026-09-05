@@ -698,7 +698,7 @@
     <string name="setup_traffic_body">O Monitor de Tráfego da BYD bloqueia o acesso de aplicativos de terceiros à internet. Desativá-lo permite que o OverDrive e quaisquer outros aplicativos que você instale realmente usem a rede. Uma reinicialização forçada é necessária depois.</string>
     <string name="setup_traffic_button">Abrir Monitor de Tráfego</string>
     <string name="setup_camera_fix_title">Imagens da câmera pretas ou incorretas?</string>
-    <string name="setup_camera_fix_body">Abra Diagnóstico → Teste de Câmera, defina o ID da Câmera para 0, toque em Salvar e reinicie o daemon da câmera. Se as imagens ainda estiverem erradas, repita com o ID da Câmera 1. Deixe a seção de mapeamento intocada.</string>
+    <string name="setup_camera_fix_body">Teste de Câmera, defina o ID da Câmera para 0, toque em Salvar e reinicie o daemon da câmera. Se as imagens ainda estiverem erradas, repita com o ID da Câmera 1. Deixe a seção de mapeamento intocada.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Atual: Câmera %1$d (Manual)</string>
@@ -912,6 +912,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">Monitorando</string>
+    <string name="dashboard_modern_vehicle_status">Status do veículo</string>
     <string name="dashboard_subtitle_all_systems">Todos os sistemas online</string>
     <string name="dashboard_subtitle_some_offline">%1$d de %2$d serviços online</string>
     <string name="dashboard_subtitle_no_tunnel">Acesso remoto offline</string>
@@ -936,11 +937,11 @@
     <string name="vehicle_model_seagull">BYD Dolphin Mini</string>
     <string name="vehicle_dialog_save">Salvar</string>
     <string name="vehicle_dialog_reset">Redefinir para detecção automática</string>
+    <string name="vehicle_dialog_detection">Detecção: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Automática</string>
+    <string name="vehicle_dialog_detection_manual">Manual</string>
     <string name="vehicle_dialog_invalid_capacity">A capacidade deve ser de 15 a 120 kWh</string>
-    <string name="vehicle_dialog_summary_capacity">Capacidade: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">Efetiva: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">Modelo: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">Última calibração: %1$.1f%% em %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">indisponível</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->
@@ -1369,4 +1370,11 @@
     <string name="projection_preset_right">Metade direita</string>
     <string name="projection_preset_center">Centro</string>
     <string name="projection_lock_aspect">Manter aspecto do painel</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Câmeras</string>
+    <string name="rail_section_controls">Controles</string>
+    <string name="rail_section_driving">Direção</string>
+    <string name="rail_section_automation">Automação</string>
+    <string name="rail_section_system">Sistema</string>
+    <string name="rail_collapse_label">Recolher</string>
 </resources>

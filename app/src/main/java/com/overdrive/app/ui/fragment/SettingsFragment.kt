@@ -177,6 +177,7 @@ class SettingsFragment : Fragment() {
             root.findViewById<LinearLayout>(R.id.subrailRowsContainer) ?: return
 
         val savedName = savedInstanceState?.getString(KEY_SECTION)
+            ?: arguments?.getString(KEY_SECTION)
         currentSection = savedName
             ?.let { name -> Section.values().firstOrNull { it.name == name } }
             ?: Section.APPEARANCE
@@ -482,7 +483,9 @@ class SettingsFragment : Fragment() {
         }.start()
     }
 
-    private companion object {
+    companion object {
         const val KEY_SECTION = "settings_subrail_section"
+        const val KEY_FROM_RECORDINGS = "settings_from_recordings"
+        const val SECTION_RECORDING = "RECORDING"
     }
 }

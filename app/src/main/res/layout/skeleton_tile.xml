@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Recording-card sized placeholder: thumbnail block over two text bars. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="104dp"
+        android:background="@drawable/skeleton_block" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="14dp"
+        android:layout_marginTop="10dp"
+        android:background="@drawable/skeleton_block" />
+
+    <View
+        android:layout_width="120dp"
+        android:layout_height="12dp"
+        android:layout_marginTop="6dp"
+        android:background="@drawable/skeleton_block" />
+</LinearLayout>

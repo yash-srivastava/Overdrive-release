@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -10,10 +10,11 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
-    <script src="../shared/theme.js?v=5"></script>
+    <script src="../shared/theme.js?v=6"></script>
     <script src="../shared/app-shell.js?v=2"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=23">
-    <link rel="stylesheet" href="../shared/seat-positions.css">
+    <script src="../shared/skeleton.js?v=4"></script>
+    <link rel="stylesheet" href="../shared/styles.css?v=32">
+    <link rel="stylesheet" href="../shared/seat-positions.css?v=7">
 </head>
 <body>
     <div class="app-layout">
@@ -29,93 +30,70 @@
                 <div style="width:40px;"></div>
             </div>
 
+            <!-- Hidden in the Android shell (the toolbar already names the page).
+                 Kept for the standalone / tunnel session. -->
             <header class="page-header">
                 <h1 class="page-title" data-i18n="seatpos.page_title">Seat Positions</h1>
-                <div class="header-actions">
-                    <span class="status-badge inactive" id="spStateBadge" data-i18n="seatpos.state_acc_off">ACC off</span>
-                </div>
             </header>
 
             <div class="page-body">
 
-                <!-- ACC off is the one hard blocker: the seat motors are unpowered, so a
-                     write is accepted (result code 0) and does nothing. Without this the
-                     UI would report a success that never happened. -->
-                <div class="card" id="spGate" style="display:none;">
-                    <div class="card-body">
-                        <div class="info-box-note" style="background:rgba(255,179,0,0.10);border:1px solid rgba(255,179,0,0.35);">
-                            <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="#ffb300" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                            <div data-i18n="seatpos.gate_acc_off">The car is off, so the seat motors have no power. Applying or saving a position would be accepted and do nothing. Turn the car on to continue.</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Gear-not-in-P is still shown when the OverDrive positioning guard is
-                     disabled. The gate is the GEAR, not motion: Pål confirmed
-                     the car refuses with the brake fully pressed and the car standing still, as
-                     long as the gear is out of P. DrivingSafetyGuard already keys on gear
-                     (NOT_PARK blocks; P only counts as parked below 2 km/h, to catch rolling in
-                     Park), so the signal was right and only this wording was wrong. Saving and
-                     renaming stay available; those only read. -->
-                <div class="card" id="spMoving" style="display:none;">
-                    <div class="card-body">
-                        <div class="info-box-note">
-                            <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="16" x2="12" y2="11"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                            <div data-i18n="seatpos.gate_moving">The car is not in Park. Seat positions can only be applied with the gear in P &mdash; the vehicle refuses otherwise, even standing still with the brake pressed. Saving and renaming still work.</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Shown on any model the axis map has not been confirmed against, including a
-                     car whose owner never picked one. Informational, not a warning: reading and
-                     capturing are safe everywhere, and the values in the list are how an owner
-                     finds out whether the addresses fit their car. -->
-                <div class="card" id="spUnconfirmed" style="display:none;">
-                    <div class="card-body">
-                        <div class="info-box-note">
-                            <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="16" x2="12" y2="11"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                            <div id="spUnconfirmedText"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="card">
-                    <div class="card-body sp-hero">
-                        <div class="seat-frame hero-size" id="spCurrentGlyph"></div>
-                        <div class="sp-hero-main">
-                            <div class="sp-hero-top">
-                                <div>
-                                    <div class="sp-eyebrow" data-i18n="seatpos.current">Current position</div>
-                                    <div class="sp-match" id="spCurrentMatch"></div>
-                                </div>
-                                <button class="btn btn-primary" id="spSaveNew">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                                    <span data-i18n="seatpos.save_as_new">Save as new</span>
-                                </button>
-                            </div>
-                            <div class="sp-axes" id="spCurrentAxes"></div>
-                            <div class="sp-batches" id="spBatches" style="display:none;">
-                                <span class="sp-batch" id="spBatch1"><span class="led"></span>batch 1 · mirrors</span>
-                                <span class="sp-batch" id="spBatch2"><span class="led"></span>batch 2 · seat</span>
+                <div class="card sp-now">
+                    <div class="card-body sp-now-body">
+                        <div class="sp-now-art" id="spCurrentGlyph" data-sk-real="seatCurrent"></div>
+                        <div class="sk sp-sk-art" data-sk-group="seatCurrent"></div>
+                        <div class="sp-now-main">
+                            <div class="sp-now-eyebrow" data-i18n="seatpos.current">Current position</div>
+                            <div class="sp-match" id="spCurrentMatch" data-sk-real="seatCurrent"></div>
+                            <div id="spCurrentAxes" data-sk-real="seatCurrent"></div>
+                            <div class="sp-sk-main" data-sk-group="seatCurrent">
+                                <div class="sk sk-line sp-sk-match"></div>
+                                <div class="sk sk-line sp-sk-axes"></div>
                             </div>
                         </div>
+                        <div class="sp-now-actions">
+                            <button class="btn btn-primary" id="spSaveNew">
+                                <span data-i18n="seatpos.save_as_new">Save as new</span>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Priority order lives in renderGate(): unpowered motors first
+                         (a write is accepted and does nothing), then gear-out-of-P,
+                         then an unconfirmed axis map. -->
+                    <div class="sp-status" id="spStatus" data-state="off">
+                        <span class="sp-status-dot" aria-hidden="true"></span>
+                        <span class="sp-status-text" id="spStatusText" data-i18n="seatpos.gate_acc_off">The car is off, so the seat motors have no power. Apply and save will do nothing until you turn it on.</span>
+                    </div>
+                    <div class="sp-batches" id="spBatches" style="display:none;">
+                        <span class="sp-batch" id="spBatch1"><span class="led"></span>batch 1 � mirrors</span>
+                        <span class="sp-batch" id="spBatch2"><span class="led"></span>batch 2 � seat</span>
                     </div>
                 </div>
 
-                <div id="spList"></div>
+                <div id="spList" data-sk-real="seatList"></div>
+
+                <div class="card sp-sk-list" data-sk-group="seatList">
+                    <div class="card-body">
+                        <div class="sk sk-line sp-sk-row"></div>
+                        <div class="sk sk-line sp-sk-row"></div>
+                        <div class="sk sk-line sp-sk-row"></div>
+                    </div>
+                </div>
 
             </div>
         </main>
     </div>
 
+    <div id="toastContainer" class="toast-container"></div>
+
     <div class="modal-backdrop" id="spScrim" style="display:none;">
-        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="spDialogTitle">
-            <h3 id="spDialogTitle" style="margin:0 0 10px;font-size:17px;font-weight:650;"></h3>
-            <p id="spDialogBody" style="margin:0 0 14px;font-size:13.5px;color:var(--text-secondary);"></p>
-            <div id="spDialogHtml" style="margin-bottom:14px;"></div>
-            <input type="text" id="spDialogInput" class="input" maxlength="60" style="display:none;width:100%;margin-bottom:14px;">
+        <div class="modal-card sp-dialog" role="dialog" aria-modal="true" aria-labelledby="spDialogTitle">
+            <h3 id="spDialogTitle" class="sp-dialog-title"></h3>
+            <p id="spDialogBody" class="sp-dialog-body"></p>
+            <div id="spDialogHtml"></div>
+            <input type="text" id="spDialogInput" class="input" maxlength="60">
             <div class="sp-dialog-actions">
-                <button class="btn btn-secondary" id="spDialogCancel" data-i18n="common.cancel">Cancel</button>
+                <button class="btn sp-dialog-cancel" id="spDialogCancel" data-i18n="common.cancel">Cancel</button>
                 <button class="btn btn-primary" id="spDialogConfirm"></button>
             </div>
         </div>
@@ -124,7 +102,7 @@
     <script src="../shared/auth.js"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
     <script src="../shared/core.js?v=20"></script>
-    <script src="../shared/seat-positions.js"></script>
+    <script src="../shared/seat-positions.js?v=6"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');

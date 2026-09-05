@@ -29,6 +29,10 @@ const SeatPositions = {
     colourMax: 30,
     _pollTimer: null,
 
+    // Which axis readouts are expanded, by position id ('current' for the hero card).
+    // Survives the 5s geometry poll, which rebuilds the card.
+    detailsOpen: {},
+
     // Axis table. Order here is the display order. Groups match the two batches
     // applyFull writes, which is also how a person thinks about them.
     AXES: [
@@ -53,6 +57,7 @@ const SeatPositions = {
 
     ICONS: {
         bolt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+        chevron: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',
         dots: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>',
         link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>',
         pencil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
@@ -64,6 +69,10 @@ const SeatPositions = {
         this.load();
         document.getElementById('spSaveNew').addEventListener('click', () => this.saveAsNew());
         document.getElementById('spList').addEventListener('click', (e) => this.onListClick(e));
+        document.getElementById('spCurrentAxes').addEventListener('click', (e) => {
+            const button = e.target.closest('button[data-act="details"]');
+            if (button) this.toggleDetails(button);
+        });
         // Close any open row menu on an outside click.
         document.addEventListener('click', (e) => {
             if (!e.target.closest || !e.target.closest('.sp-menu-wrap')) this.closeMenus(null);
@@ -129,6 +138,11 @@ const SeatPositions = {
         await this.loadAutomations();
         await this.loadCurrent();
         this.render();
+        // First resolved paint only. The 5s loadCurrent() poll updates axes in place.
+        if (window.BYD && BYD.skeleton) {
+            BYD.skeleton.resolve('seatCurrent');
+            BYD.skeleton.resolve('seatList');
+        }
         this.syncPolling();
     },
 
@@ -210,43 +224,68 @@ const SeatPositions = {
         return this.AXES.filter(a => axes && axes[a.key] !== undefined && axes[a.key] !== this.SENTINEL);
     },
 
-    axesHtml(axes) {
-        const eq = this.equipped(axes);
-        return ['seat', 'mirror'].map(group => {
-            const items = eq.filter(a => a.group === group);
-            if (!items.length) return '';
-            const label = this.t(group === 'seat' ? 'seatpos.group_seat' : 'seatpos.group_mirrors',
-                                 group === 'seat' ? 'Seat' : 'Mirrors');
-            return '<div class="sp-axis-line"><span class="sp-axis-group">' + this.esc(label) + '</span>' +
-                items.map(a =>
-                    '<span class="sp-axis"><span class="k">' + this.esc(this.t(a.i18n, a.key)) +
-                    '</span> <span class="v">' + this.esc(axes[a.key]) + '</span></span>').join('') +
-                '</div>';
-        }).join('');
+    axisSpans(axes, group) {
+        return this.equipped(axes).filter(a => a.group === group).map(a =>
+            '<span class="sp-axis">' + this.esc(this.t(a.i18n, a.key)) +
+            '<span class="v">' + this.esc(axes[a.key]) + '</span></span>').join('');
     },
 
     /**
-     * Side-profile glyph. Direction of each axis is INFERRED from comparing captured
-     * positions, not measured against real travel, and the ranges are chosen to read
-     * well rather than to be true. Angles stay gentle: past roughly 12 degrees the two
-     * clipped halves visibly pull apart at the join, and real positions differ by far
-     * less than that.
+     * Thirteen axis values per position is a wall of numbers on a page whose rows are
+     * chosen by name, so they sit behind a disclosure. What a position stores is already
+     * on the summary line above; the numbers only matter when comparing two positions.
      */
-    glyph(axes, size) {
-        const v = (k, d) => (!axes || axes[k] === undefined || axes[k] === this.SENTINEL) ? d : axes[k];
-        const n = x => Math.round(x * 100) / 100;
-        const backDeg = -(v('BACKREST', 55) - 55) * 0.30;   // negative = more upright
-        const tiltDeg = -(v('SITPOINT', 50) - 50) * 0.13;   // negative lifts the front
-        const dyPct = (50 - v('HEIGHT', 50)) / 100 * 12;
-        const dxPct = -(v('HORIZONTAL', 50) - 50) / 100 * 7;
-        const W = size, H = Math.round(size / 0.8443);
-        return '<div class="seat" aria-hidden="true" style="width:' + W + 'px;height:' + H + 'px;">' +
-            '<div class="seat-body" style="transform:translate(' + n(dxPct) + '%,' + n(dyPct) + '%);">' +
-                '<span class="seat-part cushion" style="transform:rotate(' + n(tiltDeg) + 'deg);"></span>' +
-                '<span class="seat-part back" style="transform:rotate(' + n(backDeg) + 'deg);"></span>' +
-            '</div>' +
-            '<span class="seat-floor"></span>' +
+    axesHtml(axes, key) {
+        const lines = ['seat', 'mirror'].map(group => {
+            const items = this.axisSpans(axes, group);
+            if (!items) return '';
+            const label = this.t(group === 'seat' ? 'seatpos.group_seat' : 'seatpos.group_mirrors',
+                                 group === 'seat' ? 'Seat' : 'Mirrors');
+            return '<div class="sp-axis-line"><span class="sp-axis-group">' + this.esc(label) +
+                '</span>' + items + '</div>';
+        }).join('');
+        if (!lines) return '';
+        const open = !!this.detailsOpen[key];
+        return '<div class="sp-details' + (open ? ' is-open' : '') + '" data-key="' + this.esc(key) + '">' +
+            '<button type="button" class="sp-details-toggle" data-act="details" aria-expanded="' +
+                (open ? 'true' : 'false') + '">' + this.ICONS.chevron +
+                '<span class="sp-details-label">' + this.esc(this.detailsLabel(open)) + '</span>' +
+            '</button>' +
+            '<div class="sp-axes">' + lines + '</div>' +
         '</div>';
+    },
+
+    detailsLabel(open) {
+        return open
+            ? this.t('seatpos.hide_details', 'Hide details')
+            : this.t('seatpos.show_details', 'Show details');
+    },
+
+    /**
+     * Toggled in place rather than through a re-render: the row carries an open menu and
+     * focus, and a rebuild would drop both.
+     */
+    toggleDetails(button) {
+        const wrap = button.closest('.sp-details');
+        if (!wrap) return;
+        const open = !this.detailsOpen[wrap.getAttribute('data-key')];
+        this.detailsOpen[wrap.getAttribute('data-key')] = open;
+        wrap.classList.toggle('is-open', open);
+        button.setAttribute('aria-expanded', open ? 'true' : 'false');
+        const label = button.querySelector('.sp-details-label');
+        if (label) label.textContent = this.detailsLabel(open);
+    },
+
+    // Material Icons `airline_seat_recline_extra`. Filled, so it carries no stroke width.
+    SEAT_PATH: 'M5.35 5.64c-.9-.64-1.12-1.88-.49-2.79.63-.9 1.88-1.12 2.79-.49.9.64 1.12 1.88.49 2.79-.64.9-1.88 1.12-2.79.49zM16 19H8.93c-1.48 0-2.74-1.08-2.96-2.54L4 7H2l1.99 9.76C4.37 19.2 6.47 21 8.94 21H16v-2zm.23-4h-4.88l-1.03-4.1c1.58.89 3.28 1.54 5.15 1.22V9.99c-1.63.31-3.44-.27-4.69-1.25L9.14 7.47c-.23-.18-.49-.3-.76-.38-.32-.09-.66-.12-.99-.06h-.02c-1.23.22-2.05 1.39-1.84 2.61l1.35 5.92C7.16 16.98 8.39 18 9.83 18h6.85l3.82 3 1.5-1.5-5.77-4.5z',
+
+    /**
+     * A posed side profile would have to invent the axis directions, which the
+     * numbers behind Show details state exactly.
+     */
+    glyph(axes) {
+        return '<svg class="seat-svg" viewBox="0 0 24 24" fill="currentColor" ' +
+            'aria-hidden="true"><path d="' + this.SEAT_PATH + '"/></svg>';
     },
 
     // Largest per-axis deviation still counted as "this position". The seat does not land
@@ -294,8 +333,10 @@ const SeatPositions = {
         const matchEl = document.getElementById('spCurrentMatch');
         if (!glyphEl) return;
 
-        glyphEl.innerHTML = this.current ? this.glyph(this.current, 78) : '';
-        axesEl.innerHTML = this.current ? this.axesHtml(this.current) : '';
+        // No reading means no pose to draw. An empty holder collapses (:empty)
+        // rather than reserving space for a seat shape that would be invented.
+        glyphEl.innerHTML = this.current ? this.glyph(this.current) : '';
+        axesEl.innerHTML = this.current ? this.axesHtml(this.current, 'current') : '';
         if (!this.current) {
             matchEl.textContent = this.t('seatpos.current_unavailable', 'Could not read the seat');
         } else {
@@ -307,37 +348,37 @@ const SeatPositions = {
         document.getElementById('spSaveNew').disabled = !this.acc || !this.current;
     },
 
-    renderGate() {
-        // Reading and capturing are safe on any car, so the notice explains rather than warns:
-        // the list is the instrument that tells an owner whether the addresses fit their car.
-        const unconf = document.getElementById('spUnconfirmed');
-        if (unconf) {
-            unconf.style.display = this.modelConfirmed ? 'none' : '';
-            const txt = document.getElementById('spUnconfirmedText');
-            if (txt && !this.modelConfirmed) {
-                txt.textContent = this.modelId
-                    ? this.t('seatpos.unconfirmed_note', 'These addresses are confirmed on a BYD Seal. Reading and saving positions is safe on any model — capture one, move the seat, capture another, and see whether the values follow. Applying asks first.')
-                    : this.t('seatpos.unconfirmed_note_unset', 'No vehicle model is selected in Settings, so this car is treated as unknown. Reading and saving positions is safe — capture one, move the seat, capture another, and see whether the values follow. Applying asks first.');
-            }
-        }
-        const gate = document.getElementById('spGate');
-        const moving = document.getElementById('spMoving');
-        const badge = document.getElementById('spStateBadge');
-        gate.style.display = this.acc ? 'none' : '';
-        // Keep raw movement state visible even when the user disables OverDrive's global
-        // positioning guard: the vehicle may still refuse the write outside Park. ACC off
-        // remains a blocker because unpowered motors accept the write and do nothing.
-        moving.style.display = (this.acc && this.movementBlocked) ? '' : 'none';
+    /**
+     * One line, most blocking condition first. ACC off outranks the gear because
+     * unpowered motors accept a write and do nothing; the gear gate outranks the
+     * unconfirmed axis map because it stops the apply outright, while an
+     * unconfirmed map only makes the apply ask for confirmation first.
+     */
+    gateState() {
         if (!this.acc) {
-            badge.className = 'status-badge inactive';
-            badge.textContent = this.t('seatpos.state_acc_off', 'ACC off');
-        } else if (this.movementBlocked) {
-            badge.className = 'status-badge';
-            badge.textContent = this.t('seatpos.state_moving', 'Not in Park');
-        } else {
-            badge.className = 'status-badge active';
-            badge.textContent = this.t('seatpos.state_parked', 'Parked');
+            return { state: 'off', text: this.t('seatpos.gate_acc_off',
+                'The car is off, so the seat motors have no power. Apply and save will do nothing until you turn it on.') };
         }
+        if (this.movementBlocked) {
+            return { state: 'warn', text: this.t('seatpos.gate_moving',
+                'Not in Park — apply is off until the gear is in P. Saving and renaming still work.') };
+        }
+        if (!this.modelConfirmed) {
+            return { state: 'info', text: this.modelId
+                ? this.t('seatpos.unconfirmed_note', 'These addresses are confirmed on a BYD Seal. Reading and saving are safe; apply will ask first.')
+                : this.t('seatpos.unconfirmed_note_unset', 'No model is selected in Settings. Reading and saving are safe; apply will ask first.') };
+        }
+        return { state: 'ok', text: this.t('seatpos.gate_ready',
+            'Parked and powered — positions can be applied.') };
+    },
+
+    renderGate() {
+        const host = document.getElementById('spStatus');
+        const text = document.getElementById('spStatusText');
+        if (!host || !text) return;
+        const gate = this.gateState();
+        host.setAttribute('data-state', gate.state);
+        text.textContent = gate.text;
     },
 
     rowHtml(p) {
@@ -345,7 +386,7 @@ const SeatPositions = {
         const uses = this.usedBy(p.id);
         const applied = this.appliedId === p.id;
         return '<div class="sp-row' + (applied ? ' is-applied' : '') + '" data-id="' + this.esc(p.id) + '">' +
-            '<div class="seat-frame row-size">' + this.glyph(p.axes, 42) + '</div>' +
+            '<div class="sp-row-art">' + this.glyph(p.axes) + '</div>' +
             '<div class="sp-row-main">' +
                 '<div class="sp-name-line"><span class="sp-name">' + this.esc(p.name) + '</span>' +
                     (isUser ? '' : '<span class="sp-chip from-car">' +
@@ -361,7 +402,7 @@ const SeatPositions = {
                 // car's own UI calls it.
                 (p.carName ? '<div class="sp-carname">' + this.esc(p.carName) + '</div>' : '') +
                 this.partsSummaryHtml(p) +
-                '<div class="sp-axes">' + this.axesHtml(p.axes) + '</div>' +
+                '<div class="sp-row-axes">' + this.axesHtml(p.axes, p.id) + '</div>' +
             '</div>' +
             '<div class="sp-row-actions">' +
                 (isUser ? '<button class="btn btn-secondary" data-act="saveHere"' + (this.acc ? '' : ' disabled') + '>' +
@@ -369,7 +410,7 @@ const SeatPositions = {
                 '<button class="btn btn-primary" data-act="apply"' + ((this.acc && !this.positioningBlocked) ? '' : ' disabled') + '>' +
                     this.esc(this.t('seatpos.apply', 'Apply')) + '</button>' +
                 '<div class="sp-menu-wrap">' +
-                    '<button class="btn btn-secondary icon-btn" data-act="menu" aria-haspopup="true" aria-expanded="false">' +
+                    '<button class="btn sp-icon-btn" data-act="menu" aria-haspopup="true" aria-expanded="false">' +
                         this.ICONS.dots + '</button>' +
                     '<div class="sp-menu">' +
                         '<button data-act="useInAutomation">' + this.ICONS.link +
@@ -408,8 +449,17 @@ const SeatPositions = {
 
     groupHead(title, meta) {
         return '<div class="sp-group-head"><span class="sp-group-title">' + this.esc(title) + '</span>' +
-            (meta ? '<span class="sp-group-meta">' + this.esc(meta) + '</span>' : '') +
-            '<span class="sp-group-rule"></span></div>';
+            (meta ? '<span class="sp-group-meta">' + this.esc(meta) + '</span>' : '') + '</div>';
+    },
+
+    emptyHtml() {
+        return '<div class="sp-empty">' +
+            '<div class="sp-empty-tile"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+                '<path d="' + this.SEAT_PATH + '"/></svg></div>' +
+            '<div class="sp-empty-title">' + this.esc(this.t('seatpos.empty_title', 'No saved positions yet')) + '</div>' +
+            '<div class="sp-empty-hint">' + this.esc(this.t('seatpos.empty',
+                'Adjust the seat and mirrors in the car, then press Save as new.')) + '</div>' +
+        '</div>';
     },
 
     render() {
@@ -421,8 +471,7 @@ const SeatPositions = {
         html += this.groupHead(this.t('seatpos.my_positions', 'My positions'));
         html += mine.length
             ? mine.map(p => this.rowHtml(p)).join('')
-            : '<div class="sp-empty">' + this.esc(this.t('seatpos.empty',
-                'No saved positions yet. Adjust the seat and mirrors, then press Save as new.')) + '</div>';
+            : this.emptyHtml();
 
         // Captured positions are per-profile: the same slot number is different geometry
         // for a different signed-in account, so they group by profile rather than merging.
@@ -474,6 +523,7 @@ const SeatPositions = {
         }
         this.closeMenus(null);
 
+        if (act === 'details') return this.toggleDetails(btn);
         if (act === 'apply') return this.apply(p);
         if (act === 'usedBy') return this.showUses(p);
         if (act === 'useInAutomation') return this.useInAutomation(p);
@@ -771,7 +821,7 @@ const SeatPositions = {
             htmlEl.innerHTML = html || '';
             htmlEl.style.display = html ? '' : 'none';
             const input = document.getElementById('spDialogInput');
-            input.style.display = opts.prompt ? '' : 'none';
+            input.style.display = opts.prompt ? 'block' : 'none';
             input.value = opts.value || '';
             const confirmBtn = document.getElementById('spDialogConfirm');
             confirmBtn.textContent = opts.confirmLabel;

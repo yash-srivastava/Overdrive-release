@@ -702,7 +702,7 @@
     <string name="setup_traffic_body">Монитор трафика BYD блокирует доступ третьих лиц к Интернету. Отключение позволяет OverDrive и любым другим приложениям, которые вы устанавливаете, фактически использовать сеть.</string>
     <string name="setup_traffic_button">Открытый монитор трафика</string>
     <string name="setup_camera_fix_title">Камера подает черный или неточный?</string>
-    <string name="setup_camera_fix_body">Откройте диагностику → Зонд камеры, нажмите идентификатор камеры на 0, нажмите Save, а затем перезагрузите демона камеры. Если ленты все еще неправильны, повторяйте с идентификатором камеры 1. Оставьте раздел отображения нетронутым.</string>
+    <string name="setup_camera_fix_body">Зонд камеры, нажмите идентификатор камеры на 0, нажмите Save, а затем перезагрузите демона камеры. Если ленты все еще неправильны, повторяйте с идентификатором камеры 1. Оставьте раздел отображения нетронутым.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Текущая: Камера %1$d (учебное пособие)</string>
@@ -912,6 +912,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">На страже</string>
+    <string name="dashboard_modern_vehicle_status">Состояние автомобиля</string>
     <string name="dashboard_subtitle_all_systems">Все системы онлайн</string>
     <string name="dashboard_subtitle_some_offline">%1$d услуг %2$d онлайн</string>
     <string name="dashboard_subtitle_no_tunnel">Дистанционный доступ в автономном режиме</string>
@@ -935,11 +936,11 @@
     <string name="vehicle_dialog_model_label">Модель</string>
     <string name="vehicle_dialog_save">Сохранить</string>
     <string name="vehicle_dialog_reset">Перезагрузка на автоматическое обнаружение</string>
+    <string name="vehicle_dialog_detection">Определение: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Автоматически</string>
+    <string name="vehicle_dialog_detection_manual">Вручную</string>
     <string name="vehicle_dialog_invalid_capacity">Пропускная способность должна быть 15 - 120 kWh</string>
-    <string name="vehicle_dialog_summary_capacity">Пропускная способность: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">Эффективность: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">Модель: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">Последняя калибровка: %1$.1f%% на %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">недоступна</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->
@@ -1389,4 +1390,11 @@
     <string name="projection_preset_right">Правая половина</string>
     <string name="projection_preset_center">По центру</string>
     <string name="projection_lock_aspect">Сохранять аспект кластера</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Камеры</string>
+    <string name="rail_section_controls">Управление</string>
+    <string name="rail_section_driving">Вождение</string>
+    <string name="rail_section_automation">Автоматизация</string>
+    <string name="rail_section_system">Система</string>
+    <string name="rail_collapse_label">Свернуть</string>
 </resources>

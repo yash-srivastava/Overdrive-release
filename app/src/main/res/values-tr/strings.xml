@@ -580,7 +580,7 @@
     <string name="setup_traffic_body">BYD Traffic Monitor üçüncü taraf uygulamaların internet\'e ulaşmasını engeller. Bu uygulamayı devre dışı bırakmak, OverDrive ve yüklediğiniz diğer uygulamaların ağı kullanmasına izin verir.</string>
     <string name="setup_traffic_button">Açık Trafik İzleyici</string>
     <string name="setup_camera_fix_title">Kamera siyah mı yanlış mı?</string>
-    <string name="setup_camera_fix_body">Açık Diagnostics → Kamera sondası, Camera ID\'yi 0 olarak ayarlayın, Save\'e dokunun ve sonra kamera demonu yeniden başlatın.</string>
+    <string name="setup_camera_fix_body">Kamera sondası, Camera ID\'yi 0 olarak ayarlayın, Save\'e dokunun ve sonra kamera demonu yeniden başlatın.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Şimdiki: Kamera %1$d (Manual)</string>
@@ -760,6 +760,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">Nöbette</string>
+    <string name="dashboard_modern_vehicle_status">Araç durumu</string>
     <string name="dashboard_subtitle_all_systems">Tüm sistemler çevrimiçi</string>
     <string name="dashboard_subtitle_some_offline">%1$d of %2$d online hizmetleri</string>
     <string name="dashboard_subtitle_no_tunnel">Uzaktan erişim çevrimdışı</string>
@@ -783,11 +784,11 @@
     <string name="vehicle_dialog_model_label">Model</string>
     <string name="vehicle_dialog_save">Kaydet</string>
     <string name="vehicle_dialog_reset">Otomatik tespit için yeniden ayarlayın</string>
+    <string name="vehicle_dialog_detection">Algılama: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Otomatik</string>
+    <string name="vehicle_dialog_detection_manual">Manuel</string>
     <string name="vehicle_dialog_invalid_capacity">Kapasite 15 - 120 kWh olmalıdır.</string>
-    <string name="vehicle_dialog_summary_capacity">Kapasite: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">Etkili: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">Model: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">Son kalibrasyon: %1$.1f%% %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">kullanılamıyor</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->
@@ -1340,4 +1341,11 @@
     <string name="projection_autostart_conflict_confirm">Bu uygulamayı kullan</string>
     <string name="projection_app_uninstalled">O uygulama artık yüklü değil.</string>
     <string name="projection_status_service_down">Ayna hizmeti hazır değil — uygulamayı (veya kamera arka plan hizmetini) yeniden başlatıp tekrar deneyin.</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Kameralar</string>
+    <string name="rail_section_controls">Kontroller</string>
+    <string name="rail_section_driving">Sürüş</string>
+    <string name="rail_section_automation">Otomasyon</string>
+    <string name="rail_section_system">Sistem</string>
+    <string name="rail_collapse_label">Daralt</string>
 </resources>

@@ -698,7 +698,7 @@ Questa azione non puo essere annullata.</string>
     <string name="setup_traffic_body">Il Traffic Monitor BYD blocca le app di terze parti dall\'accesso a Internet. Disattivarlo consente a OverDrive e a tutte le altre app installate di utilizzare effettivamente la rete.</string>
     <string name="setup_traffic_button">Monitore di traffico aperto</string>
     <string name="setup_camera_fix_title">La fotocamera è nera o sbagliata?</string>
-    <string name="setup_camera_fix_body">Open Diagnostics → Camera probe, impostare l\'ID della fotocamera a 0, toccare Salvare, quindi riavviare il daemon della fotocamera. Se i feed sono ancora sbagliati, ripetere con l\'ID della fotocamera 1. Lasciare la sezione di mappatura intatta.</string>
+    <string name="setup_camera_fix_body">Camera probe, impostare l\'ID della fotocamera a 0, toccare Salvare, quindi riavviare il daemon della fotocamera. Se i feed sono ancora sbagliati, ripetere con l\'ID della fotocamera 1. Lasciare la sezione di mappatura intatta.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Attuale: Telecamera %1$d (manuale)</string>
@@ -908,6 +908,7 @@ Questa azione non puo essere annullata.</string>
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">In sorveglianza</string>
+    <string name="dashboard_modern_vehicle_status">Stato del veicolo</string>
     <string name="dashboard_subtitle_all_systems">Tutti i sistemi online</string>
     <string name="dashboard_subtitle_some_offline">%1$d di %2$d servizi online</string>
     <string name="dashboard_subtitle_no_tunnel">Accesso remoto offline</string>
@@ -931,11 +932,11 @@ Questa azione non puo essere annullata.</string>
     <string name="vehicle_dialog_model_label">Modello</string>
     <string name="vehicle_dialog_save">Salva</string>
     <string name="vehicle_dialog_reset">Ripristina rilevamento automatico</string>
+    <string name="vehicle_dialog_detection">Rilevamento: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Automatico</string>
+    <string name="vehicle_dialog_detection_manual">Manuale</string>
     <string name="vehicle_dialog_invalid_capacity">La capacita deve essere 15 - 120 kWh</string>
-    <string name="vehicle_dialog_summary_capacity">Capacita: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">Effettiva: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">Modello: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">Ultima calibrazione: %1$.1f%% il %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">non disponibile</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->
@@ -1371,4 +1372,11 @@ Questa azione non puo essere annullata.</string>
     <string name="projection_preset_right">Metà destra</string>
     <string name="projection_preset_center">Centro</string>
     <string name="projection_lock_aspect">Mantieni l\'aspetto del cluster</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Telecamere</string>
+    <string name="rail_section_controls">Comandi</string>
+    <string name="rail_section_driving">Guida</string>
+    <string name="rail_section_automation">Automazione</string>
+    <string name="rail_section_system">Sistema</string>
+    <string name="rail_collapse_label">Comprimi</string>
 </resources>

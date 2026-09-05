@@ -583,7 +583,7 @@
     <string name="setup_traffic_body">Monitorul Traficului BYD blochează aplicațiile terțe să ajungă pe internet. Dezactivarea permite OverDrive și orice alte aplicații pe care le instalați de fapt utilizează rețeaua. Ulterior este necesară o repornire dură.</string>
     <string name="setup_traffic_button">Deschide Monitorul Traficului</string>
     <string name="setup_camera_fix_title">Camera foto alimentează negru sau incorect?</string>
-    <string name="setup_camera_fix_body">Deschideți diagnosticarea → sonda Camera video, setați Camera ID la 0, apăsați Salvare, apoi reporniți daemonul camerei. Dacă feed-urile sunt încă greșite, repetă cu Camera ID 1. Lasă secțiunea de cartografiere neatinsă.</string>
+    <string name="setup_camera_fix_body">Sonda Camera video, setați Camera ID la 0, apăsați Salvare, apoi reporniți daemonul camerei. Dacă feed-urile sunt încă greșite, repetă cu Camera ID 1. Lasă secțiunea de cartografiere neatinsă.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Curent: Camera %1$d (Manual)</string>
@@ -762,6 +762,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">Pe ceas</string>
+    <string name="dashboard_modern_vehicle_status">Starea vehiculului</string>
     <string name="dashboard_subtitle_all_systems">Toate sistemele online</string>
     <string name="dashboard_subtitle_some_offline">%1$d din serviciile %2$d online</string>
     <string name="dashboard_subtitle_no_tunnel">Acces offline la distanță</string>
@@ -785,11 +786,11 @@
     <string name="vehicle_dialog_model_label">Model</string>
     <string name="vehicle_dialog_save">Salvează</string>
     <string name="vehicle_dialog_reset">Resetare la autodetectare</string>
+    <string name="vehicle_dialog_detection">Detectare: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Automată</string>
+    <string name="vehicle_dialog_detection_manual">Manuală</string>
     <string name="vehicle_dialog_invalid_capacity">Capacitatea trebuie să fie 15-120 kWh</string>
-    <string name="vehicle_dialog_summary_capacity">Capacitate: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">Eficacitate: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">Model: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">Ultima calibrare: %1$.1f%% pe %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">unavailable</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->
@@ -1183,4 +1184,11 @@
     <string name="dialog_cloudflared_settings_message">Definiți dacă utilizați Cloudflare plătit sau trycloudflare. Dacă utilizați Cloudflare plătit, introduceți jetonul tunelului.</string>
     <string name="toast_cloudflared_token_cannot_be_empty">Dacă este setat pe versiunea plătită, jetonul nu poate fi gol</string>
     <string name="toast_cloudflared_saved_settings">Setările Cloudflared au fost salvate</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Camere</string>
+    <string name="rail_section_controls">Comenzi</string>
+    <string name="rail_section_driving">Conducere</string>
+    <string name="rail_section_automation">Automatizare</string>
+    <string name="rail_section_system">Sistem</string>
+    <string name="rail_collapse_label">Restrânge</string>
 </resources>

@@ -592,7 +592,7 @@
     <string name="setup_traffic_body">يمنع مراقب حركة المرور BYD تطبيقات الطرف الثالث من الوصول إلى الإنترنت. تعطيل هذا يسمح لـ OverDrive وأي تطبيقات أخرى تثبيتها في الواقع تستخدم الشبكة. مطلوب إعادة تشغيل صلبة بعد ذلك.</string>
     <string name="setup_traffic_button">فتح مراقبة حركة البيانات</string>
     <string name="setup_camera_fix_title">تغذية الكاميرا سوداء أو غير صحيحة؟</string>
-    <string name="setup_camera_fix_body">افتح التشخيصات &gt; مسبار الكاميرا، عيّن معرف الكاميرا على 0، انقر على الحفظ، ثم أعد تشغيل مسبار الكاميرا. إذا كانت الخلاصات لا تزال خاطئة، قم بتكرارها مع معرف الكاميرا 1. اترك قسم رسم الخرائط دون أن يمس.</string>
+    <string name="setup_camera_fix_body">مسبار الكاميرا، عيّن معرف الكاميرا على 0، انقر على الحفظ، ثم أعد تشغيل مسبار الكاميرا. إذا كانت الخلاصات لا تزال خاطئة، قم بتكرارها مع معرف الكاميرا 1. اترك قسم رسم الخرائط دون أن يمس.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">حاليا: الكاميرا %1$d (ثانوي)</string>
@@ -771,6 +771,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">في الساعة</string>
+    <string name="dashboard_modern_vehicle_status">حالة السيارة</string>
     <string name="dashboard_subtitle_all_systems">جميع النظم على الإنترنت</string>
     <string name="dashboard_subtitle_some_offline">%1$d من الخدمات %2$d عبر الإنترنت</string>
     <string name="dashboard_subtitle_no_tunnel">الوصول عن بعد دون اتصال</string>
@@ -794,11 +795,11 @@
     <string name="vehicle_dialog_model_label">الموديل</string>
     <string name="vehicle_dialog_save">حفظ</string>
     <string name="vehicle_dialog_reset">إعادة تعيين للكشف التلقائي</string>
+    <string name="vehicle_dialog_detection">الكشف: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">تلقائي</string>
+    <string name="vehicle_dialog_detection_manual">يدوي</string>
     <string name="vehicle_dialog_invalid_capacity">يجب أن تكون السعة 15-120 كيلو وات ساعة</string>
-    <string name="vehicle_dialog_summary_capacity">القدرة: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">فعالة: %1$.1f kWساعة</string>
-    <string name="vehicle_dialog_summary_model">النموذج: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">آخر معايرة: %1$.1f%% على %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">unavailable</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->
@@ -1402,4 +1403,11 @@
     <string name="projection_autostart_need_app">قم بإسقاط تطبيق أولا، ثم قم بتشغيل هذا.</string>
     <string name="projection_autostart_conflict_confirm">استخدم هذا التطبيق</string>
     <string name="projection_app_uninstalled">لم يعد هذا التطبيق مثبّتا.</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">الكاميرات</string>
+    <string name="rail_section_controls">التحكم</string>
+    <string name="rail_section_driving">القيادة</string>
+    <string name="rail_section_automation">التشغيل الآلي</string>
+    <string name="rail_section_system">النظام</string>
+    <string name="rail_collapse_label">طيّ</string>
 </resources>

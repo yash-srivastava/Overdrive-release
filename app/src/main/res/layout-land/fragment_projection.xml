@@ -1,0 +1,404 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Projection screen — landscape. Same cards and the SAME view IDs as the portrait
+  layout, split horizontally: the live mirror on the left, the controls column on
+  the right. ProjectionFragment does not branch on orientation, so every ID here
+  must stay in sync with layout/fragment_projection.xml.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?android:attr/colorBackground">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:baselineAligned="false"
+        android:clipToPadding="false"
+        android:orientation="horizontal"
+        android:paddingHorizontal="@dimen/page_padding_horizontal"
+        android:paddingTop="@dimen/page_padding_top"
+        android:paddingBottom="@dimen/page_padding_bottom">
+
+    <!-- ================== STAGE COLUMN ==================
+         Scrollable because updateStageAspect sizes the stage from the panel aspect;
+         on a short landscape window the panel-shaped pane can outgrow the column. -->
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1.4"
+        android:clipToPadding="false"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="@dimen/dashboard_modern_gap"
+                android:baselineAligned="false"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <View
+                    android:id="@+id/projectionStatusDot"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:layout_marginEnd="10dp"
+                    android:background="@drawable/status_dot_neutral" />
+
+                <TextView
+                    android:id="@+id/projectionStatus"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/projection_status_idle"
+                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+            </LinearLayout>
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:clipToOutline="true"
+                app:cardBackgroundColor="@android:color/black"
+                app:cardCornerRadius="@dimen/dashboard_modern_radius"
+                app:cardElevation="0dp"
+                app:contentPadding="0dp"
+                app:strokeWidth="0dp">
+
+                <FrameLayout
+                    android:id="@+id/projectionStage"
+                    android:layout_width="match_parent"
+                    android:layout_height="300dp"
+                    android:background="@android:color/black">
+
+                    <TextureView
+                        android:id="@+id/projectionTexture"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent" />
+
+                    <com.overdrive.app.ui.view.ProjectionBoundsView
+                        android:id="@+id/projectionBounds"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent" />
+
+                    <ProgressBar
+                        android:id="@+id/projectionProgress"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:visibility="gone" />
+                </FrameLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
+    <!-- ================== CONTROLS COLUMN ================== -->
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_marginStart="@dimen/dashboard_modern_gap"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- CAST -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardBackgroundColor="?attr/colorSurfaceContainer"
+                app:cardCornerRadius="@dimen/dashboard_modern_radius"
+                app:cardElevation="0dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="@dimen/dashboard_modern_card_padding">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/projection_pick_app"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:textColor="?attr/colorOnSurface" />
+
+                    <Spinner
+                        android:id="@+id/projectionAppSpinner"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:minHeight="@dimen/dashboard_modern_touch_target" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/dashboard_modern_gap"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/projectionCastButton"
+                            style="@style/Widget.Overdrive.M3.Button"
+                            android:layout_width="0dp"
+                            android:layout_height="@dimen/dashboard_modern_touch_target"
+                            android:layout_marginEnd="6dp"
+                            android:layout_weight="1"
+                            android:text="@string/projection_cast" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/projectionStopButton"
+                            style="@style/Widget.Overdrive.M3.Button.Outlined"
+                            android:layout_width="0dp"
+                            android:layout_height="@dimen/dashboard_modern_touch_target"
+                            android:layout_marginStart="6dp"
+                            android:layout_weight="1"
+                            android:enabled="false"
+                            android:text="@string/projection_stop" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- CLUSTER WINDOW -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/dashboard_modern_gap"
+                app:cardBackgroundColor="?attr/colorSurfaceContainer"
+                app:cardCornerRadius="@dimen/dashboard_modern_radius"
+                app:cardElevation="0dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="@dimen/dashboard_modern_card_padding">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/projection_window_title"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:textColor="?attr/colorOnSurface" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/projection_window_desc"
+                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <com.google.android.material.button.MaterialButtonToggleGroup
+                        android:id="@+id/projectionPresetGroup"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/dashboard_modern_gap"
+                        app:selectionRequired="false"
+                        app:singleSelection="true">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/projectionPresetFull"
+                            style="@style/Widget.Overdrive.M3.Button.Outlined"
+                            android:layout_width="0dp"
+                            android:layout_height="@dimen/dashboard_modern_touch_target"
+                            android:layout_weight="1"
+                            android:insetLeft="0dp"
+                            android:insetRight="0dp"
+                            android:paddingHorizontal="4dp"
+                            android:text="@string/projection_preset_full" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/projectionPresetLeft"
+                            style="@style/Widget.Overdrive.M3.Button.Outlined"
+                            android:layout_width="0dp"
+                            android:layout_height="@dimen/dashboard_modern_touch_target"
+                            android:layout_weight="1"
+                            android:insetLeft="0dp"
+                            android:insetRight="0dp"
+                            android:paddingHorizontal="4dp"
+                            android:text="@string/projection_preset_left" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/projectionPresetRight"
+                            style="@style/Widget.Overdrive.M3.Button.Outlined"
+                            android:layout_width="0dp"
+                            android:layout_height="@dimen/dashboard_modern_touch_target"
+                            android:layout_weight="1"
+                            android:insetLeft="0dp"
+                            android:insetRight="0dp"
+                            android:paddingHorizontal="4dp"
+                            android:text="@string/projection_preset_right" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/projectionPresetCenter"
+                            style="@style/Widget.Overdrive.M3.Button.Outlined"
+                            android:layout_width="0dp"
+                            android:layout_height="@dimen/dashboard_modern_touch_target"
+                            android:layout_weight="1"
+                            android:insetLeft="0dp"
+                            android:insetRight="0dp"
+                            android:paddingHorizontal="4dp"
+                            android:text="@string/projection_preset_center" />
+                    </com.google.android.material.button.MaterialButtonToggleGroup>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/projectionAdjustButton"
+                        style="@style/Widget.Overdrive.M3.Button.Tonal.Icon"
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/dashboard_modern_touch_target"
+                        android:layout_marginTop="8dp"
+                        android:enabled="false"
+                        android:text="@string/projection_adjust_bounds"
+                        app:icon="@drawable/ic_crop_free" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/dashboard_modern_gap"
+                        android:baselineAligned="false"
+                        android:gravity="center_vertical"
+                        android:minHeight="@dimen/dashboard_modern_touch_target"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="12dp"
+                            android:layout_weight="1"
+                            android:text="@string/projection_lock_aspect"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                            android:textColor="?attr/colorOnSurface" />
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/projectionAspectLockSwitch"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- MIRROR SCALING + AUTO-START -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/dashboard_modern_gap"
+                app:cardBackgroundColor="?attr/colorSurfaceContainer"
+                app:cardCornerRadius="@dimen/dashboard_modern_radius"
+                app:cardElevation="0dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="@dimen/dashboard_modern_card_padding">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/projection_scale_title"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:textColor="?attr/colorOnSurface" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/projection_scale_desc"
+                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <com.google.android.material.button.MaterialButtonToggleGroup
+                        android:id="@+id/projectionScaleGroup"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/dashboard_modern_gap"
+                        app:selectionRequired="true"
+                        app:singleSelection="true">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/projectionScaleFit"
+                            style="@style/Widget.Overdrive.M3.Button.Outlined"
+                            android:layout_width="0dp"
+                            android:layout_height="@dimen/dashboard_modern_touch_target"
+                            android:layout_weight="1"
+                            android:text="@string/projection_scale_fit" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/projectionScaleFill"
+                            style="@style/Widget.Overdrive.M3.Button.Outlined"
+                            android:layout_width="0dp"
+                            android:layout_height="@dimen/dashboard_modern_touch_target"
+                            android:layout_weight="1"
+                            android:text="@string/projection_scale_fill" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/projectionScaleZoom"
+                            style="@style/Widget.Overdrive.M3.Button.Outlined"
+                            android:layout_width="0dp"
+                            android:layout_height="@dimen/dashboard_modern_touch_target"
+                            android:layout_weight="1"
+                            android:text="@string/projection_scale_zoom" />
+                    </com.google.android.material.button.MaterialButtonToggleGroup>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="@dimen/dashboard_modern_card_padding"
+                        android:background="?attr/colorOutlineVariant" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/dashboard_modern_card_padding"
+                        android:baselineAligned="false"
+                        android:gravity="center_vertical"
+                        android:minHeight="@dimen/dashboard_modern_touch_target"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="12dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/projection_autostart_title"
+                                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                                android:textColor="?attr/colorOnSurface" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="@string/projection_autostart_desc"
+                                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                                android:textColor="?attr/colorOnSurfaceVariant" />
+                        </LinearLayout>
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/projectionAutoStartSwitch"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+    </LinearLayout>
+
+    <include layout="@layout/app_toast" />
+</FrameLayout>
+

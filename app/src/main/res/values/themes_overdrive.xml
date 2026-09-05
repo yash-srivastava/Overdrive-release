@@ -79,6 +79,7 @@
         <item name="materialButtonOutlinedStyle">@style/Widget.Overdrive.M3.Button.Outlined</item>
         <item name="toolbarStyle">@style/Widget.Overdrive.M3.Toolbar</item>
         <item name="sliderStyle">@style/Widget.Overdrive.M3.Slider</item>
+        <item name="linearProgressIndicatorStyle">@style/Widget.Overdrive.M3.LinearProgress</item>
         <item name="bottomSheetDialogTheme">@style/Theme.Overdrive.M3.BottomSheet</item>
         <!-- Auto-pick up our M3 dialog overlay for every MaterialAlertDialogBuilder. -->
         <item name="materialAlertDialogTheme">@style/ThemeOverlay.Overdrive.M3.MaterialAlertDialog</item>
@@ -136,6 +137,67 @@
         <item name="android:textAllCaps">false</item>
     </style>
 
+    <!-- Leading-icon tonal button. Parented on Material's icon variant for its
+         asymmetric padding, with the project corner and touch target. -->
+    <style name="Widget.Overdrive.M3.Button.Tonal.Icon" parent="Widget.Material3.Button.TonalButton.Icon">
+        <item name="cornerRadius">@dimen/card_radius_accent</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:textAllCaps">false</item>
+    </style>
+
+    <!-- Page-header action. Carries the same surface tier, hairline and corner
+         as the header's search and date cards, with the vertical inset zeroed
+         so the painted button fills the 48dp row. -->
+    <style name="Widget.Overdrive.M3.Button.Header" parent="Widget.Material3.Button.OutlinedButton.Icon">
+        <item name="backgroundTint">?attr/colorSurfaceContainerHigh</item>
+        <item name="strokeColor">?attr/colorOutlineVariant</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="cornerRadius">@dimen/card_radius_accent</item>
+        <item name="iconTint">?attr/colorOnSurfaceVariant</item>
+        <item name="iconSize">20dp</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:textAllCaps">false</item>
+    </style>
+
+    <!-- Icon-only page action wearing the Button.Header tile. Built on the
+         icon-button primitive, not the labelled Icon style, whose asymmetric
+         text padding leaves a lone glyph off-centre. All four padding attrs are
+         zeroed because a parent style's paddingLeft/Right outrank an inherited
+         paddingStart/End. -->
+    <style name="Widget.Overdrive.M3.HeaderIconButton" parent="Widget.Material3.Button.IconButton.Outlined">
+        <item name="backgroundTint">?attr/colorSurfaceContainerHigh</item>
+        <item name="strokeColor">?attr/colorOutlineVariant</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="cornerRadius">@dimen/card_radius_accent</item>
+        <item name="iconTint">?attr/colorOnSurfaceVariant</item>
+        <item name="iconPadding">0dp</item>
+        <!-- textStart, not the default start: start pins the glyph to the
+             leading edge, textStart centres the icon-and-text group, which
+             for a label-less button is the glyph alone. -->
+        <item name="iconGravity">textStart</item>
+        <item name="android:paddingLeft">0dp</item>
+        <item name="android:paddingRight">0dp</item>
+        <item name="android:paddingStart">0dp</item>
+        <item name="android:paddingEnd">0dp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:insetLeft">0dp</item>
+        <item name="android:insetRight">0dp</item>
+        <item name="android:minWidth">48dp</item>
+        <item name="android:minHeight">48dp</item>
+    </style>
+
+    <!-- For rows shared with the segmented buttons, whose own inset paints
+         them 40dp: the inset shrinks the tile to match while the touch target
+         stays 48dp. -->
+    <style name="Widget.Overdrive.M3.HeaderIconButton.Compact">
+        <item name="android:insetTop">2dp</item>
+        <item name="android:insetBottom">2dp</item>
+    </style>
+
     <style name="Widget.Overdrive.M3.Button.Text" parent="Widget.Material3.Button.TextButton">
         <item name="cornerRadius">@dimen/card_radius_accent</item>
         <item name="android:minHeight">48dp</item>
@@ -185,6 +247,13 @@
     </style>
 
     <!-- Slider -->
+    <!-- Determinate bars read as a track, not a track plus a stray dot. -->
+    <style name="Widget.Overdrive.M3.LinearProgress" parent="Widget.Material3.LinearProgressIndicator">
+        <item name="trackStopIndicatorSize">0dp</item>
+        <item name="indicatorColor">?attr/colorPrimary</item>
+        <item name="trackColor">?attr/colorSurfaceContainerHighest</item>
+    </style>
+
     <style name="Widget.Overdrive.M3.Slider" parent="Widget.Material3.Slider">
         <item name="trackColorActive">?attr/colorPrimary</item>
         <item name="trackColorInactive">?attr/colorSurfaceContainerHighest</item>
@@ -219,6 +288,13 @@
         <item name="shapeAppearance">@style/ShapeAppearance.Overdrive.SmallComponent</item>
     </style>
 
+    <!-- Filter chips. Applied per-chip rather than through the chipStyle attr,
+         which would also make assist chips checkable. Chips built in code carry
+         the same corner size on their shapeAppearanceModel. -->
+    <style name="Widget.Overdrive.M3.Chip.Filter" parent="Widget.Material3.Chip.Filter">
+        <item name="shapeAppearance">@style/ShapeAppearance.Overdrive.SmallComponent</item>
+    </style>
+
     <!-- Segmented buttons (Dashcam / Surveillance) -->
     <style name="Widget.Overdrive.M3.SegmentedButton" parent="Widget.Material3.MaterialButtonGroup">
         <item name="singleSelection">true</item>
@@ -237,8 +313,9 @@
         <item name="buttonBarPositiveButtonStyle">@style/Widget.Overdrive.M3.Button.Dialog.Primary</item>
         <item name="buttonBarNegativeButtonStyle">@style/Widget.Overdrive.M3.Button.Dialog.Neutral</item>
         <item name="buttonBarNeutralButtonStyle">@style/Widget.Overdrive.M3.Button.Dialog.Neutral</item>
-        <item name="dialogCornerRadius">28dp</item>
-        <item name="shapeAppearanceLargeComponent">@style/ShapeAppearance.Overdrive.LargeComponent</item>
+        <item name="dialogCornerRadius">@dimen/card_radius_dialog</item>
+        <item name="shapeAppearanceLargeComponent">@style/ShapeAppearance.Overdrive.Dialog</item>
+        <item name="shapeAppearanceCornerExtraLarge">@style/ShapeAppearance.Overdrive.Dialog</item>
         <!-- Surface tier: M3 spec calls for surfaceContainerHigh on the dialog -->
         <item name="colorSurface">?attr/colorSurfaceContainerHigh</item>
     </style>
@@ -264,18 +341,28 @@
         <item name="android:minWidth">88dp</item>
         <item name="android:insetTop">0dp</item>
         <item name="android:insetBottom">0dp</item>
+        <item name="android:insetLeft">@dimen/dialog_button_gap_inset</item>
+        <item name="android:insetRight">@dimen/dialog_button_gap_inset</item>
         <item name="android:textAppearance">@style/TextAppearance.Material3.LabelLarge</item>
         <item name="backgroundTint">?attr/colorPrimary</item>
         <item name="android:textColor">?attr/colorOnPrimary</item>
     </style>
 
-    <!-- Neutral / negative dialog action — flat text button to defer to
-         the primary CTA visually. M3 spec keeps these as TextButton. -->
-    <style name="Widget.Overdrive.M3.Button.Dialog.Neutral" parent="Widget.Material3.Button.TextButton.Dialog">
+    <!-- Neutral / negative dialog action — same filled shape and metrics as
+         the primary so both read as buttons, filled in the surface's own grey
+         so it still defers to the primary CTA. -->
+    <style name="Widget.Overdrive.M3.Button.Dialog.Neutral" parent="Widget.Material3.Button.TonalButton">
         <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
         <item name="android:minHeight">48dp</item>
+        <item name="android:minWidth">88dp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:insetLeft">@dimen/dialog_button_gap_inset</item>
+        <item name="android:insetRight">@dimen/dialog_button_gap_inset</item>
         <item name="android:textAllCaps">false</item>
         <item name="android:textAppearance">@style/TextAppearance.Material3.LabelLarge</item>
+        <item name="cornerRadius">@dimen/card_radius_accent</item>
+        <item name="backgroundTint">?attr/colorSurfaceContainerHighest</item>
     </style>
 
     <!-- Custom-view dialog theme: same color/shape inheritance, but lets
@@ -285,7 +372,9 @@
          dialog_update_progress, dialog_roi_drawing). -->
     <style name="Theme.Overdrive.M3.Dialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
         <item name="colorSurface">?attr/colorSurfaceContainerHigh</item>
-        <item name="dialogCornerRadius">28dp</item>
+        <item name="dialogCornerRadius">@dimen/card_radius_dialog</item>
+        <item name="shapeAppearanceLargeComponent">@style/ShapeAppearance.Overdrive.Dialog</item>
+        <item name="shapeAppearanceCornerExtraLarge">@style/ShapeAppearance.Overdrive.Dialog</item>
         <item name="android:windowBackground">@drawable/dialog_m3_background</item>
         <item name="android:windowMinWidthMajor">68%</item>
         <item name="android:windowMinWidthMinor">88%</item>

@@ -39,146 +39,175 @@
         <!--  treats this view's id (`navigationRail`) the same way it      -->
         <!--  treated NavigationRailView.                                    -->
         <!-- ============================================================== -->
-        <com.overdrive.app.ui.widget.SwipeExpandableRailScrollView
-            android:id="@+id/navigationRailScroll"
+        <LinearLayout
+            android:id="@+id/navigationRailContainer"
             android:layout_width="80dp"
             android:layout_height="match_parent"
             android:background="?attr/colorSurfaceContainerLow"
-            android:fillViewport="true"
-            android:scrollbars="none"
-            android:overScrollMode="ifContentScrolls">
+            android:orientation="vertical">
 
-            <LinearLayout
-                android:id="@+id/navigationRail"
+            <!-- Wordmark. Auto-sizes so it reads at both rail widths;
+                 MainActivity only moves its gravity. -->
+            <TextView
+                android:id="@+id/railBrand"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_horizontal"
-                android:orientation="vertical"
-                android:paddingBottom="16dp">
+                android:layout_height="48dp"
+                android:gravity="center"
+                android:maxLines="1"
+                android:text="@string/app_name"
+                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                android:textColor="?attr/colorPrimary"
+                android:textStyle="bold"
+                app:autoSizeMaxTextSize="18sp"
+                app:autoSizeMinTextSize="11sp"
+                app:autoSizeTextType="uniform" />
 
-                <!-- Accessible alternative to the horizontal expand/collapse swipe.
-                     MainActivity rotates this 0°→180° and translates it to the
-                     trailing edge as the rail expands, so it keeps a single
-                     chevron asset and a fixed centre gravity — swapping in
-                     ic_chevron_left mid-slide read as a blink. -->
-                <ImageButton
-                    android:id="@+id/railExpandButton"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:layout_marginTop="4dp"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="@string/rail_expand"
-                    android:padding="12dp"
-                    android:src="@drawable/ic_chevron_right"
-                    app:tint="?attr/colorOnSurfaceVariant" />
+            <com.overdrive.app.ui.widget.SwipeExpandableRailScrollView
+                android:id="@+id/navigationRailScroll"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:fillViewport="true"
+                android:scrollbars="none"
+                android:overScrollMode="ifContentScrolls">
 
-                <!-- Rail header (language button) was here. The language
-                     affordance moved to the toolbar end-cluster so it sits
-                     in the conventional top-right slot. The rail now goes
-                     straight to its first destination. -->
+                <LinearLayout
+                    android:id="@+id/navigationRail"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_horizontal"
+                    android:orientation="vertical"
+                    android:paddingBottom="16dp">
 
-                <include
-                    android:id="@+id/railDestDashboard"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <include
-                    android:id="@+id/railDestAssistant"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <include
-                    android:id="@+id/railDestLive"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <include
-                    android:id="@+id/railDestRecordings"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <include
-                    android:id="@+id/railDestVehicle"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <include
-                    android:id="@+id/railDestSeatPositions"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <include
-                    android:id="@+id/railDestProjection"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <include
-                    android:id="@+id/railDestTrips"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <include
-                    android:id="@+id/railDestCharging"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <include
-                    android:id="@+id/railDestAutomations"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <include
-                    android:id="@+id/railDestKeyMapping"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <include
-                    android:id="@+id/railDestIntegrations"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <include
-                    android:id="@+id/railDestRoadSense"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <include
-                    android:id="@+id/railDestMap"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <include
-                    android:id="@+id/railDestNetwork"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <include
-                    android:id="@+id/railDestDiagnostics"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <include
-                    android:id="@+id/railDestSettings"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
+                    <!-- Rail header (language button) was here. The language
+                         affordance moved to the toolbar end-cluster so it sits
+                         in the conventional top-right slot. The rail now goes
+                         straight to its first destination. -->
 
-                <!-- Hairline divider separating the primary destinations
-                     from the meta entry (About). Mirrors the M3 pattern
-                     of grouping action vs. info items on the rail. -->
-                <View
-                    android:layout_width="40dp"
-                    android:layout_height="1dp"
-                    android:layout_marginVertical="6dp"
-                    android:background="?attr/colorOutlineVariant" />
+                    <include
+                        android:id="@+id/railDestDashboard"
+                        layout="@layout/item_rail_destination"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <include
+                        android:id="@+id/railDestAssistant"
+                        layout="@layout/item_rail_destination"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <!-- Category headers group the rows from here down. Each one
+                         hides when every row under it is unpinned — see
+                         MainActivity.applyNavigationRailVisibility. -->
+                    <include
+                        android:id="@+id/railSectionCameras"
+                        layout="@layout/item_rail_section" />
+                    <include
+                        android:id="@+id/railDestLive"
+                        layout="@layout/item_rail_destination"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <include
+                        android:id="@+id/railDestRecordings"
+                        layout="@layout/item_rail_destination"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
 
-                <include
-                    android:id="@+id/railDestAbout"
-                    layout="@layout/item_rail_destination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-            </LinearLayout>
-        </com.overdrive.app.ui.widget.SwipeExpandableRailScrollView>
+                    <include
+                        android:id="@+id/railSectionControls"
+                        layout="@layout/item_rail_section" />
+                    <include
+                        android:id="@+id/railDestVehicle"
+                        layout="@layout/item_rail_destination"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <include
+                        android:id="@+id/railDestSeatPositions"
+                        layout="@layout/item_rail_destination"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <include
+                        android:id="@+id/railDestProjection"
+                        layout="@layout/item_rail_destination"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <include
+                        android:id="@+id/railDestCharging"
+                        layout="@layout/item_rail_destination"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+
+                    <include
+                        android:id="@+id/railSectionDriving"
+                        layout="@layout/item_rail_section" />
+                    <include
+                        android:id="@+id/railDestTrips"
+                        layout="@layout/item_rail_destination"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <include
+                        android:id="@+id/railDestRoadSense"
+                        layout="@layout/item_rail_destination"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <include
+                        android:id="@+id/railDestMap"
+                        layout="@layout/item_rail_destination"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+
+                    <include
+                        android:id="@+id/railSectionAutomation"
+                        layout="@layout/item_rail_section" />
+                    <include
+                        android:id="@+id/railDestAutomations"
+                        layout="@layout/item_rail_destination"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <include
+                        android:id="@+id/railDestKeyMapping"
+                        layout="@layout/item_rail_destination"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <include
+                        android:id="@+id/railDestIntegrations"
+                        layout="@layout/item_rail_destination"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+
+                    <include
+                        android:id="@+id/railSectionSystem"
+                        layout="@layout/item_rail_section" />
+                    <include
+                        android:id="@+id/railDestNetwork"
+                        layout="@layout/item_rail_destination"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <include
+                        android:id="@+id/railDestDiagnostics"
+                        layout="@layout/item_rail_destination"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <include
+                        android:id="@+id/railDestSettings"
+                        layout="@layout/item_rail_destination"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <include
+                        android:id="@+id/railDestAbout"
+                        layout="@layout/item_rail_destination"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
+            </com.overdrive.app.ui.widget.SwipeExpandableRailScrollView>
+
+            <!-- Collapse sits below the scroller so a long destination list
+                 cannot push it out of reach. MainActivity rotates its chevron
+                 0°→180° with the slide. -->
+            <include
+                android:id="@+id/railCollapseRow"
+                layout="@layout/item_rail_destination"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
 
         <!-- ============================================================== -->
         <!--  Main stage                                                     -->
@@ -200,9 +229,10 @@
                 <com.google.android.material.appbar.MaterialToolbar
                     android:id="@+id/toolbar"
                     android:layout_width="match_parent"
-                    android:layout_height="?attr/actionBarSize"
+                    android:layout_height="@dimen/app_bar_height"
                     android:background="?attr/colorSurface"
-                    app:titleTextAppearance="@style/TextAppearance.Material3.TitleLarge">
+                    app:contentInsetStart="@dimen/page_padding_horizontal"
+                    app:titleTextAppearance="@style/TextAppearance.Overdrive.HeadlineSmall">
 
                     <!--
                       Toolbar end-cluster: status pill + language picker.
@@ -227,7 +257,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_gravity="end"
-                        android:layout_marginEnd="12dp"
+                        android:layout_marginEnd="4dp"
                         android:gravity="center_vertical"
                         android:orientation="horizontal">
 
@@ -278,7 +308,7 @@
                                 android:layout_marginStart="8dp"
                                 android:background="?attr/selectableItemBackgroundBorderless"
                                 android:contentDescription="@string/cd_copy_url"
-                                android:padding="6dp"
+                                android:padding="12dp"
                                 android:src="@drawable/ic_copy"
                                 app:tint="?attr/colorOnSurfaceVariant" />
                         </LinearLayout>
@@ -287,40 +317,33 @@
                             android:id="@+id/toolbarLanguageButton"
                             android:layout_width="48dp"
                             android:layout_height="48dp"
-                            android:layout_marginStart="8dp"
+                            android:layout_marginStart="4dp"
                             android:background="?attr/selectableItemBackgroundBorderless"
                             android:contentDescription="@string/settings_language_label"
+                            android:padding="12dp"
                             android:src="@drawable/ic_language"
                             app:tint="?attr/colorOnSurfaceVariant" />
 
-                    </LinearLayout>
+                        <!-- Help stays inside urlBar so it packs next to language;
+                             urlBar itself stays visible even when the tunnel pill
+                             is gone. -->
+                        <ImageButton
+                            android:id="@+id/toolbarHelpButton"
+                            android:layout_width="48dp"
+                            android:layout_height="48dp"
+                            android:background="?attr/selectableItemBackgroundBorderless"
+                            android:contentDescription="@string/onboarding_help_cd"
+                            android:padding="12dp"
+                            android:src="@drawable/ic_help"
+                            app:tint="?attr/colorOnSurfaceVariant" />
 
-                    <!--
-                      Help "?" — direct child of the toolbar, OUTSIDE urlBar, because
-                      urlBar defaults to visibility=gone (only shown once a tunnel URL
-                      exists) and the help affordance must ALWAYS be reachable.
-                    -->
-                    <ImageButton
-                        android:id="@+id/toolbarHelpButton"
-                        android:layout_width="48dp"
-                        android:layout_height="48dp"
-                        android:layout_gravity="end|center_vertical"
-                        android:layout_marginEnd="12dp"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="@string/onboarding_help_cd"
-                        android:src="@drawable/ic_help"
-                        app:tint="?attr/colorOnSurfaceVariant" />
+                    </LinearLayout>
                 </com.google.android.material.appbar.MaterialToolbar>
 
-                <!--
-                  Overdrive accent stripe. 3dp gradient under the toolbar
-                  (primary → tertiary), mirroring the same stripe on the
-                  WebView side. Same identity, different content area.
-                -->
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="3dp"
-                    android:background="@drawable/toolbar_accent_stripe" />
+                    android:layout_height="1dp"
+                    android:background="?attr/colorOutlineVariant" />
             </com.google.android.material.appbar.AppBarLayout>
 
             <androidx.fragment.app.FragmentContainerView

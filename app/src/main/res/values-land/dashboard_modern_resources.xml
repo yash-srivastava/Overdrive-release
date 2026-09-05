@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Landscape hero is full-bleed. Panels are a fixed width so they do not
+         stretch with the card, and the render is capped so the nodpi bitmap
+         does not measure at 338dp. -->
+    <dimen name="dashboard_hero_metric_width">260dp</dimen>
+    <dimen name="dashboard_hero_metric_min_height">100dp</dimen>
+    <dimen name="dashboard_hero_art_max_height">200dp</dimen>
+    <dimen name="dashboard_hero_art_inset">64dp</dimen>
+    <dimen name="dashboard_hero_ribbon_width">1040dp</dimen>
+
+    <!-- Hero status chips. Sized against the metric row above rather than to
+         their content, so the three read as one row. -->
+    <dimen name="dashboard_hero_chip_width">160dp</dimen>
+    <dimen name="dashboard_hero_chip_min_height">42dp</dimen>
+
+    <style name="Widget.Overdrive.HeroChip" parent="Widget.Material3.Chip.Assist">
+        <item name="android:layout_width">@dimen/dashboard_hero_chip_width</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:checkable">false</item>
+        <item name="android:clickable">false</item>
+        <item name="android:focusable">false</item>
+        <item name="android:textAlignment">center</item>
+        <item name="android:textAppearance">@style/TextAppearance.Material3.TitleSmall</item>
+        <item name="chipMinHeight">@dimen/dashboard_hero_chip_min_height</item>
+        <item name="chipStrokeWidth">0dp</item>
+        <item name="ensureMinTouchTargetSize">false</item>
+    </style>
+</resources>

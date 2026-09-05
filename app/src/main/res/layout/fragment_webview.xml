@@ -31,7 +31,8 @@
         android:layout_height="match_parent"
         android:background="?android:attr/colorBackground"
         android:gravity="center"
-        android:orientation="vertical">
+        android:orientation="vertical"
+        android:visibility="visible">
 
         <ProgressBar
             android:layout_width="48dp"

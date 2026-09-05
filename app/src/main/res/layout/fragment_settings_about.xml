@@ -24,17 +24,8 @@
         android:paddingBottom="@dimen/page_padding_bottom">
 
         <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/settings_about_title"
-            android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
-            android:textColor="?attr/colorOnSurface"
-            android:textStyle="bold" />
-
-        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
             android:layout_marginBottom="@dimen/page_padding_top"
             android:text="@string/settings_about_row_subtitle"
             android:textAppearance="@style/TextAppearance.Material3.BodyMedium"

@@ -49,30 +49,9 @@
         android:paddingTop="@dimen/page_padding_top"
         android:paddingBottom="@dimen/page_padding_bottom">
 
-        <!-- ================= HERO HEADER ================= -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:letterSpacing="0.08"
-            android:text="@string/settings_hero_overline"
-            android:textAllCaps="true"
-            android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-            android:textColor="?attr/colorPrimary" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:accessibilityHeading="true"
-            android:text="@string/settings_hero_title"
-            android:textAppearance="@style/TextAppearance.Overdrive.HeadlineSmall"
-            android:textColor="?attr/colorOnSurface"
-            android:textStyle="bold" />
-
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
             android:layout_marginBottom="@dimen/page_padding_top"
             android:text="@string/settings_hero_subtitle"
             android:textAppearance="@style/TextAppearance.Material3.BodyMedium"

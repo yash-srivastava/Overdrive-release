@@ -696,7 +696,7 @@
     <string name="setup_traffic_body">De BYD Traffic Monitor blokkeert dat apps van derden internet bereiken. Het uitschakelen ervan stelt OverDrive en alle andere apps die u installeert in staat het netwerk daadwerkelijk te gebruiken.</string>
     <string name="setup_traffic_button">Open verkeersmonitor</string>
     <string name="setup_camera_fix_title">Is de camera zwart of onjuist?</string>
-    <string name="setup_camera_fix_body">Open Diagnostics → Camera probe, stel Camera ID op 0, tik op Save, en start dan de camera daemon opnieuw. Als de feeds nog steeds verkeerd zijn, herhaal met Camera ID 1. Laat het mapping-gedeelte ongerept.</string>
+    <string name="setup_camera_fix_body">Camera probe, stel Camera ID op 0, tik op Save, en start dan de camera daemon opnieuw. Als de feeds nog steeds verkeerd zijn, herhaal met Camera ID 1. Laat het mapping-gedeelte ongerept.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Stroom: camera %1$d (handleiding)</string>
@@ -906,6 +906,7 @@
          greeting) — pairs with the OVERDRIVE overline above and the live
          status row of chips below. Locale catalogs auto-translate. -->
     <string name="dashboard_hero_headline">Op wacht</string>
+    <string name="dashboard_modern_vehicle_status">Voertuigstatus</string>
     <string name="dashboard_subtitle_all_systems">Alle systemen online</string>
     <string name="dashboard_subtitle_some_offline">%1$d van %2$d diensten online</string>
     <string name="dashboard_subtitle_no_tunnel">Afgelegen toegang offline</string>
@@ -929,11 +930,11 @@
     <string name="vehicle_dialog_model_label">Model</string>
     <string name="vehicle_dialog_save">Opslaan</string>
     <string name="vehicle_dialog_reset">Herstellen op automatische detectie</string>
+    <string name="vehicle_dialog_detection">Detectie: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Automatisch</string>
+    <string name="vehicle_dialog_detection_manual">Handmatig</string>
     <string name="vehicle_dialog_invalid_capacity">De capaciteit moet 15 - 120 kWh zijn.</string>
-    <string name="vehicle_dialog_summary_capacity">Capaciteit: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">Effectief: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">Model: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">Laatste kalibreerde: %1$.1f%% op %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">niet beschikbaar</string>
     <!-- Combined Recordings+Storage chip: e.g. "8.4 GB used · 12 GB free" -->
@@ -1369,4 +1370,11 @@
     <string name="projection_preset_right">Rechts de helft</string>
     <string name="projection_preset_center">Gecentreerd</string>
     <string name="projection_lock_aspect">clusteraspect behouden</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Camera\'s</string>
+    <string name="rail_section_controls">Bediening</string>
+    <string name="rail_section_driving">Rijden</string>
+    <string name="rail_section_automation">Automatisering</string>
+    <string name="rail_section_system">Systeem</string>
+    <string name="rail_collapse_label">Inklappen</string>
 </resources>

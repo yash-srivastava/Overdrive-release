@@ -420,7 +420,7 @@
     <string name="setup_traffic_body">BYD-trafikken blokkerer tredjepartsapper fra å nå Internett. Deaktivering av den lar OverDrive og andre apper som du installerer faktisk bruker nettverket. En hard-omstart er nødvendig etterpå.</string>
     <string name="setup_traffic_button">Åpne trafikkmonitor</string>
     <string name="setup_camera_fix_title">Kamera feeds svart eller feil?</string>
-    <string name="setup_camera_fix_body">Åpne Diagnostikk → Kamerasonen, sett Kamera-ID til 0, trykk på Lagre, og start deretter kameraet på nytt med meddelelse Hvis tilbakemeldingene fortsatt er feil, gjenta med kamera-ID 1. La kartleggingsdelen være uberørt.</string>
+    <string name="setup_camera_fix_body">Kamerasonen, sett Kamera-ID til 0, trykk på Lagre, og start deretter kameraet på nytt med meddelelse Hvis tilbakemeldingene fortsatt er feil, gjenta med kamera-ID 1. La kartleggingsdelen være uberørt.</string>
     <string name="camera_current_manual">Aktuell: Kamera %1$d (manuell)</string>
     <string name="camera_current_auto_label">Nåværende: automatisk</string>
     <string name="soh_estimation_active">Aktiv estimering</string>
@@ -555,6 +555,7 @@
     <string name="settings_action_reset_data">Tilbakestill data…</string>
     <string name="cd_brand_logo">OverDrive</string>
     <string name="dashboard_hero_headline">På klokken</string>
+    <string name="dashboard_modern_vehicle_status">Kjøretøystatus</string>
     <string name="dashboard_subtitle_all_systems">Alle systemer pålogget</string>
     <string name="dashboard_subtitle_some_offline">%1$d av %2$d tjenester online</string>
     <string name="dashboard_subtitle_no_tunnel">Ekstern tilgang frakoblet</string>
@@ -575,11 +576,11 @@
     <string name="vehicle_dialog_model_label">Modell</string>
     <string name="vehicle_dialog_save">Lagre</string>
     <string name="vehicle_dialog_reset">Tilbakestill for automatisk oppdaging</string>
+    <string name="vehicle_dialog_detection">Gjenkjenning: %1$s</string>
+    <string name="vehicle_dialog_detection_auto">Automatisk</string>
+    <string name="vehicle_dialog_detection_manual">Manuell</string>
     <string name="vehicle_dialog_invalid_capacity">Kapasiteten må være 15 - 120 kWh</string>
-    <string name="vehicle_dialog_summary_capacity">Kapasitet: %1$s</string>
-    <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">Effektiv: %1$.1f kWh</string>
-    <string name="vehicle_dialog_summary_model">Modell: %1$s</string>
     <string name="vehicle_dialog_summary_calibration">Siste kalibrert: %1$.1f%% på %2$s</string>
     <string name="vehicle_dialog_soh_unavailable">ikke tilgjengelig</string>
     <string name="dashboard_metric_storage_chip">%1$s brukt · %2$s gratis</string>
@@ -1084,4 +1085,11 @@
     <string name="projection_preset_right">Høyre halvdel</string>
     <string name="projection_preset_center">Midtstilt</string>
     <string name="projection_lock_aspect">Behold cluster aspect</string>
+    <!-- Rail category headers -->
+    <string name="rail_section_cameras">Kameraer</string>
+    <string name="rail_section_controls">Kontroller</string>
+    <string name="rail_section_driving">Kjøring</string>
+    <string name="rail_section_automation">Automatisering</string>
+    <string name="rail_section_system">System</string>
+    <string name="rail_collapse_label">Skjul</string>
 </resources>

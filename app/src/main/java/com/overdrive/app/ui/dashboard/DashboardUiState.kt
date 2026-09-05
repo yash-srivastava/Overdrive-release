@@ -1,5 +1,7 @@
 package com.overdrive.app.ui.dashboard
 
+import androidx.annotation.DrawableRes
+
 data class DashboardUiState(
     val vehicle: VehicleState = VehicleState.Loading,
     val recordings: RecordingState = RecordingState.Loading,
@@ -36,9 +38,19 @@ data class DashboardUiState(
 
     sealed interface ActivityState {
         data object Loading : ActivityState
-        data class Ready(val rows: List<String>) : ActivityState
+        data class Ready(val rows: List<ActivityRow>) : ActivityState
         data object Unavailable : ActivityState
     }
+
+    /**
+     * A rendered activity line. `text` stays a CharSequence so the insight
+     * builders' emphasis spans survive into the card. `icon` is 0 when the
+     * source had none.
+     */
+    data class ActivityRow(
+        val text: CharSequence,
+        @DrawableRes val icon: Int = 0,
+    )
 }
 
 object DashboardStateReducer {
@@ -75,16 +87,18 @@ object DashboardStateReducer {
 
     fun activity(
         state: DashboardUiState,
-        rows: List<String>?,
+        rows: List<DashboardUiState.ActivityRow>?,
     ): DashboardUiState {
         val next = if (rows == null) {
             DashboardUiState.ActivityState.Unavailable
         } else {
             DashboardUiState.ActivityState.Ready(
                 rows.asSequence()
-                    .map(String::trim)
-                    .filter(String::isNotEmpty)
-                    .distinct()
+                    .map { it.copy(text = it.text.trim()) }
+                    .filter { it.text.isNotEmpty() }
+                    // Spanned text is not comparable by value, so dedupe on the
+                    // plain string.
+                    .distinctBy { it.text.toString() }
                     .take(3)
                     .toList()
             )
