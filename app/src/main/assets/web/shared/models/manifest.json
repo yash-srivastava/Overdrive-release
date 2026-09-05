@@ -1,5 +1,5 @@
 {
-  "version": 9,
+  "version": 11,
   "default": "seal",
   "baseUrl": "https://github.com/yash-srivastava/Overdrive-release/releases/download/models-v1/",
   "batteryChemistryDefinitions": {
@@ -58,10 +58,11 @@
     {
       "id": "sealion7",
       "name": "BYD Sealion 7",
-      "file": "seal.glb",
-      "sizeBytes": 1653240,
-      "sha256": "1030260cb7dc6b4483cc4f5fd2feb4746870234a87ee3ccf7f3d71e7bd0178fe",
-      "bundled": true,
+      "file": "sealion7.glb",
+      "sizeBytes": 1645180,
+      "sha256": "b1bd4c94aaf50e09ee5a294381bcec52b5160fe2cc3394e4b1c9d5ce37b055e2",
+      "bundled": false,
+      "paintMeshHint": "bodypaint",
       "batteryChemistry": "lfp",
       "batteryChemistryEvidence": {
         "authority": "BYD",
@@ -145,6 +146,25 @@
         "verifiedOn": "2026-08-02"
       },
       "nominalKwh": 60.48
+    },
+    {
+      "id": "atto2",
+      "name": "BYD Atto 2",
+      "file": "atto2.glb",
+      "sizeBytes": 1244776,
+      "sha256": "17840d59fda3870dc17c3b2a2c86ac940ce3211d4e17d6e31c72bc2ff0300afb",
+      "bundled": false,
+      "paintMeshHint": "mk_body",
+      "batteryChemistry": "lfp",
+      "batteryChemistryEvidence": {
+        "authority": "BYD",
+        "technology": "blade",
+        "nominalKwh": 45.1,
+        "configuration": "European 45.1 kWh Blade Battery",
+        "sourceUrl": "https://www.byd.com/es-es/vehiculos-electricos/atto-2.html",
+        "verifiedOn": "2026-09-04"
+      },
+      "nominalKwh": 45.1
     },
     {
       "id": "han",
