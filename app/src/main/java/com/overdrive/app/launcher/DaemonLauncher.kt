@@ -228,6 +228,22 @@ class DaemonLauncher(
                 // this gate is inert there (watchdog behaves byte-identically).
                 "PARKED=\"/data/local/tmp/overdrive_parked_shutdown\"",
                 "PROXY_ARGS=\"$proxyArgs\"",
+                "WATCHDOG_PID_FILE=\"/data/local/tmp/acc_sentry_watchdog.pid\"",
+                // Self-check, same pattern as start_telegram.sh / start_cam_daemon.sh:
+                // this watchdog is intentionally uncapped/immortal (no MAX_RETRIES, no
+                // backoff — see feedback_acc_sentry_uncapped_immortal), so if two
+                // instances ever end up running concurrently (a second trigger firing
+                // while this daemon happened to be between retries, same root cause
+                // confirmed live for cam_daemon), they'd retry each other forever with
+                // no self-correction. Exit immediately if another instance is already
+                // alive, checked BEFORE anything below could truncate its log.
+                "if [ -f \"\$WATCHDOG_PID_FILE\" ]; then",
+                "  OLD_WPID=\$(cat \"\$WATCHDOG_PID_FILE\" 2>/dev/null)",
+                "  if [ -n \"\$OLD_WPID\" ] && [ \"\$OLD_WPID\" != \"\$\$\" ] && kill -0 \"\$OLD_WPID\" 2>/dev/null; then",
+                "    exit 0",
+                "  fi",
+                "fi",
+                "echo \$\$ > \"\$WATCHDOG_PID_FILE\"",
                 "",
                 "/system/bin/device_config put activity_manager max_phantom_processes 2147483647 > /dev/null 2>&1",
                 "",
@@ -420,13 +436,35 @@ class DaemonLauncher(
                 "FALLBACK_NATIVE_LIB_DIR=\"$nativeLibDir\"",
                 "RETRY_COUNT=0",
                 "HEALTHY_UPTIME_SEC=300",
+                "WATCHDOG_PID_FILE=\"/data/local/tmp/cam_watchdog.pid\"",
+                // Self-check, same pattern as start_telegram.sh: the pidfile was
+                // previously written unconditionally on every launch with no
+                // read-back, so a second trigger (screen-on/ACC-on/health-check)
+                // firing while THIS script's own daemon was merely between
+                // retries — isDaemonRunning() sees no java process and reports
+                // "not running" during that window even though a watchdog IS
+                // already supervising it — passed the launch guard and deployed
+                // a whole second independent watchdog. Confirmed live,
+                // 2026-09-05: three concurrent start_cam_daemon.sh instances,
+                // each unaware of the others, fighting over the daemon's
+                // singleton lock and crash-looping (exit 1, "already running")
+                // for whichever two lost the race. Exiting here when another
+                // watchdog is genuinely still alive makes this self-healing
+                // regardless of which trigger path fires or how many times.
+                "if [ -f \"\$WATCHDOG_PID_FILE\" ]; then",
+                "  OLD_WPID=\$(cat \"\$WATCHDOG_PID_FILE\" 2>/dev/null)",
+                "  if [ -n \"\$OLD_WPID\" ] && [ \"\$OLD_WPID\" != \"\$\$\" ] && kill -0 \"\$OLD_WPID\" 2>/dev/null; then",
+                "    echo \"[\$(date)] Another start_cam_daemon.sh watchdog is already running (PID \$OLD_WPID). Exiting.\" >> \"\$LOG_FILE\"",
+                "    exit 0",
+                "  fi",
+                "fi",
                 // Record THIS supervisor loop's PID so the kill-readers
                 // (CameraDaemon.killWatchdogWrapper, the Telegram stop handlers)
                 // can target the watchdog precisely instead of falling back to
                 // pkill name-matching. $$ is the watchdog shell, NOT $! (which is
                 // the daemon/poller). Cleared by the same rm paths that already
                 // reference cam_watchdog.pid.
-                "echo \$\$ > /data/local/tmp/cam_watchdog.pid",
+                "echo \$\$ > \"\$WATCHDOG_PID_FILE\"",
                 "",
                 "while true; do",
                 // Catch a log left oversized by a previous run before relaunch;
@@ -1255,7 +1293,7 @@ class DaemonLauncher(
         adbShellExecutor.executeScript(
             scriptBody = "echo \"disabled by ui at \$(date)\" > /data/local/tmp/acc_sentry_daemon.disabled\n" +
                 "chmod 666 /data/local/tmp/acc_sentry_daemon.disabled 2>/dev/null\n" +
-                "rm -f /data/local/tmp/start_acc_sentry.sh 2>/dev/null\n" +
+                "rm -f /data/local/tmp/start_acc_sentry.sh /data/local/tmp/acc_sentry_watchdog.pid 2>/dev/null\n" +
                 psAwkKillLine("acc_sentry") +
                 "sleep 1\n" +
                 "rm -f /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n" +
@@ -2045,7 +2083,7 @@ class DaemonLauncher(
                 "[ -f /data/local/tmp/acc_sentry_daemon.disabled ] || " +
                 "echo \"disabled by killDaemon at \$(date)\" > /data/local/tmp/acc_sentry_daemon.disabled\n" +
                 "chmod 666 /data/local/tmp/acc_sentry_daemon.disabled 2>/dev/null\n" +
-                "rm -f /data/local/tmp/start_acc_sentry.sh 2>/dev/null\n" +
+                "rm -f /data/local/tmp/start_acc_sentry.sh /data/local/tmp/acc_sentry_watchdog.pid 2>/dev/null\n" +
                 psAwkKillLine("acc_sentry") +
                 "sleep 1\n" +
                 "rm -f /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n" +
@@ -2117,7 +2155,7 @@ class DaemonLauncher(
             "[ -f /data/local/tmp/acc_sentry_daemon.disabled ] || " +
             "echo \"disabled by killDaemon at \$(date)\" > /data/local/tmp/acc_sentry_daemon.disabled; " +
             "chmod 666 /data/local/tmp/acc_sentry_daemon.disabled 2>/dev/null; " +
-            "rm -f /data/local/tmp/start_acc_sentry.sh 2>/dev/null; " +
+            "rm -f /data/local/tmp/start_acc_sentry.sh /data/local/tmp/acc_sentry_watchdog.pid 2>/dev/null; " +
             "MY_PID=\$\$; ps -A -o PID,ARGS | grep -F acc_sentry | grep -v grep " +
             "| awk '{print \$1}' | while read pid; do " +
             "if [ \"\$pid\" != \"\$MY_PID\" ]; then kill -9 \$pid 2>/dev/null; fi; done; " +
