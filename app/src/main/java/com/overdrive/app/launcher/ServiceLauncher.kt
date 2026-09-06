@@ -78,6 +78,7 @@ class ServiceLauncher(
             // Additional permissions for background operation
             "appops set $PACKAGE_NAME RUN_IN_BACKGROUND allow",
             "appops set $PACKAGE_NAME RUN_ANY_IN_BACKGROUND allow",
+            "appops set $PACKAGE_NAME SYSTEM_ALERT_WINDOW allow",
             "dumpsys deviceidle whitelist +$PACKAGE_NAME"
         )
         
