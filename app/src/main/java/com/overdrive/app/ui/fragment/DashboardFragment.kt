@@ -49,6 +49,7 @@ import com.overdrive.app.util.DeviceIdGenerator
 import java.util.Calendar
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlin.math.roundToInt
 
 /** State-driven dashboard backed by the daemon's existing /status contract. */
 class DashboardFragment : Fragment() {
@@ -150,6 +151,7 @@ class DashboardFragment : Fragment() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var metricsExecutor: ExecutorService? = null
 
+    private var lastDisplayedSocPercent: Double? = null
     private var dashboardState = DashboardUiState()
     private var todayClipCount: Int? = null
     private var storageSummary: DashboardUiState.StorageSummary? = null
@@ -159,6 +161,17 @@ class DashboardFragment : Fragment() {
 
     private var insightsProvider: DashboardInsightProvider? = null
     private var firstVisitCount: Int = -1
+    // Wall-clock time of the last successful (Ready) vehicle status. Used to bridge a
+    // transient /status failure -- confirmed live to happen every ~15-25s while driving
+    // (a single HTTP request occasionally times out against the daemon, self-recovering
+    // on the very next poll) -- without flashing this widget to "Unavailable" on every
+    // one of them. The web dashboard already tolerates exactly this by simply not
+    // updating the DOM on a bad poll; this native fragment had no equivalent and
+    // rebuilt its whole vehicle state from `result` on every tick, so one failed
+    // request was enough to blank SoC/range/driving state immediately. See
+    // VEHICLE_UNAVAILABLE_HOLD_MS below for how long a stale Ready snapshot is kept
+    // before this widget actually admits the data is gone.
+    private var lastVehicleReadyAtMs: Long = 0L
     private val statusRefreshRunnable = Runnable { refreshVehicleStatus(showLoading = false) }
     private val recordingStatsRefreshRunnable = Runnable { refreshMetricsTiles() }
 
@@ -533,6 +546,24 @@ class DashboardFragment : Fragment() {
             val result = fetchVehicleStatus()
             mainHandler.post {
                 if (!isAdded || view == null || generation != viewGeneration) return@post
+                val now = System.currentTimeMillis()
+                if (result is DashboardStatusResult.Available) {
+                    lastVehicleReadyAtMs = now
+                } else if (result is DashboardStatusResult.Unavailable
+                        && dashboardState.vehicle is DashboardUiState.VehicleState.Ready
+                        && now - lastVehicleReadyAtMs < VEHICLE_UNAVAILABLE_HOLD_MS) {
+                    // Bridge a transient /status failure: keep showing the last
+                    // known-good snapshot rather than flashing to Unavailable.
+                    // Falls through to the reducer (and genuinely shows
+                    // Unavailable) once the gap exceeds the hold window.
+                    renderVehicleState()
+                    if (dashboardResumed) {
+                        val isAccOn = (dashboardState.vehicle as? DashboardUiState.VehicleState.Ready)?.snapshot?.isAccOn == true
+                        val refreshMs = if (isAccOn) STATUS_REFRESH_ACTIVE_MS else STATUS_REFRESH_IDLE_MS
+                        mainHandler.postDelayed(statusRefreshRunnable, refreshMs)
+                    }
+                    return@post
+                }
                 dashboardState = DashboardStateReducer.status(dashboardState, result)
                 renderVehicleState()
                 if (dashboardResumed) {
@@ -650,7 +681,7 @@ class DashboardFragment : Fragment() {
                     snapshot.charging?.charging == true -> {
                         val kw = snapshot.charging.powerKw
                         if (kw != null && kw > 0.0) {
-                            "In Ricarica (${String.format(java.util.Locale.US, "%.1f", kw)} kW)"
+                            getString(R.string.dashboard_modern_status_charging_kw, kw)
                         } else {
                             getString(R.string.dashboard_modern_charging)
                         }
@@ -658,21 +689,34 @@ class DashboardFragment : Fragment() {
                     snapshot.charging?.full == true ->
                         getString(R.string.dashboard_modern_charge_complete)
                     isPowerOn && (gear == "D" || gear == "M" || gear == "S" || (speed != null && speed >= 3.0)) -> {
-                        val spdText = if (speed != null && speed >= 1.0) " · ${Math.round(speed)} km/h" else ""
-                        val recText = if (isRecording) " (REC)" else ""
-                        "In Guida (${gear ?: "D"})$spdText$recText"
+                        val gearLabel = gear ?: "D"
+                        val base = if (speed != null && speed >= 1.0) {
+                            getString(
+                                R.string.dashboard_modern_status_driving_speed,
+                                gearLabel,
+                                speed.roundToInt(),
+                            )
+                        } else {
+                            getString(R.string.dashboard_modern_status_driving, gearLabel)
+                        }
+                        appendRecordingSuffix(base, isRecording)
                     }
-                    isPowerOn && gear == "R" -> {
-                        val recText = if (isRecording) " (REC)" else ""
-                        "In Retromarcia (R)$recText"
-                    }
-                    isPowerOn && gear == "N" -> "In Folle (N)"
-                    isPowerOn && (gear == "P" || gear == null) -> "Pronta / Parcheggiata (P)"
-                    !isPowerOn && isSentry -> "Sentinella Attiva"
-                    snapshot.charging?.plugged == true -> "Collegata alla colonnina"
+                    isPowerOn && gear == "R" ->
+                        appendRecordingSuffix(
+                            getString(R.string.dashboard_modern_status_reverse),
+                            isRecording,
+                        )
+                    isPowerOn && gear == "N" -> getString(R.string.dashboard_modern_status_neutral)
+                    snapshot.charging?.plugged == true ->
+                        getString(R.string.dashboard_modern_plugged_in)
+                    isPowerOn && (gear == "P" || gear == null) ->
+                        getString(R.string.dashboard_modern_status_parked)
+                    !isPowerOn && isSentry -> getString(R.string.dashboard_modern_status_sentry)
                     else -> getString(R.string.dashboard_modern_vehicle_connected)
                 }
-                vehicleSocValue.text = snapshot.socPercent?.let {
+                val displayedSoc = snapshot.socPercent ?: lastDisplayedSocPercent
+                if (snapshot.socPercent != null) lastDisplayedSocPercent = snapshot.socPercent
+                vehicleSocValue.text = displayedSoc?.let {
                     getString(R.string.dashboard_modern_percent, it)
                 } ?: getString(R.string.dashboard_metric_value_pending)
                 // Personalized range (learned from the driver's own trips via
@@ -700,10 +744,18 @@ class DashboardFragment : Fragment() {
                     )
                 }
                 setHalRangeColumnVisible(showHalColumn)
-                renderSocGauge(snapshot.socPercent)
+                renderSocGauge(displayedSoc)
                 renderRangeBreakdown(snapshot.rangeDetails)
                 renderCharging(snapshot.charging)
             }
+        }
+    }
+
+    private fun appendRecordingSuffix(status: String, recording: Boolean): String {
+        return if (recording) {
+            status + getString(R.string.dashboard_modern_status_recording)
+        } else {
+            status
         }
     }
 
@@ -1814,6 +1866,12 @@ class DashboardFragment : Fragment() {
         private const val STATE_SELECTED_TUNNEL = "dashboard.selected_tunnel"
         private const val STATUS_REFRESH_ACTIVE_MS = 2_000L
         private const val STATUS_REFRESH_IDLE_MS = 15_000L
+        // How long a stale Ready vehicle snapshot is shown across consecutive
+        // /status failures before this widget actually reports Unavailable. Sized
+        // to comfortably bridge the transient daemon stalls confirmed live (~15-25s
+        // apart, each a single failed request) while still surfacing a genuine
+        // sustained outage in well under a minute.
+        private const val VEHICLE_UNAVAILABLE_HOLD_MS = 20_000L
         private const val RECORDING_STATS_RETRY_MS = 1_500L
         private const val MAX_RECORDING_STATS_RETRIES = 3
         private const val STATUS_CONNECT_TIMEOUT_MS = 2_000

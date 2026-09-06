@@ -137,6 +137,32 @@ public class VehicleControlApiHandler {
             return true;
         }
 
+        // GET /api/vehicle/diag/time-tariffs — list configured time-of-use
+        // electricity tariffs (off-peak/peak rate windows) + the master toggle.
+        if (cleanPath.equals("/api/vehicle/diag/time-tariffs") && method.equals("GET")) {
+            handleListTimeTariffs(out);
+            return true;
+        }
+
+        // POST /api/vehicle/diag/time-tariffs/save — create or update (id present) a
+        // time-of-use tariff rule.
+        if (cleanPath.equals("/api/vehicle/diag/time-tariffs/save") && method.equals("POST")) {
+            handleSaveTimeTariff(out, body);
+            return true;
+        }
+
+        // POST /api/vehicle/diag/time-tariffs/delete
+        if (cleanPath.equals("/api/vehicle/diag/time-tariffs/delete") && method.equals("POST")) {
+            handleDeleteTimeTariff(out, body);
+            return true;
+        }
+
+        // POST /api/vehicle/diag/time-tariffs/toggle — master on/off for the whole feature.
+        if (cleanPath.equals("/api/vehicle/diag/time-tariffs/toggle") && method.equals("POST")) {
+            handleToggleTimeTariffs(out, body);
+            return true;
+        }
+
         // POST /api/vehicle/seat
         if (cleanPath.equals("/api/vehicle/seat") && method.equals("POST")) {
             handleSeat(out, body);
@@ -582,19 +608,21 @@ public class VehicleControlApiHandler {
                 new Thread(() -> collector.collectAllFull(), "EarlyCollectState").start();
             } catch (Throwable ignored) {}
 
-            // Check if cloud data is available to populate initial state
-            try {
-                com.overdrive.app.byd.cloud.BydCloudDataProvider provider =
-                        com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance();
-                com.overdrive.app.byd.cloud.VehicleCloudSnapshot cs = provider.getSnapshot();
-                BydVehicleData.Builder b = new BydVehicleData.Builder();
-                if (cs != null) {
-                    if (cs.hasSoc()) b.socPercent(cs.socPercent);
-                    if (cs.hasElecRange()) b.elecRangeKm(cs.elecRangeKm);
-                    if (cs.hasChargingState()) b.chargingState(cs.getChargingStateAsSdk());
-                }
-                data = b.build();
-            } catch (Throwable ignored) {}
+            // Cloud snapshot only when the user has telemetry merge ON.
+            if (com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.isCloudEnabled()) {
+                try {
+                    com.overdrive.app.byd.cloud.BydCloudDataProvider provider =
+                            com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance();
+                    com.overdrive.app.byd.cloud.VehicleCloudSnapshot cs = provider.getSnapshot();
+                    BydVehicleData.Builder b = new BydVehicleData.Builder();
+                    if (cs != null) {
+                        if (cs.hasSoc()) b.socPercent(cs.socPercent);
+                        if (cs.hasElecRange()) b.elecRangeKm(cs.elecRangeKm);
+                        if (cs.hasChargingState()) b.chargingState(cs.getChargingStateAsSdk());
+                    }
+                    data = b.build();
+                } catch (Throwable ignored) {}
+            }
         }
 
         if (data == null) {
@@ -653,15 +681,47 @@ public class VehicleControlApiHandler {
             }
         }
 
+        boolean cloudMerge = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.isCloudEnabled();
+        boolean dilink5 = com.overdrive.app.byd.DiLink5Platform.isActive();
+
+        // Local car_service locks. On DiLink5 this is the live 4-door bus;
+        // the OTA HAL and a stale cloud snapshot both report UNLOCK while
+        // the car is actually locked. When cloud telemetry merge is OFF,
+        // this reading is authoritative. When merge is ON, only fill if
+        // the SDK array above produced nothing, so cloud can still overlay.
+        if (dilink5) {
+            int[] carSvcRaw = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.doorsArray();
+            int carSvcOverall = cloudLockToApi(carSvcRaw[6]);
+            if (carSvcOverall == 1 || carSvcOverall == 2) {
+                if (!cloudMerge || sdkOverall == -1) {
+                    doors.put("rf", cloudLockToApi(carSvcRaw[0]));
+                    doors.put("lf", cloudLockToApi(carSvcRaw[1]));
+                    doors.put("rr", cloudLockToApi(carSvcRaw[2]));
+                    doors.put("lr", cloudLockToApi(carSvcRaw[3]));
+                    doors.put("overall", carSvcOverall);
+                    sdkOverall = carSvcOverall;
+                    doors.put("source", "carsvc");
+                    doors.put("scope", "vehicle");
+                }
+            }
+        }
+
         // Track which source authoritatively set LF so we can derive `overall`
         // correctly when cloud is missing. -1 = no authoritative LF yet.
         int otaLf = -1;
         int cloudOverall = -1;
         boolean cloudAvailable = false;
 
+        // Cloud telemetry merge OFF: do not overlay OTA/cloud lock state.
+        // DiLink5's OTA getLFDoorLockState reports UNLOCK while parked-and-locked;
+        // DiLink3 still uses that local HAL when cloud is off.
+        boolean useOtaCloudLock = cloudMerge || !dilink5;
+
         // PRIMARY: OTA LF fast-path — the same live SDK read the surveillance
         // lock gate trusts (CameraDaemon.readDoorLockStatus). Works ACC=OFF
-        // with ~1.5s latency; this is the freshest signal we have.
+        // with ~1.5s latency on DiLink 3. Skipped on DiLink5 when cloud merge
+        // is off (car_service already filled the 4 doors).
+        if (useOtaCloudLock && (cloudMerge || sdkOverall == -1)) {
         try {
             android.content.Context ctx = com.overdrive.app.daemon.CameraDaemon.getAppContext();
             if (ctx != null) {
@@ -681,16 +741,15 @@ public class VehicleControlApiHandler {
         } catch (Throwable t) {
             logger.debug("ota-lock overlay failed: " + t.getMessage());
         }
+        }
 
-        // FALLBACK: cloud overlay (full 4-door), gated on freshness. A cloud
-        // snapshot older than LOCK_STATE_MAX_AGE_MS is skipped entirely —
-        // hasValidLockState() stays true forever once any door has ever
-        // reported, so without the isLockStateFresh() gate an hours-old
-        // snapshot kept painting all four pills AND won `overall` over the
-        // live OTA read (glance showed "Locked" while the driver door was
-        // open-and-unlocked). Every other lock consumer already pairs the
-        // two checks (BydCloudDataProvider.isLockStateFresh, the listener
-        // replay, refreshLockStateIfStale); this was the odd one out.
+        // FALLBACK: cloud overlay (full 4-door), gated on freshness AND the
+        // cloudDataMerge setting. A cloud snapshot older than
+        // LOCK_STATE_MAX_AGE_MS is skipped entirely — hasValidLockState()
+        // stays true forever once any door has ever reported, so without the
+        // isLockStateFresh() gate an hours-old snapshot kept painting all
+        // four pills AND won `overall` over the live OTA read.
+        if (cloudMerge) {
         try {
             com.overdrive.app.byd.cloud.BydCloudDataProvider provider =
                     com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance();
@@ -721,6 +780,7 @@ public class VehicleControlApiHandler {
         } catch (Exception e) {
             logger.debug("cloud-lock overlay failed: " + e.getMessage());
         }
+        }
 
         // Merge: the live OTA read is the primary signal (same priority the
         // surveillance lock gate uses — OTA first, cloud secondary), so it
@@ -729,7 +789,7 @@ public class VehicleControlApiHandler {
         // what the (up to 5-min-old) cloud snapshot claims. Cloud keeps
         // `overall` only for states OTA cannot see — e.g. all-locked
         // confirmation or a REAR door left unlocked while LF is locked.
-        if (otaLf != -1) {
+        if (useOtaCloudLock && otaLf != -1) {
             doors.put("lf", otaLf);
             if (cloudAvailable) {
                 // Derive `overall` from the MERGED per-door cells, not from
@@ -787,16 +847,25 @@ public class VehicleControlApiHandler {
 
         // Window open percent [1-6]: 0=closed, 100=fully open, -1=unknown
         // Index: 0=LF, 1=RF, 2=LR, 3=RR, 4=sunroof, 5=sunshade
-        JSONObject windows = new JSONObject();
-        if (data.windowOpenPercent != null && data.windowOpenPercent.length >= 4) {
+        // DiLink5-first: car_service's WINDOW_OPEN_PERCENT_*_R properties are
+        // tried BEFORE the vendor SDK arrays below (confirmed live, including
+        // a physical window-open test) — sunshade has no confirmed
+        // car_service mapping so it's always sourced from stock/cloud.
+        JSONObject windows = com.overdrive.app.byd.DiLink5Platform.isActive()
+                ? com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.windowsJson()
+                : null;
+        if (windows == null) windows = new JSONObject();
+        if (windows.length() > 0) {
+            // car_service had a reading — skip the stock/cloud paths entirely.
+        } else if (data.windowOpenPercent != null && data.windowOpenPercent.length >= 4) {
             windows.put("lf", data.windowOpenPercent[0]);
             windows.put("rf", data.windowOpenPercent[1]);
             windows.put("lr", data.windowOpenPercent[2]);
             windows.put("rr", data.windowOpenPercent[3]);
             if (data.windowOpenPercent.length >= 5) windows.put("sunroof", data.windowOpenPercent[4]);
             if (data.windowOpenPercent.length >= 6) windows.put("sunshade", data.windowOpenPercent[5]);
-        } else {
-            // Check cloud fallback
+        } else if (cloudMerge) {
+            // Check cloud fallback only when telemetry merge is ON
             try {
                 com.overdrive.app.byd.cloud.BydCloudDataProvider provider =
                         com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance();
@@ -820,7 +889,7 @@ public class VehicleControlApiHandler {
         if (data.doorLockStatus != null && data.doorLockStatus.length >= 5) {
             trunkLock = data.doorLockStatus[4];
         }
-        if (trunkLock == -1) {
+        if (trunkLock == -1 && cloudMerge) {
             try {
                 com.overdrive.app.byd.cloud.BydCloudDataProvider provider =
                         com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance();
@@ -841,7 +910,7 @@ public class VehicleControlApiHandler {
         if (data.sunroofPosition != BydVehicleData.UNAVAILABLE) {
             sunroof.put("position", data.sunroofPosition);
         }
-        if (!sunroof.has("state")) {
+        if (!sunroof.has("state") && cloudMerge) {
             try {
                 com.overdrive.app.byd.cloud.BydCloudDataProvider provider =
                         com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance();
@@ -853,10 +922,21 @@ public class VehicleControlApiHandler {
         }
         response.put("sunroof", sunroof);
 
-        // Battery info for display
+        // Battery info for display — local car_service fills SOC/range on
+        // DiLink5 when the vendor HAL left them empty (parked ACC-off).
         JSONObject battery = new JSONObject();
-        if (!Double.isNaN(data.socPercent)) battery.put("soc", data.socPercent);
+        if (dilink5) {
+            double carSvcSoc = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.socPercentValue();
+            if (!Double.isNaN(carSvcSoc) && carSvcSoc >= 0 && carSvcSoc <= 100) {
+                battery.put("soc", carSvcSoc);
+            }
+        }
+        if (!battery.has("soc") && !Double.isNaN(data.socPercent)) battery.put("soc", data.socPercent);
         if (data.elecRangeKm != BydVehicleData.UNAVAILABLE) battery.put("rangeKm", data.elecRangeKm);
+        else if (dilink5) {
+            int carSvcRange = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.elecRangeKm();
+            if (carSvcRange > 0) battery.put("rangeKm", carSvcRange);
+        }
         if (data.bodyworkRangeKm != BydVehicleData.UNAVAILABLE) battery.put("bodyworkRangeKm", data.bodyworkRangeKm);
         response.put("battery", battery);
 
@@ -912,7 +992,7 @@ public class VehicleControlApiHandler {
         int wheelHeat = data.steeringWheelHeat;
         if (wheelHeat == 1 || wheelHeat == 2) {
             seats.put("steeringHeat", wheelHeat == 2);
-        } else {
+        } else if (cloudMerge) {
             try {
                 com.overdrive.app.byd.cloud.VehicleCloudSnapshot cs =
                         com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance().getSnapshot();
@@ -927,9 +1007,9 @@ public class VehicleControlApiHandler {
         response.put("seats", seats);
 
         // Traction-battery preconditioning. Cloud-only in both directions — there is no
-        // SDK readback — so the key is omitted unless a fresh snapshot reported it. Without
-        // this the UI had no state at all: after a reload every tap re-sent "on", leaving
-        // no way to switch battery heat off.
+        // SDK readback — so the key is omitted unless merge is ON and a fresh
+        // snapshot reported it.
+        if (cloudMerge) {
         try {
             com.overdrive.app.byd.cloud.VehicleCloudSnapshot cs =
                     com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance().getSnapshot();
@@ -939,22 +1019,65 @@ public class VehicleControlApiHandler {
         } catch (Exception e) {
             logger.debug("battery-heat cloud read failed: " + e.getMessage());
         }
+        }
 
-        // Climate — only report AC state if vehicle power is on (powerLevel >= 2)
-        // Otherwise stale cached data shows AC on when car is actually off
+        // Climate — only report AC state if vehicle power is on (powerLevel >= 2),
+        // ACC is on, or remote climate is active. Otherwise stale cached CAN properties
+        // from car_service/dumpsys show "AC on · Fan 2" when the car is actually off.
         JSONObject climate = new JSONObject();
         boolean vehiclePoweredOn = (data.powerLevel != BydVehicleData.UNAVAILABLE && data.powerLevel >= 2);
+        boolean accOn = com.overdrive.app.monitor.AccMonitor.isAccOn();
+        Boolean remoteClimateActive = remoteClimateActive();
+        boolean climateActuallyActive = vehiclePoweredOn || accOn || Boolean.TRUE.equals(remoteClimateActive);
+
         if (data.acStartState != BydVehicleData.UNAVAILABLE) {
-            climate.put("acOn", vehiclePoweredOn && data.acStartState == 1);
+            climate.put("acOn", climateActuallyActive && data.acStartState == 1);
         }
         if (data.hasFreshCabinTemperature() && !Double.isNaN(data.insideTempC)) {
             climate.put("insideTempC", data.insideTempC);
         }
         if (data.acWindMode != BydVehicleData.UNAVAILABLE) climate.put("windMode", data.acWindMode);
-        if (data.acFanLevel != BydVehicleData.UNAVAILABLE && vehiclePoweredOn) climate.put("fanLevel", data.acFanLevel);
-        Boolean remoteClimateActive = remoteClimateActive();
+        if (data.acFanLevel != BydVehicleData.UNAVAILABLE) {
+            climate.put("fanLevel", climateActuallyActive ? data.acFanLevel : 0);
+        }
         if (remoteClimateActive != null) {
             climate.put("remoteClimateActive", remoteClimateActive.booleanValue());
+        }
+        // DiLink5-first override of acOn and fanLevel:
+        // car_service retains the last broadcast CAN state from when the vehicle
+        // was running. If climate is not actively powered (vehicle powered off and no
+        // remote climate session), gate acOn to false and fanLevel to 0 so the dashboard
+        // reflects "AC off" instead of stale cached fan speed and work mode.
+        if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+            int carSvcAcOn = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.climateAcOnRaw();
+            if (carSvcAcOn >= 0) {
+                climate.put("acOn", climateActuallyActive && (carSvcAcOn == 1));
+            }
+            // Driver/passenger AC temperature setpoints -- never tracked
+            // anywhere in this app before, native or web. See
+            // CarSvcTelemetry.climateTempsRaw()'s doc comment for the
+            // driver-vs-passenger mapping confidence caveat. Added
+            // independently of each other (unlike acOn above, either or
+            // both can be present) so the web UI's glance row can still
+            // show one side even if the other has no reading.
+            int[] carSvcTemps = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.climateTempsRaw();
+            if (carSvcTemps[0] >= 0) climate.put("driverTempSetC", carSvcTemps[0]);
+            if (carSvcTemps[1] >= 0) climate.put("passengerTempSetC", carSvcTemps[1]);
+
+            // Fan level: car_service retains the last wind level (e.g. 2)
+            // even after vehicle shutdown. Gate on climateActuallyActive so
+            // the dashboard does not display "AC on · Fan 2" when the car is off.
+            int carSvcFanLevel = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.climateFanLevelRaw();
+            if (carSvcFanLevel >= 0) {
+                climate.put("fanLevel", climateActuallyActive ? carSvcFanLevel : 0);
+            }
+        }
+
+        // Safety fallback: if climate is not actually active, guarantee that acOn
+        // is false and fanLevel is 0 so client dashboards never show ghost readings.
+        if (!climateActuallyActive) {
+            climate.put("acOn", false);
+            climate.put("fanLevel", 0);
         }
         response.put("climate", climate);
 
@@ -963,7 +1086,20 @@ public class VehicleControlApiHandler {
         // lost). Indexed [FL, FR, RL, RR]. The web UI's tyre callouts read this
         // block directly; if any required source is missing the corner falls
         // back to {available:false} so the UI shows a grey "no signal" state.
-        JSONObject tyres = new JSONObject();
+        // DiLink5-first: car_service's TPMS properties are tried BEFORE the
+        // vendor SDK arrays below (raw units confirmed 0.1 psi against the
+        // vendor SDK's own psi reading for the same corner at the same
+        // moment) — this loses temperature/pressureState/airLeakState/
+        // signalState (car_service has no equivalent), which is acceptable
+        // since those corners still show a pressure reading.
+        JSONObject tyres = com.overdrive.app.byd.DiLink5Platform.isActive()
+                ? com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.tyrePressuresJson()
+                : null;
+        if (tyres != null) {
+            // car_service had at least one reading — skip the stock computation.
+        } else {
+        JSONObject tyresStock = new JSONObject();
+        tyres = tyresStock;
         boolean anyTyreData = data.tyrePressure != null
                 || data.tyrePressureState != null
                 || data.tyreAirLeakState != null
@@ -1005,6 +1141,7 @@ public class VehicleControlApiHandler {
             tyres.put("available", true);
         } else {
             tyres.put("available", false);
+        }
         }
         // The user's configured limits ride along with the readings so the web
         // UI colours corners against the SAME numbers that drive notifications
@@ -1641,6 +1778,54 @@ public class VehicleControlApiHandler {
             response.put("success", false);
             response.put("error", e.getMessage());
             HttpResponse.sendJson(out, response.toString());
+        }
+    }
+
+    private static void handleListTimeTariffs(OutputStream out) throws Exception {
+        try {
+            JSONObject response = com.overdrive.app.monitor.SocHistoryDatabase.getInstance() != null
+                    ? com.overdrive.app.monitor.SocHistoryDatabase.getInstance().listTimeTariffs()
+                    : null;
+            if (response == null) {
+                response = new JSONObject();
+                response.put("success", false);
+            }
+            HttpResponse.sendJson(out, response.toString());
+        } catch (Exception e) {
+            HttpResponse.sendError(out, 500, e.getMessage());
+        }
+    }
+
+    private static void handleSaveTimeTariff(OutputStream out, String body) throws Exception {
+        try {
+            com.overdrive.app.monitor.SocHistoryDatabase db =
+                    com.overdrive.app.monitor.SocHistoryDatabase.getInstance();
+            JSONObject response = db != null ? db.saveTimeTariff(body) : new JSONObject().put("success", false);
+            HttpResponse.sendJson(out, response.toString());
+        } catch (Exception e) {
+            HttpResponse.sendError(out, 500, e.getMessage());
+        }
+    }
+
+    private static void handleDeleteTimeTariff(OutputStream out, String body) throws Exception {
+        try {
+            com.overdrive.app.monitor.SocHistoryDatabase db =
+                    com.overdrive.app.monitor.SocHistoryDatabase.getInstance();
+            JSONObject response = db != null ? db.deleteTimeTariff(body) : new JSONObject().put("success", false);
+            HttpResponse.sendJson(out, response.toString());
+        } catch (Exception e) {
+            HttpResponse.sendError(out, 500, e.getMessage());
+        }
+    }
+
+    private static void handleToggleTimeTariffs(OutputStream out, String body) throws Exception {
+        try {
+            com.overdrive.app.monitor.SocHistoryDatabase db =
+                    com.overdrive.app.monitor.SocHistoryDatabase.getInstance();
+            JSONObject response = db != null ? db.setTimeTariffMasterToggle(body) : new JSONObject().put("success", false);
+            HttpResponse.sendJson(out, response.toString());
+        } catch (Exception e) {
+            HttpResponse.sendError(out, 500, e.getMessage());
         }
     }
 

@@ -221,6 +221,8 @@ public class FoveatedCropper {
              DEFAULT_QUADRANT_CORNER_OFFSETS_XY);
     }
 
+    private final boolean isTexture2D;
+
     /**
      * @param quadrantStripOffsetX Per-role X offsets for legacy 4-strip
      *     HAL. {Front, Right, Rear, Left}.
@@ -231,6 +233,14 @@ public class FoveatedCropper {
     public FoveatedCropper(int stripWidth, int stripHeight,
                            float[] quadrantStripOffsetX,
                            float[] quadrantCornerOffsetsXY) {
+        this(stripWidth, stripHeight, quadrantStripOffsetX, quadrantCornerOffsetsXY, false);
+    }
+
+    public FoveatedCropper(int stripWidth, int stripHeight,
+                           float[] quadrantStripOffsetX,
+                           float[] quadrantCornerOffsetsXY,
+                           boolean isTexture2D) {
+        this.isTexture2D = isTexture2D;
         this.stripWidth = Math.max(1, stripWidth);
         this.stripHeight = Math.max(1, stripHeight);
         this.quadrantStripOffsetX = (quadrantStripOffsetX != null && quadrantStripOffsetX.length == 4)
@@ -316,7 +326,24 @@ public class FoveatedCropper {
 
     public void init() {
         try {
-            program = GlUtil.createProgram(VERTEX_SHADER, FRAGMENT_SHADER);
+            String fs = isTexture2D
+                ? "#extension GL_OES_EGL_image_external : enable\n" +
+                  "precision mediump float;\n" +
+                  "uniform sampler2D uCameraTex;\n" +
+                  "uniform vec4 uCropRect;\n" +
+                  "uniform float uRedMaskStrength;\n" +
+                  "varying vec2 vTexCoord;\n" +
+                  "void main() {\n" +
+                  "    vec2 samplePos = vec2(\n" +
+                  "        uCropRect.x + vTexCoord.x * uCropRect.z,\n" +
+                  "        uCropRect.y + vTexCoord.y * uCropRect.w\n" +
+                  "    );\n" +
+                  "    vec4 src = texture2D(uCameraTex, samplePos);\n" +
+                  com.overdrive.app.camera.GlUtil.RED_MASK_GLSL +
+                  "    gl_FragColor = src;\n" +
+                  "}\n"
+                : FRAGMENT_SHADER;
+            program = GlUtil.createProgram(VERTEX_SHADER, fs);
             if (program == 0) {
                 logger.error("Foveated crop shader compilation failed");
                 return;
@@ -582,7 +609,11 @@ public class FoveatedCropper {
 
         GLES20.glUseProgram(program);
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
+        if (isTexture2D) {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, cameraTextureId);
+        } else {
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
+        }
         GLES20.glUniform1i(uCameraTex, 0);
         GLES20.glUniform4f(uCropRect, cropLeft, cropTop, cropWidthNorm, cropHeightNorm);
         if (uRedMaskStrength >= 0) {
@@ -776,6 +807,9 @@ public class FoveatedCropper {
     }
 
     public void setRedMaskEnabled(boolean enabled) {
+        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+            enabled = false;
+        }
         this.redMaskEnabled = enabled;
     }
 

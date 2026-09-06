@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#00876C">
     <script src="../shared/theme.js?v=6"></script>
-    <script src="../shared/app-shell.js?v=5"></script>
+    <script src="../shared/app-shell.js?v=6"></script>
     <script>
         if (typeof window.AndroidBridge !== 'undefined') {
             document.documentElement.classList.add('is-app-webview');
@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="../shared/styles.css?v=23">
     <link rel="stylesheet" href="../shared/leaflet.css" />
     <script src="../shared/leaflet.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jmuxer@2.0.4/dist/jmuxer.min.js"></script>
+    <script src="../shared/jmuxer.min.js"></script>
     <script src="../shared/SotaPlayer.js?v=13"></script>
     <script src="../shared/Decoder.js"></script>
     <script src="../shared/YUVCanvas.js"></script>
@@ -170,7 +170,7 @@
                                          from the FRONT quadrant marker so users see the
                                          standalone dashcam sensor as distinct from the
                                          AVM front-quadrant stitch. -->
-                                    <div class="cam-hotspot cam-dvr" data-cam="6" style="display:none;" onclick="BYD.stream.selectCamera(6)">
+                                    <div class="cam-hotspot cam-dvr" data-cam="6" style="display:none !important;" onclick="BYD.stream.selectCamera(6)">
                                         <div class="hotspot-pulse"></div>
                                         <div class="hotspot-ring"></div>
                                         <span class="hotspot-label" data-i18n="stream.hotspot_oem_dashcam">DVR</span>
@@ -1921,12 +1921,15 @@
                     : -1;
                 const hotspot = document.querySelector('.cam-hotspot[data-cam="6"]');
                 if (hotspot) {
-                    hotspot.style.display = camId >= 0 ? '' : 'none';
+                    if (camId >= 0) {
+                        hotspot.style.setProperty('display', 'block');
+                    } else {
+                        hotspot.remove();
+                    }
                 }
             } catch (e) {
-                // Backend unreachable or response shape changed — leave
-                // the hotspot hidden (its inline default). The feature
-                // is opt-in; silent suppression is the safe fallback.
+                const hotspot = document.querySelector('.cam-hotspot[data-cam="6"]');
+                if (hotspot) hotspot.remove();
                 console.log('[Init] OEM dashcam gating skipped:', e && e.message);
             }
         })();

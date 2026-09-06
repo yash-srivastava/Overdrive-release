@@ -4,9 +4,10 @@
 
 #include <jni.h>
 #include <android/log.h>
-#include <android/native_window.h>
-#include <android/native_window_jni.h>
+#include <GLES2/gl2.h>
 #include <stdint.h>
+#include <inttypes.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -14,22 +15,54 @@
 #include <atomic>
 #include <mutex>
 #include "fast_cam_bridge.h"
+#include "fast_cam_ipc.h"
 
 #define TAG "QCarCamBridge"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN,  TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
-#define FRAME_WIDTH 1920
-#define FRAME_HEIGHT 1300
+#define SENSOR_WIDTH 1920
+#define SENSOR_HEIGHT 1300
 
-namespace {
+#define FRAME_WIDTH 1920
+#define FRAME_HEIGHT 1080
+
+struct CameraMapping {
+    std::atomic<int> hw_front{0};
+    std::atomic<int> hw_right{1};
+    std::atomic<int> hw_rear{2};
+    std::atomic<int> hw_left{3};
+    std::atomic<int> hw_dashcam{-1};
+};
+static CameraMapping g_camMapping;
+
+static JavaVM* g_jvm = nullptr;
+static jclass g_backendClass = nullptr;
+static jmethodID g_onFrameAvailableMethod = nullptr;
+static std::atomic<uint64_t> g_lastFrameTimestampNs{0};
+
+static inline uint64_t getCurrentNanoTime() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ((uint64_t)ts.tv_sec * 1000000000ULL) + (uint64_t)ts.tv_nsec;
+}
 
 std::atomic<bool> g_streaming{false};
 std::atomic<int> g_active_camera{0};
 pthread_t g_streamThread = 0;
-ANativeWindow* g_nativeWindow = nullptr;
-std::mutex g_winMutex;
+
+// Completely decoupled CPU double-buffer pool for GL_TEXTURE_2D upload via glTexSubImage2D.
+// Zero interaction with AHardwareBuffer, Gralloc, or EGLImageKHR, making display/infotainment crashes impossible.
+static std::unique_ptr<uint8_t[]> g_cpuRgbaBuffers[2];
+static int g_bufWidth = 0;
+static int g_bufHeight = 0;
+static std::atomic<int> g_frontIdx{-1};
+static std::atomic<bool> g_hasNewFrame{false};
+static std::mutex g_bufMutex;
+static GLuint g_lastAllocatedTexId = 0;
+static int g_texAllocWidth = 0;
+static int g_texAllocHeight = 0;
 
 #include <arm_neon.h>
 
@@ -43,7 +76,8 @@ void convert_uyvy_to_rgba(const uint8_t* __restrict__ uyvy, int width, int heigh
 
     for (int y = 0; y < height; ++y) {
         const uint8_t* src_row = uyvy + y * width * 2;
-        uint32_t* dst_row = dst_rgba + y * stride;
+        // Invert Y so OpenGL / shader coordinate conventions match upright image
+        uint32_t* dst_row = dst_rgba + (height - 1 - y) * stride;
         int x = 0;
 
         // Vectorized loop: 16 pixels per iteration
@@ -142,12 +176,91 @@ void convert_uyvy_to_rgba(const uint8_t* __restrict__ uyvy, int width, int heigh
 }
 
 #define FRAME_WIDTH_1080P 1920
-#define FRAME_HEIGHT_1080P 1300
+#define FRAME_HEIGHT_1080P 1080
 #define FRAME_WIDTH_4K 3840
-#define FRAME_HEIGHT_4K 2600
+#define FRAME_HEIGHT_4K 2160
+
+// Fast 2x2 grid compositor in UYVY (4 cameras decimated into 1920x1080 16:9 canvas)
+// Center crops vertical dimension from 1300 to 1080 (110 rows top/bottom),
+// and decimates 2:1 horizontally (1920 -> 960) and vertically (1080 -> 540).
+static void compose_2x2_1080p_uyvy(
+    const uint8_t* cam0, const uint8_t* cam1,
+    const uint8_t* cam3, const uint8_t* cam2,
+    uint8_t* __restrict__ out_grid
+) {
+    const int crop_y_start = 110;
+    const int in_stride_bytes = 1920 * 2; // 3840
+    const int out_stride_bytes = 1920 * 2; // 3840
+
+    // Top half: Cam 0 (Front, Left) and Cam 1 (Right, Right) -> 540 rows
+    for (int y = 0; y < 540; ++y) {
+        int src_y = crop_y_start + (y * 2);
+        const uint32_t* src0 = (const uint32_t*)(cam0 + src_y * in_stride_bytes);
+        const uint32_t* src1 = (const uint32_t*)(cam1 + src_y * in_stride_bytes);
+        uint32_t* dst_row = (uint32_t*)(out_grid + y * out_stride_bytes);
+
+        for (int x = 0; x < 480; ++x) {
+            dst_row[x] = src0[x * 2];
+            dst_row[480 + x] = src1[x * 2];
+        }
+    }
+
+    // Bottom half: Cam 3 (Left, Left) and Cam 2 (Rear, Right) -> 540 rows
+    for (int y = 0; y < 540; ++y) {
+        int src_y = crop_y_start + (y * 2);
+        const uint32_t* src3 = (const uint32_t*)(cam3 + src_y * in_stride_bytes);
+        const uint32_t* src2 = (const uint32_t*)(cam2 + src_y * in_stride_bytes);
+        uint32_t* dst_row = (uint32_t*)(out_grid + (540 + y) * out_stride_bytes);
+
+        for (int x = 0; x < 480; ++x) {
+            dst_row[x] = src3[x * 2];
+            dst_row[480 + x] = src2[x * 2];
+        }
+    }
+}
+
+// 4K Ultra-HD Native Grid in UYVY (3840x2160 standard 16:9 canvas)
+static void compose_4k_2160p_uyvy(
+    const uint8_t* cam0, const uint8_t* cam1,
+    const uint8_t* cam3, const uint8_t* cam2,
+    uint8_t* __restrict__ out_grid
+) {
+    const int crop_y_start = 110;
+    const int in_stride_bytes = 1920 * 2; // 3840
+    const int out_stride_bytes = 3840 * 2; // 7680
+
+    for (int y = 0; y < 1080; ++y) {
+        int src_y = crop_y_start + y;
+        const uint8_t* src0 = cam0 + src_y * in_stride_bytes;
+        const uint8_t* src1 = cam1 + src_y * in_stride_bytes;
+        uint8_t* dst_row = out_grid + y * out_stride_bytes;
+        memcpy(dst_row, src0, in_stride_bytes);
+        memcpy(dst_row + in_stride_bytes, src1, in_stride_bytes);
+    }
+
+    for (int y = 0; y < 1080; ++y) {
+        int src_y = crop_y_start + y;
+        const uint8_t* src3 = cam3 + src_y * in_stride_bytes;
+        const uint8_t* src2 = cam2 + src_y * in_stride_bytes;
+        uint8_t* dst_row = out_grid + (1080 + y) * out_stride_bytes;
+        memcpy(dst_row, src3, in_stride_bytes);
+        memcpy(dst_row + in_stride_bytes, src2, in_stride_bytes);
+    }
+}
 
 void* streamClientLoop(void* arg) {
     LOGI("FastCamClient thread started.");
+
+    JNIEnv* jniEnv = nullptr;
+    bool jniAttached = false;
+    if (g_jvm) {
+        jint res = g_jvm->AttachCurrentThread(&jniEnv, nullptr);
+        if (res == JNI_OK && jniEnv) {
+            jniAttached = true;
+        } else {
+            LOGW("streamClientLoop: failed to attach to JVM (err=%d)", res);
+        }
+    }
 
     FastCamClient client;
 
@@ -162,6 +275,9 @@ void* streamClientLoop(void* arg) {
 
     if (!g_streaming.load()) {
         client.disconnect();
+        if (jniAttached && g_jvm) {
+            g_jvm->DetachCurrentThread();
+        }
         LOGI("FastCamClient thread terminated before stream start.");
         return nullptr;
     }
@@ -169,7 +285,7 @@ void* streamClientLoop(void* arg) {
     LOGI("FastCamClient connected successfully to fast_cam IPC stream (@fast_cam.sock)!");
 
     FastCamFrame frame;
-    const uint8_t* cam_ptrs[4] = { nullptr, nullptr, nullptr, nullptr };
+    const uint8_t* cam_ptrs[FAST_CAM_MAX_CAMS] = { nullptr };
     static uint8_t mosaic_buf_2x2[FRAME_WIDTH_1080P * FRAME_HEIGHT_1080P * 2];
     std::unique_ptr<uint8_t[]> mosaic_buf_4k;
     int current_win_w = 0;
@@ -177,13 +293,46 @@ void* streamClientLoop(void* arg) {
     uint32_t rendered_frames = 0;
 
     while (g_streaming.load()) {
+        if (!client.isConnected()) {
+            {
+                std::lock_guard<std::mutex> lock(g_bufMutex);
+                g_frontIdx.store(-1);
+                g_hasNewFrame.store(false);
+            }
+            LOGW("FastCamClient disconnected from @fast_cam.sock. Reconnecting...");
+            while (g_streaming.load() && !client.connect("@fast_cam.sock")) {
+                if (client.connect("/data/local/tmp/fast_cam.sock")) {
+                    break;
+                }
+                usleep(300000); // Retry connection every 300ms
+            }
+            if (!g_streaming.load()) break;
+            LOGI("FastCamClient reconnected successfully to fast_cam IPC stream (@fast_cam.sock)!");
+        }
+
         // Wait for next available hardware frame (timeout 100ms)
         if (!client.waitForFrame(&frame, 100)) {
             continue;
         }
 
-        if (frame.cam_id < 4 && frame.pixels) {
-            cam_ptrs[frame.cam_id] = frame.pixels;
+        // Map incoming frame.cam_id to canonical semantic slot:
+        // Slot 0 = Front, Slot 1 = Right, Slot 2 = Rear, Slot 3 = Left, Slot 6 = Internal Dashcam
+        int slot = -1;
+        int hw_f  = g_camMapping.hw_front.load();
+        int hw_r  = g_camMapping.hw_right.load();
+        int hw_re = g_camMapping.hw_rear.load();
+        int hw_l  = g_camMapping.hw_left.load();
+        int hw_dc = g_camMapping.hw_dashcam.load();
+
+        if (frame.cam_id == (uint32_t)hw_f)        slot = 0;
+        else if (frame.cam_id == (uint32_t)hw_r)   slot = 1;
+        else if (frame.cam_id == (uint32_t)hw_re)  slot = 2;
+        else if (frame.cam_id == (uint32_t)hw_l)   slot = 3;
+        else if (hw_dc >= 0 && frame.cam_id == (uint32_t)hw_dc) slot = 6;
+        else if (frame.cam_id < FAST_CAM_MAX_CAMS) slot = (int)frame.cam_id;
+
+        if (slot >= 0 && slot < FAST_CAM_MAX_CAMS && frame.pixels) {
+            cam_ptrs[slot] = frame.pixels;
         }
 
         int desired_cam = g_active_camera.load();
@@ -192,77 +341,92 @@ void* streamClientLoop(void* arg) {
         int target_h = FRAME_HEIGHT_1080P;
 
         if (desired_cam == 5) {
-            // Mode 5 = 4K Ultra-HD Native Grid (3840x2600, 100% native sensor pixels)
-            if (!mosaic_buf_4k) {
-                mosaic_buf_4k = std::make_unique<uint8_t[]>(FRAME_WIDTH_4K * FRAME_HEIGHT_4K * 2);
+            // Mode 5 = 4K Ultra-HD Native Grid (3840x2160, 100% native sensor pixels 16:9)
+            // Anchor on Cam 0 (slot == 0, Front) arriving at 30 FPS to avoid 120 FPS CPU overload
+            if (slot == 0 || rendered_frames == 0) {
+                if (!mosaic_buf_4k) {
+                    mosaic_buf_4k = std::make_unique<uint8_t[]>(FRAME_WIDTH_4K * FRAME_HEIGHT_4K * 2);
+                }
+                const uint8_t* p0 = cam_ptrs[0] ? cam_ptrs[0] : frame.pixels;
+                const uint8_t* p1 = cam_ptrs[1] ? cam_ptrs[1] : p0;
+                const uint8_t* p2 = cam_ptrs[2] ? cam_ptrs[2] : p0;
+                const uint8_t* p3 = cam_ptrs[3] ? cam_ptrs[3] : p0;
+
+                compose_4k_2160p_uyvy(p0, p1, p3, p2, mosaic_buf_4k.get());
+                render_pixels = mosaic_buf_4k.get();
+                target_w = FRAME_WIDTH_4K;
+                target_h = FRAME_HEIGHT_4K;
             }
-            const uint8_t* p0 = cam_ptrs[0] ? cam_ptrs[0] : frame.pixels;
-            const uint8_t* p1 = cam_ptrs[1] ? cam_ptrs[1] : p0;
-            const uint8_t* p2 = cam_ptrs[2] ? cam_ptrs[2] : p0;
-            const uint8_t* p3 = cam_ptrs[3] ? cam_ptrs[3] : p0;
-
-            FastCamClient::compose4K(p0, p1, p3, p2, mosaic_buf_4k.get());
-            render_pixels = mosaic_buf_4k.get();
-            target_w = FRAME_WIDTH_4K;
-            target_h = FRAME_HEIGHT_4K;
         } else if (desired_cam == 4) {
-            // Mode 4 = 2x2 Decimated Mosaic (1920x1300)
-            const uint8_t* p0 = cam_ptrs[0] ? cam_ptrs[0] : frame.pixels;
-            const uint8_t* p1 = cam_ptrs[1] ? cam_ptrs[1] : p0;
-            const uint8_t* p2 = cam_ptrs[2] ? cam_ptrs[2] : p0;
-            const uint8_t* p3 = cam_ptrs[3] ? cam_ptrs[3] : p0;
+            // Mode 4 = 2x2 Decimated Mosaic (1920x1080)
+            // Anchor on Cam 0 (slot == 0, Front) arriving at 30 FPS to avoid 120 FPS CPU overload
+            if (slot == 0 || rendered_frames == 0) {
+                const uint8_t* p0 = cam_ptrs[0] ? cam_ptrs[0] : frame.pixels;
+                const uint8_t* p1 = cam_ptrs[1] ? cam_ptrs[1] : p0;
+                const uint8_t* p2 = cam_ptrs[2] ? cam_ptrs[2] : p0;
+                const uint8_t* p3 = cam_ptrs[3] ? cam_ptrs[3] : p0;
 
-            FastCamClient::compose2x2(p0, p1, p3, p2, mosaic_buf_2x2);
-            render_pixels = mosaic_buf_2x2;
-            target_w = FRAME_WIDTH_1080P;
-            target_h = FRAME_HEIGHT_1080P;
-        } else if (desired_cam >= 0 && desired_cam < 4) {
-            // Specific single camera channel requested
-            if ((int)frame.cam_id == desired_cam) {
-                render_pixels = frame.pixels;
+                compose_2x2_1080p_uyvy(p0, p1, p3, p2, mosaic_buf_2x2);
+                render_pixels = mosaic_buf_2x2;
+                target_w = FRAME_WIDTH_1080P;
+                target_h = FRAME_HEIGHT_1080P;
+            }
+        } else if (desired_cam >= 0 && desired_cam < FAST_CAM_MAX_CAMS) {
+            // Specific single camera channel requested (0..3 surround or 6 internal dashcam)
+            if (slot == desired_cam) {
+                // Vertical center-crop 1920x1300 to 1920x1080 (110 rows margin top/bottom)
+                render_pixels = frame.pixels + (110 * 1920 * 2);
             }
             target_w = FRAME_WIDTH_1080P;
             target_h = FRAME_HEIGHT_1080P;
         } else {
-            // Desired cam < 0: render whatever frame arrives
-            render_pixels = frame.pixels;
+            // Desired cam < 0: render whatever frame arrives with 16:9 center crop
+            render_pixels = frame.pixels + (110 * 1920 * 2);
             target_w = FRAME_WIDTH_1080P;
             target_h = FRAME_HEIGHT_1080P;
         }
 
         if (render_pixels) {
-            std::lock_guard<std::mutex> lock(g_winMutex);
-            if (g_nativeWindow) {
-                // Dynamically reconfigure window buffer geometry if resolution changed
-                if (current_win_w != target_w || current_win_h != target_h) {
-                    ANativeWindow_setBuffersGeometry(g_nativeWindow, target_w, target_h, WINDOW_FORMAT_RGBA_8888);
-                    current_win_w = target_w;
-                    current_win_h = target_h;
-                    LOGI("ANativeWindow buffer geometry adapted: %dx%d RGBA8888 (mode=%d)", target_w, target_h, desired_cam);
-                }
+            std::lock_guard<std::mutex> lock(g_bufMutex);
+            if (!g_cpuRgbaBuffers[0] || !g_cpuRgbaBuffers[1] || g_bufWidth != target_w || g_bufHeight != target_h) {
+                g_cpuRgbaBuffers[0] = std::make_unique<uint8_t[]>(target_w * target_h * 4);
+                g_cpuRgbaBuffers[1] = std::make_unique<uint8_t[]>(target_w * target_h * 4);
+                g_bufWidth = target_w;
+                g_bufHeight = target_h;
+                g_frontIdx.store(-1);
+                LOGI("Allocated ping-pong CPU RGBA buffers for GL texture upload: %dx%d (%d bytes each)",
+                     target_w, target_h, target_w * target_h * 4);
+            }
 
-                ANativeWindow_Buffer winBuffer;
-                if (ANativeWindow_lock(g_nativeWindow, &winBuffer, nullptr) == 0) {
-                    // Color conversion UYVY to RGBA8888 onto Android Surface buffer
-                    convert_uyvy_to_rgba(render_pixels, target_w, target_h,
-                                         (uint32_t*)winBuffer.bits, winBuffer.stride);
-                    ANativeWindow_unlockAndPost(g_nativeWindow);
-                    rendered_frames++;
-                    if (rendered_frames % 300 == 1) {
-                        LOGI("Rendered %u frames to Surface (mode=%d, res=%dx%d, lastCamId=%u)",
-                             rendered_frames, desired_cam, target_w, target_h, frame.cam_id);
-                    }
+            int curFront = g_frontIdx.load();
+            int writeIdx = (curFront == 0) ? 1 : 0;
+            convert_uyvy_to_rgba(render_pixels, target_w, target_h, (uint32_t*)g_cpuRgbaBuffers[writeIdx].get(), target_w);
+            uint64_t curTsNs = (frame.timestamp_ns > 0) ? frame.timestamp_ns : getCurrentNanoTime();
+            g_lastFrameTimestampNs.store(curTsNs);
+            g_frontIdx.store(writeIdx);
+            g_hasNewFrame.store(true);
+            rendered_frames++;
+            if (rendered_frames % 300 == 1) {
+                LOGI("CPU RGBA frame ready (%u frames, mode=%d, %dx%d, ts=%" PRIu64 ")",
+                     rendered_frames, desired_cam, target_w, target_h, curTsNs);
+            }
+            if (jniAttached && jniEnv && g_backendClass && g_onFrameAvailableMethod) {
+                jniEnv->CallStaticVoidMethod(g_backendClass, g_onFrameAvailableMethod, (jlong)curTsNs);
+                if (jniEnv->ExceptionCheck()) {
+                    jniEnv->ExceptionClear();
                 }
             }
         }
+    }
+
+    if (jniAttached && g_jvm) {
+        g_jvm->DetachCurrentThread();
     }
 
     client.disconnect();
     LOGI("FastCamClient thread terminated.");
     return nullptr;
 }
-
-} // namespace
 
 extern "C" {
 
@@ -288,26 +452,48 @@ Java_com_overdrive_app_camera_dilink5_DiLink5QCarCamBackend_nativeStart(
     return JNI_TRUE;
 }
 
+// Bypasses Surface/ANativeWindow completely to avoid Qualcomm SA8155P hwcomposer crashes
 JNIEXPORT jboolean JNICALL
 Java_com_overdrive_app_camera_dilink5_DiLink5QCarCamBackend_nativeStartSurface(
     JNIEnv* env, jobject thiz, jobject surface) {
-    std::lock_guard<std::mutex> lock(g_winMutex);
-    if (g_nativeWindow) {
-        ANativeWindow_release(g_nativeWindow);
-        g_nativeWindow = nullptr;
+    // Delegated directly to nativeStart: GL rendering now reads via nativeBindLatestFrame
+    return Java_com_overdrive_app_camera_dilink5_DiLink5QCarCamBackend_nativeStart(env, thiz, 1);
+}
+
+// Binds the latest available CPU RGBA frame directly into the standard GL_TEXTURE_2D texture
+// Returns the active texture ID (>0) on success, or 0 on failure.
+JNIEXPORT jint JNICALL
+Java_com_overdrive_app_camera_dilink5_DiLink5QCarCamBackend_nativeBindLatestFrame(
+    JNIEnv* env, jclass clazz, jint textureId) {
+    if (textureId <= 0) {
+        return 0;
     }
-    if (surface) {
-        g_nativeWindow = ANativeWindow_fromSurface(env, surface);
-        if (g_nativeWindow) {
-            ANativeWindow_setBuffersGeometry(g_nativeWindow, FRAME_WIDTH, FRAME_HEIGHT, WINDOW_FORMAT_RGBA_8888);
-            LOGI("ANativeWindow configured: %dx%d RGBA8888", FRAME_WIDTH, FRAME_HEIGHT);
-        }
+    if (!g_hasNewFrame.load()) {
+        return textureId;
     }
-    g_streaming.store(true);
-    if (g_streamThread == 0) {
-        pthread_create(&g_streamThread, nullptr, streamClientLoop, nullptr);
+
+    std::unique_lock<std::mutex> lock(g_bufMutex);
+    int idx = g_frontIdx.load();
+    if (idx < 0 || idx > 1 || !g_cpuRgbaBuffers[idx]) {
+        return 0;
     }
-    return JNI_TRUE;
+
+    glBindTexture(GL_TEXTURE_2D, (GLuint)textureId);
+    if (g_texAllocWidth != g_bufWidth || g_texAllocHeight != g_bufHeight || g_lastAllocatedTexId != (GLuint)textureId) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, g_bufWidth, g_bufHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        g_texAllocWidth = g_bufWidth;
+        g_texAllocHeight = g_bufHeight;
+        g_lastAllocatedTexId = (GLuint)textureId;
+        LOGI("Allocated GL_TEXTURE_2D storage: id=%d %dx%d RGBA", textureId, g_bufWidth, g_bufHeight);
+    }
+
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, g_bufWidth, g_bufHeight, GL_RGBA, GL_UNSIGNED_BYTE, g_cpuRgbaBuffers[idx].get());
+    g_hasNewFrame.store(false);
+    return textureId;
 }
 
 JNIEXPORT jboolean JNICALL
@@ -318,11 +504,16 @@ Java_com_overdrive_app_camera_dilink5_DiLink5QCarCamBackend_nativeStop(
         pthread_join(g_streamThread, nullptr);
         g_streamThread = 0;
     }
-    std::lock_guard<std::mutex> lock(g_winMutex);
-    if (g_nativeWindow) {
-        ANativeWindow_release(g_nativeWindow);
-        g_nativeWindow = nullptr;
-    }
+    std::lock_guard<std::mutex> lock(g_bufMutex);
+    g_cpuRgbaBuffers[0].reset();
+    g_cpuRgbaBuffers[1].reset();
+    g_bufWidth = 0;
+    g_bufHeight = 0;
+    g_texAllocWidth = 0;
+    g_texAllocHeight = 0;
+    g_lastAllocatedTexId = 0;
+    g_frontIdx.store(-1);
+    g_hasNewFrame.store(false);
     return JNI_TRUE;
 }
 
@@ -333,18 +524,56 @@ Java_com_overdrive_app_camera_dilink5_DiLink5QCarCamBackend_nativeSetActiveCamer
 }
 
 JNIEXPORT void JNICALL
+Java_com_overdrive_app_camera_dilink5_DiLink5QCarCamBackend_nativeSetCameraMapping(
+    JNIEnv* env, jclass clazz, jint front, jint right, jint rear, jint left, jint dashcam) {
+    g_camMapping.hw_front.store(front);
+    g_camMapping.hw_right.store(right);
+    g_camMapping.hw_rear.store(rear);
+    g_camMapping.hw_left.store(left);
+    g_camMapping.hw_dashcam.store(dashcam);
+    LOGI("Hardware camera mapping set: Front=%d, Right=%d, Rear=%d, Left=%d, Dashcam=%d",
+         front, right, rear, left, dashcam);
+}
+
+JNIEXPORT void JNICALL
 Java_com_overdrive_app_camera_dilink5_DiLink5QCarCamBackend_nativeRelease(
     JNIEnv* env, jobject thiz, jlong handle) {
-    g_streaming.store(false);
-    if (g_streamThread != 0) {
-        pthread_join(g_streamThread, nullptr);
-        g_streamThread = 0;
+    Java_com_overdrive_app_camera_dilink5_DiLink5QCarCamBackend_nativeStop(env, thiz, handle);
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_overdrive_app_camera_dilink5_DiLink5QCarCamBackend_nativeGetLatestFrameTimestamp(
+    JNIEnv* env, jclass clazz) {
+    return (jlong)g_lastFrameTimestampNs.load();
+}
+
+jint JNI_OnLoad(JavaVM* vm, void* reserved) {
+    g_jvm = vm;
+    JNIEnv* env = nullptr;
+    if (vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
+        return JNI_ERR;
     }
-    std::lock_guard<std::mutex> lock(g_winMutex);
-    if (g_nativeWindow) {
-        ANativeWindow_release(g_nativeWindow);
-        g_nativeWindow = nullptr;
+    jclass localClass = env->FindClass("com/overdrive/app/camera/dilink5/DiLink5QCarCamBackend");
+    if (localClass) {
+        g_backendClass = (jclass)env->NewGlobalRef(localClass);
+        g_onFrameAvailableMethod = env->GetStaticMethodID(g_backendClass, "onNativeFrameAvailable", "(J)V");
+        env->DeleteLocalRef(localClass);
+        LOGI("JNI_OnLoad: DiLink5QCarCamBackend cached, onNativeFrameAvailableMethod=%p", g_onFrameAvailableMethod);
+    } else {
+        LOGE("JNI_OnLoad: Failed to find DiLink5QCarCamBackend class");
     }
+    return JNI_VERSION_1_6;
+}
+
+void JNI_OnUnload(JavaVM* vm, void* reserved) {
+    JNIEnv* env = nullptr;
+    if (vm->GetEnv((void**)&env, JNI_VERSION_1_6) == JNI_OK) {
+        if (g_backendClass) {
+            env->DeleteGlobalRef(g_backendClass);
+            g_backendClass = nullptr;
+        }
+    }
+    g_jvm = nullptr;
 }
 
 } // extern "C"

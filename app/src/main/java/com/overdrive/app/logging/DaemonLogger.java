@@ -237,6 +237,7 @@ public class DaemonLogger {
         // on every line, not just the wrapper's own echo statements.
         if (globalConfig.enableStdoutLog) {
             System.out.println(tag + ": [" + timestamp + "] " + message);
+            System.out.flush();
         }
         
         // File log if enabled globally AND for this specific tag

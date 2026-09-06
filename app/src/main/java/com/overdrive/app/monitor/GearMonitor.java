@@ -51,6 +51,34 @@ public class GearMonitor {
      *  to within ~POLL_INTERVAL_MS rather than a cold initial value. */
     public boolean isActive() { return isRunning; }
     
+    public interface OnGearChangeListener {
+        void onGearChanged(int oldGear, int newGear);
+    }
+
+    private final java.util.List<OnGearChangeListener> listeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    public void addListener(OnGearChangeListener listener) {
+        if (listener != null && !listeners.contains(listener)) {
+            listeners.add(listener);
+        }
+    }
+
+    public void removeListener(OnGearChangeListener listener) {
+        if (listener != null) {
+            listeners.remove(listener);
+        }
+    }
+
+    private void notifyListeners(int oldGear, int newGear) {
+        for (OnGearChangeListener listener : listeners) {
+            try {
+                listener.onGearChanged(oldGear, newGear);
+            } catch (Throwable t) {
+                logger.error("Error in OnGearChangeListener: " + t.getMessage(), t);
+            }
+        }
+    }
+
     // TelemetryDataCollector reference — when set, read gear from its cached snapshot
     // instead of polling the BYD device directly (avoids duplicate CAN bus reads)
     private volatile com.overdrive.app.telemetry.TelemetryDataCollector telemetrySource = null;
@@ -242,6 +270,7 @@ public class GearMonitor {
                         if (gear != previousGear) {
                             logger.info("Gear changed: " + gearToString(previousGear) + " -> " + gearToString(gear));
                             CameraDaemon.onGearChanged(gear);
+                            notifyListeners(previousGear, gear);
                         }
                     } catch (InterruptedException e) {
                         break;
@@ -254,6 +283,7 @@ public class GearMonitor {
             }, "GearPoll");
             pollThread.setDaemon(true);
             CameraDaemon.onGearChanged(initialGear);
+            notifyListeners(-1, initialGear);
             pollThread.start();
             
             logger.info("Gear monitor started successfully");
@@ -348,6 +378,8 @@ public class GearMonitor {
     private volatile long lastDumpsysReadTime = 0;
     private volatile int lastDumpsysGear = -1;
 
+    private static final long DUMPSYS_GEAR_THROTTLE_MS = 3000L;
+
     private int readGearFromDumpsys() {
         try {
             if (com.overdrive.app.monitor.ChargingDetector.getInstance().isCharging()) {
@@ -356,11 +388,13 @@ public class GearMonitor {
         } catch (Throwable ignored) {}
 
         long now = SystemClock.elapsedRealtime();
-        if (now - lastDumpsysReadTime < 250 && isValidGearMode(lastDumpsysGear)) {
-            return lastDumpsysGear;
+        if (now - lastDumpsysReadTime < DUMPSYS_GEAR_THROTTLE_MS) {
+            return isValidGearMode(lastDumpsysGear) ? lastDumpsysGear : -1;
         }
+        lastDumpsysReadTime = now;
+
         try {
-            // 1. First try CarPropertyBridge if available
+            // 1. First try CarPropertyBridge if available (zero-fork Binder call)
             try {
                 com.overdrive.app.byd.CarPropertyBridge bridge = com.overdrive.app.byd.CarPropertyBridge.getInstance();
                 if (bridge != null) {
@@ -369,7 +403,6 @@ public class GearMonitor {
                         int shift = rr.intValue;
                         int decoded = decodeShiftMode(shift);
                         if (isValidGearMode(decoded)) {
-                            lastDumpsysReadTime = now;
                             lastDumpsysGear = decoded;
                             return decoded;
                         }
@@ -377,7 +410,18 @@ public class GearMonitor {
                 }
             } catch (Throwable ignored) {}
 
-            // 2. Fallback: dumpsys car_service
+            // 2. Try CarSvcTelemetry on DiLink 5.0 (extracts PROP_GEAR_R 0x21403a0a)
+            try {
+                if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+                    int csg = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.gearValue();
+                    if (isValidGearMode(csg)) {
+                        lastDumpsysGear = csg;
+                        return csg;
+                    }
+                }
+            } catch (Throwable ignored) {}
+
+            // 3. Fallback: dumpsys car_service (throttled to 3 seconds to avoid CPU/IPC saturation)
             String propDump = com.overdrive.app.monitor.AccMonitor.execShell(
                 "dumpsys car_service 2>/dev/null | grep -E '0x21406407|0x21403a06|0x21403a0a' | grep 'lastEvent'");
             if (propDump != null && !propDump.isEmpty()) {
@@ -389,14 +433,13 @@ public class GearMonitor {
                     else if (propDump.contains("int32Values: [1]") || propDump.contains("int32Values: [0]")) decoded = GEAR_P;
                     
                     if (isValidGearMode(decoded)) {
-                        lastDumpsysReadTime = now;
                         lastDumpsysGear = decoded;
                         return decoded;
                     }
                 }
             }
         } catch (Throwable ignored) {}
-        return -1;
+        return isValidGearMode(lastDumpsysGear) ? lastDumpsysGear : -1;
     }
 
     private static int decodeShiftMode(int shift) {

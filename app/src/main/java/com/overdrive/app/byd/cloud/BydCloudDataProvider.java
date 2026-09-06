@@ -91,8 +91,34 @@ public final class BydCloudDataProvider {
 
     // ── Snapshot access ─────────────────────────────────────────────────
 
+    /**
+     * Returns the current cloud snapshot, or {@code null} if the user has
+     * cloud telemetry merge switched off.
+     *
+     * <p>This is the single accessor nearly every caller across the app uses
+     * to read cloud vehicle data (doors, windows, trunk, sunroof, steering
+     * heat, battery-heat/preconditioning, charging status/time-to-full,
+     * etc.). Several of those call sites were reading cloud values
+     * unconditionally as a "local had nothing" fallback, without checking
+     * the cloudDataMerge setting first — meaning cloud data could still
+     * reach the UI even with the switch off. Gating it here, once, means
+     * every existing and future {@code getSnapshot()} caller automatically
+     * respects the switch without having to remember to check it
+     * individually — the ingestion side (MQTT subscriber /
+     * updateFromVehicleInfo) is untouched, so the snapshot keeps updating in
+     * the background; it's just never handed out while the switch is off.
+     */
     public VehicleCloudSnapshot getSnapshot() {
+        if (!isCloudMergeEnabled()) return null;
         return snapshot.get();
+    }
+
+    private static boolean isCloudMergeEnabled() {
+        try {
+            return BydCloudConfig.fromUnifiedConfig().cloudDataMerge;
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     public boolean isConnectionHealthy() {

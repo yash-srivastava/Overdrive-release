@@ -8,6 +8,7 @@ import com.overdrive.app.launcher.AdbShellExecutor
 import com.overdrive.app.launcher.ZrokLauncher
 import com.overdrive.app.launcher.TailscaleLauncher
 import com.overdrive.app.logging.LogManager
+import com.overdrive.app.receiver.BootDaemonSequenceReceiver
 import com.overdrive.app.telegram.config.UnifiedTelegramConfig
 import com.overdrive.app.ui.model.DaemonType
 import com.overdrive.app.ui.util.PreferencesManager
@@ -219,7 +220,7 @@ class DaemonStartupManager(
 
     fun initializeOnAppLaunch() {
         log.info(TAG, "=== Initializing daemon startup on app launch ===")
-        log.info(TAG, "Waiting 45 seconds before starting daemons (system stabilization)...")
+        log.info(TAG, "Waiting 2.5 seconds before starting daemons (system stabilization)...")
 
         // Hand off from any pre-existing bootManager (which was launched
         // before MainActivity attached). If we don't shut its scheduler
@@ -276,12 +277,12 @@ class DaemonStartupManager(
         // only machine-written markers immediately before starting a daemon.
         clearStaleSentinels()
 
-        // Wait 45 seconds for system to fully stabilize before starting any daemons
-        handler.postDelayed({ startCoreDaemons() }, 45000)
-        handler.postDelayed({ startOptionalDaemonsFromPreferences() }, 60000)
+        // Wait 2.5 seconds for system/ADB stabilization on app launch (instead of 45s cold-boot wait)
+        handler.postDelayed({ startCoreDaemons() }, 2500)
+        handler.postDelayed({ startOptionalDaemonsFromPreferences() }, 5000)
 
         // Start periodic health check after initial daemons have had time to start
-        handler.postDelayed({ startDaemonHealthCheck() }, 90000)
+        handler.postDelayed({ startDaemonHealthCheck() }, 20000)
     }
 
     /**
@@ -318,8 +319,8 @@ class DaemonStartupManager(
 
     private fun initializeOnBoot() {
         log.info(TAG, "=== Initializing daemon startup on boot ===")
-        log.info(TAG, "Waiting 45 seconds before starting daemons (system stabilization)...")
-        
+        log.info(TAG, "Scheduling daemon startup via AlarmManager (system stabilization: 45s)...")
+
         // Reset only the process-local cache; durable manual stops survive boot.
         userStoppedDaemons.clear()
 
@@ -329,12 +330,15 @@ class DaemonStartupManager(
         // Keep manual-stop sentinels; see initializeOnAppLaunch.
         clearStaleSentinels()
 
-        // Wait 45 seconds for system to fully stabilize before starting any daemons
-        handler.postDelayed({ startCoreDaemonsViaAdb() }, 45000)
-        handler.postDelayed({ startOptionalDaemonsViaAdb() }, 60000)
-
-        // Start periodic health check after initial daemons have had time to start
-        handler.postDelayed({ startDaemonHealthCheck() }, 90000)
+        // Stagger via BootDaemonSequenceReceiver/AlarmManager rather than
+        // Handler.postDelayed. A plain postDelayed callback is tied to this
+        // process's main Looper — if the process dies or is killed anywhere in
+        // the 45-90s window (a crash, or the system_server instability this
+        // device is known to hit right after boot), every pending callback is
+        // silently lost with it: no error, no retry, daemons just never start.
+        // AlarmManager alarms survive that — the OS resurrects the process to
+        // deliver them, same guarantee ProcessRevivalReceiver already relies on.
+        BootDaemonSequenceReceiver.schedule(context.applicationContext)
     }
 
 
@@ -380,59 +384,84 @@ class DaemonStartupManager(
         }, 10000)
     }
 
-    private fun startCoreDaemonsViaAdb() {
+    internal fun startCoreDaemonsViaAdb() {
         log.info(TAG, "Starting core daemons via ADB (Camera first, then Sentry daemons)...")
 
-        // Start Camera Daemon FIRST. Probe the actual --nice-name (`byd_cam_daemon`)
-        // not the legacy "camera_daemon" string — `ps -A` on stock Android shows
-        // the nice-name, and "camera_daemon" is not a substring of "byd_cam_daemon".
-        // The previous literal always reported false → one redundant launch+
-        // cleanup ADB round-trip on every boot (the inner `launchDaemon` does
-        // its own correct probe at DaemonLauncher.kt:328 and short-circuits, so
-        // this was cosmetic, but kept boot ~1-2 s slower than necessary).
+        // Kill-then-launch, not check-then-skip: a daemon process surviving
+        // an app update/reinstall (it's a detached shell-uid process, not
+        // part of this app's own process tree, so `pm install`/data-clear
+        // never touches it) keeps running whatever bytecode its JVM loaded
+        // at its OWN launch time — an old app version's daemon can still be
+        // alive and serving requests long after a newer APK is installed,
+        // silently running stale code with none of that update's fixes.
+        // The previous isDaemonRunning() check only asked "is a process
+        // with this name alive," never "is it OUR version," so it would
+        // happily leave a stale daemon in place forever. Unconditionally
+        // killing first (best-effort — a daemon that isn't running is a
+        // harmless no-op per killDaemon's own "not running" short-circuit)
+        // guarantees every boot picks up whatever code the just-installed
+        // APK actually contains.
         ifNotUserStopped(DaemonType.CAMERA_DAEMON) {
-            adbLauncher.isDaemonRunning(DaemonType.CAMERA_DAEMON.processName) { running ->
-                if (!running) {
-                    log.info(TAG, "Boot: Starting Camera Daemon...")
-                    val nativeLibDir = context.applicationInfo.nativeLibraryDir
-                    val outputDir = context.getExternalFilesDir(null)?.absolutePath ?: context.filesDir.absolutePath
-                    adbLauncher.launchDaemon(outputDir, nativeLibDir, createLogCallback("CameraDaemon"))
-                } else {
-                    log.info(TAG, "Boot: Camera Daemon already running")
+            log.info(TAG, "Boot: Ensuring a fresh Camera Daemon (killing any existing instance first)...")
+            adbLauncher.killDaemon(DaemonType.CAMERA_DAEMON.processName, object : AdbDaemonLauncher.LaunchCallback {
+                override fun onLog(message: String) { log.info(TAG, "Boot: [kill byd_cam_daemon] $message") }
+                override fun onLaunched() { startFreshCameraDaemon() }
+                override fun onError(error: String) {
+                    log.warn(TAG, "Boot: kill byd_cam_daemon failed ($error) — launching anyway")
+                    startFreshCameraDaemon()
                 }
-            }
+            })
         }
-        
+
         // Start Sentry Daemon after Camera Daemon has time to initialize
         handler.postDelayed({
             ifNotUserStopped(DaemonType.SENTRY_DAEMON) {
-                adbLauncher.isSentryDaemonRunning { running ->
-                    if (!running) {
-                        log.info(TAG, "Boot: Starting Sentry Daemon...")
-                        adbLauncher.launchSentryDaemon(createLogCallback("SentryDaemon"))
-                    } else {
-                        log.info(TAG, "Boot: Sentry Daemon already running")
+                log.info(TAG, "Boot: Ensuring a fresh Sentry Daemon (killing any existing instance first)...")
+                adbLauncher.killDaemon("sentry_daemon", object : AdbDaemonLauncher.LaunchCallback {
+                    override fun onLog(message: String) { log.info(TAG, "Boot: [kill sentry_daemon] $message") }
+                    override fun onLaunched() { startFreshSentryDaemon() }
+                    override fun onError(error: String) {
+                        log.warn(TAG, "Boot: kill sentry_daemon failed ($error) — launching anyway")
+                        startFreshSentryDaemon()
                     }
-                }
+                })
             }
         }, 5000)
-        
+
         // Start ACC Sentry Daemon last
         handler.postDelayed({
             ifNotUserStopped(DaemonType.ACC_SENTRY_DAEMON) {
-                adbLauncher.isDaemonRunning("acc_sentry_daemon") { running ->
-                    if (!running) {
-                        log.info(TAG, "Boot: Starting ACC Sentry Daemon...")
-                        adbLauncher.launchAccSentryDaemon(
-                            onSuccess = { log.info(TAG, "Boot: ACC Sentry Daemon started") },
-                            onError = { error -> log.error(TAG, "Boot: ACC Sentry error: $error") }
-                        )
-                    } else {
-                        log.info(TAG, "Boot: ACC Sentry Daemon already running")
+                log.info(TAG, "Boot: Ensuring a fresh ACC Sentry Daemon (killing any existing instance first)...")
+                adbLauncher.killDaemon("acc_sentry_daemon", object : AdbDaemonLauncher.LaunchCallback {
+                    override fun onLog(message: String) { log.info(TAG, "Boot: [kill acc_sentry_daemon] $message") }
+                    override fun onLaunched() { startFreshAccSentryDaemon() }
+                    override fun onError(error: String) {
+                        log.warn(TAG, "Boot: kill acc_sentry_daemon failed ($error) — launching anyway")
+                        startFreshAccSentryDaemon()
                     }
-                }
+                })
             }
         }, 10000)
+    }
+
+    private fun startFreshCameraDaemon() {
+        log.info(TAG, "Boot: Starting Camera Daemon...")
+        val nativeLibDir = context.applicationInfo.nativeLibraryDir
+        val outputDir = context.getExternalFilesDir(null)?.absolutePath ?: context.filesDir.absolutePath
+        adbLauncher.launchDaemon(outputDir, nativeLibDir, createLogCallback("CameraDaemon"))
+    }
+
+    private fun startFreshSentryDaemon() {
+        log.info(TAG, "Boot: Starting Sentry Daemon...")
+        adbLauncher.launchSentryDaemon(createLogCallback("SentryDaemon"))
+    }
+
+    private fun startFreshAccSentryDaemon() {
+        log.info(TAG, "Boot: Starting ACC Sentry Daemon...")
+        adbLauncher.launchAccSentryDaemon(
+            onSuccess = { log.info(TAG, "Boot: ACC Sentry Daemon started") },
+            onError = { error -> log.error(TAG, "Boot: ACC Sentry error: $error") }
+        )
     }
 
 
@@ -445,7 +474,7 @@ class DaemonStartupManager(
      * /data/local/tmp). Probe errors fail closed: preserving an explicit user
      * stop is more important than one automatic start attempt.
      */
-    private fun ifNotUserStopped(type: DaemonType, onAllowed: () -> Unit) {
+    private fun ifNotUserStopped(type: DaemonType, retryCount: Int = 0, onAllowed: () -> Unit) {
         val probe =
             "S='${type.sentinelPath}'; " +
             "if [ ! -f \"\$S\" ]; then echo OK; " +
@@ -475,8 +504,15 @@ class DaemonStartupManager(
                 }
                 override fun onLaunched() {}
                 override fun onError(error: String) {
-                    log.warn(TAG, "Auto-start sentinel probe failed for " +
-                        "${type.displayName} ($error) — leaving it stopped")
+                    if (retryCount < 3) {
+                        log.warn(TAG, "Auto-start sentinel probe failed for ${type.displayName} ($error) — retrying in 2s (attempt ${retryCount + 1}/3)")
+                        handler.postDelayed({
+                            ifNotUserStopped(type, retryCount + 1, onAllowed)
+                        }, 2000)
+                    } else {
+                        log.warn(TAG, "Auto-start sentinel probe failed for " +
+                            "${type.displayName} ($error) after 3 retries — leaving it stopped")
+                    }
                 }
             }
         )
@@ -599,7 +635,7 @@ class DaemonStartupManager(
         }
     }
 
-    private fun startOptionalDaemonsViaAdb() {
+    internal fun startOptionalDaemonsViaAdb() {
         log.info(TAG, "Starting optional daemons via ADB...")
         try {
             // Singbox is gated by its own user toggle AND the disable sentinel
@@ -845,7 +881,7 @@ class DaemonStartupManager(
      * Core daemons are always restarted. Optional daemons only if user had them enabled.
      * Daemons intentionally stopped by the user are skipped.
      */
-    private fun startDaemonHealthCheck() {
+    internal fun startDaemonHealthCheck() {
         if (!healthCheckRunning.compareAndSet(false, true)) return
         log.info(TAG, "Daemon health check started (interval=${HEALTH_CHECK_INTERVAL_MS / 1000}s)")
         scheduleNextHealthCheck()

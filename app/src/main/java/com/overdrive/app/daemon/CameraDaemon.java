@@ -536,7 +536,7 @@ public class CameraDaemon {
 
     // Build stamp printed at startup so logs identify the running build.
     // BUMP THIS on every code change you intend to deploy + verify.
-    private static final String BUILD_TAG = "20260603-coldstart-recfix-1";
+    private static final String BUILD_TAG = "20260906-sentry-rearm-hwcodec-fix-1";
 
     // Lock file for singleton enforcement
     private static final String LOCK_FILE = "/data/local/tmp/camera_daemon.lock";
@@ -545,6 +545,33 @@ public class CameraDaemon {
 
     public static void main(String[] args) {
         initFileLogging();
+
+        // SAFETY NET: an uncaught exception on ANY thread this process ever
+        // spawns (surveillance pipeline workers, storage retry threads, probe
+        // threads — dozens of "new Thread(...)" sites across this codebase,
+        // and more get added over time) otherwise just kills that ONE thread
+        // silently. The process itself keeps running, so the existing crash-
+        // restart safety net (requestProcessRestartPreservingTrip, which
+        // already correctly recovers from a GL/EGL fault that takes the whole
+        // process down) never triggers — the process sits there alive but
+        // partially broken until someone notices and manually restarts it.
+        // A default handler here converts EVERY silent thread death into the
+        // same well-tested full-process restart, regardless of which thread
+        // it is or what specifically killed it — no per-thread handler to
+        // remember to add, no chasing which specific site needs it next time.
+        Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
+            try {
+                log("FATAL: uncaught exception on thread '" + thread.getName()
+                        + "' — forcing a full process restart so the daemon "
+                        + "doesn't keep running half-broken: " + throwable);
+            } catch (Throwable ignored) {}
+            try {
+                requestProcessRestartPreservingTrip(
+                        "uncaught exception on thread " + thread.getName());
+            } catch (Throwable ignored) {
+                Runtime.getRuntime().halt(1);
+            }
+        });
 
         // CRITICAL: Acquire singleton lock FIRST - exit if another instance is running
         if (!acquireSingletonLock()) {
@@ -1404,6 +1431,11 @@ public class CameraDaemon {
         // the common cold-reboot case arms in seconds, not at the first tick.
         com.overdrive.app.server.StreamingApiHandler.startBsSelfHealTicker();
         com.overdrive.app.server.StreamingApiHandler.resolveBlindSpotLifecycle();
+
+        // Auto-arm surveillance if requested in config and ACC is OFF,
+        // and start the 30s self-heal ticker.
+        enforceSurveillanceStartupIfRequested();
+        startSurveillanceSelfHealTicker();
 
         // Recover gracefully if the app cast onto the cluster (or the persisted ACC-on
         // auto-start app) is uninstalled: tear down a live cast + mirror in the SF-safe
@@ -2731,6 +2763,13 @@ public class CameraDaemon {
         if (geoBackfillScheduler != null) {
             try { geoBackfillScheduler.shutdownNow(); } catch (Exception ignored) {}
             geoBackfillScheduler = null;
+        }
+
+        // Stop surveillance self-heal ticker
+        surveillanceSelfHealRunning = false;
+        if (surveillanceSelfHealThread != null) {
+            try { surveillanceSelfHealThread.interrupt(); } catch (Exception ignored) {}
+            surveillanceSelfHealThread = null;
         }
 
         // Cancel PermissionGranter to stop orphaned pm grant processes
@@ -4217,6 +4256,23 @@ public class CameraDaemon {
 
             gpuPipeline.init(assetManager, com.overdrive.app.daemon.DaemonBootstrap.getContext());
 
+            // init() can return normally while an internal GL/EGL step still
+            // failed silently, leaving isInitialized() false forever with
+            // gpuPipeline itself non-null. Every exit/retry check below this
+            // point tests "gpuPipeline != null", so that silent failure was
+            // never distinguished from success and never retried -- confirmed
+            // live: surveillance stuck uninitialized for over an hour with the
+            // existing exponential-backoff retry (below) never once firing,
+            // because nothing here ever threw to trigger it. Throwing funnels
+            // this case through the same catch block and retry schedule that
+            // every other init failure already uses correctly.
+            if (!gpuPipeline.isInitialized()) {
+                throw new IllegalStateException(
+                        "GpuSurveillancePipeline.init() returned without completing "
+                        + "initialization (isInitialized() still false) -- likely a "
+                        + "GL/EGL failure swallowed internally");
+            }
+
             log("GPU Surveillance initialized: profile=" + resolvedCamera.getProfile().getDisplayName()
                 + ", panoCam=" + resolvedCamera.getPanoCameraId()
                 + ", size=" + resolvedCamera.getPanoWidth() + "x" + resolvedCamera.getPanoHeight()
@@ -4482,6 +4538,7 @@ public class CameraDaemon {
                     } catch (Throwable th) {
                         log("WARN: initSurveillance retry replay failed: " + th.getMessage());
                     }
+                    enforceSurveillanceStartupIfRequested();
                 }
             } finally {
                 initSurveillanceRetryInFlight.set(false);
@@ -4598,7 +4655,10 @@ public class CameraDaemon {
             log("enableSurveillance() REJECTED — ACC is ON or not yet authoritatively known");
             return;
         }
-        enableSurveillanceForAccGeneration(generation, "public/deferred request");
+        boolean enabled = enableSurveillanceForAccGeneration(generation, "public/deferred request");
+        if (enabled) {
+            doorLockListenerArmed = true;
+        }
     }
 
     private static boolean enableSurveillanceForAccGeneration(
@@ -4825,6 +4885,108 @@ public class CameraDaemon {
     public static void ensureCameraForSurveillance() {
         log("ensureCameraForSurveillance called");
         enableSurveillance();
+    }
+
+    private static volatile boolean surveillanceSelfHealRunning = false;
+    private static Thread surveillanceSelfHealThread = null;
+
+    /**
+     * Enforce surveillance startup if enabled in config and car is currently parked (ACC off).
+     * Called during daemon boot and after GPU pipeline recovery so surveillance doesn't
+     * require manual toggle on the web UI after a reboot.
+     */
+    public static void enforceSurveillanceStartupIfRequested() {
+        try {
+            boolean userEnabled = com.overdrive.app.config.UnifiedConfigManager.isSurveillanceEnabled();
+            if (!userEnabled) {
+                return;
+            }
+            boolean accIsOn = com.overdrive.app.monitor.AccMonitor.isAccOn();
+            if (accIsOn) {
+                return;
+            }
+            com.overdrive.app.surveillance.SafeLocationManager safeMgr =
+                com.overdrive.app.surveillance.SafeLocationManager.getInstance();
+            if (safeMgr != null && safeMgr.isInSafeZone()) {
+                log("Surveillance enforcement: car is in safe zone, skipping startup arm");
+                return;
+            }
+            com.overdrive.app.surveillance.SurveillanceSchedule schedule =
+                com.overdrive.app.config.UnifiedConfigManager.getSurveillanceSchedule();
+            if (schedule != null && schedule.isEnabled() && !schedule.isActiveNow()) {
+                log("Surveillance enforcement: outside schedule window, skipping startup arm");
+                return;
+            }
+
+            synchronized (parkTerminateLock) {
+                if (latestAccIsOff == null) {
+                    latestAccIsOff = Boolean.TRUE;
+                }
+            }
+
+            boolean actuallyRunning = gpuPipeline != null
+                && gpuPipeline.isRunning()
+                && gpuPipeline.isSurveillanceMode();
+            if (!actuallyRunning || !surveillanceEnabled) {
+                log("Surveillance enforcement: user enabled & parked (ACC OFF) — auto-arming surveillance");
+                enableSurveillance();
+            }
+        } catch (Throwable t) {
+            log("Surveillance startup enforcement failed: " + t.getMessage());
+        }
+    }
+
+    /**
+     * Periodic 30s self-heal ticker for surveillance.
+     * Mirrors OemDashcamApiHandler.startSelfHealTicker() and StreamingApiHandler.startBsSelfHealTicker().
+     * Recovers surveillance if a startup race or transient HAL stall caused the pipeline to stop
+     * while the car is parked with surveillance enabled.
+     */
+    public static synchronized void startSurveillanceSelfHealTicker() {
+        if (surveillanceSelfHealThread != null && surveillanceSelfHealThread.isAlive()) return;
+        surveillanceSelfHealRunning = true;
+        surveillanceSelfHealThread = new Thread(() -> {
+            log("Surveillance: self-heal ticker started (30s interval)");
+            while (surveillanceSelfHealRunning && running.get()) {
+                try {
+                    Thread.sleep(30_000L);
+                } catch (InterruptedException ie) {
+                    if (!surveillanceSelfHealRunning || !running.get()) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                    continue;
+                }
+                if (!surveillanceSelfHealRunning || !running.get()) return;
+                try {
+                    if (com.overdrive.app.config.UnifiedConfigManager.isSurveillanceEnabled()
+                            && !com.overdrive.app.monitor.AccMonitor.isAccOn()) {
+                        com.overdrive.app.surveillance.SafeLocationManager safeMgr =
+                            com.overdrive.app.surveillance.SafeLocationManager.getInstance();
+                        if (safeMgr != null && safeMgr.isInSafeZone()) {
+                            continue;
+                        }
+                        com.overdrive.app.surveillance.SurveillanceSchedule schedule =
+                            com.overdrive.app.config.UnifiedConfigManager.getSurveillanceSchedule();
+                        if (schedule != null && schedule.isEnabled() && !schedule.isActiveNow()) {
+                            continue;
+                        }
+                        boolean actuallyRunning = gpuPipeline != null
+                            && gpuPipeline.isRunning()
+                            && gpuPipeline.isSurveillanceMode();
+                        if (!actuallyRunning || !surveillanceEnabled) {
+                            log("Surveillance self-heal ticker: re-arming surveillance (running="
+                                + actuallyRunning + ", enabled=" + surveillanceEnabled + ")");
+                            enforceSurveillanceStartupIfRequested();
+                        }
+                    }
+                } catch (Throwable t) {
+                    log("Surveillance self-heal tick failed: " + t.getMessage());
+                }
+            }
+        }, "SurveillanceSelfHeal");
+        surveillanceSelfHealThread.setDaemon(true);
+        surveillanceSelfHealThread.start();
     }
 
     /**

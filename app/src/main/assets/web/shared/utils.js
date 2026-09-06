@@ -551,10 +551,28 @@ const BYD = {
         const recording = data.recording || [];
         const viewing = data.viewing || [];
         const battery = data.battery || {};
+        const recordingStatus = data.recordingStatus || {};
 
-        // Update battery
+        // Update battery — same 3-way cascade as core.js's status poller:
+        //  1. Live car_service reading (recordingStatus.voltage12v) — added for
+        //     platforms (e.g. DiLink 5 / Sealion 7) where battery.voltage is dead.
+        //  2. The ORIGINAL battery.voltage path, fully intact — the fallback for
+        //     any platform where that already works fine and the new one doesn't.
+        //  3. Neither valid this poll: skip the update entirely and leave whatever
+        //     updateBattery last painted, rather than flickering to a false 0.0V.
         BYD.state.battery = battery;
-        BYD.ui.updateBattery(battery.voltage || 0, battery.level || 'UNKNOWN');
+        const carSvcVoltage = Number(recordingStatus.voltage12v);
+        const carSvcFresh = isFinite(carSvcVoltage) && carSvcVoltage > 0;
+        const stockVoltage = Number(battery.voltage);
+        const stockFresh = battery.available !== false
+            && battery.isStale !== true
+            && isFinite(stockVoltage)
+            && stockVoltage > 0;
+        if (carSvcFresh) {
+            BYD.ui.updateBattery(carSvcVoltage, battery.level || 'UNKNOWN');
+        } else if (stockFresh) {
+            BYD.ui.updateBattery(stockVoltage, battery.level || 'UNKNOWN');
+        }
 
         // Update device ID if available
         if (data.deviceId) {

@@ -181,6 +181,34 @@ BYD.surveillance = {
         street:   { sensitivityLevel: 3, detectionZone: 'normal', loiteringTime: 5, shadowFilter: 3 }
     },
 
+    // Live-armed status badge — separate from this.config.enabled (the
+    // persisted feature toggle set in updateUI()). "Enabled as a setting"
+    // and "actually armed right now" are different: the toggle can be on
+    // while the daemon is still booting, ACC is on, or the doors are
+    // unlocked, and the badge used to just echo the toggle, so it read "ON"
+    // from the moment the app launched even though nothing was protecting
+    // the car yet. Reads /api/surveillance/status directly instead.
+    async refreshLiveStatusBadge() {
+        const badge = document.getElementById('survStatusBadge');
+        if (!badge) return;
+        try {
+            let res = null;
+            if (window.BYD && window.BYD.api && typeof window.BYD.api.getSurveillanceStatus === 'function') {
+                res = await BYD.api.getSurveillanceStatus();
+            } else {
+                const resp = await fetch('/api/surveillance/status');
+                res = await resp.json();
+            }
+            const armed = !!(res && res.success && res.status
+                && res.status.enabled && res.status.initialized !== false);
+            badge.textContent = armed ? BYD.i18n.t('surveillance.badge_on') : BYD.i18n.t('surveillance.badge_off');
+            badge.className = 'status-badge ' + (armed ? 'active' : 'inactive');
+        } catch (e) {
+            // Leave the last-known badge state on a transient fetch failure
+            // rather than flipping it to an unverified guess.
+        }
+    },
+
     async init() {
         // loadConfig() must land FIRST and alone — every loader below reads or
         // writes this.config, and updateUI() renders from it.
@@ -212,6 +240,12 @@ BYD.surveillance = {
         this.savedConfig = JSON.parse(JSON.stringify(this.config));
         this.updateUI();
         this.startClock();
+
+        // Live-armed badge, separate from the config-driven toggle above.
+        // Refreshed on init and every 10s so it doesn't go stale while the
+        // page sits open across a daemon restart/arm/disarm.
+        this.refreshLiveStatusBadge();
+        setInterval(() => this.refreshLiveStatusBadge(), 10000);
 
         // Telegram pairing state — drives the tier filter availability UI.
         // Re-checked when reloadConfig() fires (visibility change, periodic
@@ -1249,11 +1283,12 @@ BYD.surveillance = {
         const survEnabled = document.getElementById('survEnabled');
         if (survEnabled) survEnabled.checked = this.config.enabled;
 
-        const badge = document.getElementById('survStatusBadge');
-        if (badge) {
-            badge.textContent = this.config.enabled ? BYD.i18n.t('surveillance.badge_on') : BYD.i18n.t('surveillance.badge_off');
-            badge.className = 'status-badge ' + (this.config.enabled ? 'active' : 'inactive');
-        }
+        // Badge is owned by refreshLiveStatusBadge() below, not here — this
+        // only ran off this.config.enabled (the persisted feature toggle),
+        // so the badge said "ON" the instant the app launched even though
+        // nothing was armed yet (daemon still booting, ACC on, unlocked).
+        // The toggle being on and the daemon actually being armed are two
+        // different things; the badge needs to answer the second one.
 
         const preRecSlider = document.getElementById('preRecSlider');
         if (preRecSlider) preRecSlider.value = this.config.preRecordSeconds;
@@ -1351,6 +1386,7 @@ BYD.surveillance = {
             this.config.enabled = enabled;
             this.savedConfig.enabled = enabled;
             this.updateUI();
+            this.refreshLiveStatusBadge();
             if (BYD.utils && BYD.utils.toast) {
                 // deferred=true → the vehicle is on, so the preference is stored
                 // but nothing is armed yet. Say that instead of a bare "enabled".

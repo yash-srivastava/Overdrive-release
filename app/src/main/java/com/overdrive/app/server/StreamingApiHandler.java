@@ -2147,6 +2147,15 @@ public class StreamingApiHandler {
      */
     private static void handleOemDashcamView(
             OutputStream out, ViewRequest request) throws Exception {
+        int oemCamId = com.overdrive.app.config.UnifiedConfigManager.resolveOemDashcamId();
+        if (oemCamId < 0) {
+            JSONObject err = new JSONObject();
+            err.put("success", false);
+            err.put("viewMode", 6);
+            err.put("error", "OEM Dashcam is not configured or not installed on this vehicle");
+            HttpResponse.sendJson(out, err.toString());
+            return;
+        }
         GpuSurveillancePipeline pano = CameraDaemon.getGpuPipeline();
         // Async-warm pano if needed; return starting=true while it's coming up.
         if (!ensurePanoStartedNonBlocking(pano)) {

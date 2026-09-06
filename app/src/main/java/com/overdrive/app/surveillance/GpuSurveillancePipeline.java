@@ -1606,6 +1606,20 @@ public class GpuSurveillancePipeline {
         }
     }
 
+    private static boolean isHevcEncoderSupported() {
+        try {
+            android.media.MediaCodecList list = new android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS);
+            for (android.media.MediaCodecInfo info : list.getCodecInfos()) {
+                if (info.isEncoder()) {
+                    for (String type : info.getSupportedTypes()) {
+                        if (type.equalsIgnoreCase("video/hevc")) return true;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
     /**
      * Reinitializes the encoder with current config settings.
      * This is a synchronous operation that waits for completion.
@@ -1675,7 +1689,7 @@ public class GpuSurveillancePipeline {
             if (config != null && config.is4K()) {
                 this.encoderWidth = 3840;
                 this.encoderHeight = 2160;
-                codecMimeType = "video/hevc";
+                codecMimeType = isHevcEncoderSupported() ? "video/hevc" : "video/avc";
                 com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.set4KUltraEnabled(true);
             } else {
                 this.encoderWidth = 1920;
@@ -1814,11 +1828,13 @@ public class GpuSurveillancePipeline {
                             logger.info("Reinit: rebuilding recorder with cached profile offsets ("
                                 + encoderWidth + "x" + encoderHeight + ")");
                             recorder = new GpuMosaicRecorder(
-                                lastQuadrantStripOffsetX, encoderWidth, encoderHeight);
+                                lastQuadrantStripOffsetX, encoderWidth, encoderHeight,
+                                com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported());
                         } else {
                             logger.warn("Reinit: no cached profile offsets — falling back to no-arg "
                                 + "GpuMosaicRecorder (Tang trims may be miss-sized)");
-                            recorder = new GpuMosaicRecorder();
+                            recorder = new GpuMosaicRecorder(
+                                com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported());
                         }
                         // FIX (audit R1, RESIDUAL): re-wire segment-rotated
                         // listener after a fresh recorder allocation so RMM
@@ -1989,7 +2005,7 @@ public class GpuSurveillancePipeline {
             if (config != null && config.is4K()) {
                 this.encoderWidth = 3840;
                 this.encoderHeight = 2160;
-                codecMimeType = "video/hevc";
+                codecMimeType = isHevcEncoderSupported() ? "video/hevc" : "video/avc";
                 com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.set4KUltraEnabled(true);
             } else {
                 this.encoderWidth = 1920;
@@ -2089,7 +2105,7 @@ public class GpuSurveillancePipeline {
 
         // 2. Create GPU mosaic recorder (shared) with profile-driven viewport
         // and per-quadrant offsets. Tang gets 2560x1440 instead of 2560x1920.
-        recorder = new GpuMosaicRecorder(quadrantStripOffsetX, encoderWidth, encoderHeight);
+        recorder = new GpuMosaicRecorder(quadrantStripOffsetX, encoderWidth, encoderHeight, isDilink5);
         // Note: recorder.init() will be called after EGL context is created by camera
 
         // FIX (audit R1, RESIDUAL): stamp lastSegmentRotateMs on every
@@ -2123,7 +2139,7 @@ public class GpuSurveillancePipeline {
             }
             downscaler = null;
         }
-        downscaler = new GpuDownscaler(quadrantStripOffsetX);
+        downscaler = new GpuDownscaler(quadrantStripOffsetX, isDilink5);
         // Note: downscaler.init() will be called after EGL context is created by camera
 
         // 4. Create surveillance engine (uses shared recorder).
@@ -4496,15 +4512,15 @@ public class GpuSurveillancePipeline {
             //
             // Legacy fleet keeps the original "release and reopen as secondary
             // consumer" behaviour because that's how non-byd_apa HALs share.
-            boolean dilink4 = false;
+            boolean dilinkKeepAlive = false;
             try {
-                dilink4 = com.overdrive.app.daemon.CameraDaemon.isDilink4ModeActiveStatic();
+                dilinkKeepAlive = com.overdrive.app.daemon.CameraDaemon.isDilink4ModeActiveStatic();
             } catch (Throwable ignored) {}
-            if (camera != null && running && !dilink4) {
+            if (camera != null && running && !dilinkKeepAlive) {
                 camera.reopenCamera();
                 logger.info("ACC ON transition complete - all recordings finalized, camera reopened");
-            } else if (dilink4) {
-                logger.info("ACC ON transition complete - dilink4 keeps camera alive (oem-parity, no reopen)");
+            } else if (dilinkKeepAlive) {
+                logger.info("ACC ON transition complete - DiLink keep-alive active (oem-parity, no reopen on ACC ON)");
             } else {
                 logger.info("ACC ON transition complete - all recordings finalized");
             }
@@ -4702,6 +4718,7 @@ public class GpuSurveillancePipeline {
         int effectiveStreamFps = streamFps;
         try {
             if (camera != null && camera.isUsingOemSurfaceTexturePath()
+                    && !com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()
                     && streamFps > DILINK4_STREAM_FPS_CAP) {
                 effectiveStreamFps = DILINK4_STREAM_FPS_CAP;
                 logger.info("dilink4: clamping stream encoder fps " + streamFps + " → "
@@ -4741,8 +4758,9 @@ public class GpuSurveillancePipeline {
         com.overdrive.app.camera.ResolvedCameraConfig streamCfg =
             com.overdrive.app.camera.CameraConfigResolver.resolve(getVehicleModel());
         float[] streamQuadrantStripOffsetX = streamCfg.getQuadrantStripOffsetX();
+        boolean isDilink5Stream = com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported();
         streamScaler = new com.overdrive.app.streaming.GpuStreamScaler(
-            streamWidth, streamHeight, streamQuadrantStripOffsetX);
+            streamWidth, streamHeight, streamQuadrantStripOffsetX, isDilink5Stream);
 
             try {
                 android.content.Context odCtx = savedContext;
@@ -5988,8 +6006,9 @@ public class GpuSurveillancePipeline {
         // matches the recorder's camera arrangement.
         com.overdrive.app.camera.ResolvedCameraConfig cfg =
             com.overdrive.app.camera.CameraConfigResolver.resolve(getVehicleModel());
+        boolean isDilink5Bs = com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported();
         bsScaler = new com.overdrive.app.streaming.GpuStreamScaler(
-            BS_WIDTH, sharedLaneHeight, cfg.getQuadrantStripOffsetX());
+            BS_WIDTH, sharedLaneHeight, cfg.getQuadrantStripOffsetX(), isDilink5Bs);
 
         // BS-LIFECYCLE-1: from here on, bsScaler+bsLayer are assigned to the
         // instance fields and a GL EGLWindowSurface gets created wrapping the SC
@@ -8873,6 +8892,7 @@ public class GpuSurveillancePipeline {
             else if (mode == 2) hookMode = 1; // Destra (Right)
             else if (mode == 3) hookMode = 2; // Posteriore (Rear)
             else if (mode == 4) hookMode = 3; // Sinistra (Left)
+            else if (mode == 6) hookMode = 6; // Internal Dashcam / Cabin Camera
             com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.setActiveCamera(hookMode);
         }
         if (streamScaler != null) {

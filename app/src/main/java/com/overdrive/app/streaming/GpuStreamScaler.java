@@ -271,8 +271,10 @@ public class GpuStreamScaler {
      *  per-quadrant offsets so streaming a single direction picks the slice
      *  that the user mapped to that role. */
 
+    private final boolean isTexture2D;
+
     public GpuStreamScaler(int outputWidth, int outputHeight) {
-        this(outputWidth, outputHeight, null);
+        this(outputWidth, outputHeight, null, false);
     }
 
     /**
@@ -281,10 +283,16 @@ public class GpuStreamScaler {
      */
     public GpuStreamScaler(int outputWidth, int outputHeight,
                            float[] quadrantStripOffsetX) {
+        this(outputWidth, outputHeight, quadrantStripOffsetX, false);
+    }
+
+    public GpuStreamScaler(int outputWidth, int outputHeight,
+                           float[] quadrantStripOffsetX, boolean isTexture2D) {
         this.outputWidth = outputWidth;
         this.outputHeight = outputHeight;
+        this.isTexture2D = isTexture2D;
         this.quadrantStripOffsetX = normalizeOffsets(quadrantStripOffsetX);
-        this.fragmentShader = buildFragmentShader(this.quadrantStripOffsetX);
+        this.fragmentShader = buildFragmentShader(this.quadrantStripOffsetX, isTexture2D);
     }
     
     public int getWidth() { return outputWidth; }
@@ -492,7 +500,11 @@ public class GpuStreamScaler {
         
         // Bind texture
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
+        if (isTexture2D) {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, cameraTextureId);
+        } else {
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
+        }
         GLES20.glUniform1i(uCameraTexLocation, 0);
         
         // Quasi-static uniforms — only re-upload when a setter flagged
@@ -1221,7 +1233,7 @@ public class GpuStreamScaler {
      * Single-view modes (uViewMode 1-4) pick the slice mapped to that role;
      * uViewMode 0 = mosaic; 5 = raw.
      */
-    private static String buildFragmentShader(float[] offsets) {
+    private static String buildFragmentShader(float[] offsets, boolean isTexture2D) {
         // uApaMode > 2.5 = DiLink 4 / 2x2-native HAL.
         //   uViewMode == 0 → rearrange the 2x2 into canonical Front=TL,
         //                    Right=TR, Rear=BL, Left=BR with per-role flips,
@@ -1230,12 +1242,14 @@ public class GpuStreamScaler {
         //                    applied within the local 0.5×0.5 region.
         //   uViewMode == 5 → raw passthrough (debug).
         // The legacy 4-strip math stays for uApaMode <= 2.5 paths.
+        String ext = isTexture2D ? "#extension GL_OES_EGL_image_external : enable\n" : "#extension GL_OES_EGL_image_external : require\n";
+        String camSampler = isTexture2D ? "uniform sampler2D uCameraTex;\n" : "uniform samplerExternalOES uCameraTex;\n";
         return String.format(Locale.US,
-            "#extension GL_OES_EGL_image_external : require\n" +
+            ext +
             // highp: the view 7/8 sampler needs the extra precision (mediump, the
             // Adreno 610 fragment default, shimmers the seam). Other paths insensitive.
             "precision highp float;\n" +
-            "uniform samplerExternalOES uCameraTex;\n" +
+            camSampler +
             "uniform samplerExternalOES uOemTex;\n" +
             "uniform mat4 uOemTexMatrix;\n" +
             "uniform int uOemActive;\n" +

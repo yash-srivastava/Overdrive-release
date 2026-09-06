@@ -95,6 +95,16 @@ public final class SessionEnergyResolver {
     public static final String SRC_SOC = "soc_estimate";
     public static final String SRC_SOC_FALLBACK = "soc_fallback_counter_diverged";
     public static final String SRC_NONE = "none";
+    /**
+     * Session energy recomputed from CarSvcTelemetry's car_service (dumpsys)
+     * power samples: avgPowerKw * sample-window duration. Used ONLY for the
+     * currently-open session, as a deliberate bypass of the normal
+     * SRC_INTEGRATED/SRC_METERED/SRC_SOC arbitration above, on platforms
+     * (e.g. DiLink 5 / Sealion 7) where the normal C1-C4 HAL power cascade
+     * this resolver's other inputs depend on is unavailable. See
+     * SocHistoryDatabase#recomputeOpenSessionEnergyKwh.
+     */
+    public static final String SRC_CARSVC = "carsvc_power_time";
 
     /** Resolved outcome. */
     public static final class Result {

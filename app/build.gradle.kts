@@ -276,10 +276,20 @@ tasks.register("extractWebAssets") {
 android {
     signingConfigs {
         create("release") {
-            storeFile = file(System.getenv("KEYSTORE_FILE") ?: "release.jks")
-            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
-            keyPassword = System.getenv("KEY_PASSWORD") ?: ""
-            keyAlias = System.getenv("KEY_ALIAS") ?: "key0"
+            val envKs = System.getenv("KEYSTORE_FILE")
+            val releaseKs = if (envKs != null) file(envKs) else file("release.jks")
+            if (releaseKs.exists()) {
+                storeFile = releaseKs
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+                keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+                keyAlias = System.getenv("KEY_ALIAS") ?: "key0"
+            } else {
+                val debugKs = file("${System.getProperty("user.home")}/.android/debug.keystore")
+                storeFile = debugKs
+                storePassword = "android"
+                keyPassword = "android"
+                keyAlias = "androiddebugkey"
+            }
         }
     }
     namespace = "com.overdrive.app"
@@ -305,8 +315,8 @@ android {
         // value (e.g. `-PoverdriveVersionName=27.4 -PoverdriveVersionCode=12`)
         // without a source edit per release; the defaults track the current
         // rolling head so a plain local build is still accurate.
-        versionCode = (project.findProperty("overdriveVersionCode") as? String)?.toIntOrNull() ?: 102
-        versionName = (project.findProperty("overdriveVersionName") as? String) ?: "50.0"
+        versionCode = (project.findProperty("overdriveVersionCode") as? String)?.toIntOrNull() ?: 109
+        versionName = (project.findProperty("overdriveVersionName") as? String) ?: "51.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
         // Note: abiFilters removed - using splits.abi instead for size optimization
@@ -472,6 +482,10 @@ android {
                 "lib/armeabi-v7a/**",
                 "lib/x86/**",
                 "lib/x86_64/**"
+            )
+
+            pickFirsts += listOf(
+                "**/libfast_cam_client.so"
             )
         }
     }

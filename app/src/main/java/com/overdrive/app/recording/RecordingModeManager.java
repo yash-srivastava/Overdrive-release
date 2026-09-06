@@ -1966,8 +1966,7 @@ public class RecordingModeManager {
             // specific.
             boolean dilinkKeepAlive = false;
             try {
-                dilinkKeepAlive = com.overdrive.app.daemon.CameraDaemon.isDilink4ModeActiveStatic()
-                        || com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported();
+                dilinkKeepAlive = com.overdrive.app.daemon.CameraDaemon.isDilink4ModeActiveStatic();
             } catch (Throwable t) {
                 logger.warn("dilink mode probe failed: " + t.getMessage());
             }

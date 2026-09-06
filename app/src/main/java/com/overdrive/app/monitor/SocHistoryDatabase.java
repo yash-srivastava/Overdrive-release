@@ -104,6 +104,18 @@ public class SocHistoryDatabase {
     // genuinely separate charges in the same spot aren't glued together.
     private static final long CHARGING_MERGE_GAP_MS = 15 * 60 * 1000L;
     /**
+     * A closing session shorter than this AND with SoC movement under
+     * {@link #TRIVIAL_SESSION_SOC_DELTA_PERCENT} is discarded rather than
+     * persisted as a real charge — same "too short to matter" reasoning
+     * trip recording already applies (0.2 km / 60 s). Without this, a
+     * momentary CHARGING-state flicker (state-code bounce, a gun reseat
+     * that doesn't actually deliver current, transient BMS noise while
+     * parked) leaves a permanent phantom row: sub-minute duration,
+     * unchanged SoC, "estimated" energy the user never actually received.
+     */
+    private static final double TRIVIAL_SESSION_DURATION_SEC = 60.0;
+    private static final double TRIVIAL_SESSION_SOC_DELTA_PERCENT = 0.5;
+    /**
      * How far back to look for a prior session when deciding whether the charge now starting is a
      * CONTINUATION of one interrupted by a daemon outage.
      *
@@ -495,6 +507,7 @@ public class SocHistoryDatabase {
                     
                     isInitialized = true;
                     reconcileChargingLifecycleJournalWithDatabase();
+                    queueTimeOfUseRepriceBestEffort();
                     replayPendingChargingPostCommitMetadata();
                     logger.info("SOC History Database initialized via H2 (Pure Java): " + DB_PATH);
                     return;  // Success - exit
@@ -858,6 +871,86 @@ public class SocHistoryDatabase {
             );
 
             logger.info("acc_events table ready (migration idempotent)");
+        }
+        backfillChargingTypeGun1Verdicts();
+    }
+
+    // One-shot marker for backfillChargingTypeGun1Verdicts — bump the version if the
+    // classifier's gunState==1 rule changes again and old rows need re-derivation.
+    private static final String CHARGING_TYPE_GUN1_MIGRATION = "charging_type_gun1_power_fallback_v1";
+
+    /**
+     * One-shot backfill for the gunState==1 power-fallback fix in {@link ChargingTypeClassifier}:
+     * sessions closed BEFORE that fix are frozen with whatever verdict the old (always-UNKNOWN-for-
+     * gun-out) logic produced at close time, and {@code is_dc} is never re-derived on read. Re-run
+     * the classifier against each such row's already-durable {@code gun_state}/{@code peak_power_kw}
+     * and correct {@code is_dc} in place, then rebuild the daily rollups for every day touched so
+     * {@code dc_count}/{@code ac_count} (and anything derived from them) reflect the correction too.
+     * Scoped to {@code gun_state = 1} rows only — the only branch the fix changed — so nothing else
+     * is touched. Guarded by {@link #TABLE_DATA_MIGRATIONS} so it runs at most once ever.
+     */
+    private void backfillChargingTypeGun1Verdicts() {
+        if (connection == null) return;
+        try {
+            boolean alreadyDone;
+            try (PreparedStatement read = connection.prepareStatement(
+                    "SELECT version FROM " + TABLE_DATA_MIGRATIONS + " WHERE migration_name = ?;")) {
+                read.setString(1, CHARGING_TYPE_GUN1_MIGRATION);
+                try (ResultSet rs = read.executeQuery()) {
+                    alreadyDone = rs.next() && rs.getInt(1) >= 1;
+                }
+            }
+            if (alreadyDone) return;
+
+            final int[] corrected = {0};
+            final java.util.Set<Long> touchedDays = new java.util.HashSet<>();
+            runInTransaction(() -> {
+                java.util.List<long[]> updates = new java.util.ArrayList<>(); // {id, newIsDc}
+                try (PreparedStatement select = connection.prepareStatement(
+                        "SELECT id, end_time, peak_power_kw, is_dc FROM " + TABLE_CHARGING
+                                + " WHERE gun_state = 1 AND end_time IS NOT NULL;");
+                     ResultSet rs = select.executeQuery()) {
+                    while (rs.next()) {
+                        long id = rs.getLong(1);
+                        long endTime = rs.getLong(2);
+                        double peak = rs.getDouble(3);
+                        if (rs.wasNull()) peak = 0;
+                        int oldIsDc = rs.getInt(4);
+                        int newIsDc = ChargingTypeClassifier.classify(1, peak);
+                        if (newIsDc != oldIsDc) {
+                            updates.add(new long[]{id, newIsDc});
+                            touchedDays.add((endTime / 86_400_000L) * 86_400_000L);
+                        }
+                    }
+                }
+                if (!updates.isEmpty()) {
+                    try (PreparedStatement update = connection.prepareStatement(
+                            "UPDATE " + TABLE_CHARGING + " SET is_dc = ? WHERE id = ?;")) {
+                        for (long[] u : updates) {
+                            update.setInt(1, (int) u[1]);
+                            update.setLong(2, u[0]);
+                            update.addBatch();
+                        }
+                        update.executeBatch();
+                    }
+                    corrected[0] = updates.size();
+                }
+                for (long day : touchedDays) {
+                    rebuildChargingDailyDay(day);
+                }
+                try (PreparedStatement marker = connection.prepareStatement(
+                        "MERGE INTO " + TABLE_DATA_MIGRATIONS
+                                + " (migration_name, version, completed_at) KEY(migration_name) VALUES (?, ?, ?);")) {
+                    marker.setString(1, CHARGING_TYPE_GUN1_MIGRATION);
+                    marker.setInt(2, 1);
+                    marker.setLong(3, System.currentTimeMillis());
+                    marker.executeUpdate();
+                }
+            });
+            logger.info("Charging type gun1-fallback backfill: corrected " + corrected[0]
+                    + " session(s), rebuilt " + touchedDays.size() + " daily rollup day(s)");
+        } catch (Exception e) {
+            logger.warn("Charging type gun1-fallback backfill failed: " + e.getMessage());
         }
     }
 
@@ -1609,9 +1702,10 @@ public class SocHistoryDatabase {
                             int rangeGained = rangeGainedFromEnergy(energyAdded);
                             // Price at the tariff for WHERE this charge happened,
                             // else the global DC/base rate (see priceSession).
-                            if (optOutClosePricing == null) {
+                            if (optOutClosePricing == null || energyAdded > 0) {
                                 optOutClosePricing = priceSessionForClose(
-                                        isDc, chargingStartLat, chargingStartLng);
+                                        isDc, chargingStartLat, chargingStartLng,
+                                        chargingStartTime, closeTime, energyAdded);
                             }
                             // A successful retry-time config read becomes part of the frozen
                             // opt-out boundary before the H2 transaction is attempted. If H2 is
@@ -2259,6 +2353,25 @@ public class SocHistoryDatabase {
                 now = strictlyAfterChargingStart(chargingStartTime, now);
                 double socDelta = soc - chargingStartSoc;
 
+                // Discard trivial/flicker sessions instead of persisting them — see
+                // TRIVIAL_SESSION_DURATION_SEC. This must run before any of the energy/
+                // pricing/SOH-calibration work below: none of that is meaningful for a
+                // session that never really happened.
+                double closeDurationSec = (now - chargingStartTime) / 1000.0;
+                if (closeDurationSec < TRIVIAL_SESSION_DURATION_SEC
+                        && Math.abs(socDelta) < TRIVIAL_SESSION_SOC_DELTA_PERCENT) {
+                    boolean discarded = discardTrivialChargingSession(chargingStartTime);
+                    resetLiveChargingState(true);
+                    if (chargingLifecycleJournalDirty
+                            && !persistChargingLifecycleJournal()) {
+                        return false;
+                    }
+                    logger.info(String.format(java.util.Locale.US,
+                            "Discarded trivial charging session: %.1fs, socDelta=%.2f%% (start=%d)",
+                            closeDurationSec, socDelta, chargingStartTime));
+                    return discarded;
+                }
+
                 // Compute energy added using nominal capacity if available,
                 // otherwise fall back to rough estimate
                 double energyAdded = 0;
@@ -2331,9 +2444,10 @@ public class SocHistoryDatabase {
                 int rangeGained = rangeGainedFromEnergy(energyAdded);
                 // Price at the tariff registered for WHERE this charge happened;
                 // absent a match, the global DC/base rate (see priceSession).
-                if (pendingClosePricing == null) {
+                if (pendingClosePricing == null || energyAdded > 0) {
                     pendingClosePricing = priceSessionForClose(
-                            isDc, chargingStartLat, chargingStartLng);
+                            isDc, chargingStartLat, chargingStartLng,
+                            chargingStartTime, now, energyAdded);
                 }
                 // If the first config read failed, the retry that succeeds must freeze its result
                 // before H2 is attempted again. Otherwise another restart/config edit can price the
@@ -3164,7 +3278,8 @@ public class SocHistoryDatabase {
         pendingCloseIsDc = currentChargingTypeVerdict();
         try {
             pendingClosePricing = priceSessionForClose(
-                    pendingCloseIsDc, chargingStartLat, chargingStartLng);
+                    pendingCloseIsDc, chargingStartLat, chargingStartLng,
+                    chargingStartTime);
         } catch (Exception unavailable) {
             // Boundary/counter remain frozen in the lifecycle journal. The close path retries the
             // config read and must not turn this transient failure into a permanent fallback price.
@@ -3624,7 +3739,8 @@ public class SocHistoryDatabase {
                     deferredChargingTypeVerdict(generation);
             try {
                 generation.closePricing = priceSessionForClose(
-                        generation.closeIsDc, generation.lat, generation.lng);
+                        generation.closeIsDc, generation.lat, generation.lng,
+                        generation.startMs);
             } catch (Exception unavailable) {
                 generation.closePricing = null;
                 logger.warn("Deferred charging pricing unavailable at boundary: "
@@ -6230,7 +6346,9 @@ public class SocHistoryDatabase {
             }
             int isDc = deriveIsDc(gun, peak);  // peak-guarded against a misread DC gun
             // Price at the location's tariff, else the global DC/base rate.
-            PricingDecision pd = priceSessionForClose(isDc, rowLat, rowLng);
+            PricingDecision pd = priceSessionForClose(
+                    isDc, rowLat, rowLng, start,
+                    lastT > start ? lastT : accountingBound, energyAdded);
             double rate = pd.rate;
             double cost = pd.costFor(energyAdded);
             String curr = pd.currency;
@@ -6531,7 +6649,7 @@ public class SocHistoryDatabase {
                     // moment they added one tariff. That is the I2 violation.
                     PricingDecision pd = (owner.isEmpty())
                             ? priceSessionInCircle(isDc, lat, lng)
-                            : priceSession(isDc, lat, lng);
+                            : priceSession(isDc, lat, lng, startTime, endTime, energy);
 
                     // NEVER re-price a session that was priced by the global rate
                     // and still is. Those costs are a historical record of what the
@@ -6650,6 +6768,13 @@ public class SocHistoryDatabase {
         return changed;
     }
 
+    /**
+     * Journal key for re-applying time-of-use to globally-priced sessions using
+     * each row's start clock, not "now". Distinct from location-tariff ids so a
+     * site-tariff sweep cannot drop this retry.
+     */
+    static final String TIME_OF_USE_REPRICE_KEY = "tou";
+
     static String normalizeTariffRepriceKey(String tariffId) {
         return tariffId == null || tariffId.isEmpty() ? "*" : tariffId;
     }
@@ -6666,12 +6791,19 @@ public class SocHistoryDatabase {
         String requestedKey = normalizeTariffRepriceKey(tariffId);
         boolean changed = false;
         if ("*".equals(requestedKey)) {
-            if (pendingTariffReprices.size() != 1
-                    || !pendingTariffReprices.contains("*")) {
+            boolean keepTou = pendingTariffReprices.contains(TIME_OF_USE_REPRICE_KEY);
+            boolean alreadyStar = pendingTariffReprices.contains("*");
+            boolean alreadyOnlyStar = alreadyStar && pendingTariffReprices.size() == 1;
+            boolean alreadyStarAndTou = alreadyStar && keepTou
+                    && pendingTariffReprices.size() == 2;
+            if (!(keepTou ? alreadyStarAndTou : alreadyOnlyStar)) {
                 pendingTariffReprices.clear();
                 pendingTariffReprices.add("*");
+                if (keepTou) pendingTariffReprices.add(TIME_OF_USE_REPRICE_KEY);
                 changed = true;
             }
+        } else if (TIME_OF_USE_REPRICE_KEY.equals(requestedKey)) {
+            changed = pendingTariffReprices.add(requestedKey);
         } else if (!pendingTariffReprices.contains("*")) {
             changed = pendingTariffReprices.add(requestedKey);
         }
@@ -6681,7 +6813,8 @@ public class SocHistoryDatabase {
             throw new IllegalStateException(
                     "tariff repricing intent was not durable");
         }
-        return pendingTariffReprices.contains("*") ? "*" : requestedKey;
+        return pendingTariffReprices.contains("*") && !TIME_OF_USE_REPRICE_KEY.equals(requestedKey)
+                ? "*" : requestedKey;
     }
 
     /**
@@ -6691,7 +6824,7 @@ public class SocHistoryDatabase {
     private void completePendingTariffReprice(String tariffKey) throws Exception {
         java.util.LinkedHashSet<String> before =
                 new java.util.LinkedHashSet<>(pendingTariffReprices);
-        if ("*".equals(tariffKey)) pendingTariffReprices.clear();
+        if ("*".equals(tariffKey)) pendingTariffReprices.remove("*");
         else pendingTariffReprices.remove(tariffKey);
         chargingLifecycleJournalDirty = true;
         if (!persistChargingLifecycleJournal()) {
@@ -6711,8 +6844,12 @@ public class SocHistoryDatabase {
             while (!pendingTariffReprices.isEmpty()) {
                 String tariffKey = pendingTariffReprices.iterator().next();
                 try {
-                    repriceSessionsForTariffNow(
-                            tariffIdForRepriceKey(tariffKey));
+                    if (TIME_OF_USE_REPRICE_KEY.equals(tariffKey)) {
+                        repriceSessionsForTimeOfUseNow();
+                    } else {
+                        repriceSessionsForTariffNow(
+                                tariffIdForRepriceKey(tariffKey));
+                    }
                     completePendingTariffReprice(tariffKey);
                 } catch (Exception e) {
                     logger.warn("Pending tariff repricing replay deferred for "
@@ -6723,6 +6860,157 @@ public class SocHistoryDatabase {
         } finally {
             replayingTariffReprices = false;
         }
+    }
+
+    private void queueTimeOfUseRepriceBestEffort() {
+        try {
+            queuePendingTariffReprice(TIME_OF_USE_REPRICE_KEY);
+        } catch (Exception e) {
+            logger.warn("TOU reprice intent not durable: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Re-apply interval time-of-use to globally-priced closed sessions.
+     * Location-tariff rows are left alone (a site's contracted rate wins).
+     * Existing TOU labels are not stripped when no window currently matches.
+     */
+    private int repriceSessionsForTimeOfUseNow() throws Exception {
+        if (!isAvailable()) {
+            throw new java.sql.SQLException("charging database unavailable for TOU repricing");
+        }
+        int changed = 0;
+        java.util.List<RepricePostcondition> expectedUpdates = new java.util.ArrayList<>();
+        boolean commitAttempted = false;
+        try {
+            java.util.List<long[]> keys = new java.util.ArrayList<>();
+            java.util.List<double[]> vals = new java.util.ArrayList<>();
+            java.util.List<int[]> flags = new java.util.ArrayList<>();
+            java.util.List<String> owners = new java.util.ArrayList<>();
+            java.util.List<String[]> texts = new java.util.ArrayList<>();
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT start_time, end_time, energy_added_kwh, session_cost, start_lat, start_lng, "
+                            + "is_dc, range_gained_km, tariff_id, currency, tariff_label, electricity_rate FROM "
+                            + TABLE_CHARGING + " WHERE end_time IS NOT NULL;")) {
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        double energy = rs.getDouble(3);
+                        if (!Double.isFinite(energy) || energy <= 0) continue;
+                        keys.add(new long[]{ rs.getLong(1), rs.getLong(2) });
+                        vals.add(new double[]{ energy, rs.getDouble(4), rs.getDouble(5),
+                                rs.getDouble(6), rs.getDouble(12) });
+                        flags.add(new int[]{ rs.getInt(7), rs.getInt(8) });
+                        String owner = rs.getString(9);
+                        owners.add(owner != null ? owner : "");
+                        String cur = rs.getString(10);
+                        String lbl = rs.getString(11);
+                        texts.add(new String[]{ cur != null ? cur : "", lbl != null ? lbl : "" });
+                    }
+                }
+            }
+
+            Connection transactionConnection = connection;
+            boolean priorAutoCommit = transactionConnection.getAutoCommit();
+            if (!priorAutoCommit) {
+                discardTransactionConnection(transactionConnection);
+                throw new java.sql.SQLException(
+                        "TOU repricing found auto-commit disabled before its transaction");
+            }
+            transactionConnection.setAutoCommit(false);
+            boolean committed = false;
+            Exception transactionFailure = null;
+            try (PreparedStatement upd = transactionConnection.prepareStatement(
+                    "UPDATE " + TABLE_CHARGING + " SET electricity_rate = ?, currency = ?, "
+                            + "session_cost = ?, tariff_id = ?, tariff_label = ? WHERE start_time = ?;")) {
+                for (int i = 0; i < keys.size(); i++) {
+                    long startTime = keys.get(i)[0];
+                    long endTime = keys.get(i)[1];
+                    double energy = vals.get(i)[0];
+                    double oldCost = vals.get(i)[1];
+                    double lat = vals.get(i)[2];
+                    double lng = vals.get(i)[3];
+                    double oldRate = vals.get(i)[4];
+                    int isDc = flags.get(i)[0];
+                    String owner = owners.get(i);
+                    String oldCurrency = texts.get(i)[0];
+                    String oldLabel = texts.get(i)[1];
+                    if (!owner.isEmpty()) continue;
+
+                    PricingDecision pd = blendTimeOfUsePricing(
+                            isDc, startTime, endTime, energy, false);
+                    if (!pd.tariffId.isEmpty()) continue;
+                    if (pd.tariffLabel.isEmpty() && !oldLabel.isEmpty()) continue;
+                    if (pd.tariffLabel.isEmpty() && oldLabel.isEmpty()) continue;
+
+                    double newCost = pd.costFor(energy);
+                    boolean costSame = (oldCost <= -1 && newCost <= -1)
+                            || (oldCost > -1 && newCost > -1 && Math.abs(oldCost - newCost) < 0.005);
+                    boolean rowSame = costSame
+                            && pd.currency.equals(oldCurrency)
+                            && pd.tariffLabel.equals(oldLabel)
+                            && realStorageEquivalent(oldRate, pd.rate);
+                    if (rowSame) continue;
+
+                    upd.setDouble(1, pd.rate);
+                    upd.setString(2, pd.currency);
+                    upd.setDouble(3, newCost);
+                    upd.setString(4, pd.tariffId);
+                    upd.setString(5, pd.tariffLabel);
+                    upd.setLong(6, startTime);
+                    if (upd.executeUpdate() <= 0) continue;
+                    adjustDailyCost(endTime, (newCost > 0 ? newCost : 0) - (oldCost > 0 ? oldCost : 0));
+                    expectedUpdates.add(new RepricePostcondition(
+                            startTime, pd.rate, pd.currency, newCost,
+                            pd.tariffId, pd.tariffLabel, !costSame));
+                    if (!costSame) changed++;
+                }
+                commitAttempted = true;
+                transactionConnection.commit();
+                committed = true;
+            } catch (Exception e) {
+                transactionFailure = e;
+                throw e;
+            } finally {
+                if (!committed) {
+                    try {
+                        transactionConnection.rollback();
+                    } catch (Exception rollbackFailure) {
+                        if (transactionFailure != null) {
+                            transactionFailure.addSuppressed(rollbackFailure);
+                        }
+                        discardTransactionConnection(transactionConnection);
+                    }
+                    changed = 0;
+                }
+                try {
+                    if (!transactionConnection.isClosed()) {
+                        transactionConnection.setAutoCommit(priorAutoCommit);
+                    }
+                } catch (Exception restoreFailure) {
+                    discardTransactionConnection(transactionConnection);
+                    if (transactionFailure != null) {
+                        transactionFailure.addSuppressed(restoreFailure);
+                    } else {
+                        throw restoreFailure;
+                    }
+                }
+            }
+            if (changed > 0) {
+                logger.info("Re-priced " + changed + " charging session(s) for time-of-use");
+            }
+        } catch (Exception e) {
+            if (commitAttempted && !expectedUpdates.isEmpty()
+                    && reconcileRepriceCommit(expectedUpdates, e)) {
+                changed = countCostChanged(expectedUpdates);
+                noteWriteOk();
+                logger.warn("TOU repricing commit result was uncertain; reconciled "
+                        + expectedUpdates.size() + " durable session update(s)");
+                return changed;
+            }
+            if (commitAttempted && expectedUpdates.isEmpty()) return 0;
+            throw e;
+        }
+        return changed;
     }
 
     /**
@@ -6892,13 +7180,31 @@ public class SocHistoryDatabase {
      */
     private int snapshotOdometerKm() {
         try {
-            com.overdrive.app.byd.BydDataCollector col = com.overdrive.app.byd.BydDataCollector.getInstance();
+            com.overdrive.app.byd.BydDataCollector col =
+                    com.overdrive.app.byd.BydDataCollector.getInstance();
             if (col != null && col.isInitialized()) {
                 com.overdrive.app.byd.BydVehicleData vd = col.getData();
                 if (vd != null && vd.totalMileageKm != com.overdrive.app.byd.BydVehicleData.UNAVAILABLE
                         && vd.totalMileageKm > 0) {
                     return vd.totalMileageKm;
                 }
+            }
+        } catch (Exception ignored) {}
+        try {
+            if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+                int carSvc = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.totalMileageKm();
+                if (carSvc > 0) return carSvc;
+            }
+        } catch (Exception ignored) {}
+        try {
+            double odo = com.overdrive.app.trips.OdometerReader.getInstance().readOdometerKm();
+            if (Double.isFinite(odo) && odo > 0) return (int) Math.round(odo);
+        } catch (Exception ignored) {}
+        try {
+            com.overdrive.app.byd.cloud.VehicleCloudSnapshot cloud =
+                    com.overdrive.app.byd.cloud.BydCloudDataProvider.getInstance().getSnapshot();
+            if (cloud != null && cloud.hasTotalMileage() && cloud.totalMileageKm > 0) {
+                return cloud.totalMileageKm;
             }
         } catch (Exception ignored) {}
         return -1;
@@ -7972,6 +8278,15 @@ public class SocHistoryDatabase {
      * @param lng  session start longitude, 0 when no fix was captured
      */
     private PricingDecision priceSession(int isDc, double lat, double lng) {
+        return priceSession(isDc, lat, lng, 0L, 0L, 0);
+    }
+
+    private PricingDecision priceSession(int isDc, double lat, double lng, long atMs) {
+        return priceSession(isDc, lat, lng, atMs, atMs, 0);
+    }
+
+    private PricingDecision priceSession(int isDc, double lat, double lng,
+            long startMs, long endMs, double energyKwh) {
         try {
             com.overdrive.app.charging.TariffProfile p =
                     com.overdrive.app.charging.TariffManager.getInstance().resolve(lat, lng, isDc);
@@ -7988,7 +8303,12 @@ public class SocHistoryDatabase {
             // to the global rate exactly as before.
             logger.debug("Tariff resolve skipped: " + t.getMessage());
         }
-        return globalPricing(isDc);
+        try {
+            return blendTimeOfUsePricing(isDc, startMs, endMs, energyKwh, false);
+        } catch (Exception e) {
+            logger.debug("TOU blend skipped: " + e.getMessage());
+            return globalPricingWithoutTimeOfUse(isDc);
+        }
     }
 
     /**
@@ -7999,6 +8319,16 @@ public class SocHistoryDatabase {
      */
     private PricingDecision priceSessionForClose(int isDc, double lat, double lng)
             throws Exception {
+        return priceSessionForClose(isDc, lat, lng, 0L, 0L, 0);
+    }
+
+    private PricingDecision priceSessionForClose(int isDc, double lat, double lng, long atMs)
+            throws Exception {
+        return priceSessionForClose(isDc, lat, lng, atMs, atMs, 0);
+    }
+
+    private PricingDecision priceSessionForClose(int isDc, double lat, double lng,
+            long startMs, long endMs, double energyKwh) throws Exception {
         com.overdrive.app.charging.TariffProfile p =
                 com.overdrive.app.charging.TariffManager.getInstance()
                         .resolveStrict(lat, lng, isDc);
@@ -8013,21 +8343,53 @@ public class SocHistoryDatabase {
                         rate, currency, p.getId(), p.getLabel());
             }
         }
-        return globalPricingStrict(isDc);
+        return blendTimeOfUsePricing(isDc, startMs, endMs, energyKwh, true);
     }
 
-    /**
-     * Global (non-tariff) pricing resolved from a SINGLE config read.
-     *
-     * <p>getElectricityRate/getDcRate/getCurrencySymbol each call loadConfig()
-     * separately, so composing them did up to 3 reads per priced row - and both
-     * repriceSessionsForTariff and the live session-list render call the pricing
-     * path once PER ROW. Same values, one read.
-     *
-     * <p>Keeps the pre-existing return conventions exactly: an unset base rate is
-     * -1 (never 0), an unset DC rate is ignored, and the currency is "" when unset.
-     */
-    private PricingDecision globalPricing(int isDc) {
+    private PricingDecision blendTimeOfUsePricing(int isDc, long startMs, long endMs,
+            double energyKwh, boolean strict) throws Exception {
+        double ac = -1;
+        double dc = 0;
+        String currency = "";
+        if (strict) {
+            org.json.JSONObject cfg =
+                    com.overdrive.app.charging.TariffManager.loadVerifiedConfig();
+            org.json.JSONObject trips = cfg.optJSONObject("tripAnalytics");
+            if (trips != null) {
+                double configured = trips.optDouble("electricityRate", -1);
+                if (configured > 0) ac = configured;
+                currency = trips.optString("currency", "");
+                if (currency == null) currency = "";
+            }
+            org.json.JSONObject charging = cfg.optJSONObject("chargingAnalytics");
+            if (charging != null) {
+                double configuredDc = charging.optDouble("dcRate", 0);
+                if (configuredDc > 0) dc = configuredDc;
+            }
+        } else {
+            PricingDecision flat = globalPricingWithoutTimeOfUse(isDc);
+            ac = flat.rate;
+            currency = flat.currency;
+            try {
+                org.json.JSONObject cfg = com.overdrive.app.config.UnifiedConfigManager.loadConfig();
+                org.json.JSONObject charging = cfg != null ? cfg.optJSONObject("chargingAnalytics") : null;
+                if (charging != null) {
+                    double configuredDc = charging.optDouble("dcRate", 0);
+                    if (configuredDc > 0) dc = configuredDc;
+                }
+            } catch (Exception ignored) {}
+        }
+        java.util.List<TimeTariffRule> rules = loadEnabledTimeTariffRules();
+        TimeOfUseMatch blended = blendTimeOfUseRates(isDc == 1, startMs, endMs, energyKwh,
+                ac, dc, rules, java.util.TimeZone.getDefault());
+        if (blended != null && blended.rate > 0) {
+            return new PricingDecision(blended.rate, currency, "", blended.label);
+        }
+        double flatRate = (isDc == 1 && dc > 0) ? dc : ac;
+        return new PricingDecision(flatRate, currency, "", "");
+    }
+
+    private PricingDecision globalPricingWithoutTimeOfUse(int isDc) {
         double rate = -1;
         double dc = 0;
         String curr = "";
@@ -8050,6 +8412,437 @@ public class SocHistoryDatabase {
         return new PricingDecision(rate, curr, "", "");
     }
 
+    /**
+     * Global (non-tariff) pricing resolved from a SINGLE config read.
+     *
+     * <p>getElectricityRate/getDcRate/getCurrencySymbol each call loadConfig()
+     * separately, so composing them did up to 3 reads per priced row - and both
+     * repriceSessionsForTariff and the live session-list render call the pricing
+     * path once PER ROW. Same values, one read.
+     *
+     * <p>Keeps the pre-existing return conventions exactly: an unset base rate is
+     * -1 (never 0), an unset DC rate is ignored, and the currency is "" when unset.
+     */
+    // ==================== TIME-OF-USE TARIFFS ====================
+    // A second, independent tariff axis from TariffManager/TariffProfile:
+    // TariffProfile prices a charge by WHERE it happened (a site's contracted
+    // rate); this prices it by WHEN — an off-peak/peak electricity plan that
+    // applies wherever the car charges (typically home). The two compose:
+    // a matched location tariff still wins outright (a specific site's own
+    // rate is more authoritative than a generic time-of-day plan), and
+    // time-of-use only replaces the flat global rate that a session would
+    // otherwise fall back to when no location tariff matches.
+
+    private void ensureTimeTariffTables(Connection conn) throws Exception {
+        try (Statement st = conn.createStatement()) {
+            st.execute("CREATE TABLE IF NOT EXISTS time_tariffs (id IDENTITY PRIMARY KEY,"
+                    + "label VARCHAR(64) DEFAULT '',day_mask INTEGER NOT NULL,"
+                    + "start_minute INTEGER NOT NULL,end_minute INTEGER NOT NULL,"
+                    + "ac_rate REAL DEFAULT -1,dc_rate REAL DEFAULT -1,"
+                    + "priority INTEGER DEFAULT 0,enabled INTEGER DEFAULT 1);");
+            st.execute("CREATE TABLE IF NOT EXISTS time_tariff_config "
+                    + "(id INTEGER PRIMARY KEY,enabled INTEGER DEFAULT 0);");
+        }
+    }
+
+    /**
+     * The active time-of-use rate right now, or -1 if the feature is off, no
+     * rule matches the current day/time, or the DB is unavailable.
+     *
+     * <p>{@code isDc}: prefers {@code dc_rate} when set (&gt;0) and the
+     * session is DC, else falls back to the matched rule's {@code ac_rate}.
+     * Matching is highest-{@code priority} rule first, among rules enabled
+     * and covering both today ({@code day_mask} bit for
+     * {@link java.util.Calendar#DAY_OF_WEEK}) and the current minute-of-day,
+     * with overnight windows (start &gt; end, e.g. 22:00-06:00) wrapping
+     * across midnight. Wall-clock matching uses the JVM default timezone
+     * ({@link java.util.Calendar#getInstance()}), which on the head unit is
+     * the Android system zone — not UTC.
+     *
+     * <p>Day/time coverage is applied in Java rather than a parameterized
+     * SQL bit-function. H2 2.2 cannot infer the type of an unbound argument
+     * to {@code BITAND} at prepare time and throws; the previous query
+     * therefore never matched and every session fell through to the flat
+     * global rate.
+     */
+    public double resolveTimeOfUseRate(boolean isDc) {
+        TimeOfUseMatch match = resolveTimeOfUseMatch(isDc);
+        return match != null ? match.rate : -1;
+    }
+
+    /**
+     * True when {@code dayBit} is set in {@code dayMask} and {@code minuteOfDay}
+     * sits inside {@code [startMinute, endMinute]}, wrapping across midnight
+     * when {@code startMinute > endMinute}.
+     */
+    static boolean timeTariffCovers(int dayMask, int startMinute, int endMinute,
+            int dayBit, int minuteOfDay) {
+        if (dayBit == 0 || (dayMask & dayBit) == 0) return false;
+        if (startMinute <= endMinute) {
+            return minuteOfDay >= startMinute && minuteOfDay <= endMinute;
+        }
+        return minuteOfDay >= startMinute || minuteOfDay <= endMinute;
+    }
+
+    private TimeOfUseMatch resolveTimeOfUseMatch(boolean isDc) {
+        java.util.Calendar cal = java.util.Calendar.getInstance();
+        int dayBit = 1 << (cal.get(java.util.Calendar.DAY_OF_WEEK) - 1);
+        int minuteOfDay = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60
+                + cal.get(java.util.Calendar.MINUTE);
+        return resolveTimeOfUseMatchAt(isDc, dayBit, minuteOfDay);
+    }
+
+    TimeOfUseMatch resolveTimeOfUseMatchAt(boolean isDc, int dayBit, int minuteOfDay) {
+        try {
+            if (connection == null || connection.isClosed()) return null;
+            ensureTimeTariffTables(connection);
+            try (PreparedStatement enabledStmt = connection.prepareStatement(
+                    "SELECT enabled FROM time_tariff_config WHERE id = 1;");
+                 ResultSet er = enabledStmt.executeQuery()) {
+                if (!er.next() || er.getInt(1) == 0) return null;
+            }
+            try (PreparedStatement stmt = connection.prepareStatement(
+                    "SELECT label, day_mask, start_minute, end_minute, ac_rate, dc_rate"
+                    + " FROM time_tariffs WHERE enabled = 1"
+                    + " ORDER BY priority DESC, id ASC;");
+                 ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    if (!timeTariffCovers(
+                            rs.getInt(2), rs.getInt(3), rs.getInt(4),
+                            dayBit, minuteOfDay)) {
+                        continue;
+                    }
+                    double ac = rs.getDouble(5);
+                    double dc = rs.getDouble(6);
+                    double rate = (isDc && dc > 0) ? dc : ac;
+                    if (rate > 0) {
+                        String label = rs.getString(1);
+                        return new TimeOfUseMatch(rate, label != null ? label : "");
+                    }
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            logger.debug("resolveTimeOfUseRate failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    static final class TimeOfUseMatch {
+        final double rate;
+        final String label;
+
+        TimeOfUseMatch(double rate, String label) {
+            this.rate = rate;
+            this.label = label != null ? label : "";
+        }
+    }
+
+    static final class TimeTariffRule {
+        final String label;
+        final int dayMask;
+        final int startMinute;
+        final int endMinute;
+        final double acRate;
+        final double dcRate;
+        final int priority;
+
+        TimeTariffRule(String label, int dayMask, int startMinute, int endMinute,
+                double acRate, double dcRate, int priority) {
+            this.label = label != null ? label : "";
+            this.dayMask = dayMask;
+            this.startMinute = startMinute;
+            this.endMinute = endMinute;
+            this.acRate = acRate;
+            this.dcRate = dcRate;
+            this.priority = priority;
+        }
+
+        double rateFor(boolean isDc) {
+            if (isDc && dcRate > 0) return dcRate;
+            return acRate;
+        }
+    }
+
+    private java.util.List<TimeTariffRule> loadEnabledTimeTariffRules() {
+        java.util.ArrayList<TimeTariffRule> out = new java.util.ArrayList<>();
+        try {
+            if (connection == null || connection.isClosed()) return out;
+            ensureTimeTariffTables(connection);
+            try (PreparedStatement enabledStmt = connection.prepareStatement(
+                    "SELECT enabled FROM time_tariff_config WHERE id = 1;");
+                 ResultSet er = enabledStmt.executeQuery()) {
+                if (!er.next() || er.getInt(1) == 0) return out;
+            }
+            try (PreparedStatement stmt = connection.prepareStatement(
+                    "SELECT label, day_mask, start_minute, end_minute, ac_rate, dc_rate, priority"
+                            + " FROM time_tariffs WHERE enabled = 1"
+                            + " ORDER BY priority DESC, id ASC;");
+                 ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    out.add(new TimeTariffRule(
+                            rs.getString(1), rs.getInt(2), rs.getInt(3), rs.getInt(4),
+                            rs.getDouble(5), rs.getDouble(6), rs.getInt(7)));
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("loadEnabledTimeTariffRules failed: " + e.getMessage());
+        }
+        return out;
+    }
+
+    /**
+     * Minute-weighted blend of enabled TOU rules over {@code [startMs, endMs)}.
+     * Each wall-clock minute is equal weight (constant-power assumption). Minutes
+     * with no matching rule use the flat global AC/DC rate. Returns null when
+     * nothing positive can be priced.
+     */
+    static TimeOfUseMatch blendTimeOfUseRates(boolean isDc, long startMs, long endMs,
+            double energyKwh, double ac, double dc, java.util.List<TimeTariffRule> rules,
+            java.util.TimeZone tz) {
+        double flat = (isDc && dc > 0) ? dc : ac;
+        if (rules == null) rules = java.util.Collections.emptyList();
+        java.util.TimeZone zone = tz != null ? tz : java.util.TimeZone.getDefault();
+        if (startMs <= 0 || endMs <= startMs) {
+            long at = startMs > 0 ? startMs : endMs;
+            if (at > 0 && !rules.isEmpty()) {
+                TimeTariffRule matched = matchTimeTariffRuleAt(rules, at, zone, isDc);
+                if (matched != null) {
+                    double rate = matched.rateFor(isDc);
+                    if (rate > 0) return new TimeOfUseMatch(rate, matched.label);
+                }
+            }
+            return flat > 0 ? new TimeOfUseMatch(flat, "") : null;
+        }
+        final long maxSpanMs = 14L * 24L * 60L * 60L * 1000L;
+        long last = endMs;
+        if (last - startMs > maxSpanMs) last = startMs + maxSpanMs;
+        java.util.Calendar cal = java.util.Calendar.getInstance(zone);
+        double sum = 0;
+        int n = 0;
+        java.util.LinkedHashSet<String> labels = new java.util.LinkedHashSet<>();
+        boolean mixedWithFlat = false;
+        for (long t = startMs; t < last; t += 60_000L) {
+            TimeTariffRule matched = matchTimeTariffRuleAt(rules, t, zone, isDc, cal);
+            double rate;
+            if (matched != null) {
+                rate = matched.rateFor(isDc);
+                if (matched.label != null && !matched.label.isEmpty()) {
+                    labels.add(matched.label);
+                }
+            } else {
+                rate = flat;
+                mixedWithFlat = true;
+            }
+            if (rate > 0) {
+                sum += rate;
+                n++;
+            }
+        }
+        if (n == 0) return flat > 0 ? new TimeOfUseMatch(flat, "") : null;
+        double blended = sum / n;
+        if (labels.isEmpty()) {
+            return new TimeOfUseMatch(blended, "");
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String label : labels) {
+            if (sb.length() > 0) sb.append(" + ");
+            sb.append(label);
+        }
+        if (mixedWithFlat) sb.append(" + Standard");
+        return new TimeOfUseMatch(blended, sb.toString());
+    }
+
+    static TimeTariffRule matchTimeTariffRuleAt(java.util.List<TimeTariffRule> rules,
+            long atMs, java.util.TimeZone tz, boolean isDc) {
+        return matchTimeTariffRuleAt(rules, atMs, tz, isDc,
+                java.util.Calendar.getInstance(tz != null ? tz : java.util.TimeZone.getDefault()));
+    }
+
+    private static TimeTariffRule matchTimeTariffRuleAt(java.util.List<TimeTariffRule> rules,
+            long atMs, java.util.TimeZone tz, boolean isDc, java.util.Calendar cal) {
+        if (rules == null || rules.isEmpty()) return null;
+        if (tz != null && !tz.equals(cal.getTimeZone())) cal.setTimeZone(tz);
+        cal.setTimeInMillis(atMs);
+        int dayBit = 1 << (cal.get(java.util.Calendar.DAY_OF_WEEK) - 1);
+        int minuteOfDay = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60
+                + cal.get(java.util.Calendar.MINUTE);
+        TimeTariffRule best = null;
+        for (TimeTariffRule rule : rules) {
+            if (!timeTariffCovers(rule.dayMask, rule.startMinute, rule.endMinute,
+                    dayBit, minuteOfDay)) {
+                continue;
+            }
+            if (rule.rateFor(isDc) <= 0) continue;
+            if (best == null || rule.priority > best.priority) best = rule;
+        }
+        return best;
+    }
+
+    public JSONObject listTimeTariffs() {
+        JSONObject out = new JSONObject();
+        try {
+            if (connection == null || connection.isClosed()) {
+                out.put("success", false);
+                return out;
+            }
+            ensureTimeTariffTables(connection);
+            boolean masterEnabled = false;
+            try (PreparedStatement enabledStmt = connection.prepareStatement(
+                    "SELECT enabled FROM time_tariff_config WHERE id = 1;");
+                 ResultSet er = enabledStmt.executeQuery()) {
+                if (er.next()) masterEnabled = er.getInt(1) != 0;
+            }
+            out.put("success", true);
+            out.put("enabled", masterEnabled);
+            JSONArray tariffs = new JSONArray();
+            try (PreparedStatement stmt = connection.prepareStatement(
+                    "SELECT id, label, day_mask, start_minute, end_minute, ac_rate, dc_rate,"
+                    + " priority, enabled FROM time_tariffs ORDER BY priority DESC, id ASC;");
+                 ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    JSONObject row = new JSONObject();
+                    row.put("id", rs.getInt(1));
+                    row.put("label", rs.getString(2));
+                    row.put("dayMask", rs.getInt(3));
+                    row.put("startMinute", rs.getInt(4));
+                    row.put("endMinute", rs.getInt(5));
+                    row.put("acRate", rs.getDouble(6));
+                    row.put("dcRate", rs.getDouble(7));
+                    row.put("priority", rs.getInt(8));
+                    row.put("enabled", rs.getBoolean(9));
+                    tariffs.put(row);
+                }
+            }
+            out.put("tariffs", tariffs);
+        } catch (Exception e) {
+            try {
+                out.put("success", false);
+                out.put("error", e.getMessage());
+            } catch (Exception ignored) {}
+        }
+        return out;
+    }
+
+    public JSONObject saveTimeTariff(String body) {
+        JSONObject out = new JSONObject();
+        try {
+            JSONObject req = new JSONObject(body);
+            if (connection == null || connection.isClosed()) {
+                out.put("success", false);
+                return out;
+            }
+            ensureTimeTariffTables(connection);
+            int id = req.optInt("id", -1);
+            PreparedStatement stmt;
+            if (id >= 0) {
+                stmt = connection.prepareStatement("UPDATE time_tariffs SET label=?, day_mask=?,"
+                        + " start_minute=?, end_minute=?, ac_rate=?, dc_rate=?, priority=?,"
+                        + " enabled=? WHERE id=?;");
+                stmt.setInt(9, id);
+            } else {
+                stmt = connection.prepareStatement("INSERT INTO time_tariffs (label, day_mask,"
+                        + " start_minute, end_minute, ac_rate, dc_rate, priority, enabled)"
+                        + " VALUES (?,?,?,?,?,?,?,?);");
+            }
+            try (PreparedStatement ps = stmt) {
+                ps.setString(1, req.optString("label", ""));
+                ps.setInt(2, req.optInt("dayMask", 0));
+                ps.setInt(3, req.optInt("startMinute", 0));
+                ps.setInt(4, req.optInt("endMinute", 0));
+                ps.setDouble(5, req.optDouble("acRate", 0));
+                ps.setDouble(6, req.optDouble("dcRate", 0));
+                ps.setInt(7, req.optInt("priority", 0));
+                ps.setBoolean(8, req.optBoolean("enabled", true));
+                ps.executeUpdate();
+            }
+            out.put("success", true);
+            queueTimeOfUseRepriceBestEffort();
+            replayPendingChargingPostCommitMetadata();
+        } catch (Exception e) {
+            try {
+                out.put("success", false);
+                out.put("error", e.getMessage());
+            } catch (Exception ignored) {}
+        }
+        return out;
+    }
+
+    public JSONObject deleteTimeTariff(String body) {
+        JSONObject out = new JSONObject();
+        try {
+            JSONObject req = new JSONObject(body);
+            int id = req.optInt("id", -1);
+            if (connection == null || connection.isClosed() || id < 0) {
+                out.put("success", false);
+                return out;
+            }
+            try (PreparedStatement stmt = connection.prepareStatement(
+                    "DELETE FROM time_tariffs WHERE id = ?;")) {
+                stmt.setInt(1, id);
+                stmt.executeUpdate();
+            }
+            out.put("success", true);
+            queueTimeOfUseRepriceBestEffort();
+            replayPendingChargingPostCommitMetadata();
+        } catch (Exception e) {
+            try { out.put("success", false); } catch (Exception ignored) {}
+        }
+        return out;
+    }
+
+    public JSONObject setTimeTariffMasterToggle(String body) {
+        JSONObject out = new JSONObject();
+        try {
+            JSONObject req = new JSONObject(body);
+            if (connection == null || connection.isClosed()) {
+                out.put("success", false);
+                return out;
+            }
+            ensureTimeTariffTables(connection);
+            boolean enabled = req.optBoolean("enabled", false);
+            try (PreparedStatement stmt = connection.prepareStatement(
+                    "MERGE INTO time_tariff_config (id, enabled) KEY(id) VALUES (1, ?);")) {
+                stmt.setBoolean(1, enabled);
+                stmt.executeUpdate();
+            }
+            out.put("success", true);
+            out.put("enabled", enabled);
+            queueTimeOfUseRepriceBestEffort();
+            replayPendingChargingPostCommitMetadata();
+        } catch (Exception e) {
+            try { out.put("success", false); } catch (Exception ignored) {}
+        }
+        return out;
+    }
+
+    private PricingDecision globalPricing(int isDc) {
+        double rate = -1;
+        double dc = 0;
+        String curr = "";
+        try {
+            org.json.JSONObject cfg = com.overdrive.app.config.UnifiedConfigManager.loadConfig();
+            org.json.JSONObject trips = cfg != null ? cfg.optJSONObject("tripAnalytics") : null;
+            if (trips != null) {
+                double r = trips.optDouble("electricityRate", -1);
+                if (r > 0) rate = r;
+                String c = trips.optString("currency", "");
+                if (c != null && !c.isEmpty()) curr = c;
+            }
+            org.json.JSONObject charging = cfg != null ? cfg.optJSONObject("chargingAnalytics") : null;
+            if (charging != null) {
+                double d = charging.optDouble("dcRate", 0);
+                if (d > 0) dc = d;
+            }
+        } catch (Exception ignored) {}
+        TimeOfUseMatch timeOfUse = resolveTimeOfUseMatch(isDc == 1);
+        if (timeOfUse != null && timeOfUse.rate > 0) {
+            return new PricingDecision(timeOfUse.rate, curr, "", timeOfUse.label);
+        }
+        if (isDc == 1 && dc > 0) return new PricingDecision(dc, curr, "", "");
+        return new PricingDecision(rate, curr, "", "");
+    }
+
     private PricingDecision globalPricingStrict(int isDc) throws Exception {
         org.json.JSONObject cfg =
                 com.overdrive.app.charging.TariffManager.loadVerifiedConfig();
@@ -8067,6 +8860,10 @@ public class SocHistoryDatabase {
         if (charging != null) {
             double configuredDc = charging.optDouble("dcRate", 0);
             if (configuredDc > 0) dc = configuredDc;
+        }
+        TimeOfUseMatch timeOfUse = resolveTimeOfUseMatch(isDc == 1);
+        if (timeOfUse != null && timeOfUse.rate > 0) {
+            return new PricingDecision(timeOfUse.rate, currency, "", timeOfUse.label);
         }
         return new PricingDecision(
                 isDc == 1 && dc > 0 ? dc : rate,
@@ -8946,6 +9743,119 @@ public class SocHistoryDatabase {
         return wasCharging ? chargingStartTime : -1;
     }
 
+    private static final double LIVE_PEAK_ONLY_DC_THRESHOLD_KW = 11.0;
+
+    /**
+     * Peak/avg/is_dc update for the currently-open session from car_service
+     * power samples. See CarSvcTelemetry.recordChargingSample.
+     */
+    public synchronized boolean updateOpenSessionPeakAvgPower(long sessionStartTime) {
+        if (!isInitialized || connection == null || sessionStartTime <= 0) return false;
+        if (!wasCharging || sessionStartTime != chargingStartTime) return false;
+        double avg = averageSamplePowerKw(sessionStartTime);
+        double peak = peakSampleKw(sessionStartTime);
+        if (avg <= 0 && peak <= 0) return false;
+        double finalAvg = avg;
+        double finalPeak = peak;
+        Integer isDc = peak > 0 ? (peak >= LIVE_PEAK_ONLY_DC_THRESHOLD_KW ? 1 : 0) : null;
+        try {
+            runInTransaction(() -> {
+                try (PreparedStatement pstmt = connection.prepareStatement(
+                        "UPDATE " + TABLE_CHARGING
+                                + " SET peak_power_kw = ?, avg_power_kw = ?"
+                                + (isDc != null ? ", is_dc = ?" : "")
+                                + " WHERE start_time = ? AND end_time IS NULL;")) {
+                    int idx = 1;
+                    pstmt.setDouble(idx++, finalPeak > 0 ? finalPeak : 0);
+                    pstmt.setDouble(idx++, finalAvg > 0 ? finalAvg : -1);
+                    if (isDc != null) pstmt.setInt(idx++, isDc);
+                    pstmt.setLong(idx, sessionStartTime);
+                    if (pstmt.executeUpdate() != 1) {
+                        throw new java.sql.SQLException(
+                                "car_service peak/avg update found no matching open session");
+                    }
+                }
+            });
+            return true;
+        } catch (Exception e) {
+            logger.debug("updateOpenSessionPeakAvgPower failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Corrected session-energy recompute for the currently-open session from
+     * car_service power samples. See CarSvcTelemetry.recomputeSessionEnergyKwh.
+     */
+    public synchronized boolean recomputeOpenSessionEnergyKwh(long sessionStartTime) {
+        if (!isInitialized || connection == null || sessionStartTime <= 0) return false;
+        if (!wasCharging || sessionStartTime != chargingStartTime) return false;
+        double avgPowerKw;
+        long minT;
+        long maxT;
+        try (PreparedStatement p = connection.prepareStatement(
+                "SELECT AVG(power_kw), MIN(t), MAX(t) FROM " + TABLE_CPS
+                        + " WHERE session_start_time = ?"
+                        + " AND power_kw > 0 AND power_kw <= 500;")) {
+            p.setLong(1, sessionStartTime);
+            try (ResultSet rs = p.executeQuery()) {
+                if (!rs.next()) return false;
+                avgPowerKw = rs.getDouble(1);
+                if (rs.wasNull() || avgPowerKw <= 0) return false;
+                minT = rs.getLong(2);
+                maxT = rs.getLong(3);
+            }
+        } catch (Exception e) {
+            logger.debug("recomputeOpenSessionEnergyKwh read failed: " + e.getMessage());
+            return false;
+        }
+        if (maxT <= minT) return false;
+        double energyKwh = avgPowerKw * (maxT - minT) / 3_600_000.0;
+        if (!(energyKwh > 0) || energyKwh > 500.0) return false;
+        try {
+            runInTransaction(() -> {
+                try (PreparedStatement pstmt = connection.prepareStatement(
+                        "UPDATE " + TABLE_CHARGING
+                                + " SET energy_added_kwh = ?, energy_source = ?, energy_incomplete = 0"
+                                + " WHERE start_time = ? AND end_time IS NULL;")) {
+                    pstmt.setDouble(1, energyKwh);
+                    pstmt.setString(2, com.overdrive.app.charging.SessionEnergyResolver.SRC_CARSVC);
+                    pstmt.setLong(3, sessionStartTime);
+                    if (pstmt.executeUpdate() != 1) {
+                        throw new java.sql.SQLException(
+                                "car_service energy recompute found no matching open session");
+                    }
+                }
+            });
+            return true;
+        } catch (Exception e) {
+            logger.debug("recomputeOpenSessionEnergyKwh write failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Raw energy_added_kwh for the currently-open session, bypassing
+     * SessionEnergyResolver arbitration. Returns -1 if unavailable.
+     */
+    public synchronized double getOpenSessionEnergyAddedKwhRaw(long sessionStartTime) {
+        if (!isInitialized || connection == null || sessionStartTime <= 0) return -1;
+        if (!wasCharging || sessionStartTime != chargingStartTime) return -1;
+        try (PreparedStatement p = connection.prepareStatement(
+                "SELECT energy_added_kwh FROM " + TABLE_CHARGING
+                        + " WHERE start_time = ? AND end_time IS NULL;")) {
+            p.setLong(1, sessionStartTime);
+            try (ResultSet rs = p.executeQuery()) {
+                if (!rs.next()) return -1;
+                double value = rs.getDouble(1);
+                return !rs.wasNull() && value > 0 ? value : -1;
+            }
+        } catch (Exception e) {
+            logger.debug("getOpenSessionEnergyAddedKwhRaw failed: " + e.getMessage());
+            return -1;
+        }
+    }
+
     /**
      * Peak-guarded AC/DC verdict for the currently-open physical session.
      *
@@ -9558,6 +10468,39 @@ public class SocHistoryDatabase {
         persistChargingLifecycleJournal();
     }
 
+    /**
+     * Deletes the still-open row for a session identified as trivial (see
+     * {@link #TRIVIAL_SESSION_DURATION_SEC}) rather than closing and keeping
+     * it. Also removes any power samples the flicker managed to log before
+     * it closed, so no orphaned {@link #TABLE_CPS} rows survive it.
+     */
+    private boolean discardTrivialChargingSession(long startTime) {
+        if (connection == null) return false;
+        try {
+            if (connection.isClosed()) reconnect();
+            if (connection == null || connection.isClosed()) return false;
+            try (PreparedStatement samples = connection.prepareStatement(
+                    "DELETE FROM " + TABLE_CPS + " WHERE session_start_time = ?;")) {
+                samples.setLong(1, startTime);
+                samples.executeUpdate();
+            }
+            try (PreparedStatement row = connection.prepareStatement(
+                    "DELETE FROM " + TABLE_CHARGING + " WHERE start_time = ? AND end_time IS NULL;")) {
+                row.setLong(1, startTime);
+                row.executeUpdate();
+            }
+            noteWriteOk();
+            return true;
+        } catch (Exception e) {
+            if (isSqlFailure(e)) {
+                noteWriteFailed();
+                try { reconnect(); } catch (Exception ignored) {}
+            }
+            logger.warn("discardTrivialChargingSession failed for start=" + startTime + ": " + e.getMessage());
+            return false;
+        }
+    }
+
     private void resetLiveChargingState(boolean retainLastCounter) {
         resetLiveChargingState(retainLastCounter, true);
     }
@@ -9831,6 +10774,62 @@ public class SocHistoryDatabase {
             if (isSqlFailure(e)) noteReadFailed();
             throw chargingHistoryReadException(
                     "get SOC history", e);
+        }
+    }
+
+    /**
+     * Time-bucketed pack inflow from {@code charging_power_samples} for the
+     * stats-tab power curve. Only measured kW (0 &lt; p ≤ 500); sentinel
+     * rows are excluded. Grouped by session so two charges in one bucket
+     * cannot average into a fake midpoint.
+     */
+    public synchronized JSONArray getChargingPowerHistoryStrict(
+            int hoursBack, int maxPoints) throws java.sql.SQLException {
+        JSONArray results = new JSONArray();
+        final Connection conn = requireChargingHistoryReadConnection();
+        try {
+            long now = System.currentTimeMillis();
+            int hours = clampSocHistoryHours(hoursBack);
+            long startTime = now - (hours * 60 * 60 * 1000L);
+            long timeRangeMs = hours * 60 * 60 * 1000L;
+            long bucketMs = Math.max(120_000L, timeRangeMs / Math.max(1, maxPoints));
+            bucketMs = Math.min(bucketMs, 30 * 60 * 1000L);
+            int bucketCount = (int) Math.ceil((double) timeRangeMs / bucketMs) + 1;
+            int rowLimit = Math.max(maxPoints, bucketCount) * 4;
+            String querySql =
+                "SELECT MIN(t) as t, "
+                + "  AVG(power_kw) as power, "
+                + "  session_start_time as session "
+                + "FROM " + TABLE_CPS + " "
+                + "WHERE t >= ? AND t <= ? "
+                + "  AND power_kw > 0 AND power_kw <= 500 "
+                + "GROUP BY session_start_time, (t / ?) "
+                + "ORDER BY t ASC "
+                + "LIMIT ?;";
+            try (PreparedStatement pstmt = conn.prepareStatement(querySql)) {
+                pstmt.setLong(1, startTime);
+                pstmt.setLong(2, now);
+                pstmt.setLong(3, bucketMs);
+                pstmt.setInt(4, rowLimit);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    while (rs.next()) {
+                        double power = rs.getDouble("power");
+                        if (rs.wasNull() || !isFinite(power) || power <= 0 || power > 500) {
+                            continue;
+                        }
+                        JSONObject row = new JSONObject();
+                        row.put("t", rs.getLong("t"));
+                        row.put("power", Math.round(power * 100) / 100.0);
+                        row.put("session", rs.getLong("session"));
+                        results.put(row);
+                    }
+                }
+            }
+            noteReadOk();
+            return results;
+        } catch (Exception e) {
+            if (isSqlFailure(e)) noteReadFailed();
+            throw chargingHistoryReadException("get charging power history", e);
         }
     }
 
@@ -10129,13 +11128,16 @@ public class SocHistoryDatabase {
                     // the live card already names the tariff that will price it.
                     PricingDecision livePd = priceSession(
                             liveIsDc,
-                            chargingStartLat, chargingStartLng);
+                            chargingStartLat, chargingStartLng,
+                            chargingStartTime, System.currentTimeMillis(), e);
                     if (livePd.rate > 0) {
                         o.put("cost", e * livePd.rate);
                         o.put("electricityRate", livePd.rate);
                         if (!livePd.currency.isEmpty()) o.put("currency", livePd.currency);
                         if (!livePd.tariffId.isEmpty()) {
                             o.put("tariffId", livePd.tariffId);
+                        }
+                        if (!livePd.tariffLabel.isEmpty()) {
                             o.put("tariffLabel", livePd.tariffLabel);
                         }
                     }
@@ -10200,11 +11202,24 @@ public class SocHistoryDatabase {
      * peak-guarded, so a real DC session whose coarse ticks all missed the threshold was recorded as
      * AC and priced at the AC rate. Taking the max of both makes every close path agree with the
      * curve the UI draws above it.
+     *
+     * <p>The coarse value is a plain running {@code Math.max} with no outlier rejection at all (see
+     * its update site) — a single glitch sample (the documented 359.4 idle-junk signature,
+     * CHARGING-POWER-INVARIANTS.md I4) locks in for the rest of the session and used to win this
+     * max unconditionally, re-poisoning a session whose FINE series had already median-filtered the
+     * same glitch out. Confirmed live, 2026-09-05: a slow AC session recorded a clean ~1.4 kW fine
+     * peak but still closed with peakPower=359.4, because this method took it from the coarse side
+     * of the max instead. Gating the coarse value against the fine series' own outlier ceiling stops
+     * that without losing the reason coarse exists — a genuine fast-DC ramp pulls the fine median up
+     * right alongside it, so the ceiling rises too and a real DC peak still passes.
      */
     private double resolvePeakKw(long sessionStartTime, double coarsePeak) {
-        double fine = peakSampleKw(sessionStartTime);
+        double[] fineStats = robustPeakAndAvgKw(sessionStartTime);
+        double fine = fineStats[0];
+        double ceiling = fineStats[2];
+        boolean coarseValid = isValidMeasuredChargingPower(coarsePeak) && coarsePeak <= ceiling;
         return Math.max(
-                isValidMeasuredChargingPower(coarsePeak) ? coarsePeak : 0,
+                coarseValid ? coarsePeak : 0,
                 isValidMeasuredChargingPower(fine) ? fine : 0);
     }
 
@@ -10230,43 +11245,82 @@ public class SocHistoryDatabase {
         return -1;
     }
 
-    /** Arithmetic mean of measured positive samples, or -1 when none are available. */
-    private double averageSamplePowerKw(long sessionStartTime) {
-        if (!isInitialized || connection == null || sessionStartTime <= 0) return -1;
-        try (PreparedStatement p = connection.prepareStatement(
-                "SELECT AVG(power_kw) FROM " + TABLE_CPS
-                        + " WHERE session_start_time = ?"
-                        + " AND power_kw > 0 AND power_kw <= 500;")) {
-            p.setLong(1, sessionStartTime);
-            try (ResultSet rs = p.executeQuery()) {
-                if (!rs.next()) return -1;
-                double value = rs.getDouble(1);
-                return !rs.wasNull() && isValidMeasuredChargingPower(value)
-                        ? value : -1;
+    // A sample this many times the session's own median is treated as an isolated
+    // glitch, not a real reading — see robustPeakAndAvgKw's doc comment.
+    private static final double OUTLIER_MEDIAN_MULTIPLIER = 8.0;
+    // Floor on the outlier ceiling so a very low median (slow trickle charging,
+    // ~1 kW) doesn't make ordinary tick-to-tick variance look like an outlier.
+    private static final double OUTLIER_CEILING_FLOOR_KW = 5.0;
+
+    /**
+     * Median-based outlier rejection over one session's recorded power samples,
+     * then peak = max and avg = mean of whatever survives.
+     *
+     * <p>Confirmed live, 2026-09-05: a slow overnight AC session (~200+ samples
+     * clustered around ~1.4 kW) recorded a single sample at 359.4 — the
+     * documented BYD idle-junk signature (CHARGING-POWER-INVARIANTS.md I4) — and
+     * because the OLD peak/avg here were a plain MAX/AVG over every sample, that
+     * one glitch became the session's reported "peak" and skewed its "average",
+     * which then tripped the session-level poisoned-power gate and hid the
+     * session's otherwise-real energy/avg data entirely.
+     *
+     * <p>The median is robust to a small minority of extreme samples by
+     * definition — it only reflects them once they're the MAJORITY, at which
+     * point they're not outliers, they're a real sustained high-power stretch
+     * (a genuine DC fast charge). So gating on "how far past the median" rather
+     * than a fixed kW ceiling or a specific known-bad value catches whatever
+     * bogus number a future glitch produces, without needing gun-state/AC-DC
+     * awareness and without falsely rejecting a real DC session's real peak
+     * (which pulls its own median up alongside it, so the ceiling rises with
+     * it too).
+     */
+    private double[] robustPeakAndAvgKw(long sessionStartTime) {
+        java.util.List<Double> sorted = new java.util.ArrayList<>();
+        if (isInitialized && connection != null && sessionStartTime > 0) {
+            try (PreparedStatement p = connection.prepareStatement(
+                    "SELECT power_kw FROM " + TABLE_CPS
+                            + " WHERE session_start_time = ?"
+                            + " AND power_kw > 0 AND power_kw <= 500 ORDER BY power_kw;")) {
+                p.setLong(1, sessionStartTime);
+                try (ResultSet rs = p.executeQuery()) {
+                    while (rs.next()) {
+                        double v = rs.getDouble(1);
+                        if (!rs.wasNull() && isValidMeasuredChargingPower(v)) sorted.add(v);
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("robustPeakAndAvgKw failed: " + e.getMessage());
             }
-        } catch (Exception e) {
-            logger.debug("averageSamplePowerKw failed: " + e.getMessage());
-            return -1;
         }
+        int n = sorted.size();
+        // Double.MAX_VALUE ceiling with no fine samples means "nothing to gate
+        // against" — resolvePeakKw() reads this as "trust the coarse value",
+        // matching its old behavior for sessions too short to have samples yet.
+        if (n == 0) return new double[]{0, -1, Double.MAX_VALUE};
+        double median = (n % 2 == 1)
+                ? sorted.get(n / 2)
+                : (sorted.get(n / 2 - 1) + sorted.get(n / 2)) / 2.0;
+        double ceiling = Math.max(median * OUTLIER_MEDIAN_MULTIPLIER, OUTLIER_CEILING_FLOOR_KW);
+        double sum = 0;
+        int count = 0;
+        double peak = 0;
+        for (double v : sorted) {
+            if (v > ceiling) continue; // isolated glitch, not folded into peak/avg
+            sum += v;
+            count++;
+            if (v > peak) peak = v;
+        }
+        return new double[]{peak, count > 0 ? sum / count : -1, ceiling};
     }
 
-    /** Max measured power (kW) across a session's recorded samples, or 0. */
+    /** Arithmetic mean of measured positive samples (outliers excluded), or -1 when none are available. */
+    private double averageSamplePowerKw(long sessionStartTime) {
+        return robustPeakAndAvgKw(sessionStartTime)[1];
+    }
+
+    /** Max measured power (kW) across a session's recorded samples (outliers excluded), or 0. */
     private double peakSampleKw(long sessionStartTime) {
-        if (!isInitialized || connection == null || sessionStartTime <= 0) return 0;
-        try (PreparedStatement p = connection.prepareStatement(
-                "SELECT MAX(power_kw) FROM " + TABLE_CPS
-                        + " WHERE session_start_time = ?"
-                        + " AND power_kw > 0 AND power_kw <= 500;")) {
-            p.setLong(1, sessionStartTime);
-            try (ResultSet rs = p.executeQuery()) {
-                if (rs.next()) {
-                    double value = rs.getDouble(1);
-                    return !rs.wasNull()
-                            && isValidMeasuredChargingPower(value) ? value : 0;
-                }
-            }
-        } catch (Exception ignored) {}
-        return 0;
+        return robustPeakAndAvgKw(sessionStartTime)[0];
     }
 
     /**
@@ -11269,7 +12323,8 @@ public class SocHistoryDatabase {
                     optOutCloseIsDc = currentChargingTypeVerdict();
                     try {
                         optOutClosePricing = priceSessionForClose(
-                                optOutCloseIsDc, chargingStartLat, chargingStartLng);
+                                optOutCloseIsDc, chargingStartLat, chargingStartLng,
+                                chargingStartTime);
                     } catch (Exception unavailable) {
                         optOutClosePricing = null;
                         logger.warn("Opt-out close pricing unavailable at boundary: "
@@ -12347,6 +13402,29 @@ public class SocHistoryDatabase {
             logger.debug("getMostRecentCompletedChargingSession failed: " + e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Most recent traction-battery SoC written to {@code soc_history}, or
+     * {@link Double#NaN} if none. DiLink 5 drops the live SOC lastEvent
+     * while parked; this is the last measured pack percent.
+     */
+    public synchronized double getLatestRecordedSocPercent() {
+        if (!isAvailable()) return Double.NaN;
+        try (PreparedStatement stmt = connection.prepareStatement(
+                "SELECT soc_percent FROM " + TABLE_SOC
+                        + " WHERE soc_percent >= 0 AND soc_percent <= 100"
+                        + " ORDER BY timestamp DESC LIMIT 1")) {
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    double v = rs.getDouble(1);
+                    if (!rs.wasNull() && v >= 0 && v <= 100) return v;
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("getLatestRecordedSocPercent failed: " + e.getMessage());
+        }
+        return Double.NaN;
     }
 
     /**

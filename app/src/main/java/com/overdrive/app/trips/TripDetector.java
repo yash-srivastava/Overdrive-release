@@ -1,7 +1,12 @@
 package com.overdrive.app.trips;
 
+import android.os.SystemClock;
+
+import com.overdrive.app.byd.CarSvcTelemetry;
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.monitor.AccMonitor;
 import com.overdrive.app.monitor.BatterySocData;
+import com.overdrive.app.monitor.ChargingDetector;
 import com.overdrive.app.monitor.GearMonitor;
 import com.overdrive.app.monitor.GpsMonitor;
 import com.overdrive.app.monitor.VehicleDataMonitor;
@@ -18,7 +23,11 @@ import java.util.concurrent.TimeUnit;
  *
  * Transitions:
  * - IDLE + gear ∈ {D, R, S, M, N} → create TripRecord, notify listener → ACTIVE
+ * - IDLE + fused GPS/CAN speed ≥ 8 km/h for 3 s (ACC on, not charging)
+ *   → ACTIVE. Covers DiLink 5 where GEAR_R lastEvent stays Park.
  * - ACTIVE + gear == P + speed == 0 → start 120s debounce timer → PARK_PENDING
+ * - ACTIVE + gear P/unknown + fused speed ≤ 2 km/h for 2 s → PARK_PENDING
+ *   (same stuck-Park case: there is never a P edge to close the trip).
  * - PARK_PENDING + gear ∈ {D, R, S, M, N} (within 120s) → cancel timer → ACTIVE
  * - PARK_PENDING + 120s elapsed → finalize trip, notify listener → IDLE
  *
@@ -30,10 +39,6 @@ public class TripDetector {
 
     // Constants
     static final long PARK_DEBOUNCE_MS = 120_000;    // 2 minutes
-    /** Max age of a GPS fix for its speed to veto the park transition. Beyond
-     *  this, gear P wins — a cached/disk-restored speed must not wedge the
-     *  detector in ACTIVE. 10s is generous vs the ~1s fix cadence. */
-    static final long GPS_SPEED_MAX_AGE_MS = 10_000;
     static final long MIN_TRIP_DURATION_MS = 60_000;  // 1 minute
     static final double MIN_TRIP_DISTANCE_KM = 0.2;   // 200 meters
 
@@ -53,6 +58,12 @@ public class TripDetector {
     // Debounce timer
     private final ScheduledExecutorService scheduler;
     private volatile ScheduledFuture<?> parkDebounceTask;
+    private volatile ScheduledFuture<?> motionWatchTask;
+    // Periodic durable checkpoint while ACTIVE — see startTrip() and TripListener.onTripCheckpoint.
+    private static final long CHECKPOINT_INTERVAL_MS = 60_000; // 1 minute
+    private volatile ScheduledFuture<?> checkpointTask;
+    private int motionStartStreak;
+    private int motionStopStreak;
     // PHEV-only: integrates seconds where engineSpeedRpm > 600 across the
     // active trip. Used by the cost-breakdown UI to label the trip's HEV
     // mode share. Idle on BEVs (sampler is started only when isPhev=true).
@@ -80,6 +91,14 @@ public class TripDetector {
         void onTripDiscarded(TripRecord trip, String reason);
         /** Called before finalization to get the GPS distance from the recorder. */
         default double getRecordedDistanceKm() { return 0; }
+        /**
+         * Periodic durable checkpoint while a trip is ACTIVE (see startTrip's
+         * checkpoint timer) — SoC/energy readings only, so a mid-drive daemon
+         * crash leaves behind real (if slightly stale) energy data instead of
+         * nothing but the GPS telemetry file. No-op default so existing
+         * listeners that don't own a TripDatabase aren't forced to implement it.
+         */
+        default void onTripCheckpoint(TripRecord trip) {}
     }
 
     /**
@@ -145,28 +164,17 @@ public class TripDetector {
      */
     private void handleActiveGearChange(int newGear) {
         if (newGear == GearMonitor.GEAR_P) {
-            // Check speed — only start debounce if speed is 0.
-            //
-            // STALENESS GUARD: GpsMonitor.getSpeed() is a cached field that is also
-            // restored from disk at startup, so it can report a non-zero speed from
-            // a fix minutes or hours old (e.g. GPS lost in a garage, or the value
-            // reloaded after a restart). Gear P is a far more reliable "the car
-            // stopped" signal than a stale speed sample. Without this guard the
-            // detector never leaves ACTIVE, the trip only closes on ACC-off, and its
-            // recorded duration is inflated by the whole parked interval.
-            float speed = GpsMonitor.getInstance().getSpeed();
-            long fixAgeMs = System.currentTimeMillis() - GpsMonitor.getInstance().getLastUpdate();
-            boolean speedTrustworthy = fixAgeMs >= 0 && fixAgeMs <= GPS_SPEED_MAX_AGE_MS;
-            if (speed <= 0.5f || !speedTrustworthy) {
-                // Start park debounce timer
-                logger.info("Gear P + speed=" + speed + "m/s"
-                    + (speedTrustworthy ? " (stopped)" : " IGNORED (fix " + fixAgeMs + "ms old)")
-                    + " → starting " + (PARK_DEBOUNCE_MS / 1000) + "s debounce");
+            double fusedKmh = readFusedSpeedKmh();
+            if (TripMotionGate.isStopped(fusedKmh)) {
+                logger.info("Gear P + fusedSpeed="
+                        + (Double.isNaN(fusedKmh) ? "n/a" : String.format("%.1f", fusedKmh))
+                        + " km/h → starting " + (PARK_DEBOUNCE_MS / 1000) + "s debounce");
                 state = State.PARK_PENDING;
                 parkStartTime = System.currentTimeMillis();
                 startParkDebounceTimer();
             } else {
-                logger.info("Gear P but speed=" + speed + " m/s → staying ACTIVE (moving)");
+                logger.info("Gear P but fusedSpeed=" + String.format("%.1f", fusedKmh)
+                        + " km/h → staying ACTIVE (moving)");
             }
         }
         // Other gear changes while active are normal driving (D→R, D→N, etc.)
@@ -185,12 +193,153 @@ public class TripDetector {
         }
     }
 
+    // ==================== GPS / CAN MOTION WATCH ====================
+
+    /**
+     * 1 Hz fused-speed sampler. Starts trips when gear is stuck in Park and
+     * ends them the same way (there is no P edge if lastEvent never left P).
+     */
+    public void startMotionWatch() {
+        synchronized (this) {
+            if (motionWatchTask != null && !motionWatchTask.isDone()) {
+                return;
+            }
+            motionWatchTask = scheduler.scheduleAtFixedRate(
+                    this::tickMotion, 1, 1, TimeUnit.SECONDS);
+            logger.info("Motion watch started (GPS + CAN speed fallback)");
+        }
+    }
+
+    private void stopMotionWatch() {
+        if (motionWatchTask != null && !motionWatchTask.isDone()) {
+            motionWatchTask.cancel(false);
+            motionWatchTask = null;
+        }
+    }
+
+    private void tickMotion() {
+        try {
+            boolean charging = false;
+            try {
+                charging = ChargingDetector.getInstance().isCharging();
+            } catch (Throwable ignored) {}
+            onMotionSample(
+                    readLiveGear(),
+                    readFusedSpeedKmh(),
+                    AccMonitor.isAccOn(),
+                    AccMonitor.isAccStateAuthoritative(),
+                    charging);
+        } catch (Throwable t) {
+            logger.debug("motion tick: " + t.getMessage());
+        }
+    }
+
+    /**
+     * Package-visible so streak start/stop can be unit-tested without Android GPS.
+     */
+    synchronized void onMotionSample(
+            int gear,
+            double fusedKmh,
+            boolean accOn,
+            boolean accAuthoritative,
+            boolean charging) {
+        if (TripMotionGate.mayStartFromMotion(
+                state == State.IDLE, accOn, accAuthoritative, charging, fusedKmh)) {
+            motionStartStreak++;
+            motionStopStreak = 0;
+            if (motionStartStreak >= TripMotionGate.START_STREAK) {
+                motionStartStreak = 0;
+                logger.info("Fused speed " + String.format("%.1f", fusedKmh)
+                        + " km/h for " + TripMotionGate.START_STREAK
+                        + "s (gear=" + GearMonitor.gearToString(gear)
+                        + ") → starting trip");
+                startTrip();
+            }
+            return;
+        }
+        motionStartStreak = 0;
+
+        if (state == State.PARK_PENDING && TripMotionGate.mayCancelParkDebounce(fusedKmh)) {
+            motionStopStreak = 0;
+            logger.info("Fused speed " + String.format("%.1f", fusedKmh)
+                    + " km/h → cancelling park debounce, back to ACTIVE");
+            cancelParkDebounceTimer();
+            parkStartTime = 0;
+            state = State.ACTIVE;
+            return;
+        }
+
+        if (state == State.ACTIVE && TripMotionGate.mayStopFromMotion(gear, fusedKmh)) {
+            motionStopStreak++;
+            if (motionStopStreak >= TripMotionGate.STOP_STREAK) {
+                motionStopStreak = 0;
+                logger.info("Gear " + GearMonitor.gearToString(gear)
+                        + " + fusedSpeed="
+                        + (Double.isNaN(fusedKmh) ? "n/a" : String.format("%.1f", fusedKmh))
+                        + " km/h → starting " + (PARK_DEBOUNCE_MS / 1000) + "s debounce");
+                state = State.PARK_PENDING;
+                parkStartTime = System.currentTimeMillis();
+                startParkDebounceTimer();
+            }
+            return;
+        }
+        motionStopStreak = 0;
+    }
+
+    private static int readLiveGear() {
+        try {
+            if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+                int carSvc = CarSvcTelemetry.INSTANCE.gearValue();
+                if (carSvc >= 1 && carSvc <= 6) return carSvc;
+            }
+        } catch (Throwable ignored) {}
+        try {
+            return GearMonitor.getInstance().getCurrentGear();
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    /**
+     * Max of live CAN ({@link CarSvcTelemetry#resolvedSpeedKmh}) and a
+     * non-cached GPS fix. Stale GPS is dropped so a garage restart cannot
+     * open or hold a trip.
+     */
+    double readFusedSpeedKmh() {
+        double canKmh = Double.NaN;
+        try {
+            int v = CarSvcTelemetry.INSTANCE.resolvedSpeedKmh();
+            if (v >= 0 && v <= 300) canKmh = v;
+        } catch (Throwable ignored) {}
+
+        double gpsKmh = Double.NaN;
+        try {
+            GpsMonitor gps = GpsMonitor.getInstance();
+            long fixAgeMs;
+            if (gps.isLoadedFromCache()) {
+                fixAgeMs = -1L;
+            } else if (gps.getFixElapsedMs() > 0L) {
+                fixAgeMs = Math.max(0L, SystemClock.elapsedRealtime() - gps.getFixElapsedMs());
+            } else {
+                fixAgeMs = Math.max(0L, System.currentTimeMillis() - gps.getLastUpdate());
+            }
+            if (TripMotionGate.gpsSpeedUsable(
+                    gps.hasLocation(), gps.isLoadedFromCache(), fixAgeMs)) {
+                gpsKmh = TripMotionGate.gpsSpeedKmh(gps.getSpeed());
+            }
+        } catch (Throwable ignored) {}
+
+        return TripMotionGate.fuse(canKmh, gpsKmh);
+    }
+
     // ==================== TRIP LIFECYCLE ====================
 
     /**
      * Start a new trip. Creates a TripRecord and notifies the listener.
      */
     private void startTrip() {
+        motionStartStreak = 0;
+        motionStopStreak = 0;
         long now = System.currentTimeMillis();
         activeTrip = new TripRecord();
         activeTrip.startTime = now;
@@ -203,6 +352,23 @@ public class TripDetector {
             }
         } catch (Exception e) {
             logger.error("Failed to read start SoC: " + e.getMessage());
+        }
+        // DiLink5-exclusive car_service override, unconditional (not just a
+        // fallback for a null/missing stock read) — same "DiLink5 always
+        // wins" rule already applied to 12V/SOC elsewhere in this app
+        // (CarSvcTelemetry.socPercent doc comment). An earlier version of
+        // this fix only overrode when the stock reading was exactly 0.0,
+        // which would silently keep a stale-but-nonzero stock value instead
+        // of the better source; deliberately widened to always-preferred.
+        try {
+            if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+                double carSvcSoc = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.socPercentValue();
+                if (!Double.isNaN(carSvcSoc) && carSvcSoc >= 0 && carSvcSoc <= 100) {
+                    activeTrip.socStart = carSvcSoc;
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Failed to read car_service start SoC: " + e.getMessage());
         }
 
         // Read start kWh (remaining energy from BMS)
@@ -321,6 +487,52 @@ public class TripDetector {
                 logger.error("Listener.onTripStarted failed: " + e.getMessage());
             }
         }
+
+        checkpointNow(); // immediate first checkpoint, then periodic
+        checkpointTask = scheduler.scheduleAtFixedRate(
+                this::checkpointNow, CHECKPOINT_INTERVAL_MS, CHECKPOINT_INTERVAL_MS,
+                TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * Refresh the live trip's current SoC/kWh/elec-counter readings and hand
+     * them to the listener for durable persistence. Reuses socEnd/kwhEnd/
+     * elecConEnd as the "current reading" slot — harmless, since trip-end
+     * overwrites them again with the real final values regardless.
+     */
+    private void checkpointNow() {
+        TripRecord trip = activeTrip;
+        if (trip == null || state != State.ACTIVE) return;
+        try {
+            BatterySocData socData = VehicleDataMonitor.getInstance().getBatterySoc();
+            if (socData != null) trip.socEnd = socData.socPercent;
+            if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+                double carSvcSoc = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.socPercentValue();
+                if (!Double.isNaN(carSvcSoc) && carSvcSoc >= 0 && carSvcSoc <= 100) trip.socEnd = carSvcSoc;
+            }
+            double kwhRemaining = VehicleDataMonitor.getInstance().getBatteryRemainPowerKwh();
+            if (kwhRemaining > 0) trip.kwhEnd = kwhRemaining;
+            double elecConNow = VehicleDataMonitor.getInstance().getTotalElecCon();
+            if (!Double.isNaN(elecConNow) && elecConNow > 0) trip.elecConEnd = elecConNow;
+        } catch (Exception e) {
+            logger.debug("checkpointNow: read failed: " + e.getMessage());
+        }
+        if (listener != null) {
+            try {
+                listener.onTripCheckpoint(trip);
+            } catch (Exception e) {
+                logger.debug("Listener.onTripCheckpoint failed: " + e.getMessage());
+            }
+        }
+    }
+
+    /** Stop the periodic checkpoint timer. Called whenever a trip stops being ACTIVE. */
+    private void stopCheckpointTimer() {
+        ScheduledFuture<?> t = checkpointTask;
+        if (t != null) {
+            t.cancel(false);
+            checkpointTask = null;
+        }
     }
 
     /**
@@ -350,6 +562,19 @@ public class TripDetector {
             }
         } catch (Exception e) {
             logger.error("Failed to read end SoC: " + e.getMessage());
+        }
+        // DiLink5-exclusive car_service override — see the matching comment
+        // in startTrip() above; same always-preferred (not fallback-only)
+        // rule applies symmetrically to the end-of-trip reading.
+        try {
+            if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+                double carSvcSoc = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.socPercentValue();
+                if (!Double.isNaN(carSvcSoc) && carSvcSoc >= 0 && carSvcSoc <= 100) {
+                    activeTrip.socEnd = carSvcSoc;
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Failed to read car_service end SoC: " + e.getMessage());
         }
 
         // Read end kWh (remaining energy from BMS)
@@ -556,10 +781,13 @@ public class TripDetector {
         }
 
         // Trip is valid — notify listener
+        stopCheckpointTimer();
         TripRecord completedTrip = activeTrip;
         activeTrip = null;
         startOdometerKm = -1;
         parkStartTime = 0;
+        motionStartStreak = 0;
+        motionStopStreak = 0;
         state = State.IDLE;
 
         if (listener != null) {
@@ -575,10 +803,13 @@ public class TripDetector {
      * Discard a trip that doesn't meet minimum thresholds.
      */
     private void discardTrip(String reason) {
+        stopCheckpointTimer();
         TripRecord discardedTrip = activeTrip;
         activeTrip = null;
         startOdometerKm = -1;
         parkStartTime = 0;
+        motionStartStreak = 0;
+        motionStopStreak = 0;
         state = State.IDLE;
 
         if (listener != null && discardedTrip != null) {
@@ -726,6 +957,7 @@ public class TripDetector {
      */
     public void shutdown() {
         logger.info("Shutting down TripDetector");
+        stopMotionWatch();
         finalizeActiveTrip();
         scheduler.shutdownNow();
     }

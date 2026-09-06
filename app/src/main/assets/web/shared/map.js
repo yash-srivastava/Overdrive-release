@@ -22,10 +22,20 @@ BYD.map = {
     userPosition: null,
     isInitialized: false,
     distanceLabel: null,
-    
+
     // Default center (will be updated with car position)
     DEFAULT_ZOOM: 18,
-    
+
+    // Auto-follow state -- true means every car position update re-centers
+    // the map on the car. A genuine user pan/zoom (detected via Leaflet's
+    // dragstart/zoomstart events, which only carry an originalEvent when
+    // they originate from real mouse/touch/wheel input -- our own
+    // panTo()/setView() calls never do) flips this off and shows the
+    // recenter button; tapping it (or a fresh position after re-init)
+    // turns following back on.
+    followCar: true,
+    recenterBtnEl: null,
+
     /**
      * Initialize the map
      */
@@ -54,7 +64,14 @@ BYD.map = {
         
         // Add zoom control to bottom right
         L.control.zoom({ position: 'bottomright' }).addTo(this.map);
-        
+
+        // Reset follow-state and wire up user-pan/zoom detection fresh for
+        // this map instance (each page calls init() once on its own
+        // #mapContainer, so there's nothing to double-bind).
+        this.followCar = true;
+        this.recenterBtnEl = null;
+        this._bindInteractionTracking();
+
         // Create car marker with custom icon
         this.carMarker = L.marker([0, 0], {
             icon: this.createCarIcon(),
@@ -254,12 +271,18 @@ BYD.map = {
             pulse.classList.add('active');
         }
         
-        // Center map on car if this is first position
+        // Center map on car if this is first position; on every later
+        // update, keep following the car (at whatever zoom the user is
+        // currently at) as long as they haven't panned/zoomed away.
+        // panTo() never carries an originalEvent, so it can't be mistaken
+        // for user interaction by the dragstart/zoomstart listeners below.
         if (!this.hasInitialPosition) {
             this.map.setView([lat, lng], this.DEFAULT_ZOOM);
             this.hasInitialPosition = true;
+        } else if (this.followCar) {
+            this.map.panTo([lat, lng], { animate: true });
         }
-        
+
         // Update route if user position exists
         if (this.userPosition) {
             this.drawRoute();
@@ -402,13 +425,75 @@ BYD.map = {
     },
     
     /**
-     * Center map on car
+     * Center map on car. An explicit "go to car" action, so it also
+     * resumes auto-follow -- same as tapping the recenter button.
      */
     centerOnCar() {
         if (!this.map || !this.carPosition.lat) return;
         this.map.setView([this.carPosition.lat, this.carPosition.lng], this.DEFAULT_ZOOM);
+        this.followCar = true;
+        this._hideRecenterButton();
     },
-    
+
+    /**
+     * Wire up detection for genuine user pans/zooms (drag, wheel, pinch,
+     * double-click-zoom) vs. our own programmatic panTo()/setView() calls.
+     * Leaflet only attaches originalEvent to move/zoom events that trace
+     * back to real DOM input, so panTo()/setView() (no originalEvent) can
+     * never be mistaken for a user pulling away from the car.
+     */
+    _bindInteractionTracking() {
+        if (!this.map || this._interactionBound) return;
+        this._interactionBound = true;
+
+        this.map.on('dragstart', () => this._onUserInteraction());
+        this.map.on('zoomstart', (e) => {
+            if (e.originalEvent) this._onUserInteraction();
+        });
+    },
+
+    _onUserInteraction() {
+        if (!this.followCar) return;
+        this.followCar = false;
+        this._showRecenterButton();
+    },
+
+    /**
+     * Create (once) and reveal the floating recenter button inside the
+     * Leaflet container. Lives outside Leaflet's own pane system so it
+     * never gets swept up by tile/marker z-index rules.
+     */
+    _showRecenterButton() {
+        if (this.recenterBtnEl) {
+            this.recenterBtnEl.classList.add('visible');
+            return;
+        }
+        if (!this.map) return;
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'map-recenter-btn visible';
+        btn.setAttribute('aria-label', BYD.i18n.t('map.recenter') || 'Recenter on vehicle');
+        btn.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+            </svg>
+        `;
+        btn.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            this.centerOnCar();
+        });
+
+        this.map.getContainer().appendChild(btn);
+        this.recenterBtnEl = btn;
+    },
+
+    _hideRecenterButton() {
+        if (this.recenterBtnEl) this.recenterBtnEl.classList.remove('visible');
+    },
+
     /**
      * Open Google Maps with directions to car
      */
@@ -467,5 +552,8 @@ BYD.map = {
             this.map = null;
         }
         this.isInitialized = false;
+        this._interactionBound = false;
+        this.recenterBtnEl = null;
+        this.followCar = true;
     }
 };

@@ -23,8 +23,11 @@ public class HttpServerChargingStatusTest {
     public void statusTreatsV2lAsUnpluggedAndRetainsNormalFallbacks() {
         assertFalse(HttpServer.resolveChargingPlugged(
                 true, ChargingStateData.ChargingStatus.CHARGING, 2, true));
-        assertTrue(HttpServer.resolveChargingPlugged(
+        assertFalse(HttpServer.resolveChargingPlugged(
                 false, ChargingStateData.ChargingStatus.READY,
+                BydVehicleData.UNAVAILABLE, false));
+        assertTrue(HttpServer.resolveChargingPlugged(
+                false, ChargingStateData.ChargingStatus.FINISHED,
                 BydVehicleData.UNAVAILABLE, false));
     }
 

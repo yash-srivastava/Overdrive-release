@@ -294,9 +294,26 @@ public class BydDataCollector {
             "/storage/emulated/0/Overdrive/byd_telemetry_snap.json",
             "/data/local/tmp/byd_telemetry_snap.json"
     };
+    /** Parked DiLink 5 can go hours without tyre/window lastEvents; the disk
+     *  snap is the only copy of those readings after a daemon restart. */
+    private static final long SNAPSHOT_DISK_MAX_AGE_MS = 7L * 24 * 60 * 60 * 1000;
 
     public static void writeSnapshotDiskFile(BydVehicleData data) {
         if (data == null) return;
+        // Never replace a richer parked cache with a sparse ACC-off dump.
+        // DiLink 5 drops tyre/window lastEvents while asleep; writing that
+        // empty poll used to wipe the only copy the dash could show.
+        if (data.tyrePressure == null) {
+            BydVehicleData existing = peekSnapshotDiskFile();
+            if (existing != null && existing.tyrePressure != null) {
+                data = data.toBuilder()
+                        .tyrePressure(existing.tyrePressure)
+                        .tyrePressureState(existing.tyrePressureState)
+                        .tyreTemperature(existing.tyreTemperature)
+                        .tyreSystemState(existing.tyreSystemState)
+                        .build();
+            }
+        }
         byte[] bytes = data.toJson().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
         for (String path : SNAPSHOT_FILE_PATHS) {
             try {
@@ -316,10 +333,19 @@ public class BydDataCollector {
     }
 
     public static BydVehicleData readSnapshotDiskFile() {
+        return readSnapshotDiskFile(SNAPSHOT_DISK_MAX_AGE_MS);
+    }
+
+    private static BydVehicleData peekSnapshotDiskFile() {
+        return readSnapshotDiskFile(Long.MAX_VALUE);
+    }
+
+    private static BydVehicleData readSnapshotDiskFile(long maxAgeMs) {
         for (String path : SNAPSHOT_FILE_PATHS) {
             try {
                 java.io.File file = new java.io.File(path);
-                if (file.exists() && (System.currentTimeMillis() - file.lastModified()) <= 60_000) {
+                if (file.exists()
+                        && (System.currentTimeMillis() - file.lastModified()) <= maxAgeMs) {
                     byte[] bytes = new byte[(int) file.length()];
                     try (java.io.FileInputStream fis = new java.io.FileInputStream(file)) {
                         fis.read(bytes);
@@ -1389,6 +1415,12 @@ public class BydDataCollector {
      * unavailable / ACC off. Lock-free; safe from the overlay's 2 Hz thread.
      */
     public double readCurrentSpeedKmh() {
+        if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+            try {
+                int carSvc = CarSvcTelemetry.INSTANCE.resolvedSpeedKmh();
+                if (carSvc >= 0 && carSvc <= 300) return carSvc;
+            } catch (Throwable ignored) {}
+        }
         // Only a HARDWARE-detected unit is trustworthy for the raw value. Without it the
         // unit is unknown → NaN ("--"), never a guess (km would be ~1.6× low on a miles
         // cluster; the app preference can't disambiguate the raw unit).
@@ -1413,7 +1445,11 @@ public class BydDataCollector {
      */
     public synchronized void startFastDynamicsPoll() {
         if (fastPollScheduler != null) return;       // already running
-        if (speedDevice == null && gearboxDevice == null) return; // nothing to poll on this trim
+        boolean dilink5 = false;
+        try {
+            dilink5 = DiLink5Platform.isActive();
+        } catch (Throwable ignored) {}
+        if (speedDevice == null && gearboxDevice == null && !dilink5) return;
         fastPollScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "RoadSenseFastPoll");
             t.setDaemon(true);
@@ -1425,18 +1461,36 @@ public class BydDataCollector {
                 int accel = BydVehicleData.UNAVAILABLE;
                 int brake = BydVehicleData.UNAVAILABLE;
                 int gear = BydVehicleData.UNAVAILABLE;
-                if (speedDevice != null) {
-                    Object sp = BydDeviceHelper.callGetter(speedDevice, "getCurrentSpeed");
-                    if (sp instanceof Number) {
-                        double v = ((Number) sp).doubleValue();
-                        speedKmh = convertRawSpeedToKmh(v, getSpeedToKmhFactor());
-                    }
-                    Object ac = BydDeviceHelper.callGetter(speedDevice, "getAccelerateDeepness");
-                    if (ac instanceof Number) accel = ((Number) ac).intValue();
-                    Object br = BydDeviceHelper.callGetter(speedDevice, "getBrakeDeepness");
-                    if (br instanceof Number) brake = ((Number) br).intValue();
+                if (DiLink5Platform.isActive()) {
+                    try {
+                        int carSvcSpeed = CarSvcTelemetry.INSTANCE.resolvedSpeedKmh();
+                        if (carSvcSpeed >= 0 && carSvcSpeed <= 300) speedKmh = carSvcSpeed;
+                        int carSvcGear = CarSvcTelemetry.INSTANCE.gearValue();
+                        if (carSvcGear >= 1 && carSvcGear <= 6) gear = carSvcGear;
+                        int carSvcAccel = CarSvcTelemetry.INSTANCE.accelPercent();
+                        if (carSvcAccel >= 0) accel = carSvcAccel;
+                        int carSvcBrake = CarSvcTelemetry.INSTANCE.brakePercent();
+                        if (carSvcBrake >= 0) brake = carSvcBrake;
+                    } catch (Throwable ignored) {}
                 }
-                if (gearboxDevice != null) {
+                if (speedDevice != null) {
+                    if (Double.isNaN(speedKmh)) {
+                        Object sp = BydDeviceHelper.callGetter(speedDevice, "getCurrentSpeed");
+                        if (sp instanceof Number) {
+                            double v = ((Number) sp).doubleValue();
+                            speedKmh = convertRawSpeedToKmh(v, getSpeedToKmhFactor());
+                        }
+                    }
+                    if (accel == BydVehicleData.UNAVAILABLE) {
+                        Object ac = BydDeviceHelper.callGetter(speedDevice, "getAccelerateDeepness");
+                        if (ac instanceof Number) accel = ((Number) ac).intValue();
+                    }
+                    if (brake == BydVehicleData.UNAVAILABLE) {
+                        Object br = BydDeviceHelper.callGetter(speedDevice, "getBrakeDeepness");
+                        if (br instanceof Number) brake = ((Number) br).intValue();
+                    }
+                }
+                if (gearboxDevice != null && gear == BydVehicleData.UNAVAILABLE) {
                     Object g = BydDeviceHelper.callGetter(gearboxDevice, "getGearboxAutoModeType");
                     if (g instanceof Number) gear = ((Number) g).intValue();
                 }
@@ -1914,6 +1968,14 @@ public class BydDataCollector {
      *  or UNAVAILABLE on a miss. Uses the same getter the 5s poll (collectGearbox) and the
      *  fast-dynamics poll already call — NOT the learningEPB() listener path. */
     public int readGearNow() {
+        if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+            try {
+                int carSvc = CarSvcTelemetry.INSTANCE.gearValue();
+                if (carSvc >= 1 && carSvc <= 6) return carSvc;
+            } catch (Throwable t) {
+                logger.debug("readGearNow car_service error: " + t.getMessage());
+            }
+        }
         if (gearboxDevice != null) {
             try {
                 Object g = BydDeviceHelper.callGetter(gearboxDevice, "getGearboxAutoModeType");
@@ -2375,6 +2437,43 @@ public class BydDataCollector {
     // This guard prevents any code path from triggering a full device sweep within the interval.
     private volatile long lastCoreCollectTime = 0;
     private static final long MIN_COLLECT_INTERVAL_MS = 5000; // 5 seconds
+    private volatile long lastFullCollectTime = 0;
+    // Coalescing window for collectAllFull(), which deliberately bypasses
+    // MIN_COLLECT_INTERVAL_MS above so a client always gets fresh data on
+    // demand. Confirmed live (drive-session logging, 2026-09-04): collectAllFull()
+    // and the periodic background scheduler's collectAll() tick (POLL_INTERVAL_MS =
+    // 5s while ACC is on) both synchronize on this same collector instance, and
+    // there are now THREE independent /status pollers in practice -- the native
+    // dashboard widget (every 2s), the web dashboard, and any external client --
+    // each capable of triggering its own full vendor-HAL + dumpsys car_service
+    // sweep. A request arriving while the scheduler's own tick holds the monitor
+    // (or while a HAL binder call inside it is slow, which happens under real
+    // CAN-bus load while driving) queues behind it regardless of the HTTP
+    // thread pool's size, and was observed live to take 3+ seconds, well past a
+    // typical client's read timeout.
+    //
+    // A wider coalescing window here doesn't shrink any single stall, but it
+    // sharply cuts how often a fresh full sweep runs at all -- sized close to
+    // the scheduler's own 5s cadence so most near-simultaneous pollers (across
+    // all three consumers) reuse one recent snapshot instead of each queuing
+    // for their own. A proper bounded/non-blocking lock on the collection path
+    // would be the complete fix, but that means changing the locking model
+    // shared by ~15 other synchronized methods on this class (several of which
+    // depend on the same mutual exclusion for their own read-modify-write
+    // snapshot updates) -- too much blast radius to take on without dedicated
+    // test time, so this is the safe mitigation for now.
+    private static final long MIN_FULL_COLLECT_INTERVAL_MS = 4000;
+    // Bounded alternative to synchronized(this) for collectAllFull() specifically --
+    // see the full rationale as a comment at its call site. Kept separate from the
+    // periodic scheduler's collectAll()/collectAllFromScheduler(), which stay on the
+    // class monitor: their own mutual exclusion is a resource-usage nicety, not a
+    // correctness requirement (publishCollectedSnapshot()'s chargingEdgePublishLock +
+    // monotonic pollGeneration already makes concurrent/out-of-order publishes safe),
+    // so decoupling only the client-facing path is enough to fix the actual problem
+    // (a request thread blocking indefinitely) without touching the ~15 other
+    // synchronized(this) methods on this class.
+    private final java.util.concurrent.locks.ReentrantLock collectFullLock =
+            new java.util.concurrent.locks.ReentrantLock();
 
     // ACC state: when off, skip polling speed/engine/gearbox (always 0 when parked)
     private volatile boolean accIsOn = true;
@@ -2622,6 +2721,67 @@ public class BydDataCollector {
         return !beamDemand.isEmpty();
     }
 
+    /**
+     * DiLink5 overlay: vendor HAL getters for SOC / 12V / speed / gear are
+     * dead on this platform (SecurityException or empty), while
+     * {@code dumpsys car_service} exposes the same property bus. Applied
+     * after HAL + cloud merge so car_service wins. No-op off DiLink5.
+     * Runs on the collector thread (5s), never on the 5Hz overlay poller.
+     */
+    private void applyCarSvcOverlay(BydVehicleData.Builder b) {
+        try {
+            if (!DiLink5Platform.isActive()) return;
+            double soc = CarSvcTelemetry.INSTANCE.socPercentValue();
+            if (!Double.isNaN(soc) && soc >= 0 && soc <= 100) b.socPercent(soc);
+            float v12 = CarSvcTelemetry.INSTANCE.batteryVoltage12v();
+            if (v12 >= 8f && v12 <= 16f) b.voltage12v(v12);
+            int speed = CarSvcTelemetry.INSTANCE.resolvedSpeedKmh();
+            if (speed >= 0 && speed <= 300) b.speedKmh(speed);
+            int[] windows = CarSvcTelemetry.INSTANCE.windowPercentsRaw();
+            boolean anyWindow = false;
+            if (windows != null) {
+                for (int p : windows) {
+                    if (p >= 0) { anyWindow = true; break; }
+                }
+            }
+            if (anyWindow) {
+                int[] merged = (b.windowOpenPercent != null)
+                        ? java.util.Arrays.copyOf(b.windowOpenPercent, Math.max(6, b.windowOpenPercent.length))
+                        : new int[6];
+                for (int i = 0; i < windows.length && i < merged.length; i++) {
+                    if (windows[i] >= 0) merged[i] = windows[i];
+                }
+                b.windowOpenPercent(merged);
+            }
+            int gear = CarSvcTelemetry.INSTANCE.gearValue();
+            if (gear >= 1 && gear <= 6) b.gearMode(gear);
+            int rangeKm = CarSvcTelemetry.INSTANCE.elecRangeKm();
+            if (rangeKm > 0) b.elecRangeKm(rangeKm);
+            int odometerKm = CarSvcTelemetry.INSTANCE.totalMileageKm();
+            if (odometerKm > 0) b.totalMileageKm(odometerKm);
+            int[] locks = CarSvcTelemetry.INSTANCE.doorsArray();
+            if (locks.length >= 7 && (locks[6] == 1 || locks[6] == 2)) {
+                b.doorLockStatus(locks);
+            }
+            int accel = CarSvcTelemetry.INSTANCE.accelPercent();
+            if (accel >= 0) b.accelPercent(accel);
+            int brake = CarSvcTelemetry.INSTANCE.brakePercent();
+            if (brake >= 0) b.brakePercent(brake);
+            int turn = CarSvcTelemetry.INSTANCE.turnLightState();
+            if (turn >= 1) {
+                boolean left = (turn == 2 || turn == 3 || turn == 6 || turn == 7);
+                boolean right = (turn == 4 || turn == 5 || turn == 6 || turn == 7);
+                b.leftTurnState(left ? 1 : 0);
+                b.rightTurnState(right ? 1 : 0);
+            }
+            int mappedGun = mapCarSvcGunToHal(
+                    CarSvcTelemetry.INSTANCE.gunConnected(), b.chargingGunState);
+            if (mappedGun != b.chargingGunState) b.chargingGunState(mappedGun);
+        } catch (Throwable t) {
+            logger.debug("car_service overlay failed: " + t.getMessage());
+        }
+    }
+
     public synchronized void collectAll() {
         long now = System.currentTimeMillis();
         // Hard throttle: skip if called within MIN_COLLECT_INTERVAL_MS of last poll.
@@ -2658,9 +2818,19 @@ public class BydDataCollector {
         // from the listener-delivered chargingPower / externalChargingPower
         // values populated from typed callbacks even while ACC is off.
         if (accIsOn) {
-            collectSpeed(b);        // speed, accel, brake
+            // collectSpeed/collectGearbox hit the vendor-HAL speed/accel/brake
+            // and gearbox devices, which CarSvcTelemetry's own header comment
+            // documents as dead on DiLink5 (SecurityException or garbage) —
+            // applyCarSvcOverlay() below unconditionally overwrites both
+            // fields from the working car_service reading regardless, so on
+            // DiLink5 these two calls are pure wasted reflection/binder work
+            // every 5s tick with zero effect on the final snapshot. Skip them
+            // there; every other platform is unaffected.
+            if (!DiLink5Platform.isActive()) {
+                collectSpeed(b);        // speed, accel, brake
+                collectGearbox(b);      // gearMode
+            }
             collectEngineOrdered(b, chargingObserved); // enginePower, motorSpeed/torque
-            collectGearbox(b);      // gearMode
             collectSteeringAngle(b);// live steering angle (init-only otherwise → dead trigger)
         } else {
             // NB the power terms here read fields the admission gate populates, so on a trim whose
@@ -2825,6 +2995,7 @@ public class BydDataCollector {
         // Cloud data merge (when toggle enabled and data is fresh)
         mergeCloudData(b, cabinTempHalSucceeded, socHalSucceeded, rangeHalSucceeded, fuelHalSucceeded);
 
+            applyCarSvcOverlay(b);
             BydVehicleData built = b.build();
             built = publishCollectedSnapshot(built, chargingObserved, pollGeneration);
         }
@@ -2835,7 +3006,52 @@ public class BydDataCollector {
      * Bypasses the 5-second throttle. Called by the HTTP API when a client
      * opens the dashboard or requests full vehicle state.
      */
-    public synchronized void collectAllFull() {
+    public void collectAllFull() {
+        // Coalesce a near-simultaneous second caller (see MIN_FULL_COLLECT_INTERVAL_MS)
+        // into a no-op: the snapshot this method is about to publish, or just published
+        // a moment ago under this same monitor, is already fresh enough.
+        long sinceLastFull = System.currentTimeMillis() - lastFullCollectTime;
+        if (lastFullCollectTime > 0 && sinceLastFull < MIN_FULL_COLLECT_INTERVAL_MS) {
+            return;
+        }
+        // Bounded wait instead of an unbounded synchronized(this). Confirmed live
+        // (2026-09-04 drive session): this class-wide monitor is also held by the
+        // periodic background scheduler's collectAll() tick (every 5s while ACC is
+        // on), and a slow vendor-HAL/car_service read inside that tick -- more likely
+        // under real CAN-bus load while driving, and worse again while the recording
+        // pipeline + TFLite hazard inference are also competing for CPU -- blocked
+        // every /status request thread waiting on it. Traced the full consequence
+        // chain: a blocked request thread never reaches HttpServer's
+        // `finally { client.close() }`, so its socket leaks as CLOSE_WAIT (confirmed
+        // live, dozens accumulated); enough of those pile up that the daemon gets
+        // SIGKILL'd (exit 137, confirmed live) by Android's low-memory killer after a
+        // few minutes. A bounded attempt here means a stuck scheduler tick can now
+        // only ever cost this method 300ms, never an indefinite block -- it falls
+        // back to whatever snapshot.get() already holds: a real, recent reading, just
+        // not from this call, the same "hold last known, never block" shape as every
+        // other fix this session.
+        //
+        // Safe to decouple from collectAll()'s own synchronized(this): the snapshot's
+        // actual correctness guarantee is publishCollectedSnapshot()'s
+        // chargingEdgePublishLock + monotonic pollGeneration check (read directly to
+        // confirm), not this outer monitor -- that generation check already makes an
+        // out-of-order/concurrent publish safe, so collectAll() and collectAllFull()
+        // no longer excluding each other risks only an occasional redundant
+        // simultaneous HAL sweep, never a lost update.
+        boolean acquired;
+        try {
+            acquired = collectFullLock.tryLock(300, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
+        }
+        if (!acquired) {
+            logger.debug("collectAllFull: collector busy (scheduler tick or another full "
+                    + "collection in flight) -- serving last published snapshot instead of blocking");
+            return;
+        }
+        try {
+        lastFullCollectTime = System.currentTimeMillis();
         try (com.overdrive.app.monitor.ChargingDetector.PublicationMutation ignored =
                      com.overdrive.app.monitor.ChargingDetector.beginPublicationMutation()) {
             lastCoreCollectTime = 0;  // Bypass throttle
@@ -2847,7 +3063,13 @@ public class BydDataCollector {
 
         // Core devices
         collectBodywork(b);
-        collectSpeed(b);
+        // collectSpeed/collectGearbox: dead vendor-HAL calls on DiLink5, see
+        // the matching skip + comment in collectAll() above — applyCarSvcOverlay()
+        // below overwrites both fields from car_service regardless.
+        boolean skipDeadDiLink5Hal = DiLink5Platform.isActive();
+        if (!skipDeadDiLink5Hal) {
+            collectSpeed(b);
+        }
         StatisticHalResult statResult = collectStatistic(b);
         boolean socHalSucceeded = statResult.socSucceeded;
         boolean rangeHalSucceeded = statResult.elecRangeSucceeded;
@@ -2857,7 +3079,9 @@ public class BydDataCollector {
         collectInstrumentOrdered(b, chargingObserved);
         collectEngineOrdered(b, chargingObserved);
         collectOta(b);
-        collectGearbox(b);
+        if (!skipDeadDiLink5Hal) {
+            collectGearbox(b);
+        }
 
         // Read AC_TEMP_INSIDE exactly once for this poll and publish that one observation to
         // both legacy cabin fields.
@@ -2895,9 +3119,13 @@ public class BydDataCollector {
         // Cloud data merge (when toggle enabled and data is fresh)
         mergeCloudData(b, cabinTempHalSucceeded, socHalSucceeded, rangeHalSucceeded, fuelHalSucceeded);
 
+            applyCarSvcOverlay(b);
             BydVehicleData built = b.build();
             built = publishCollectedSnapshot(built, chargingObserved, pollGeneration);
             lastCoreCollectTime = System.currentTimeMillis();
+        }
+        } finally {
+            collectFullLock.unlock();
         }
     }
 
@@ -3970,6 +4198,10 @@ public class BydDataCollector {
             }
 
             // ==================== SOC (ELEC PERCENTAGE) ====================
+            // DiLink 5: car_service REMAINING_BATTERY_POWER_R is the first
+            // SOC source (applyCarSvcOverlay). Skip HAL getElecPercentageValue()
+            // which returns 0.0 unpopulated and must not win.
+            if (!DiLink5Platform.isActive()) {
             // Named getter primary, then feature ID fallback
             Object elecPct = BydDeviceHelper.callGetter(statisticDevice, "getElecPercentageValue");
             if (elecPct instanceof Number) {
@@ -4004,6 +4236,7 @@ public class BydDataCollector {
                 } catch (Exception e) {
                     logger.debug("collectStatistic socPercent feature ID error: " + e.getMessage());
                 }
+            }
             }
 
             // ==================== WATER TEMP ====================
@@ -4590,6 +4823,18 @@ public class BydDataCollector {
         return raw >= 1 && raw <= 5;
     }
 
+    /**
+     * Map DiLink 5 {@code CHARGING_GUN_STATER} (0=unplugged, 1=connected, else
+     * unavailable) onto HAL {@code chargingGunState} (1=disconnected, 2/3/4=
+     * connected, 5=vtol). Binary 0/1 must never be written into that field.
+     */
+    static int mapCarSvcGunToHal(int binaryGun, int currentHalGun) {
+        if ((binaryGun != 0 && binaryGun != 1) || currentHalGun == 5) return currentHalGun;
+        if (binaryGun == 0) return 1;
+        if (currentHalGun == 3 || currentHalGun == 4) return currentHalGun;
+        return 2;
+    }
+
     /** Decode only the documented boolean encodings; non-zero HAL sentinels are unavailable. */
     static Boolean decodePowerIsCharging(Object value) {
         if (value instanceof Boolean) return (Boolean) value;
@@ -5014,14 +5259,28 @@ public class BydDataCollector {
         return raw;
     }
 
-    /** True for the documented BYD failure/unavailable codes that share the numeric channel. */
+    /**
+     * True for the documented BYD failure/unavailable codes that share the numeric channel.
+     *
+     * <p>Includes the {@code ~359.x} idle-junk band documented in
+     * CHARGING-POWER-INVARIANTS.md (I4) — observed on ambiguous instrument fields when
+     * not genuinely charging. Confirmed live, 2026-09-05: a slow overnight AC session
+     * (avg ~2.15 kW, ~9.4 kWh added — both plausible) recorded a peakPower of exactly
+     * 359.4, which downstream {@code isPoisonedPower} correctly flagged and hid — but
+     * that only suppresses the DISPLAY after the junk has already poisoned the whole
+     * session's energy/avg-power data. Rejecting it here, at the same collection-time
+     * gate as every other sentinel, keeps a real slow session's real numbers intact
+     * instead of relying on the session-level gate to clean up after the fact. A range,
+     * not an exact match, because the junk isn't perfectly stable — hence "~359.x".
+     */
     private static boolean isChargePowerSentinel(double v) {
         return v == 104857.5
                 || v == 65535.0
                 || v == -10011.0
                 || v == BydFeatureIds.INVALID_VALUE
                 || v == BydFeatureIds.INVALID_VALUE_2
-                || v == Integer.MIN_VALUE;
+                || v == Integer.MIN_VALUE
+                || (v >= 359.0 && v < 360.0);
     }
 
     /**
@@ -5422,9 +5681,8 @@ public class BydDataCollector {
         if (chargingDevice == null) {
             if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
                 try {
-                    String propDump = com.overdrive.app.monitor.AccMonitor.execShell(
-                        "dumpsys car_service 2>/dev/null | grep -E '0x21403407|0x2140461c' | grep 'lastEvent'");
-                    if (!propDump.isEmpty()) {
+                    String propDump = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.dumpsysText();
+                    if (propDump != null && !propDump.isEmpty()) {
                         long gunObs = chargingObservationOrder.begin();
                         if (propDump.contains("Property:0x21403407")) {
                             if (propDump.contains("Property:0x21403407,status: 0") && (propDump.contains("int32Values: [1]") || propDump.contains("int32Values: [2]"))) {
@@ -7680,7 +7938,41 @@ public class BydDataCollector {
             int[] signalStates = new int[4];
             for (int i = 0; i < 4; i++) {
                 Object p = BydDeviceHelper.callGetter(tyreDevice, "getTyrePressureValue", i + 1);
-                pressures[i] = (p instanceof Number) ? ((Number) p).intValue() : -1;
+                int rawPressure = (p instanceof Number) ? ((Number) p).intValue() : -1;
+                // Some firmware (confirmed on a European-market unit, France)
+                // returns this raw value pre-scaled by roughly the SAME
+                // kPa->psi factor this class already applies for its own psi
+                // display (0.1450377) — i.e. raw already sits almost exactly
+                // on the real BAR reading (raw * 0.1450377 ~= true bar),
+                // rather than being real kPa directly like the firmware this
+                // formula was reverse-engineered against. Confirmed against
+                // the OFFICIAL BYD app on that vehicle: raw=19/20 showed as
+                // "2.8"/"2.9" PSI here, and the official app showed the same
+                // "2.8"/"2.9" as BAR for the same tires — so true kPa is
+                // raw * 14.50377 (= raw * 0.1450377 * 100), not raw directly.
+                // Data-driven disambiguation, not a locale/model guess: a
+                // real inflated tire is never below ~150 kPa (this app's own
+                // criticalLow default is 152) and this rescale only ever
+                // fires on a raw value that couldn't be real kPa already.
+                if (rawPressure > 0 && rawPressure < 100) {
+                    rawPressure = Math.round(rawPressure * 14.50377f);
+                }
+                // Sanity check AFTER whichever branch ran above: a real inflated
+                // tyre is never outside roughly 100-450 kPa (~14.5-65 psi) even
+                // half-flat. If neither the direct-kPa assumption nor the
+                // bar-rescale above lands in that range, this vehicle/firmware
+                // is reporting a raw scale we haven't seen before. Log it loudly
+                // with the untouched raw value so it can be identified and a
+                // real fix added, rather than silently showing a number that's
+                // very likely wrong.
+                if (rawPressure > 0 && (rawPressure < 100 || rawPressure > 450)) {
+                    logger.warn("Tyre pressure corner " + (i + 1) + " raw=" + rawPressure
+                            + " is outside any plausible tyre-pressure range after scale "
+                            + "correction — this vehicle may report a raw unit we don't "
+                            + "recognize. Withholding rather than showing a likely-wrong value.");
+                    rawPressure = -1;
+                }
+                pressures[i] = rawPressure;
                 Object s = BydDeviceHelper.callGetter(tyreDevice, "getTyrePressureState", i + 1);
                 pressureStates[i] = (s instanceof Number) ? ((Number) s).intValue() : -1;
                 Object leak = BydDeviceHelper.callGetter(tyreDevice, "getTyreAirLeakState", i + 1);
@@ -8693,7 +8985,8 @@ public class BydDataCollector {
             }
             
             // SOC fallback: EnergyDevice.getElecPercentageValue() — try if statistic didn't provide SOC
-            if (!socHalSucceeded) {
+            // DiLink 5 uses car_service remaining-power as the SOC source instead.
+            if (!socHalSucceeded && !DiLink5Platform.isActive()) {
                 Object elecPct = BydDeviceHelper.callGetter(energyDevice, "getElecPercentageValue");
                 if (elecPct instanceof Number) {
                     double soc = ((Number) elecPct).doubleValue();
@@ -9993,9 +10286,11 @@ public class BydDataCollector {
             try {
                 double soc = ((Number) args[0]).doubleValue();
                 if (soc >= 0 && soc <= 100) {
-                    BydVehicleData current = snapshot.get();
-                    if (current != null) {
-                        publishNonChargingSnapshot(current.toBuilder().socPercent(soc).build());
+                    if (!DiLink5Platform.isActive()) {
+                        BydVehicleData current = snapshot.get();
+                        if (current != null) {
+                            publishNonChargingSnapshot(current.toBuilder().socPercent(soc).build());
+                        }
                     }
                     // Fan out to the SoC voluntary-cutoff monitor (no-op when
                     // not running). Doesn't try to subclass the abstract
@@ -10010,7 +10305,7 @@ public class BydDataCollector {
         if ("onSOCBatteryPercentageChanged".equals(method) && args != null && args.length > 0) {
             try {
                 int soc = ((Number) args[0]).intValue();
-                if (soc >= 0 && soc <= 100) {
+                if (soc >= 0 && soc <= 100 && !DiLink5Platform.isActive()) {
                     BydVehicleData current = snapshot.get();
                     if (current != null) {
                         publishNonChargingSnapshot(current.toBuilder().socPercent((double) soc).build());
@@ -13079,6 +13374,12 @@ public class BydDataCollector {
      * getter the OEM uses.
      */
     private int readSocPercentForHold() {
+        if (DiLink5Platform.isActive()) {
+            double carSvc = CarSvcTelemetry.INSTANCE.socPercentValue();
+            if (!Double.isNaN(carSvc) && carSvc > 0 && carSvc <= 100) {
+                return (int) Math.floor(carSvc);
+            }
+        }
         BydVehicleData d = snapshot.get();
         if (d != null && !Double.isNaN(d.socPercent) && d.socPercent > 0 && d.socPercent <= 100) {
             return (int) Math.floor(d.socPercent);

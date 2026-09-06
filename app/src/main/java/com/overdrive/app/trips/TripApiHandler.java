@@ -563,23 +563,24 @@ public class TripApiHandler {
     }
 
     /**
-     * GET /api/trips/summary — weekly rollup.
-     * Query: days (default 7).
+     * GET /api/trips/summary — period totals for the last {@code days} days.
+     *
+     * <p>Aggregated from the trips table with the same cutoff as GET /api/trips,
+     * so the Period Summary card matches the list (including after deletes).
+     * Weekly rollup rows are ISO-week keyed and are not the selected window.
      */
     private JSONObject handleGetSummary(Map<String, String> params) {
         int days = getIntParam(params, "days", 7);
-        // Convert days to approximate weeks (round up)
-        int weeks = Math.max(1, (days + 6) / 7);
 
         TripDatabase db = manager.getDatabase();
         if (db == null) {
             return errorResponse("Trip database not available", 500);
         }
 
-        List<WeeklyRollup> rollups = db.getRecentWeeklyRollups(weeks);
+        WeeklyRollup period = db.getPeriodSummary(days);
         JSONArray rollupsArray = new JSONArray();
-        for (WeeklyRollup rollup : rollups) {
-            rollupsArray.put(rollup.toJson());
+        if (period != null && period.tripCount > 0) {
+            rollupsArray.put(period.toJson());
         }
 
         JSONObject response = new JSONObject();

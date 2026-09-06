@@ -54,8 +54,9 @@
     // mid-layout (after a daemon-restart-driven page reload) are keyed
     // by the wrong bucket and re-painting them stretches the car —
     // bumping the version evicts those poisoned entries. The next live
-    // 3D render after this ships writes a clean v3 sprite.
-    var SPRITE_VERSION = 4;
+    // v4: sealion7 model support.
+    // v5: invalidate stale fallback snapshots and align with updated model catalog.
+    var SPRITE_VERSION = 5;
 
     // Keep the cache from growing unbounded as the user tries paint
     // colours. The realistic upper bound is:
@@ -218,12 +219,17 @@
             return new Promise(function (resolve) {
                 var tx = db.transaction(STORE, 'readwrite');
                 var store = tx.objectStore(STORE);
-                var prefix = (modelId || '') + '|';
+                var prefix1 = 'v' + SPRITE_VERSION + '|' + (modelId || '') + '|';
+                var prefix2 = (modelId || '') + '|';
+                var midTarget = '|' + (modelId || '') + '|';
                 var req = store.openCursor();
                 req.onsuccess = function () {
                     var cur = req.result;
                     if (!cur) return;
-                    if (typeof cur.key === 'string' && cur.key.indexOf(prefix) === 0) {
+                    if (typeof cur.key === 'string' &&
+                        (cur.key.indexOf(prefix1) === 0 ||
+                         cur.key.indexOf(prefix2) === 0 ||
+                         cur.key.indexOf(midTarget) !== -1)) {
                         cur.delete();
                     }
                     cur['continue']();

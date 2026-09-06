@@ -121,7 +121,7 @@ public class TripAnalyticsManager {
 
         // 1. Finalize active trip
         if (detector != null) {
-            detector.finalizeActiveTrip();
+            detector.shutdown();
         }
 
         // 2. Close database
@@ -172,12 +172,12 @@ public class TripAnalyticsManager {
      */
     public void onAccOn() {
         if (!enabled) return;
-        logger.info("ACC ON — trip detection ready (waiting for gear D/R)");
+        logger.info("ACC ON — trip detection ready (gear D/R or GPS/CAN motion)");
 
         // Safety net: probe current gear in case we missed the gear change event
         // during the ACC OFF→ON transition
         try {
-            int currentGear = GearMonitor.getInstance().getCurrentGear();
+            int currentGear = resolveLiveGear();
             if (currentGear != GearMonitor.GEAR_P && detector != null && !detector.isTripActive()) {
                 logger.info("ACC ON + gear already " + GearMonitor.gearToString(currentGear)
                         + " — auto-starting trip");
@@ -186,6 +186,16 @@ public class TripAnalyticsManager {
         } catch (Exception e) {
             logger.warn("ACC ON gear probe failed: " + e.getMessage());
         }
+    }
+
+    private static int resolveLiveGear() {
+        try {
+            if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+                int carSvc = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.gearValue();
+                if (carSvc >= 1 && carSvc <= 6) return carSvc;
+            }
+        } catch (Throwable ignored) {}
+        return GearMonitor.getInstance().getCurrentGear();
     }
 
     // ==================== RUNTIME CONFIG ====================
@@ -204,10 +214,10 @@ public class TripAnalyticsManager {
         }
 
         if (!newEnabled) {
-            // Disabling — finalize active trip first
-            if (detector != null && detector.isTripActive()) {
-                logger.info("Disabling while trip active — finalizing trip");
-                detector.finalizeActiveTrip();
+            // Disabling — finalize any active trip and stop the 1 Hz motion watch
+            if (detector != null) {
+                detector.shutdown();
+                detector = null;
             }
             enabled = false;
             config.setEnabled(false);
@@ -223,7 +233,7 @@ public class TripAnalyticsManager {
             }
 
             // If gear is not P, trigger trip detection
-            int currentGear = GearMonitor.getInstance().getCurrentGear();
+            int currentGear = resolveLiveGear();
             if (currentGear != GearMonitor.GEAR_P && detector != null) {
                 logger.info("Enabling while gear=" + GearMonitor.gearToString(currentGear)
                         + " — forwarding gear to detector");
@@ -354,6 +364,14 @@ public class TripAnalyticsManager {
                 Thread recoveryThread = new Thread(() -> {
                     try {
                         TripDatabase.RecoveryResult r = db.recoverTripsFromDisk(tripsDirs);
+                        // A surviving checkpoint alongside a just-recovered row means the
+                        // crash happened mid-trip after at least one checkpoint tick — fill
+                        // in the real SoC/energy data the GPS-only recovery above can't see.
+                        try {
+                            db.enrichRecoveredTripsFromCheckpoints();
+                        } catch (Throwable t) {
+                            logger.warn("Checkpoint enrichment failed: " + t.getMessage());
+                        }
                         if (r.recovered > 0) {
                             logger.info("Auto-recovery: recovered " + r.recovered
                                 + " orphaned trips from disk (scanned=" + r.scanned
@@ -400,7 +418,13 @@ public class TripAnalyticsManager {
             public double getRecordedDistanceKm() {
                 return recorder != null ? recorder.getTotalDistanceKm() : 0;
             }
+
+            @Override
+            public void onTripCheckpoint(TripRecord trip) {
+                handleTripCheckpoint(trip);
+            }
         });
+        detector.startMotionWatch();
 
         // Recorder
         recorder = new TripTelemetryRecorder(telemetryDataCollector);
@@ -454,6 +478,24 @@ public class TripAnalyticsManager {
     }
 
     /**
+     * Handle a periodic live-trip checkpoint from TripDetector (see
+     * TripDetector.checkpointNow / TripListener.onTripCheckpoint). Persists
+     * just the SoC/energy readings — real crash-recovery insurance for the gap
+     * this system had before: a mid-drive daemon crash left NOTHING durable
+     * except the GPS telemetry file, so recovery could only ever reconstruct
+     * distance/speed/elevation, never energy or SoC.
+     */
+    private void handleTripCheckpoint(TripRecord trip) {
+        if (database == null || trip == null || trip.startTime <= 0) return;
+        try {
+            database.upsertTripCheckpoint(trip.startTime, trip.socStart, trip.kwhStart,
+                    trip.elecConStart, trip.socEnd, trip.kwhEnd, trip.elecConEnd);
+        } catch (Throwable t) {
+            logger.debug("handleTripCheckpoint failed: " + t.getMessage());
+        }
+    }
+
+    /**
      * Handle trip ended event from TripDetector.
      *
      * 1. Stop recorder, get samples
@@ -467,6 +509,15 @@ public class TripAnalyticsManager {
     private void handleTripEnded(TripRecord trip) {
         logger.info("Trip ended — duration=" + trip.durationSeconds + "s, distance="
                 + trip.distanceKm + "km");
+        // NOTE: the checkpoint is deliberately NOT cleared here. Scoring, the
+        // last-charge-rate lookup, and cost math all happen below, well before
+        // insertTrip() actually runs — a crash anywhere in that stretch used to
+        // leave the trip with NEITHER a real row NOR a checkpoint to recover
+        // from (confirmed live, 2026-09-05: a 12-minute trip crashed during
+        // this window and came back with distance/duration only, zero SoC/
+        // energy, because the checkpoint had already been wiped up here before
+        // the row existed). It's cleared only once insertTrip() actually
+        // succeeds, below.
 
         // Release telemetry polling ref (acquired in handleTripStarted)
         if (telemetryDataCollector != null) {
@@ -792,7 +843,18 @@ public class TripAnalyticsManager {
                         + " SD=" + trip.speedDisciplineScore
                         + " E=" + trip.efficiencyScore
                         + " C=" + trip.consistencyScore + "]");
+
+                // The row is durably in place now — the checkpoint's only job
+                // (crash-recovery insurance) is done. Left alone until now so a
+                // crash during scoring/insert above still has it available.
+                try {
+                    if (database != null) database.clearTripCheckpoint(trip.startTime);
+                } catch (Throwable ignored) {}
             } else {
+                // insertTrip failed — deliberately leave the checkpoint in place.
+                // Next-boot disk recovery will rebuild a row from the .jsonl.gz
+                // (distance/speed/elevation only); enrichRecoveredTripsFromCheckpoints()
+                // needs this checkpoint to still exist to fill in SoC/energy for it.
                 // Previously there was no else branch, so a failed insert
                 // produced NO log line at all here — the trip simply vanished
                 // and the only trace was a lower-level "Failed to insert trip".
@@ -912,6 +974,11 @@ public class TripAnalyticsManager {
      */
     private void handleTripDiscarded(TripRecord trip, String reason) {
         logger.info("Trip discarded: " + reason);
+        // A discarded trip (below min duration/distance) never gets a `trips`
+        // row either — no crash to recover from, so no reason to keep insurance.
+        try {
+            if (database != null && trip != null) database.clearTripCheckpoint(trip.startTime);
+        } catch (Throwable ignored) {}
 
         // Release telemetry polling ref (acquired in handleTripStarted)
         if (telemetryDataCollector != null) {

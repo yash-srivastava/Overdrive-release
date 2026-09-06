@@ -30,4 +30,20 @@ public class HardwareEventRecorderGpuVideoUploadPolicyTest {
         assertTrue(HardwareEventRecorderGpu.VideoUploadPolicy.AUTOMATIC
                 .shouldAutoUpload("proximity_20260812_153155.mp4"));
     }
+
+    @Test
+    public void continuousDashcamClipsNeverUploadAutomatically() {
+        assertFalse(HardwareEventRecorderGpu.VideoUploadPolicy.AUTOMATIC
+                .shouldAutoUpload("cam_20260905_175214.mp4"));
+        assertFalse(HardwareEventRecorderGpu.VideoUploadPolicy.AUTOMATIC
+                .shouldAutoUpload("cam2_20260905_175214.mp4"));
+        assertFalse(HardwareEventRecorderGpu.VideoUploadPolicy.AUTOMATIC
+                .shouldAutoUpload("replay_20260905_175214.mp4"));
+    }
+
+    @Test
+    public void nullFileNameReturnsFalse() {
+        assertFalse(HardwareEventRecorderGpu.VideoUploadPolicy.AUTOMATIC
+                .shouldAutoUpload(null));
+    }
 }

@@ -1,5 +1,6 @@
 package com.overdrive.app.camera;
 
+import android.os.SystemClock;
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.surveillance.SurveillanceEngineGpu;
 
@@ -38,6 +39,7 @@ public final class AiLaneWorker {
 
     private final ExecutorService executor;
     private final AtomicBoolean busy = new AtomicBoolean(false);
+    private volatile long busySinceMs = 0;
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
 
     private volatile SurveillanceEngineGpu sentry;
@@ -78,12 +80,18 @@ public final class AiLaneWorker {
             return false;
         }
         if (!busy.compareAndSet(false, true)) {
-            // Worker still processing previous frame; drop this one and let
-            // GL thread continue.
+            // Worker still processing previous frame; check watchdog in case of stall.
+            long busyStart = busySinceMs;
+            if (busyStart > 0 && (SystemClock.elapsedRealtime() - busyStart) > 3000L) {
+                logger.warn("AiLaneWorker busy state held >3s — force-clearing watchdog");
+                busy.set(false);
+                busySinceMs = 0;
+            }
             droppedFrames++;
             recycler.recycle(rgbFrame);
             return false;
         }
+        busySinceMs = SystemClock.elapsedRealtime();
         // Stage the Runnable so we can deregister it from inFlightFrames
         // when it actually runs OR recycle the captured frame on forced
         // shutdown via shutdownNow.
@@ -110,6 +118,7 @@ public final class AiLaneWorker {
                 // ArrayBlockingQueue offer policy).
                 try { recycler.recycle(rgbFrame); } catch (Throwable ignored) {}
             } finally {
+                busySinceMs = 0;
                 busy.set(false);
             }
         };
@@ -121,6 +130,7 @@ public final class AiLaneWorker {
         } catch (Throwable t) {
             // Executor rejected (post-shutdown). Recycle and clear tracking + busy.
             inFlightFrames.remove(task);
+            busySinceMs = 0;
             busy.set(false);
             recycler.recycle(rgbFrame);
             return false;
@@ -149,7 +159,15 @@ public final class AiLaneWorker {
      * Cheap atomic read; safe to call from the GL thread every iteration.
      */
     public boolean isBusy() {
-        return busy.get();
+        if (!busy.get()) return false;
+        long busyStart = busySinceMs;
+        if (busyStart > 0 && (SystemClock.elapsedRealtime() - busyStart) > 3000L) {
+            logger.warn("AiLaneWorker isBusy held >3s — force-clearing watchdog");
+            busy.set(false);
+            busySinceMs = 0;
+            return false;
+        }
+        return true;
     }
 
     public void resetCounters() {

@@ -89,6 +89,10 @@ public class ChargingApiHandler {
                 return handleGetSoc(params);
             }
 
+            if (path.equals("/api/charging/power") && "GET".equals(method)) {
+                return handleGetPower(params);
+            }
+
             if (path.equals("/api/charging/config")) {
                 if ("GET".equals(method)) return handleGetConfig();
                 if ("POST".equals(method)) return handlePostConfig(body);
@@ -184,6 +188,7 @@ public class ChargingApiHandler {
             socParams.put("points",
                     bootstrapParam(params, "points", "300"));
             bootstrap.put("soc", invokeSectionStripped(() -> handleGetSoc(socParams)));
+            bootstrap.put("power", invokeSectionStripped(() -> handleGetPower(socParams)));
 
             Map<String, String> sessionsParams =
                     bootstrapPeriodParams(params);
@@ -509,6 +514,25 @@ public class ChargingApiHandler {
         }
     }
 
+    /** GET /api/charging/power — kW-over-time from charging_power_samples. */
+    private JSONObject handleGetPower(Map<String, String> params) {
+        try {
+            int hours = getIntParam(params, "hours", 72);
+            int points = getIntParam(params, "points", 300);
+            if (hours > 24 * 30) hours = 24 * 30;
+            if (points < 10) points = 10;
+            if (points > 1000) points = 1000;
+            JSONArray power = db().getChargingPowerHistoryStrict(hours, points);
+            JSONObject response = new JSONObject();
+            response.put("success", true);
+            response.put("power", power);
+            return response;
+        } catch (Exception e) {
+            logger.error("Error getting charging power history", e);
+            return errorResponse("Failed to get charge power history", 500);
+        }
+    }
+
     /** GET /api/charging/soc — SoC-over-time series (reuses getSocHistory). */
     private JSONObject handleGetSoc(Map<String, String> params) {
         try {
@@ -701,6 +725,12 @@ public class ChargingApiHandler {
                         rangeKm >= 0 ? rangeKm : JSONObject.NULL);
                 live.put("sohPercent",
                         sohPercent > 0 ? sohPercent : JSONObject.NULL);
+                // car_service (dumpsys) overrides for platforms where the normal
+                // C1-C4 charging power/state cascade above is dead (e.g. DiLink 5 /
+                // Sealion 7). No-op — leaves every field above untouched — unless
+                // that platform check passes AND the live charge-state property was
+                // actually found. See CarSvcTelemetry.applyChargingOverrides.
+                com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.applyChargingOverrides(live);
             } catch (Exception e) {
                 logger.debug("Could not serialize live charging state: "
                         + e.getMessage());
@@ -740,6 +770,7 @@ public class ChargingApiHandler {
                 if (timeToFullMin > 0) {
                     status.put("timeToFullMin", timeToFullMin);
                 }
+                com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.applyChargingOverrides(status);
             } catch (Exception e) {
                 return buildClearedStatusJson();
             }
@@ -759,19 +790,40 @@ public class ChargingApiHandler {
             ChargingStateData state = null;
             double socPercent = -1.0;
             double rangeKm = -1.0;
+            if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+                try {
+                    double carSvcSoc = com.overdrive.app.byd.CarSvcTelemetry
+                            .INSTANCE.socPercentValue();
+                    if (!Double.isNaN(carSvcSoc) && carSvcSoc >= 0 && carSvcSoc <= 100) {
+                        socPercent = carSvcSoc;
+                    }
+                } catch (Exception ignored) {}
+            }
             VehicleDataMonitor monitor = VehicleDataMonitor.getInstance();
             if (monitor != null) {
                 try {
                     state = monitor.getChargingState();
                 } catch (Exception ignored) {}
-                try {
-                    BatterySocData soc = monitor.getBatterySoc();
-                    if (soc != null) socPercent = soc.socPercent;
-                } catch (Exception ignored) {}
+                if (socPercent < 0) {
+                    try {
+                        BatterySocData soc = monitor.getBatterySoc();
+                        if (soc != null) socPercent = soc.socPercent;
+                    } catch (Exception ignored) {}
+                }
                 try {
                     DrivingRangeData range = monitor.getDrivingRange();
                     if (range != null && range.isValidRange()) {
                         rangeKm = range.elecRangeKm;
+                    }
+                } catch (Exception ignored) {}
+            }
+            if (socPercent < 0
+                    && com.overdrive.app.byd.DiLink5Platform.isActive()) {
+                try {
+                    double carSvcSoc = com.overdrive.app.byd.CarSvcTelemetry
+                            .INSTANCE.socPercentValue();
+                    if (!Double.isNaN(carSvcSoc) && carSvcSoc >= 0 && carSvcSoc <= 100) {
+                        socPercent = carSvcSoc;
                     }
                 } catch (Exception ignored) {}
             }

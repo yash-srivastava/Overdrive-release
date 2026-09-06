@@ -93,7 +93,7 @@ public final class DaemonLogConfig {
     public static final boolean GPU_STREAM_SCALER = false;
     
     /** HWEncoderGpu - MediaCodec hardware encoder */
-    public static final boolean HW_ENCODER = false;
+    public static final boolean HW_ENCODER = true;
     
     /** AdaptiveBitrate - bitrate controller */
     public static final boolean ADAPTIVE_BITRATE = false;
@@ -109,7 +109,7 @@ public final class DaemonLogConfig {
     // ==================== SURVEILLANCE & MOTION ====================
     
     /** SurveillanceEngineGpu - motion detection, event recording triggers */
-    public static final boolean SURVEILLANCE_ENGINE = false;
+    public static final boolean SURVEILLANCE_ENGINE = true;
     
     /** EventTimeline - event timeline collector */
     public static final boolean EVENT_TIMELINE = false;

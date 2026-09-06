@@ -372,8 +372,15 @@ public class TripTelemetryRecorder {
             double altitude = fix.altitude;
             float gpsAccuracy = fix.accuracy;
 
-            // Read gear from GearMonitor
+            // Read gear from GearMonitor, preferring car_service on DiLink 5
+            // where the vendor gearbox HAL is stuck on a valid Park.
             int gearMode = GearMonitor.getInstance().getCurrentGear();
+            try {
+                if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+                    int carSvc = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.gearValue();
+                    if (carSvc >= 1 && carSvc <= 6) gearMode = carSvc;
+                }
+            } catch (Throwable ignored) {}
 
             TelemetrySample sample = new TelemetrySample(
                     now, speedKmh, accelPedal, brakePedal,

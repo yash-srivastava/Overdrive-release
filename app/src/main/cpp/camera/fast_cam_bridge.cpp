@@ -113,6 +113,10 @@ bool fast_cam_client_connect(FastCamClientCtx* ctx, const char* sock_path) {
     return true;
 }
 
+bool fast_cam_client_is_connected(const FastCamClientCtx* ctx) {
+    return ctx != NULL && ctx->sock_fd >= 0;
+}
+
 bool fast_cam_client_wait_frame(FastCamClientCtx* ctx, FastCamFrame* out_frame, int timeout_ms) {
     if (!ctx || ctx->sock_fd < 0 || !out_frame) return false;
 
@@ -123,8 +127,17 @@ bool fast_cam_client_wait_frame(FastCamClientCtx* ctx, FastCamFrame* out_frame, 
     int ret = poll(&pfd, 1, timeout_ms);
     if (ret <= 0) return false;
 
+    if (pfd.revents & (POLLHUP | POLLERR | POLLNVAL)) {
+        fast_cam_client_disconnect(ctx);
+        return false;
+    }
+
     fast_cam_frame_msg_t msg;
     ssize_t n = recv(ctx->sock_fd, &msg, sizeof(msg), MSG_WAITALL);
+    if (n <= 0) {
+        fast_cam_client_disconnect(ctx);
+        return false;
+    }
     if (n != sizeof(msg) || msg.magic != FAST_CAM_MAGIC) return false;
 
     // Find the stream matching msg.cam_id

@@ -500,8 +500,11 @@
     "state_idle": "Idle",
     "state_plugged": "Plugged in",
     "state_charging": "Charging",
+    "state_not_charging": "Not charging",
     "state_full": "Full",
     "state_fault": "Charge fault",
+    "title_unplugged": "Unplugged",
+    "title_plugged": "Plugged in",
     "metric_soc": "SoC",
     "metric_power": "Power",
     "metric_session": "Added",
@@ -2417,7 +2420,8 @@
   "map": {
     "your_vehicle": "Your Vehicle",
     "your_vehicle_sub": "OverDrive Surveillance",
-    "you_are_here": "You are here"
+    "you_are_here": "You are here",
+    "recenter": "Recenter on vehicle"
   },
   "pip": {
     "select_camera": "Select Camera",
@@ -2721,6 +2725,7 @@
     "toast_no_location": "Car location not available",
     "glance_ac_off": "AC off",
     "glance_ac_on": "AC on",
+    "glance_fan": "Fan",
     "glance_climate": "Climate",
     "glance_sentry": "Sentry",
     "glance_sentry_count": "{n} today",

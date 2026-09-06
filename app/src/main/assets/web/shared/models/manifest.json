@@ -75,6 +75,25 @@
       "nominalKwh": 82.5
     },
     {
+      "id": "shark",
+      "name": "BYD Shark",
+      "file": "seal.glb",
+      "sizeBytes": 1653240,
+      "sha256": "1030260cb7dc6b4483cc4f5fd2feb4746870234a87ee3ccf7f3d71e7bd0178fe",
+      "bundled": true,
+      "phev": true,
+      "batteryChemistry": "lfp",
+      "batteryChemistryEvidence": {
+        "authority": "BYD",
+        "technology": "blade",
+        "nominalKwh": 29.6,
+        "configuration": "DMO Super Hybrid Off-road Platform 29.6 kWh Blade",
+        "sourceUrl": "https://media.byd.com/byd-shark-pickup-truck-global-debut/?lang=eng",
+        "verifiedOn": "2026-09-03"
+      },
+      "nominalKwh": 29.6
+    },
+    {
       "id": "seal-u",
       "name": "BYD Seal U",
       "file": "seal-u.glb",

@@ -23,3 +23,5 @@ device_backup
 logs_debug
 downloaded_logs
 frame_grabber_light
+.agents
+tools

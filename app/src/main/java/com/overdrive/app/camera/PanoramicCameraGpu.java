@@ -235,13 +235,21 @@ public class PanoramicCameraGpu {
     // Don't hammer close+reopen: a single-client HAL that refuses the second
     // client would otherwise spin. One attempt per this interval.
     private static final long WINDSHIELD_REOPEN_MIN_INTERVAL_MS = 10_000;
-    // Dedicated handler for ImageReader.OnImageAvailableListener. MUST be
-    // separate from glHandler — renderLoop blocks the GL thread on
-    // frameSync.wait(), which would starve the listener if it ran on the
-    // same looper. The callback hops to glHandler.post for the actual GL
-    // bind work via onHalImageAvailable.
+    // Dedicated handler for camera frame-arrival listeners (both ImageReader
+    // and SurfaceTexture). MUST be separate from glHandler — renderLoop blocks
+    // the GL thread on frameSync.wait(250); if the listener ran on glHandler,
+    // the HAL's frame notification could never dispatch while waiting, forcing
+    // the GL thread to freeze for the full 250ms timeout.
     private HandlerThread imageReaderThread;
     private Handler imageReaderHandler;
+
+    private synchronized void ensureCameraCallbackThread() {
+        if (imageReaderThread == null) {
+            imageReaderThread = new HandlerThread("CamFrameCb");
+            imageReaderThread.start();
+            imageReaderHandler = new Handler(imageReaderThread.getLooper());
+        }
+    }
     
     // Camera object (via reflection).
     // volatile because reopenCamera() runs on the daemon thread and writes
@@ -696,6 +704,11 @@ public class PanoramicCameraGpu {
     // signalled at least one onFrameAvailable. Drives the renderLoop bind
     // instead of imagePending (which is for the ImageReader path).
     private volatile boolean stFramePending = false;
+
+    // Sticky flag and hardware timestamp for DiLink 5.0 (Snapdragon SA8155P) zero-copy path.
+    // Signalled from native C++ streamClientLoop when an AHardwareBuffer is converted and ready.
+    private volatile boolean diLink5FramePending = false;
+    private volatile long diLink5HardwareTimestampNs = 0L;
 
     // GENUINE new-buffer counter for the SurfaceTexture (dilink4) path.
     // Incremented ONLY from onFrameAvailable — i.e. only when the HAL actually
@@ -1301,6 +1314,11 @@ public class PanoramicCameraGpu {
         logger.info("AI lane released (surveillance disarmed) — freed thread + EGL context + cropper buffers");
     }
 
+    public boolean isTexture2D() {
+        return (cameraObj instanceof com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend)
+                || com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported();
+    }
+
     /**
      * Initializes OpenGL context and textures.
      */
@@ -1316,8 +1334,12 @@ public class PanoramicCameraGpu {
         // Log GL info (now that context is current)
         GlUtil.logGlInfo();
         
-        // Create camera texture (OES type for external camera)
-        cameraTextureId = GlUtil.createExternalTexture();
+        // Create camera texture (GL_TEXTURE_2D for DiLink 5, OES for legacy/OEM)
+        if (isTexture2D()) {
+            cameraTextureId = GlUtil.create2DTexture();
+        } else {
+            cameraTextureId = GlUtil.createExternalTexture();
+        }
         windshieldTextureId = GlUtil.createExternalTexture();
 
         // Build the camera consumer. Default = oem-style SurfaceTexture
@@ -1326,7 +1348,7 @@ public class PanoramicCameraGpu {
         // disabled — kept around for FPS-ceiling investigations on Seal
         // (verified ~26 fps by AvmImageReaderFpsProbe vs SurfaceFlinger's
         // ~8.5 fps clamp on legacy SurfaceTexture wiring).
-        if (USE_OEM_SURFACE_TEXTURE_PATH) {
+        if (USE_OEM_SURFACE_TEXTURE_PATH || com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
             createCameraSurfaceTexture();
         } else {
             createCameraImageReader();
@@ -1442,8 +1464,11 @@ public class PanoramicCameraGpu {
                     org.json.JSONObject camCfgDs = com.overdrive.app.config
                         .UnifiedConfigManager.loadConfig().optJSONObject("camera");
                     if (camCfgDs != null) {
-                        downscaler.setRedMaskEnabled(
-                            camCfgDs.optBoolean("dilink4RedMask", false));
+                        boolean redMask = camCfgDs.optBoolean("dilink4RedMask", false);
+                        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+                            redMask = false;
+                        }
+                        downscaler.setRedMaskEnabled(redMask);
                         downscaler.setApaCenterInset(CAMERA_LAYOUT_MODE == 3
                             ? (float) camCfgDs.optDouble(
                                 "dilink4ApaCenterInset", 0.09375)
@@ -1470,7 +1495,7 @@ public class PanoramicCameraGpu {
             // GL thread. Allocating its FBOs + shader on the encoder thread
             // would serialize readback against encoder eglSwapBuffers.
             foveatedCropper = new FoveatedCropper(width, height,
-                quadrantStripOffsetX, quadrantCornerOffsetsXY);
+                quadrantStripOffsetX, quadrantCornerOffsetsXY, isTexture2D());
             foveatedCropper.setCameraLayout(getCameraLayoutMode());
 
             // DiLink 4: override the canonical corner map with the known
@@ -1492,8 +1517,11 @@ public class PanoramicCameraGpu {
                     org.json.JSONObject camCfgFc = com.overdrive.app.config
                         .UnifiedConfigManager.loadConfig().optJSONObject("camera");
                     if (camCfgFc != null) {
-                        foveatedCropper.setRedMaskEnabled(
-                            camCfgFc.optBoolean("dilink4RedMask", false));
+                        boolean redMask = camCfgFc.optBoolean("dilink4RedMask", false);
+                        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+                            redMask = false;
+                        }
+                        foveatedCropper.setRedMaskEnabled(redMask);
                         foveatedCropper.setApaCenterInset(CAMERA_LAYOUT_MODE == 3
                             ? (float) camCfgFc.optDouble(
                                 "dilink4ApaCenterInset", 0.09375)
@@ -1621,24 +1649,28 @@ public class PanoramicCameraGpu {
      *        → renderLoop sees stFramePending, calls updateTexImage()
      *  Mirrors oem's gl.C5920a path: addTexture/setTexture/rmTexture.
      *  cameraTextureId is created in initializeGl() and is the EXTERNAL_OES
-     *  texture the SurfaceTexture writes into. We attach the listener on
-     *  glHandler so the renderLoop wakeup happens on the same thread that
-     *  later calls updateTexImage — the HAL ping/notify race that motivates
-     *  imagePending on the ImageReader path applies the same way here.
+     *  texture the SurfaceTexture writes into. The listener MUST run on
+     *  imageReaderHandler (separate HandlerThread) because renderLoop blocks
+     *  the GL thread on frameSync.wait(250). If the listener ran on glHandler,
+     *  the HAL's notification could never dispatch while waiting, forcing the
+     *  GL thread to freeze for the full 250ms timeout.
      *
      *  We do NOT call attachToGLContext / detachFromGLContext on this
      *  SurfaceTexture: the SurfaceTexture(int) ctor already attaches it to
      *  the current EGL context's cameraTextureId, and updateTexImage runs
      *  on the GL thread where that context is current.  */
     private void createCameraSurfaceTexture() {
+        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+            cameraSurfaceTexture = null;
+            cameraSurface = null;
+            return;
+        }
         if (cameraTextureId == 0) {
             logger.warn("createCameraSurfaceTexture called before GL texture exists");
             return;
         }
         cameraSurfaceTexture = new SurfaceTexture(cameraTextureId);
-        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
-            cameraSurfaceTexture.setDefaultBufferSize(width > 0 ? width : 1920, height > 0 ? height : 1024);
-        }
+        ensureCameraCallbackThread();
         cameraSurfaceTexture.setOnFrameAvailableListener(st -> {
             // Cheap signalling — the actual updateTexImage happens on the GL
             // thread inside renderLoop. Ride frameSync so the wait/notify
@@ -1655,14 +1687,9 @@ public class PanoramicCameraGpu {
                 stFramePending = true;
                 frameSync.notify();
             }
-        }, glHandler);
-        if (cameraObj instanceof com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend) {
-            cameraSurface = new Surface(cameraSurfaceTexture);
-            ((com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend) cameraObj).startSurface(cameraSurface);
-            logger.info("DiLink 5 QCarCamBackend started with new SurfaceTexture Surface");
-        } else {
-            cameraSurface = null;
-        }
+        }, imageReaderHandler);
+        // On DiLink 5, rendering is zero-copy in-process via AHardwareBuffer; no Surface needed.
+        cameraSurface = null;
     }
 
     /** Bind the active SurfaceTexture to the AVMCamera via reflection,
@@ -1682,9 +1709,8 @@ public class PanoramicCameraGpu {
         }
 
         if (cameraObj instanceof com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend) {
-            logger.info("Attaching Surface to DiLink 5 QCarCam backend");
-            if (cameraSurface == null) cameraSurface = new Surface(cameraSurfaceTexture);
-            ((com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend) cameraObj).startSurface(cameraSurface);
+            logger.info("DiLink 5 QCarCam backend active — starting zero-copy native stream");
+            ((com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend) cameraObj).start();
             return;
         }
 
@@ -2418,11 +2444,7 @@ public class PanoramicCameraGpu {
      *  listener would starve and the HAL queue would back up, dropping
      *  frames the way we observed at boot (Stats: 0 frames). */
     private void createCameraImageReader() {
-        if (imageReaderThread == null) {
-            imageReaderThread = new HandlerThread("CamImageReaderCb");
-            imageReaderThread.start();
-            imageReaderHandler = new Handler(imageReaderThread.getLooper());
-        }
+        ensureCameraCallbackThread();
         // Pool size 6 (vs the typical 3) absorbs GL-thread stalls during
         // surveillance heavy work (YOLO inference, foveated readback) without
         // throttling the HAL producer rate. At 5120×960 NV12 = 7.4 MB/buf,
@@ -2483,6 +2505,8 @@ public class PanoramicCameraGpu {
         }
         }
         stFramePending = false;
+        diLink5FramePending = false;
+        diLink5HardwareTimestampNs = 0L;
         // Reset the arrival bookkeeping together with the SurfaceTexture it
         // describes. The old SurfaceTexture's listener is detached above, so no
         // further increments can arrive from it; a NEW SurfaceTexture starts its
@@ -2546,11 +2570,7 @@ public class PanoramicCameraGpu {
     }
 
     private void createWindshieldImageReader() {
-        if (imageReaderThread == null) {
-            imageReaderThread = new HandlerThread("CamImageReaderCb");
-            imageReaderThread.start();
-            imageReaderHandler = new Handler(imageReaderThread.getLooper());
-        }
+        ensureCameraCallbackThread();
         try {
             windshieldImageReader = ImageReader.newInstance(
                 1920, 1080,
@@ -2750,19 +2770,21 @@ public class PanoramicCameraGpu {
             releaseSentryBridgeViewpoint();
         }
 
-        // DiLink 5.0 (Snapdragon SA8155P): uses native QCarCam / AIS backend directly
+        // DiLink 5.0 (Snapdragon SA8155P): uses native QCarCam / AIS zero-copy backend directly
         if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
-            logger.info("DiLink 5 platform detected — initializing native QCarCam backend (cameraId=" + cameraId + ")");
+            logger.info("DiLink 5 platform detected — initializing native QCarCam zero-copy backend (cameraId=" + cameraId + ")");
+            com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.setFrameListener(timestampNs -> {
+                synchronized (frameSync) {
+                    diLink5FramePending = true;
+                    diLink5HardwareTimestampNs = timestampNs;
+                    frameSync.notify();
+                }
+            });
             com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend dilink5Backend =
                     new com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend(cameraId);
-            if (cameraSurfaceTexture != null) {
-                if (cameraSurface == null) cameraSurface = new Surface(cameraSurfaceTexture);
-                dilink5Backend.startSurface(cameraSurface);
-            } else {
-                dilink5Backend.start();
-            }
+            dilink5Backend.start();
             cameraObj = dilink5Backend;
-            logger.info("DiLink 5 native QCarCam stream initialized (cameraObj assigned).");
+            logger.info("DiLink 5 native QCarCam zero-copy stream started (cameraObj assigned).");
             return;
         }
 
@@ -3035,6 +3057,38 @@ public class PanoramicCameraGpu {
                 }
             }
         }
+    }
+
+    /**
+     * DiLink 5.0 QCarCam (Qualcomm SA8155P) zero-copy frame consumption.
+     * Binds the latest AHardwareBuffer into cameraTextureId via EGLImageKHR /
+     * GL_TEXTURE_EXTERNAL_OES entirely in-process, bypassing SurfaceFlinger and
+     * Qualcomm hwcomposer to eliminate SEGV_ACCERR crashes in sdm::HWCLayer::ValidateAndSetCSC.
+     *
+     * Must be called on the GL thread.
+     */
+    private boolean consumeDiLink5Frame() {
+        if (!(cameraObj instanceof com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend)) {
+            return false;
+        }
+        int activeTex;
+        synchronized (cameraTextureLock) {
+            activeTex = com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.bindLatestFrame(cameraTextureId);
+            if (activeTex > 0) {
+                cameraTextureId = activeTex;
+            }
+        }
+        if (activeTex <= 0) {
+            return false;
+        }
+        long candidate = System.nanoTime();
+        if (candidate <= lastAcceptedPtsNs) {
+            candidate = lastAcceptedPtsNs + 1_000L;
+        }
+        lastAcceptedPtsNs = candidate;
+        currentFrameTimestampNs = candidate;
+        cameraFrameSeq.incrementAndGet();
+        return true;
     }
 
     /**
@@ -3333,7 +3387,7 @@ public class PanoramicCameraGpu {
             android.opengl.GLES20.glUseProgram(probeProgram);
 
             android.opengl.GLES20.glActiveTexture(android.opengl.GLES20.GL_TEXTURE0);
-            android.opengl.GLES20.glBindTexture(android.opengl.GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
+            android.opengl.GLES20.glBindTexture(isTexture2D() ? android.opengl.GLES20.GL_TEXTURE_2D : android.opengl.GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
             android.opengl.GLES20.glUniform1i(probeUTexSamplerLoc, 0);
             android.opengl.GLES20.glUniformMatrix4fv(probeUTexMatrixLoc, 1, false, currentTexMatrix, 0);
 
@@ -3611,16 +3665,13 @@ public class PanoramicCameraGpu {
             // imagePending is set by the ImageReader OnImageAvailable cb;
             // stFramePending is set by SurfaceTexture.onFrameAvailable. The
             // path that's inactive simply never sets its flag.
+            // diLink5FramePending is set by DiLink5QCarCamBackend FrameListener.
             synchronized (frameSync) {
-                if (!imagePending && !stFramePending) {
+                if (!imagePending && !stFramePending && !diLink5FramePending) {
                     try {
-                        // FIX H4: 250 ms timeout (was 100 ms). The watchdog
-                        // owns frame-stall detection at its own 5 s cadence;
-                        // the timeout here only paces how often we re-check
-                        // running.get(). 100 ms produced ~10 idle wakeups/s
-                        // when the camera HAL was paused (e.g. during ACC-off
-                        // teardown latency); 250 ms cuts that to ~4/s with no
-                        // user-visible behaviour change.
+                        // Event-driven frame synchronization: waits for notification from
+                        // HAL callback (ImageReader/SurfaceTexture) or native FastCamClient (DiLink 5).
+                        // 250ms fallback timeout in case of dropped signal or hardware stall.
                         frameSync.wait(250);
                     } catch (InterruptedException e) {
                         // Continue
@@ -3628,6 +3679,7 @@ public class PanoramicCameraGpu {
                 }
                 imagePending = false;
                 stFramePending = false;
+                diLink5FramePending = false;
             }
 
             if (!running) {
@@ -3650,17 +3702,22 @@ public class PanoramicCameraGpu {
                 return;
             }
 
-            // Bind the latest camera frame to cameraTextureId. Two paths:
+            // Bind the latest camera frame to cameraTextureId. Three paths:
+            //   - DiLink 5 (SA8155P): in-process zero-copy AHardwareBuffer -> EGLImageKHR -> EXTERNAL_OES
             //   - oem SurfaceTexture: updateTexImage() pulls the most recent
             //     BufferQueue slot into the EXTERNAL_OES texture. PTS comes
             //     from SurfaceTexture.getTimestamp().
             //   - legacy ImageReader: acquireLatestImage + getHardwareBuffer
             //     + glEGLImageTargetTexture2DOES on the gralloc buffer.
-            // Both run on the GL thread (current EGL context). If no new
+            // All run on the GL thread (current EGL context). If no new
             // frame is ready (spurious wakeup or notify race), return — the
             // finally re-posts the loop and we wait again.
             long stageT0 = System.nanoTime();
-            if (USE_OEM_SURFACE_TEXTURE_PATH) {
+            if (cameraObj instanceof com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend) {
+                if (!consumeDiLink5Frame()) {
+                    return;
+                }
+            } else if (USE_OEM_SURFACE_TEXTURE_PATH) {
                 if (cameraSurfaceTexture == null) {
                     return;
                 }
@@ -3696,6 +3753,15 @@ public class PanoramicCameraGpu {
                     + " confirm content before anything is persisted");
             }
 
+            // On DiLink 5, cameras are handled natively via DiLink5QCarCamBackend (Qualcomm AIS).
+            // NEVER probe, downscale or sweep camera IDs on DiLink 5 — doing so cycles the HAL and
+            // triggers a system watchdog reboot of the head unit / pad.
+            if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+                probeComplete = true;
+                autoProbeCameras = false;
+                skipFrameValidation = true;
+            }
+
             // SOTA: Full-matrix auto-probe at frame 15 (~2 sec).
             // Sweeps camera IDs 0-5 × surface modes 0-5 to find the first
             // combination that produces panoramic image data. Each combo gets
@@ -3708,7 +3774,8 @@ public class PanoramicCameraGpu {
             // suspenders (this check), because the dead-slot walk resets
             // skipFrameValidation=false in advanceToNextCandidateCameraId.
             if (frameCounter == 15 && downscaler != null && downscaler.isInitialized()
-                    && !skipFrameValidation) {
+                    && !skipFrameValidation
+                    && !com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
                 try {
                     byte[] probe = downscaler.readPixels(cameraTextureId, 8, 8);
                     boolean hasData = false;
@@ -3782,6 +3849,7 @@ public class PanoramicCameraGpu {
             // black frame; without isInitialized() this recheck would re-probe
             // a working camera whenever the downscaler thread failed init.
             if (frameCounter == 50 && !autoProbeCameras && !skipFrameValidation
+                    && !com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()
                     && downscaler != null && downscaler.isInitialized()) {
                 try {
                     byte[] probe = downscaler.readPixels(cameraTextureId, 8, 8);
@@ -4065,19 +4133,14 @@ public class PanoramicCameraGpu {
                     boolean drawStreamFrame = sStride <= 1 || (streamStrideCounter % sStride) == 0;
                     streamStrideCounter++;
                     if (drawStreamFrame) {
-                        if (USE_OEM_SURFACE_TEXTURE_PATH) {
+                        if (USE_OEM_SURFACE_TEXTURE_PATH || com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
                             localStreamScaler.setTextureMatrix(currentTexMatrix);
-                            // Stamp the presentation time on dilink4 ONLY.
+                            // Stamp the presentation time on dilink4 & dilink5.
                             //
-                            // This HAL emits at its own fixed rate (~4.5 fps
-                            // observed) and refuses setCameraFps outright — it
-                            // returns false for every value, and both the OEM app
-                            // (gl/a.java:402) and other OEM-derived players discard that return, so
-                            // false is simply normal here. An encoder configured
-                            // for a higher KEY_FRAME_RATE and fed UNSTAMPED buffers
-                            // has to invent timing: most ticks see an identical
-                            // image, yielding near-empty P-frames and a picture
-                            // that looks frozen after the first keyframe.
+                            // An encoder configured for a higher KEY_FRAME_RATE and
+                            // fed UNSTAMPED buffers has to invent timing: most ticks
+                            // see an identical image, yielding near-empty P-frames and
+                            // a picture that looks frozen after the first keyframe.
                             //
                             // currentFrameTimestampNs is the same single-domain
                             // System.nanoTime() PTS the recorder lane already
@@ -4359,6 +4422,12 @@ public class PanoramicCameraGpu {
      * @param skipId Camera ID to skip (the one we just tested). -1 to start fresh.
      */
     private void advanceProbeToNext(int skipId) {
+        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+            logger.info("DiLink 5: advanceProbeToNext suppressed — native QCarCam backend active");
+            probeComplete = true;
+            autoProbeCameras = false;
+            return;
+        }
         // Close current camera cleanly
         if (cameraObj != null) {
             try {
@@ -4629,7 +4698,12 @@ public class PanoramicCameraGpu {
                     if (USE_OEM_SURFACE_TEXTURE_PATH && stallClock <= 0) {
                         stallClock = lastCameraStartTime;
                     }
-                    if (!cameraYielded && stallClock > 0 &&
+                    boolean dilink5Yielded = cameraObj instanceof com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                            && com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isYielded();
+                    if (dilink5Yielded) {
+                        lastFrameTime = now;
+                    }
+                    if (!cameraYielded && !dilink5Yielded && stallClock > 0 &&
                         timeSinceHeartbeat < GL_THREAD_TIMEOUT_MS) {
                         long timeSinceFrame = now - stallClock;
 
@@ -6567,9 +6641,9 @@ public class PanoramicCameraGpu {
         // while the encoder is clamped to 10, giving stride 2 and halving an
         // already-slow feed.) Legacy keeps the full stride behaviour, where
         // targetFps is genuinely honoured by the HAL and skipping saves real work.
-        if (USE_OEM_SURFACE_TEXTURE_PATH && stride > 1) {
-            logger.info("dilink4: forcing stream stride 1 (was " + stride
-                + ") — HAL rate is fixed and below the request, so decimating"
+        if ((USE_OEM_SURFACE_TEXTURE_PATH || com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) && stride > 1) {
+            logger.info("dilink4/5: forcing stream stride 1 (was " + stride
+                + ") — source rate is fixed or passthrough, so decimating"
                 + " would drop real frames");
             stride = 1;
         }
@@ -6623,6 +6697,12 @@ public class PanoramicCameraGpu {
      * with non-black frames.
      */
     public void setAutoProbeCameras(boolean enabled) {
+        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+            this.autoProbeCameras = false;
+            this.probeComplete = true;
+            logger.info("Camera auto-probe: DISABLED (DiLink 5 native QCarCam platform)");
+            return;
+        }
         this.autoProbeCameras = enabled;
         if (enabled) {
             probeComplete = false;
@@ -6862,7 +6942,7 @@ public class PanoramicCameraGpu {
             return null;
         }
         try {
-            highResSampler = new HighResPreviewSampler(sharedContext);
+            highResSampler = new HighResPreviewSampler(sharedContext, isTexture2D());
             // Layout mirrors the active camera layout mode; matrix is
             // refreshed on every consume tick so even legacy mode (which
             // uses identity) stays current.
@@ -6873,8 +6953,11 @@ public class PanoramicCameraGpu {
                     org.json.JSONObject camCfgHr = com.overdrive.app.config
                         .UnifiedConfigManager.loadConfig().optJSONObject("camera");
                     if (camCfgHr != null) {
-                        highResSampler.setRedMaskEnabled(
-                            camCfgHr.optBoolean("dilink4RedMask", false));
+                        boolean redMask = camCfgHr.optBoolean("dilink4RedMask", false);
+                        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+                            redMask = false;
+                        }
+                        highResSampler.setRedMaskEnabled(redMask);
                         highResSampler.setApaCenterInset(CAMERA_LAYOUT_MODE == 3
                             ? (float) camCfgHr.optDouble(
                                 "dilink4ApaCenterInset", 0.09375)

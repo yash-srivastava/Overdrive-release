@@ -68,13 +68,15 @@ public final class HighResPreviewSampler {
             "    vTexCoord = (uTexMatrix * vec4(src, 0.0, 1.0)).xy;\n" +
             "}\n";
 
-    private static String buildMosaicShader(float[] offsets) {
+    private static String buildMosaicShader(float[] offsets, boolean isTexture2D) {
         // Layout 1 = full-frame passthrough. Layout 3 = four-corner DiLink 4
         // output with the configured inset. Layout 0 = legacy 4-strip.
+        String ext = isTexture2D ? "#extension GL_OES_EGL_image_external : enable\n" : "#extension GL_OES_EGL_image_external : require\n";
+        String camSampler = isTexture2D ? "uniform sampler2D uCameraTex;\n" : "uniform samplerExternalOES uCameraTex;\n";
         return String.format(Locale.US,
-                "#extension GL_OES_EGL_image_external : require\n" +
+                ext +
                 "precision mediump float;\n" +
-                "uniform samplerExternalOES uCameraTex;\n" +
+                camSampler +
                 "uniform float uApaMode;\n" +
                 "uniform float uRedMaskStrength;\n" +
                 "uniform float uApaCenterInset;\n" +
@@ -114,35 +116,38 @@ public final class HighResPreviewSampler {
     //   uApaMode >  2.5 → DiLink 4 2x2: 0.5×0.5 corner at uCorner.
     // uTexMatrix in the vertex shader is applied to the sampled UV
     // regardless, so the HAL's transform matrix still crops out chrome.
-    private static final String QUADRANT_SHADER =
-            "#extension GL_OES_EGL_image_external : require\n" +
-            "precision mediump float;\n" +
-            "uniform samplerExternalOES uCameraTex;\n" +
-            "uniform float uStripOffsetX;\n" +
-            "uniform vec2 uCorner;\n" +
-            "uniform vec2 uFlip;\n" +
-            "uniform float uApaMode;\n" +
-            "uniform float uRedMaskStrength;\n" +
-            "uniform float uApaCenterInset;\n" +
-            "varying vec2 vTexCoord;\n" +
-            "void main() {\n" +
-            "    vec2 samplePos;\n" +
-            "    if (uApaMode > 2.5) {\n" +
-            "        // DiLink 4 2x2: sample inside the role's 0.5×0.5\n" +
-            "        // producer corner. uFlip mirrors the local axes when\n" +
-            "        // the HAL emits that role's tile flipped.\n" +
-            "        vec2 sampledLocal = vec2(vTexCoord.x * 0.5, vTexCoord.y * 0.5);\n" +
-            "        if (uFlip.x > 0.5) sampledLocal.x = 0.5 - sampledLocal.x;\n" +
-            "        if (uFlip.y > 0.5) sampledLocal.y = 0.5 - sampledLocal.y;\n" +
-            "        samplePos = uCorner + sampledLocal;\n" +
-            com.overdrive.app.camera.GlUtil.APA_CENTER_INSET_GLSL +
-            "    } else {\n" +
-            "        samplePos = vec2(uStripOffsetX + vTexCoord.x * 0.25, vTexCoord.y);\n" +
-            "    }\n" +
-            "    vec4 src = texture2D(uCameraTex, samplePos);\n" +
-            com.overdrive.app.camera.GlUtil.RED_MASK_GLSL +
-            "    gl_FragColor = src;\n" +
-            "}\n";
+    private static String buildQuadrantShader(boolean isTexture2D) {
+        String ext = isTexture2D ? "#extension GL_OES_EGL_image_external : enable\n" : "#extension GL_OES_EGL_image_external : require\n";
+        String camSampler = isTexture2D ? "uniform sampler2D uCameraTex;\n" : "uniform samplerExternalOES uCameraTex;\n";
+        return ext +
+                "precision mediump float;\n" +
+                camSampler +
+                "uniform float uStripOffsetX;\n" +
+                "uniform vec2 uCorner;\n" +
+                "uniform vec2 uFlip;\n" +
+                "uniform float uApaMode;\n" +
+                "uniform float uRedMaskStrength;\n" +
+                "uniform float uApaCenterInset;\n" +
+                "varying vec2 vTexCoord;\n" +
+                "void main() {\n" +
+                "    vec2 samplePos;\n" +
+                "    if (uApaMode > 2.5) {\n" +
+                "        // DiLink 4 2x2: sample inside the role's 0.5×0.5\n" +
+                "        // producer corner. uFlip mirrors the local axes when\n" +
+                "        // the HAL emits that role's tile flipped.\n" +
+                "        vec2 sampledLocal = vec2(vTexCoord.x * 0.5, vTexCoord.y * 0.5);\n" +
+                "        if (uFlip.x > 0.5) sampledLocal.x = 0.5 - sampledLocal.x;\n" +
+                "        if (uFlip.y > 0.5) sampledLocal.y = 0.5 - sampledLocal.y;\n" +
+                "        samplePos = uCorner + sampledLocal;\n" +
+                com.overdrive.app.camera.GlUtil.APA_CENTER_INSET_GLSL +
+                "    } else {\n" +
+                "        samplePos = vec2(uStripOffsetX + vTexCoord.x * 0.25, vTexCoord.y);\n" +
+                "    }\n" +
+                "    vec4 src = texture2D(uCameraTex, samplePos);\n" +
+                com.overdrive.app.camera.GlUtil.RED_MASK_GLSL +
+                "    gl_FragColor = src;\n" +
+                "}\n";
+    }
 
     private static final float[] VERTEX_COORDS = {
             -1.0f, -1.0f,
@@ -209,6 +214,7 @@ public final class HighResPreviewSampler {
     private ByteBuffer readBuffer;
     private byte[] scratchRgba;
     private int[] argbPixels;
+    private final boolean isTexture2D;
 
     /**
      * @param sharedContext EGL context owned by the camera GL thread. Pass
@@ -216,7 +222,12 @@ public final class HighResPreviewSampler {
      *     camera's OES texture from this thread.
      */
     public HighResPreviewSampler(EGLContext sharedContext) {
+        this(sharedContext, false);
+    }
+
+    public HighResPreviewSampler(EGLContext sharedContext, boolean isTexture2D) {
         this.sharedContext = sharedContext;
+        this.isTexture2D = isTexture2D;
         this.thread = new HandlerThread("HighResPreviewSampler");
         this.thread.start();
         this.handler = new Handler(thread.getLooper());
@@ -338,7 +349,7 @@ public final class HighResPreviewSampler {
             try { GLES20.glDeleteProgram(mosaicProgram); } catch (Throwable ignored) {}
             mosaicProgram = 0;
         }
-        mosaicProgram = GlUtil.createProgram(VERTEX_SHADER, buildMosaicShader(offsets));
+        mosaicProgram = GlUtil.createProgram(VERTEX_SHADER, buildMosaicShader(offsets, isTexture2D));
         if (mosaicProgram <= 0) return false;
         mosaicAPos = GLES20.glGetAttribLocation(mosaicProgram, "aPosition");
         mosaicATex = GLES20.glGetAttribLocation(mosaicProgram, "aTexCoord");
@@ -354,7 +365,7 @@ public final class HighResPreviewSampler {
 
     private boolean ensureQuadrantProgram() {
         if (quadProgram > 0) return true;
-        quadProgram = GlUtil.createProgram(VERTEX_SHADER, QUADRANT_SHADER);
+        quadProgram = GlUtil.createProgram(VERTEX_SHADER, buildQuadrantShader(isTexture2D));
         if (quadProgram <= 0) return false;
         quadAPos = GLES20.glGetAttribLocation(quadProgram, "aPosition");
         quadATex = GLES20.glGetAttribLocation(quadProgram, "aTexCoord");
@@ -528,7 +539,11 @@ public final class HighResPreviewSampler {
 
             GLES20.glUseProgram(program);
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId);
+            if (isTexture2D) {
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId);
+            } else {
+                GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId);
+            }
             GLES20.glUniform1i(uTexLoc, 0);
             if (uOffsetLoc >= 0) {
                 GLES20.glUniform1f(uOffsetLoc, offsetValue);
@@ -675,6 +690,9 @@ public final class HighResPreviewSampler {
     }
 
     public void setRedMaskEnabled(boolean enabled) {
+        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+            enabled = false;
+        }
         this.redMaskEnabled = enabled;
     }
 

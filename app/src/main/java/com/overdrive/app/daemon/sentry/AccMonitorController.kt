@@ -25,6 +25,9 @@ class AccMonitorController(
         const val POWER_LEVEL_ACC = 1
         const val POWER_LEVEL_ON = 2
         const val POWER_LEVEL_OK = 3
+        // Adaptive polling intervals
+        const val POLL_INTERVAL_SENTRY_MS = 3_000L   // 3s when car is OFF / parked in sentry
+        const val POLL_INTERVAL_ACTIVE_MS = 1_500L   // 1.5s when car is ON / driving
     }
     
     @Volatile
@@ -39,7 +42,7 @@ class AccMonitorController(
      * Start polling mode for ACC status monitoring.
      */
     fun startPolling() {
-        logger.info("Starting polling mode (checking state every 500ms)...")
+        logger.info("Starting polling mode (adaptive throttle: ${POLL_INTERVAL_SENTRY_MS}ms sentry / ${POLL_INTERVAL_ACTIVE_MS}ms active)...")
         
         // Log initial state
         logAllPowerSources()
@@ -62,23 +65,40 @@ class AccMonitorController(
                 logger.info("Started with ACC ON - waiting for ACC OFF event...")
             }
             
+            var isCurrentlyAccOff = (lastAccAnimStatus != "0")
+            var lastCarServiceCheckMs = 0L
+
             while (running) {
                 try {
-                    Thread.sleep(500) // Poll every 500ms for faster detection
+                    val sleepInterval = if (isCurrentlyAccOff) POLL_INTERVAL_SENTRY_MS else POLL_INTERVAL_ACTIVE_MS
+                    Thread.sleep(sleepInterval)
                     pollCount++
                     
-                    // Every 60 polls (30 seconds), log all sources for debugging
-                    if (pollCount % 60 == 0) {
+                    // Diagnostic logging: reduced frequency to once every ~10 minutes
+                    if (pollCount % 200 == 0) {
                         logAllPowerSources()
                     }
                     
-                    // Check Display Power & Interactive State (DiLink 5 & standard Android Automotive)
-                    val screenPower = execShell("dumpsys power 2>/dev/null | grep -i 'Display Power: state=' | head -1").trim()
-                    val isInteractive = execShell("dumpsys power 2>/dev/null | grep -i 'mIsInteractive' | head -1").trim()
-                    val isScreenOff = !screenPower.contains("state=ON") || isInteractive.contains("false")
+                    // 1. Check Display Power & Interactive State (prefer direct Binder call, zero forks)
+                    val isScreenOff = checkScreenOff()
+
+                    // 2. Fast property check
                     var accAnimStatus = execShell("getprop sys.accanim.status").trim()
-                    val carPowerMode = execShell("dumpsys car_service 2>/dev/null | grep -i 'Power Mute State' -A 2 | grep 'current' | head -1").trim()
-                    val isStandby = carPowerMode.contains("Standby") || carPowerMode.contains("Sleep") || carPowerMode.contains("Str") || carPowerMode.contains("4=") || carPowerMode.contains("8=") || carPowerMode.contains("5=")
+
+                    // 3. Cadenced CarService check: run when screen is ON, or every 9s in sentry, or when active
+                    val nowMs = System.currentTimeMillis()
+                    val shouldCheckCarService = !isScreenOff || !isCurrentlyAccOff || (nowMs - lastCarServiceCheckMs >= 9_000L)
+                    
+                    var isStandby = false
+                    var carPowerMode = ""
+                    if (shouldCheckCarService) {
+                        carPowerMode = execShell("dumpsys car_service 2>/dev/null | grep -i 'Power Mute State' -A 2 | grep 'current' | head -1").trim()
+                        isStandby = carPowerMode.contains("Standby") || carPowerMode.contains("Sleep") || carPowerMode.contains("Str") || carPowerMode.contains("4=") || carPowerMode.contains("8=") || carPowerMode.contains("5=")
+                        lastCarServiceCheckMs = nowMs
+                    } else if (isCurrentlyAccOff && isScreenOff) {
+                        // While screen is off and car was off, maintain standby without waking car_service
+                        isStandby = true
+                    }
 
                     if (accAnimStatus.isEmpty()) {
                         accAnimStatus = if (isScreenOff || isStandby) "1" else "0"
@@ -98,6 +118,8 @@ class AccMonitorController(
                             onAccOn()
                         }
                         lastAccAnimStatus = if (isAccOffNow) "1" else "0"
+                        isCurrentlyAccOff = isAccOffNow
+                        logAllPowerSources() // Log full snapshot on actual state change
                     }
                     
                 } catch (e: InterruptedException) {
@@ -110,6 +132,30 @@ class AccMonitorController(
         }, "PowerLevelPoller")
         
         pollingThread?.start()
+    }
+    
+    /**
+     * Check if display is OFF or non-interactive.
+     * Uses direct PowerManager Binder call when context is available (0 forks),
+     * falling back to a single dumpsys power query.
+     */
+    private fun checkScreenOff(): Boolean {
+        try {
+            val ctx = com.overdrive.app.daemon.CameraDaemon.getAppContext()
+            if (ctx != null) {
+                val pm = ctx.getSystemService(android.content.Context.POWER_SERVICE) as? android.os.PowerManager
+                if (pm != null) {
+                    return !pm.isInteractive
+                }
+            }
+        } catch (t: Throwable) {
+            // Fall back to dumpsys
+        }
+
+        val screenState = execShell("dumpsys power 2>/dev/null | grep -E -i 'Display Power: state=|mIsInteractive' | head -2").trim()
+        val isInteractive = !screenState.contains("mIsInteractive=false") && !screenState.contains("mIsInteractive: false")
+        val isDisplayOn = screenState.contains("state=ON")
+        return !isDisplayOn || !isInteractive
     }
     
     /**

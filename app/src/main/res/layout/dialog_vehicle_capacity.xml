@@ -115,6 +115,29 @@
                 android:layout_height="wrap_content"
                 android:imeOptions="actionDone"
                 android:inputType="numberDecimal"
+                android:digits="0123456789.,"
+                android:maxLines="1"
+                android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <!-- QCarCam camera mapping input (DiLink 5.0 only) -->
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/vehicleCameraMappingLayout"
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:hint="Canali Telecamere (QCarCam)"
+            app:helperText="Es. 8,9,5,4 (Shark) o 0,1,2,3 (Sealion 7). Aggiungi ,6 per dashcam interna."
+            app:helperTextEnabled="true"
+            android:visibility="gone">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/vehicleCameraMappingInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:imeOptions="actionDone"
+                android:inputType="text"
                 android:maxLines="1"
                 android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
         </com.google.android.material.textfield.TextInputLayout>

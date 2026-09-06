@@ -117,6 +117,36 @@ public class GlUtil {
         
         return textureId;
     }
+
+    /**
+     * Creates a standard 2D texture (GL_TEXTURE_2D) for direct CPU/GPU pixel upload.
+     * Unlike GL_TEXTURE_EXTERNAL_OES, this texture is completely isolated from
+     * SurfaceFlinger/Gralloc and does not require EGLImage or AHardwareBuffer.
+     *
+     * @return Texture ID for the created 2D texture
+     */
+    public static int create2DTexture() {
+        int[] textures = new int[1];
+        GLES20.glGenTextures(1, textures, 0);
+        checkGlError("glGenTextures");
+
+        int textureId = textures[0];
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId);
+        checkGlError("glBindTexture");
+
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,
+                GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,
+                GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,
+                GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,
+                GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
+        checkGlError("glTexParameteri");
+
+        logger.debug("Created 2D texture: " + textureId);
+        return textureId;
+    }
     
     /**
      * Creates an OpenGL program from vertex and fragment shader source code.

@@ -376,3 +376,8 @@
 -dontwarn sun.misc.Unsafe
 -dontwarn java.nio.file.**
 -dontwarn java.util.spi.ToolProvider
+
+# ==================== DiLink 5.0 (SA8155P) JNI Bridge ====================
+-keep class com.overdrive.app.camera.dilink5.** { *; }
+-keepclassmembers class com.overdrive.app.camera.dilink5.** { *; }
+

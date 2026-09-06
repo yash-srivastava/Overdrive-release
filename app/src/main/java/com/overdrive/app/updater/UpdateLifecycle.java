@@ -151,6 +151,7 @@ public final class UpdateLifecycle {
                 psAwkKillLine("start_acc_sentry") +
                 psAwkKillLine("start_telegram") +
                 psAwkKillLine("byd_cam_daemon") +
+                psAwkKillLine("fast_cam_capture") +
                 psAwkKillLine("cam_daemon") +
                 psAwkKillLine("sentry_daemon") +
                 psAwkKillLine("acc_sentry_daemon") +

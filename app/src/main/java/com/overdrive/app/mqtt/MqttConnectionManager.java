@@ -641,9 +641,17 @@ public class MqttConnectionManager {
             // for a stable published value. getBatterySoc() is only a fallback for the
             // AccSentry-process path where the collector snapshot may be absent.
             double soc = -1;
-            if (vd != null && !Double.isNaN(vd.socPercent)) {
+            if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+                try {
+                    double carSvcSoc = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.socPercentValue();
+                    if (!Double.isNaN(carSvcSoc) && carSvcSoc >= 0 && carSvcSoc <= 100) {
+                        soc = carSvcSoc;
+                    }
+                } catch (Throwable ignored) {}
+            }
+            if (soc < 0 && vd != null && !Double.isNaN(vd.socPercent)) {
                 soc = vd.socPercent;
-            } else {
+            } else if (soc < 0) {
                 BatterySocData socData = vehicleDataMonitor.getBatterySoc();
                 if (socData != null) soc = socData.socPercent;
             }

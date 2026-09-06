@@ -769,6 +769,47 @@ public class TelemetryDataCollector {
             }
         }
 
+        // DiLink5: vendor speed/gear HALs are dead; use the BydDataCollector
+        // snapshot that applyCarSvcOverlay fills from dumpsys car_service
+        // (5s cadence). Read-only here so this 5Hz overlay poller never
+        // shells out to dumpsys itself.
+        if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+            try {
+                com.overdrive.app.byd.BydVehicleData d =
+                        com.overdrive.app.byd.BydDataCollector.getInstance().getData();
+                if (d != null) {
+                    if (!Double.isNaN(d.speedKmh) && d.speedKmh >= 0 && d.speedKmh <= 300) {
+                        int carSvcSpeed = (int) Math.round(d.speedKmh);
+                        acceptSpeedCandidate(carSvcSpeed, pollElapsedRealtimeMs);
+                        speedKmh = lastSpeedKmh;
+                    }
+                    if (isValidGearMode(d.gearMode)) {
+                        gearMode = d.gearMode;
+                        lastGearMode = d.gearMode;
+                        lastGearValid = true;
+                        lastGearReadElapsedRealtimeMs = pollElapsedRealtimeMs;
+                    }
+                    if (isValidPedalPercent(d.accelPercent)) {
+                        accelPercent = d.accelPercent;
+                        lastAccelPercent = d.accelPercent;
+                        lastAccelValid = true;
+                        lastAccelReadElapsedRealtimeMs = pollElapsedRealtimeMs;
+                    }
+                    if (isValidPedalPercent(d.brakePercent)) {
+                        brakePercent = d.brakePercent;
+                        lastBrakePercent = d.brakePercent;
+                        lastBrakeValid = true;
+                        lastBrakeReadElapsedRealtimeMs = pollElapsedRealtimeMs;
+                        brakePedalPressed = d.brakePercent > 0;
+                        lastBrakePedalPressed = brakePedalPressed;
+                        lastBrakePedalPressedValid = true;
+                        lastBrakePedalPressedReadElapsedRealtimeMs =
+                                pollElapsedRealtimeMs;
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+
         // Turn signals (every poll = 5Hz). Read on the fast path so a cancelled
         // indicator clears from the overlay within ~600ms instead of lingering
         // for up to 10s. Sticky counter bridges the off-phase of the blink cycle.
@@ -779,7 +820,31 @@ public class TelemetryDataCollector {
         // snapshot.leftTurnSignal/rightTurnSignal. When demand is off we leave
         // leftTurn/rightTurn at their carried-forward last-known values (cheap,
         // no reflection) — they simply aren't drawn.
-        if (demandTurnSignals && lightDevice != null && getTurnLightFlashStateMethod != null) {
+        boolean turnFromSnapshot = false;
+        if (demandTurnSignals
+                && com.overdrive.app.byd.DiLink5Platform.isActive()) {
+            try {
+                com.overdrive.app.byd.BydVehicleData d =
+                        com.overdrive.app.byd.BydDataCollector.getInstance().getData();
+                if (d != null
+                        && (d.leftTurnState != com.overdrive.app.byd.BydVehicleData.UNAVAILABLE
+                        || d.rightTurnState != com.overdrive.app.byd.BydVehicleData.UNAVAILABLE)) {
+                    boolean leftNow = d.leftTurnState == 1;
+                    boolean rightNow = d.rightTurnState == 1;
+                    if (leftNow) leftTurnStickyCount = TURN_STICKY_TICKS;
+                    if (rightNow) rightTurnStickyCount = TURN_STICKY_TICKS;
+                    leftTurn = leftTurnStickyCount > 0;
+                    rightTurn = rightTurnStickyCount > 0;
+                    if (leftTurnStickyCount > 0) leftTurnStickyCount--;
+                    if (rightTurnStickyCount > 0) rightTurnStickyCount--;
+                    lastLeftTurn = leftTurn;
+                    lastRightTurn = rightTurn;
+                    turnFromSnapshot = true;
+                }
+            } catch (Throwable ignored) {}
+        }
+        if (demandTurnSignals && !turnFromSnapshot
+                && lightDevice != null && getTurnLightFlashStateMethod != null) {
             try {
                 int flashState = (int) getTurnLightFlashStateMethod.invoke(lightDevice);
 

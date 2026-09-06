@@ -47,11 +47,14 @@ else()
     set(OPENCV_AVAILABLE FALSE)
 endif()
 
-# ==================== Precompiled FastCam Client ====================
-add_library(fast_cam_client SHARED IMPORTED)
-set_target_properties(fast_cam_client PROPERTIES
-    IMPORTED_LOCATION "${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libfast_cam_client.so"
+# ==================== FastCam Client ====================
+add_library(fast_cam_client SHARED
+    camera/fast_cam_bridge.cpp
 )
+target_include_directories(fast_cam_client PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+)
+target_link_libraries(fast_cam_client android log)
 
 # ==================== Surveillance Library ====================
 set(SURVEILLANCE_SOURCES

@@ -93,7 +93,7 @@ public final class CameraProfiles {
                 "BYD DiLink 5.0 (Sealion 7 / Snapdragon 8155)",
                 0,
                 1920,
-                1300,
+                1080,
                 0,
                 1920,
                 1080,

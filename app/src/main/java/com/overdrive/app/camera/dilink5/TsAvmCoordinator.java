@@ -7,6 +7,7 @@ import android.content.ServiceConnection;
 import android.os.IBinder;
 
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.monitor.AccMonitor;
 import com.ts.avm.IAvmServiceInterface;
 import com.ts.avm.IAvmServiceListener;
 
@@ -86,11 +87,19 @@ public class TsAvmCoordinator {
     }
 
     public void startAvm() {
+        startAvm(false);
+    }
+
+    public void startAvm(boolean force) {
+        if (!force && AccMonitor.isAccOn()) {
+            logger.warn("startAvm() suppressed: ACC is ON, avoiding OEM 360 collision with display / SurfaceFlinger");
+            return;
+        }
         bind();
         if (avmService != null) {
             try {
                 avmService.startAvm();
-                logger.info("startAvm() invoked successfully");
+                logger.info("startAvm() invoked successfully (force=" + force + ")");
             } catch (Exception e) {
                 logger.warn("startAvm() failed: " + e.getMessage());
             }

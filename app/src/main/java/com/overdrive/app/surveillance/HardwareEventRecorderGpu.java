@@ -120,7 +120,7 @@ public class HardwareEventRecorderGpu {
     // meant to prevent. Secondary encoders (e.g. OEM dashcam alongside pano)
     // call setPinOperatingRate(false) before init() so only the primary
     // encoder claims the frequency lock.
-    private boolean pinOperatingRate = PIN_OPERATING_RATE;
+    private boolean pinOperatingRate = PIN_OPERATING_RATE || com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported();
     
     // Encoder
     // Volatile because release() (lifecycle thread) nulls this while the
@@ -1363,13 +1363,23 @@ public class HardwareEventRecorderGpu {
         /** Pure policy check kept Android-runtime independent for local tests. */
         boolean shouldAutoUpload(String fileName) {
             if (this != AUTOMATIC) return false;
-            if (fileName == null) return true;
+            if (fileName == null) return false;
             String name = fileName;
             int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
             if (slash >= 0 && slash + 1 < name.length()) {
                 name = name.substring(slash + 1);
             }
-            return !name.startsWith("event_");
+            // NEVER auto-upload continuous dashcam recordings (cam_* or replay_*).
+            // Continuous driving loops must stay local and not flood Telegram.
+            if (name.startsWith("cam_") || name.startsWith("replay_") || name.matches("^cam\\d+_.*")) {
+                return false;
+            }
+            // Sentry events (event_*.mp4) are handled exclusively by SurveillanceEngineGpu
+            // which evaluates severity and alert thresholds.
+            if (name.startsWith("event_")) {
+                return false;
+            }
+            return true;
         }
     }
     private VideoUploadPolicy videoUploadPolicy = VideoUploadPolicy.AUTOMATIC;
@@ -1816,11 +1826,23 @@ public class HardwareEventRecorderGpu {
         logger.info("Creating MediaCodec encoder...");
         final MediaCodec[] encoderResult = {null};
         final Exception[] createError = {null};
+        final String[] effectiveMimeType = {finalCodecMimeType};
         Thread createThread = new Thread(() -> {
             try {
                 encoderResult[0] = MediaCodec.createEncoderByType(finalCodecMimeType);
             } catch (Exception e) {
-                createError[0] = e;
+                if (!"video/avc".equalsIgnoreCase(finalCodecMimeType)) {
+                    logger.warn("Failed to create encoder for " + finalCodecMimeType + " (" + e.getMessage() + "), falling back to video/avc");
+                    try {
+                        encoderResult[0] = MediaCodec.createEncoderByType("video/avc");
+                        effectiveMimeType[0] = "video/avc";
+                        finalFormat.setString(MediaFormat.KEY_MIME, "video/avc");
+                    } catch (Exception e2) {
+                        createError[0] = e;
+                    }
+                } else {
+                    createError[0] = e;
+                }
             }
         }, "EncoderCreate");
         createThread.start();
@@ -1838,6 +1860,7 @@ public class HardwareEventRecorderGpu {
             throw createError[0];
         }
         encoder = encoderResult[0];
+        this.codecMimeType = effectiveMimeType[0];
         // Confirm the negotiated codec name on this device, not just our intent.
         // If the device-side codec selection silently downgraded HEVC→AVC (rare,
         // but possible if the platform encoder list rejects HEVC for our params),
@@ -4379,9 +4402,16 @@ public class HardwareEventRecorderGpu {
             // on a codec whose dequeue is stuck is its own native hazard. Leak
             // the codec deliberately — the process exit reclaims it; a second
             // concurrent teardown attempt cannot.
-            logger.error("release(): worker wedged — skipping encoder stop/release "
-                + "(process restart reclaims the codec); requesting trip-safe restart");
+            // CRITICAL: Also leak inputSurface without releasing it! Releasing
+            // inputSurface while the codec worker is alive in vendor media.hwcodec
+            // invalidates GrallocBuffer handles underneath QC2Component::prepareInputPack,
+            // triggering a fatal SIGSEGV in QC2GrallocBuffer::getMetadata and bringing down
+            // cameraserver/system_server.
+            logger.error("release(): worker wedged — skipping encoder AND surface release "
+                + "(process restart reclaims both; releasing surface while codec is alive "
+                + "triggers Qualcomm media.hwcodec QC2GrallocBuffer SIGSEGV); requesting trip-safe restart");
             encoder = null;
+            inputSurface = null;
             try {
                 com.overdrive.app.daemon.CameraDaemon.requestProcessRestartPreservingTrip(
                     "encoder worker wedged during release()");
@@ -4441,7 +4471,11 @@ public class HardwareEventRecorderGpu {
         }
         
         if (inputSurface != null) {
-            inputSurface.release();
+            try {
+                inputSurface.release();
+            } catch (Exception e) {
+                logger.error("Error releasing inputSurface", e);
+            }
             inputSurface = null;
         }
 
@@ -4656,7 +4690,7 @@ public class HardwareEventRecorderGpu {
                 final boolean[] interrupted = { Thread.interrupted() };
                 try {
                     exited = com.overdrive.app.util.ThreadJoins
-                        .joinFullDeadline(deadDrainer, 2000, interrupted);
+                        .joinFullDeadline(deadDrainer, 5000, interrupted);
                 } finally {
                     if (interrupted[0]) {
                         Thread.currentThread().interrupt();
@@ -4667,7 +4701,7 @@ public class HardwareEventRecorderGpu {
                 } else {
                     teardownWedged = true;
                     logger.error("stopDrainerThread: drainer still alive after its full "
-                        + "2s deadline — reference retained (sticky); draining, muxer "
+                        + "5s deadline — reference retained (sticky); draining, muxer "
                         + "stop and drainer restart are NOT safe");
                 }
             }
@@ -4740,20 +4774,13 @@ public class HardwareEventRecorderGpu {
                 final boolean[] interrupted = { Thread.interrupted() };
                 boolean exited;
                 try {
-                    // 2s deadline (audit follow-up): aligned with the teardown
+                    // 5s deadline (audit follow-up): aligned with the teardown
                     // standard everywhere else (stopDrainerThread's join, the
                     // disk-writer join, GpuSurveillancePipeline's bounded
-                    // release). The old 1s was the outlier: a single
-                    // drainEncoderInternal() pass can overrun under SD/FUSE
-                    // pressure (the 500ms→2s history on stopDrainerThread
-                    // records real overruns) and the native dequeue is not
-                    // interruptible, so this join rides the pass-latency
-                    // tail. A false "wedged" verdict now costs a bounded
-                    // URGENT process restart (camera-release halt), so the
-                    // wider grace is the false-positive control that makes
-                    // that escalation safe to ship.
+                    // release). A single drainEncoderInternal() pass can overrun
+                    // under SD/FUSE pressure.
                     exited = com.overdrive.app.util.ThreadJoins
-                        .joinFullDeadline(deadDrainer, 2000, interrupted);
+                        .joinFullDeadline(deadDrainer, 5000, interrupted);
                 } finally {
                     if (interrupted[0]) {
                         Thread.currentThread().interrupt();
@@ -4761,7 +4788,7 @@ public class HardwareEventRecorderGpu {
                 }
                 if (!exited) {
                     teardownWedged = true;
-                    logger.error("Drainer thread still alive after its full 2s deadline — "
+                    logger.error("Drainer thread still alive after its full 5s deadline — "
                         + "camera close is NOT safe (FORTIFY destroyed-mutex risk)");
                     return false;
                 }
@@ -5017,7 +5044,7 @@ public class HardwareEventRecorderGpu {
             boolean exited;
             try {
                 exited = com.overdrive.app.util.ThreadJoins
-                    .joinFullDeadline(deadWriter, 2000, interrupted);
+                    .joinFullDeadline(deadWriter, 5000, interrupted);
             } finally {
                 if (interrupted[0]) {
                     Thread.currentThread().interrupt();
@@ -5026,7 +5053,7 @@ public class HardwareEventRecorderGpu {
             if (!exited) {
                 teardownWedged = true;
                 logger.error("stopDiskWriterThread: disk writer still alive after its "
-                    + "full 2s deadline — reference retained (sticky); muxer stop is "
+                    + "full 5s deadline — reference retained (sticky); muxer stop is "
                     + "NOT safe and this encoder instance is terminal");
                 return false;
             }

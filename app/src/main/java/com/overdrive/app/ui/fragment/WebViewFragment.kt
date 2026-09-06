@@ -118,7 +118,8 @@ class WebViewFragment : Fragment() {
          *   4. Patches window.fetch() to route POST/PUT/DELETE through
          *      AndroidBridge.httpRequest() so writes bypass sing-box proxy.
          *      GET requests go through the normal WebView path so polling
-         *      doesn't block the JS thread.
+         *      doesn't block the JS thread. theme.js applies the same patch
+         *      in <head> so Live View auto-start does not race this inject.
          */
         private const val INJECT_JS = """
 (function() {
@@ -464,6 +465,13 @@ class WebViewFragment : Fragment() {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun setupWebView() {
+        try {
+            val crashpad = java.io.File(requireContext().cacheDir, "WebView/Crashpad")
+            if (!crashpad.exists()) {
+                crashpad.mkdirs()
+            }
+        } catch (_: Throwable) {}
+
         webView?.apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
@@ -703,6 +711,20 @@ class WebViewFragment : Fragment() {
                         // the *original* URL, breaking back navigation.
                         connection.instanceFollowRedirects = false
 
+                        // Preserve the verb. HttpURLConnection defaults to GET,
+                        // and WebResourceRequest does not expose a POST body, so
+                        // mutating calls with a body still go through
+                        // AndroidBridge. Empty-body POSTs (live-view stream
+                        // enable, quality) must keep POST — otherwise they 404
+                        // against POST-only daemon routes.
+                        val method = request.method?.uppercase() ?: "GET"
+                        connection.requestMethod = method
+                        if (method == "POST" || method == "PUT"
+                            || method == "PATCH" || method == "DELETE") {
+                            connection.doOutput = true
+                            connection.setFixedLengthStreamingMode(0)
+                        }
+
                         // 2. Forward Range Header (VITAL for video)
                         // Chrome sends "Range: bytes=0-" to start playback
                         val range = request.requestHeaders["Range"]
@@ -734,6 +756,10 @@ class WebViewFragment : Fragment() {
                         val jwt = getAuthJwt()
                         if (jwt != null) {
                             connection.setRequestProperty("Cookie", "byd_session=$jwt")
+                        }
+
+                        if (connection.doOutput) {
+                            connection.outputStream.use { /* empty body */ }
                         }
 
                         connection.connect()
@@ -930,6 +956,21 @@ class WebViewFragment : Fragment() {
                         loadInProgress = false
                         showError()
                     }
+                }
+
+                override fun onRenderProcessGone(
+                    view: WebView?, detail: android.webkit.RenderProcessGoneDetail?
+                ): Boolean {
+                    val didCrash = detail?.didCrash() ?: true
+                    android.util.Log.e("WebViewFragment", "WebView render process gone (crashed=$didCrash)")
+                    pageLoadFailed = true
+                    loadInProgress = false
+                    try {
+                        liveWebView = null
+                        view?.destroy()
+                    } catch (_: Throwable) {}
+                    showError()
+                    return true // Prevents system from killing the entire host application
                 }
 
                 override fun shouldOverrideUrlLoading(
@@ -1359,10 +1400,16 @@ class WebViewFragment : Fragment() {
                 conn.requestMethod = method
                 val isBydCloudApi = url.path.startsWith("/api/bydcloud")
                 val isGenAiApi = url.path.startsWith("/api/genai/")
+                val isStreamEnable = url.path == "/api/stream/enable"
                 conn.connectTimeout = if (isBydCloudApi) 10000 else 8000
                 conn.readTimeout = when {
                     isGenAiApi -> 130000
                     isBydCloudApi -> 60000
+                    // GL encoder init while 4 cams are recording can exceed
+                    // the default 10s; the in-app Live View then toasted
+                    // enable_failed even though Tailscale (no bridge timeout)
+                    // succeeded.
+                    isStreamEnable -> 30000
                     else -> 10000
                 }
                 conn.instanceFollowRedirects = false
@@ -1389,10 +1436,18 @@ class WebViewFragment : Fragment() {
                     }
                 }
 
-                // Send body for POST/PUT
-                if (body.isNotEmpty() && (method == "POST" || method == "PUT")) {
+                // Empty-body POST/PUT/DELETE still needs doOutput, otherwise
+                // some HttpURLConnection builds omit the verb or Content-Length
+                // and the daemon 404s the route.
+                val mutating = method == "POST" || method == "PUT"
+                    || method == "PATCH" || method == "DELETE"
+                if (mutating) {
                     conn.doOutput = true
-                    conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                    val bytes = body.toByteArray(Charsets.UTF_8)
+                    conn.setFixedLengthStreamingMode(bytes.size)
+                    conn.outputStream.use { out ->
+                        if (bytes.isNotEmpty()) out.write(bytes)
+                    }
                 }
 
                 val code = conn.responseCode

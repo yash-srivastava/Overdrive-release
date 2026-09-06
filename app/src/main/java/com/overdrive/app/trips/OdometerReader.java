@@ -86,6 +86,8 @@ public class OdometerReader {
      *
      * <p>Sources, in the order they are consulted:
      * <ol>
+     *   <li>DiLink 5 {@code dumpsys car_service} {@code STATISTIC_TOTAL_MILEAGE},
+     *       including the last-known cache when the parked dump has no lastEvent.</li>
      *   <li>{@code getTotalMileageValue()} — the authoritative total-distance
      *       register, one whole cluster unit per count. A value at or above
      *       {@link #COARSE_UNIT_THRESHOLD} indicates a finer raw unit and is
@@ -100,6 +102,12 @@ public class OdometerReader {
      * </ol>
      */
     public double readOdometerKm() {
+        if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+            try {
+                int carSvc = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.totalMileageKm();
+                if (carSvc > 0) return carSvc;
+            } catch (Exception ignored) {}
+        }
         if (!initialized || statisticDevice == null) {
             return snapshotOdometerKm();
         }

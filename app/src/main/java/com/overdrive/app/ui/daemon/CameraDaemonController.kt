@@ -28,6 +28,7 @@ class CameraDaemonController(
         // All processes related to camera daemon that should be killed on stop
         private val RELATED_PROCESSES = listOf(
             "byd_cam_daemon",
+            "fast_cam_capture",
             "ffmpeg",
             "mediamtx"
         )

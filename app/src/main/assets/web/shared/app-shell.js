@@ -929,12 +929,33 @@
 
                 // Apply state to every tracked member — re-runs reach newly
                 // injected links so they pick up the current collapsed state.
+                function applyMemberCollapsed(el, isCollapsed) {
+                    if (isCollapsed) {
+                        el.setAttribute('hidden', '');
+                        el.style.setProperty('display', 'none', 'important');
+                        el.style.setProperty('min-height', '0', 'important');
+                        el.style.setProperty('max-height', '0', 'important');
+                        el.style.setProperty('height', '0', 'important');
+                        el.style.setProperty('padding', '0', 'important');
+                        el.style.setProperty('margin', '0', 'important');
+                        el.style.setProperty('border', 'none', 'important');
+                    } else {
+                        el.removeAttribute('hidden');
+                        el.style.removeProperty('display');
+                        el.style.removeProperty('min-height');
+                        el.style.removeProperty('max-height');
+                        el.style.removeProperty('height');
+                        el.style.removeProperty('padding');
+                        el.style.removeProperty('margin');
+                        el.style.removeProperty('border');
+                    }
+                }
+
                 if (collapsed) header.setAttribute('data-collapsed', 'true');
                 else header.removeAttribute('data-collapsed');
                 header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
                 for (var m = 0; m < group.members.length; m++) {
-                    if (collapsed) group.members[m].setAttribute('hidden', '');
-                    else group.members[m].removeAttribute('hidden');
+                    applyMemberCollapsed(group.members[m], collapsed);
                 }
 
                 // Skip the click/keydown bind on re-runs to avoid duplicate
@@ -964,8 +985,7 @@
                     for (var s2 = header.nextElementSibling; s2; s2 = s2.nextElementSibling) {
                         if (s2.classList.contains('nav-group-header') ||
                             s2.classList.contains('nav-divider')) break;
-                        if (nowCollapsed) s2.setAttribute('hidden', '');
-                        else s2.removeAttribute('hidden');
+                        applyMemberCollapsed(s2, nowCollapsed);
                     }
                     writeState(group.slug, nowCollapsed);
                 }

@@ -3687,6 +3687,20 @@ var CHARGING = {
     _money: function (v) {
         if (v == null) return '--';
         var sym = this.currency || '$';
+        var abs = Math.abs(v);
+        if (abs > 0 && abs < 1) {
+            // Sub-$1 costs: a flat toFixed(2) rounds a small-but-nonzero charge
+            // (e.g. a few-cent trickle top-up) to "$0.00" and it visibly vanishes.
+            // Use extra precision here, trimming trailing zeros so a cost that's
+            // merely small (not tiny) — $0.42 — still reads as a normal 2-decimal
+            // amount instead of picking up noise digits.
+            var fixed = v.toFixed(5).replace(/0+$/, '').replace(/\.$/, '.0');
+            var dot = fixed.indexOf('.');
+            if (dot < 0 || fixed.length - dot - 1 < 2) {
+                fixed = v.toFixed(2);
+            }
+            return sym + fixed;
+        }
         return sym + v.toFixed(2);
     },
 

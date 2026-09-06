@@ -77,6 +77,7 @@ public class GpuDownscaler {
     // ResolvedCameraConfig.getQuadrantStripOffsetX() to support Tang.
     private final float[] quadrantStripOffsetX;
     private final String fragmentShader;
+    private final boolean isTexture2D;
     private static final float[] DEFAULT_QUADRANT_STRIP_OFFSET_X = {
         0.75f, 0.50f, 0.00f, 0.25f
     };
@@ -181,13 +182,18 @@ public class GpuDownscaler {
      * @param mainThreadContext EGL context from main render thread (for texture sharing)
      */
     public GpuDownscaler(EGLContext mainThreadContext) {
-        this(mainThreadContext, null);
+        this(mainThreadContext, null, false);
     }
 
     public GpuDownscaler(EGLContext mainThreadContext, float[] quadrantStripOffsetX) {
+        this(mainThreadContext, quadrantStripOffsetX, false);
+    }
+
+    public GpuDownscaler(EGLContext mainThreadContext, float[] quadrantStripOffsetX, boolean isTexture2D) {
         this.sharedContext = mainThreadContext;
+        this.isTexture2D = isTexture2D;
         this.quadrantStripOffsetX = normalizeOffsets(quadrantStripOffsetX);
-        this.fragmentShader = buildFragmentShader(this.quadrantStripOffsetX);
+        this.fragmentShader = buildFragmentShader(this.quadrantStripOffsetX, isTexture2D);
 
         // Start background thread
         renderThread = new HandlerThread("GpuDownscalerThread");
@@ -202,13 +208,18 @@ public class GpuDownscaler {
      * Default constructor - call init() later with context.
      */
     public GpuDownscaler() {
-        this((float[]) null);
+        this((float[]) null, false);
     }
 
     public GpuDownscaler(float[] quadrantStripOffsetX) {
+        this(quadrantStripOffsetX, false);
+    }
+
+    public GpuDownscaler(float[] quadrantStripOffsetX, boolean isTexture2D) {
         this.sharedContext = null;
+        this.isTexture2D = isTexture2D;
         this.quadrantStripOffsetX = normalizeOffsets(quadrantStripOffsetX);
-        this.fragmentShader = buildFragmentShader(this.quadrantStripOffsetX);
+        this.fragmentShader = buildFragmentShader(this.quadrantStripOffsetX, isTexture2D);
     }
     
     /**
@@ -448,7 +459,11 @@ public class GpuDownscaler {
         
         // Bind main thread's camera texture (allowed via shared context)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId);
+        if (isTexture2D) {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId);
+        } else {
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId);
+        }
         GLES20.glUniform1i(uCameraTexLocation, 0);
         if (uTexMatrixLocation >= 0) {
             GLES20.glUniformMatrix4fv(uTexMatrixLocation, 1, false, currentTexMatrix, 0);
@@ -685,7 +700,11 @@ public class GpuDownscaler {
 
         GLES20.glUseProgram(directProgram);
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
+        if (isTexture2D) {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, cameraTextureId);
+        } else {
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
+        }
         GLES20.glUniform1i(directUCameraTex, 0);
         if (directUTexMatrix >= 0) {
             GLES20.glUniformMatrix4fv(directUTexMatrix, 1, false, currentTexMatrix, 0);
@@ -948,7 +967,11 @@ public class GpuDownscaler {
 
             GLES20.glUseProgram(directProgram);
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
+            if (isTexture2D) {
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, cameraTextureId);
+            } else {
+                GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
+            }
             GLES20.glUniform1i(directUCameraTex, 0);
             if (directUTexMatrix >= 0) {
                 GLES20.glUniformMatrix4fv(directUTexMatrix, 1, false, currentTexMatrix, 0);
@@ -1187,6 +1210,9 @@ public class GpuDownscaler {
     }
 
     public void setRedMaskEnabled(boolean enabled) {
+        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+            enabled = false;
+        }
         this.redMaskEnabled = enabled;
     }
 
@@ -1472,6 +1498,12 @@ public class GpuDownscaler {
      * strip-X offsets baked in. Order: {Front=TL, Right=TR, Rear=BL, Left=BR}.
      */
     private static String buildFragmentShader(float[] offsets) {
+        return buildFragmentShader(offsets, false);
+    }
+
+    private static String buildFragmentShader(float[] offsets, boolean isTexture2D) {
+        String ext = isTexture2D ? "#extension GL_OES_EGL_image_external : enable\n" : "#extension GL_OES_EGL_image_external : require\n";
+        String camSampler = isTexture2D ? "uniform sampler2D uCameraTex;\n" : "uniform samplerExternalOES uCameraTex;\n";
         // uApaMode > 2.5 = DiLink 4 / 2x2-native HAL. The producer surface
         // emits a non-canonical 2x2 (Variant A: Front X-mirrored at TL,
         // Rear at TR, Left at BL, Right at BR — no Y flip on any role; see
@@ -1487,9 +1519,9 @@ public class GpuDownscaler {
         // Layout 1 → full-frame passthrough. Legacy (uApaMode <= 0.5) →
         // 4-strip → 2x2 rearrangement, unchanged.
         return String.format(Locale.US,
-            "#extension GL_OES_EGL_image_external : require\n" +
+            ext +
             "precision mediump float;\n" +
-            "uniform samplerExternalOES uCameraTex;\n" +
+            camSampler +
             "uniform float uApaMode;\n" +
             "uniform vec2 uProducerForFront;\n" +
             "uniform vec2 uProducerForRight;\n" +

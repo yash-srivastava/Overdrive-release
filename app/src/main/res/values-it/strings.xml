@@ -927,11 +927,11 @@ Questa azione non puo essere annullata.</string>
     <string name="vehicle_dialog_title">Imposta capacita batteria</string>
     <string name="vehicle_dialog_capacity_label">Capacita</string>
     <string name="vehicle_dialog_capacity_suffix">kWh</string>
-    <string name="vehicle_dialog_capacity_helper">Da 15 a 120 kWh. Lascia vuoto per usare il valore predefinito del modello.</string>
+    <string name="vehicle_dialog_capacity_helper">Da 8 a 120 kWh. Lascia vuoto per usare il valore predefinito del modello.</string>
     <string name="vehicle_dialog_model_label">Modello</string>
     <string name="vehicle_dialog_save">Salva</string>
     <string name="vehicle_dialog_reset">Ripristina rilevamento automatico</string>
-    <string name="vehicle_dialog_invalid_capacity">La capacita deve essere 15 - 120 kWh</string>
+    <string name="vehicle_dialog_invalid_capacity">La capacita deve essere 8 - 120 kWh</string>
     <string name="vehicle_dialog_summary_capacity">Capacita: %1$s</string>
     <string name="vehicle_dialog_summary_soh">SOH: %1$s</string>
     <string name="vehicle_dialog_summary_effective">Effettiva: %1$.1f kWh</string>

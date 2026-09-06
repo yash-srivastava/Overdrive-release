@@ -243,8 +243,14 @@ public class ChargingApiHandlerTest {
             throws Exception {
         assertTrue(ChargingApiHandler.resolvePlugged(
                 false, ChargingStateData.ChargingStatus.IDLE, 2, false));
-        assertTrue(ChargingApiHandler.resolvePlugged(
+        assertFalse(ChargingApiHandler.resolvePlugged(
                 false, ChargingStateData.ChargingStatus.READY,
+                BydVehicleData.UNAVAILABLE, false));
+        assertTrue(ChargingApiHandler.resolvePlugged(
+                false, ChargingStateData.ChargingStatus.FINISHED,
+                BydVehicleData.UNAVAILABLE, false));
+        assertTrue(ChargingApiHandler.resolvePlugged(
+                false, ChargingStateData.ChargingStatus.SCHEDULED,
                 BydVehicleData.UNAVAILABLE, false));
     }
 

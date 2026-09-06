@@ -379,21 +379,21 @@ html.shell-ready { visibility: visible; }
                 color 0.2s ease;
 }
 
+.sidebar-nav .nav-link[hidden],
 .sidebar-nav [hidden] {
-    /* Override the UA `display:none` so the transition has a flex layout
-       to drive. Then drop every dimensional axis to 0 — the cascade lands
-       on a fully-flat link that reads as collapsed. */
-    display: flex !important;
+    /* Hide collapsed group members cleanly. display: none removes elements
+       from flow, eliminating the empty gap caused by .nav-link min-height: 48px
+       and flexbox container gap. */
+    display: none !important;
     max-height: 0 !important;
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-    opacity: 0;
-    pointer-events: none;
-    /* Take the link out of the keyboard tab order while collapsed so a
-       focus trap can't land on a visually-hidden destination. */
-    visibility: hidden;
+    min-height: 0 !important;
+    height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    visibility: hidden !important;
 }
 
 /* Animate group-header bottom padding so the gap between header and the

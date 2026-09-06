@@ -36,14 +36,14 @@ import java.util.concurrent.atomic.AtomicLong;
  * Daemon-side coordinator for the Screen Deterrent feature.
  *
  * Hybrid architecture: SurfaceControl owns the visual; an Activity in the
- * app process captures touches.
+ * app process captures touches and paints a still/GIF/default fallback.
  *
- * Why hybrid? While ACC is off, BYD composites only its own AccAnimation
- * layer (`z=2^30`) into HWC — every other Window from any process is
- * excluded from composition by the vendor compositor. Only a SurfaceControl
- * layer placed directly into SurfaceFlinger at `z=Integer.MAX_VALUE` (=
- * 2^31-1) sits above AccAnimation and is composited. WindowManager-managed
- * Activity windows top out at `z≈3000` and are invisible during ACC-off.
+ * Why hybrid? While ACC is off, some BYD compositors include only their own
+ * AccAnimation layer (`z=2^30`) in HWC — every other Window from any process
+ * is excluded. Only a SurfaceControl layer placed directly into
+ * SurfaceFlinger at `z=Integer.MAX_VALUE` sits above AccAnimation and is
+ * composited. On DiLink 5 the Activity Window is also composited, so the
+ * Activity fallback is visible if that layer never appears.
  *
  * However, a SurfaceControl color/buffer layer has no `InputChannel` of its
  * own — taps pass through to whatever's beneath. So we also `am start` a
@@ -188,6 +188,18 @@ public final class ScreenDeterrent {
     private long lastGateWriteElapsedMs = 0;
     private long lastWakeReassertElapsedMs = 0;
     private boolean restorePanelAfterSession = false;
+    /**
+     * Set by shouldStop() the instant it tears down the render loop because
+     * ACC just read ON — the driver got in mid-session, not an intruder.
+     * cleanup() reads this to skip its own restore-to-off evaluation
+     * entirely rather than re-deciding "is it safe to darken" from scratch:
+     * we already know definitively why this session ended, so there's
+     * nothing to re-check, and no way a fresh independent read could
+     * disagree with the reason that just fired.
+     */
+    private volatile boolean stoppedBecauseAccOn = false;
+    /** Once the Activity has authenticated, a later drop means teardown. */
+    private volatile boolean inputCaptureEverReady = false;
 
     private ScreenDeterrent() {
         // Refresh hot cache from disk every second on a dedicated background
@@ -220,6 +232,22 @@ public final class ScreenDeterrent {
         return instance;
     }
 
+    boolean isSessionActive() {
+        return inFlight.get();
+    }
+
+    boolean isEnabledCached() {
+        return hotCacheEnabled;
+    }
+
+    public static boolean isScreenDeterrentEnabled() {
+        try {
+            return UnifiedConfigManager.getSurveillance().optBoolean("screenDeterrentEnabled", false);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     /** Called by SurveillanceIpcServer when the focused Activity opens its tokened socket. */
     public static long openInputCapture(String token) {
         ScreenDeterrent current = instance;
@@ -250,6 +278,7 @@ public final class ScreenDeterrent {
         synchronized (inputCaptureLock) {
             expectedInputCaptureToken = java.util.UUID.randomUUID().toString();
             activeInputCaptureId = 0;
+            inputCaptureEverReady = false;
             return expectedInputCaptureToken;
         }
     }
@@ -305,10 +334,47 @@ public final class ScreenDeterrent {
     }
 
     private static boolean isAccUnsafe() {
+        // Live DiLink5 power-mode read FIRST, ahead of AccMonitor's cache.
+        // AccMonitor.isAccOn()/isAccStateAuthoritative() are just fields in
+        // THIS process, written only when AccSentryDaemon's IPC happens to
+        // land — on a fresh/just-restarted byd_cam_daemon process (which has
+        // been crash-looping), that cache can sit at its default
+        // "not authoritative yet" for a real, observed stretch after
+        // restart, making every check in that window fail closed as
+        // "unsafe" regardless of the car's actual state.
+        //
+        // CarSvcTelemetry.dumpsysText() reads `dumpsys car_service` directly
+        // and caches it for only DUMP_TTL_MS (2s) — a time-based cache that
+        // can never get "stuck" the way an event/IPC-based one can, since it
+        // just re-shells-out once that 2s elapses. Same source
+        // AccMonitor.probeAccState() and the dashboard's own ACC status
+        // already treat as ground truth for DiLink5.
+        //
+        // A confident live TRUE (ACC/ready) returns unsafe immediately. A
+        // confident live FALSE (parked) is trusted directly and skips the
+        // cache below entirely — the whole point is to not let a stale
+        // cached "on"/"unknown" override a fresh "off". Only a null/
+        // unparseable read (dumpsys mid-transition, or non-DiLink5) falls
+        // through to the cache as a fallback.
+        if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+            try {
+                String dump = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.dumpsysText();
+                Boolean inUse = com.overdrive.app.monitor.DiLink5PowerMode.classifyCurrentLine(dump);
+                if (Boolean.TRUE.equals(inUse)) return true;
+                if (Boolean.FALSE.equals(inUse)) return isMovingUnsafe();
+            } catch (Throwable ignored) {
+                // dumpsys unreadable this instant — fall through to the cache.
+            }
+        }
         if (!com.overdrive.app.monitor.AccMonitor.isAccStateAuthoritative()
                 || com.overdrive.app.monitor.AccMonitor.isAccOn()) {
             return true;
         }
+        return isMovingUnsafe();
+    }
+
+    /** Speed/gear fail-safe: even a confident "parked" ACC reading must not override the vehicle actually rolling or in gear. */
+    private static boolean isMovingUnsafe() {
         try {
             com.overdrive.app.byd.BydDataCollector collector = com.overdrive.app.byd.BydDataCollector.getInstance();
             if (collector != null) {
@@ -322,13 +388,14 @@ public final class ScreenDeterrent {
         return false;
     }
 
+
     /**
      * GL frame thread enters here on every confirmed motion. Must be cheap:
      * volatile reads + atomic CAS only. NO I/O, NO locks, NO allocations.
      * The hot cache is kept fresh by cacheScheduler on a separate thread.
      */
     public void onMotionDetected() {
-        if (!hotCacheEnabled) return;
+        if (!hotCacheEnabled || !isScreenDeterrentEnabled()) return;
 
         // SAFETY (deterrent-while-driving): the deterrent renders a full-screen
         // SurfaceControl layer at z=Integer.MAX_VALUE that occludes the ENTIRE
@@ -344,6 +411,11 @@ public final class ScreenDeterrent {
             logger.warn("Screen deterrent suppressed — ACC is ON or unknown");
             return;
         }
+
+        // One burst per session. Continued motion / an in-progress clip must
+        // not keep pushing the deadline; a new approach starts a new session
+        // after cleanup.
+        if (inFlight.get()) return;
 
         long durationMs = hotCacheDurationSec * 1000L;
         long newDeadline = SystemClock.elapsedRealtime() + durationMs;
@@ -377,24 +449,68 @@ public final class ScreenDeterrent {
     }
 
     private void cleanup() {
+        SentryScreenWalkLog.actual("OFF", "deterrent ended");
         clearSessionGate();
 
-        // Restore stealth backlight unless somebody else owns the wake (ACC-on).
-        //
-        // The authoritative ACC read mirrors shouldStop()'s guard because
-        // isForceStop() is only an edge signal that AccSentryDaemon later clears.
-        // Without the direct state check, "owner walks up → deterrent fires →
-        // owner starts the car" can darken the panel after the last wake and
-        // leave the driver with a black screen.
-        // Note: turnBacklightOff → StealthPanel.turnOff also refuses while a fresh
-        // ACC-ON edge is in its trust window, so this is belt-and-braces; keeping it
-        // here avoids even starting the teardown chain (locked config writes +
-        // binder calls) on the ACC-ON edge.
-        boolean restorePanel = restorePanelAfterSession;
+        // Cross-checked restore: only darken the panel back down when every
+        // signal we have access to AGREES the car is genuinely unattended —
+        // ACC confirmed off by BOTH the live dumpsys read and the AccMonitor
+        // cache (when both are available), AND doors confirmed locked.
+        // Confirmed live, 2026-09-04: a get-in-while-showing test with the
+        // OLD unconditional version darkened the screen while the driver was
+        // sitting in the car with ACC on and doors unlocked — both signals
+        // agreed on that at the time (liveDumpsysAccInUse=true,
+        // accMonitorAccOn=true, doorsRaw overall=1/unlocked), so requiring
+        // agreement on the OFF/locked direction is the direct fix: any
+        // disagreement, or a confirmed on/unlocked reading, skips the
+        // restore instead of forcing it.
         restorePanelAfterSession = false;
         Context ctx = resolveContext();
-        if (restorePanel && ctx != null && !isForceStop() && !isAccUnsafe()) {
+
+        boolean safeNow = ctx != null && isSafeToRestoreNow("immediate");
+        if (safeNow) {
             turnBacklightOff(ctx);
+            // Mirror-image safety net: the immediate check can darken the
+            // panel on a stale "still locked/ACC off" read that hasn't
+            // caught up yet with a driver who's actually mid-unlock/mid-
+            // entry. Re-check 5s later; if ACC has come on OR doors are now
+            // unlocked, the driver didn't make it in before this restore
+            // fired — wake the panel back up (plain wakePanel, NOT the
+            // deterrent image; they're getting in their own car, not an
+            // intruder) so they're not left staring at a black screen.
+            final Context wakeCtx = ctx;
+            Thread postCheck = new Thread(() -> {
+                try {
+                    Thread.sleep(5000);
+                } catch (InterruptedException ignored) {
+                    return;
+                }
+                if (!isSafeToRestoreNow("post-restore-5s")) {
+                    wakePanel(wakeCtx);
+                }
+            }, "DeterrentPostRestoreCheck");
+            postCheck.setDaemon(true);
+            postCheck.start();
+        } else if (ctx != null) {
+            // Safety net: the immediate check can miss a genuinely-safe
+            // moment on a transient bad read (a momentary dumpsys hiccup, an
+            // ACC/lock signal that hasn't resynced yet). Re-check a few
+            // seconds later on a throwaway thread, and restore then if
+            // everything confirms safe by that point. Does not retry
+            // indefinitely — one follow-up check, same as the immediate one.
+            final Context retryCtx = ctx;
+            Thread retry = new Thread(() -> {
+                try {
+                    Thread.sleep(5000);
+                } catch (InterruptedException ignored) {
+                    return;
+                }
+                if (isSafeToRestoreNow("retry-5s")) {
+                    turnBacklightOff(retryCtx);
+                }
+            }, "DeterrentRestoreRetry");
+            retry.setDaemon(true);
+            retry.start();
         }
 
         // Race fix (audit #8): a GL-thread motion bump can land between any
@@ -432,6 +548,79 @@ public final class ScreenDeterrent {
         }
     }
 
+    /**
+     * True only when every ACC signal available AGREES the vehicle is off
+     * (live dumpsys read and the AccMonitor cache, when both are available —
+     * either saying "on" blocks it) AND doors are confirmed locked. Neither
+     * signal being available fails closed (no agreement, no restore).
+     *
+     * <p>Also appends a line to {@code /data/local/tmp/deterrent_debug.txt}
+     * tagged with {@code label} ("immediate" vs "retry-5s") so both the
+     * initial decision and any safety-net retry are visible in one place —
+     * world-readable via adb shell, unlike the app's own external-files
+     * probe file (permission-denied all night under the new UID from
+     * tonight's reinstalls).
+     */
+    private boolean isSafeToRestoreNow(String label) {
+        Boolean liveAccInUse = null;
+        boolean liveAccError = false;
+        boolean dilink5 = false;
+        try {
+            dilink5 = com.overdrive.app.byd.DiLink5Platform.isActive();
+            if (dilink5) {
+                String dump = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.dumpsysText();
+                liveAccInUse = com.overdrive.app.monitor.DiLink5PowerMode.classifyCurrentLine(dump);
+            }
+        } catch (Throwable ignored) {
+            liveAccError = true;
+        }
+
+        boolean accMonitorAuthoritative = false;
+        boolean accMonitorAccOn = true; // fail-closed default if the read itself throws
+        try {
+            accMonitorAuthoritative = com.overdrive.app.monitor.AccMonitor.isAccStateAuthoritative();
+            accMonitorAccOn = com.overdrive.app.monitor.AccMonitor.isAccOn();
+        } catch (Throwable ignored) {}
+
+        int[] doors = null;
+        try {
+            doors = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.doorsArray();
+        } catch (Throwable ignored) {}
+        boolean doorsLocked = doors != null && doors.length >= 7 && doors[6] == 2;
+
+        boolean haveAnySignal = (liveAccInUse != null) || accMonitorAuthoritative;
+        boolean accConfirmedOff = haveAnySignal
+                && (liveAccInUse == null || Boolean.FALSE.equals(liveAccInUse))
+                && (!accMonitorAuthoritative || !accMonitorAccOn);
+
+        boolean safeToRestore = accConfirmedOff && doorsLocked;
+
+        try (java.io.FileWriter fw = new java.io.FileWriter(
+                "/data/local/tmp/deterrent_debug.txt", true)) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("--- ").append(label).append(" t=").append(System.currentTimeMillis()).append(" ---\n");
+            sb.append("diLink5Active=").append(dilink5).append('\n');
+            sb.append("liveDumpsysAccInUse=").append(liveAccInUse)
+                    .append(liveAccError ? " (error reading)" : "").append('\n');
+            sb.append("accMonitorAuthoritative=").append(accMonitorAuthoritative).append('\n');
+            sb.append("accMonitorAccOn=").append(accMonitorAccOn).append('\n');
+            if (doors != null && doors.length >= 7) {
+                sb.append("doorsRaw=[").append(doors[0]).append(',').append(doors[1])
+                        .append(',').append(doors[2]).append(',').append(doors[3])
+                        .append("] overall=").append(doors[6])
+                        .append(" (2=locked,1=unlocked,-1=unknown)\n");
+            } else {
+                sb.append("doorsRaw=unavailable\n");
+            }
+            sb.append("accConfirmedOff=").append(accConfirmedOff).append('\n');
+            sb.append("doorsLocked=").append(doorsLocked).append('\n');
+            sb.append("safeToRestore=").append(safeToRestore).append('\n');
+            fw.write(sb.toString());
+        } catch (Throwable ignored) {}
+
+        return safeToRestore;
+    }
+
     private void clearSessionGate() {
         clearInputCapture();
         java.util.Map<String, Object> reset = new java.util.HashMap<>();
@@ -460,7 +649,7 @@ public final class ScreenDeterrent {
      */
     public String previewNow() {
         if (previewBlocked()) {
-            return "Preview blocked until the vehicle is safely parked";
+            return "Preview blocked until the vehicle is in Park and not moving";
         }
         refreshHotCacheFromDisk();
         Context ctx = resolveContext();
@@ -514,13 +703,24 @@ public final class ScreenDeterrent {
                 || terminalStopRequested.get()
                 || previewBlocked()
                 || SystemClock.elapsedRealtime() >= previewDeadlineElapsedMs) return;
+        // Trust panelIsAlreadyDark() as-is here — this is the manual on-demand
+        // test/preview path (POST /api/surveillance/screen-deterrent/test),
+        // always triggered from the Settings UI with the screen already on.
+        // The DiLink5 override below (force restorePanelAfterSession=true
+        // regardless of actual panel state) exists for fire()'s real
+        // automatic-trigger path and does not belong here: forcing it true
+        // for a manual test made cleanup() call turnBacklightOff() and kill
+        // the screen even though it was never dark before the test started
+        // — confirmed live, 2026-09-04.
         restorePanelAfterSession = panelIsAlreadyDark(ctx);
         wakePanel(ctx);
         launchActivity(inputToken);
-        if (!waitForInputCapture(true)) {
-            terminateCurrentSession();
-            return;
-        }
+        // Picture first. Touch-capture is best-effort in the background —
+        // a 4s Activity-focus timeout used to abort before the layer existed.
+        Thread previewCaptureWait = new Thread(
+                () -> waitForInputCapture(true), "DeterrentCaptureWait");
+        previewCaptureWait.setDaemon(true);
+        previewCaptureWait.start();
         Point size = resolveDisplaySize(ctx);
         renderAsset(size.x, size.y, this::shouldStopPreview, this::maybeReassertWake);
     }
@@ -569,7 +769,8 @@ public final class ScreenDeterrent {
                 || terminalStopRequested.get()
                 || extendDeadlineElapsedMs.get() <= SystemClock.elapsedRealtime()
                 || isAccUnsafe()) {
-            logger.warn("Screen deterrent fire() aborted — session is no longer safe/live");
+            logger.warn("Screen deterrent fire() aborted — session is no longer safe/live "
+                    + "(ACC on/unknown)");
             terminateCurrentSession();
             return;
         }
@@ -591,6 +792,7 @@ public final class ScreenDeterrent {
             return;
         }
 
+        SentryScreenWalkLog.actual("ON", "deterrent started");
         String inputToken = prepareInputCapture();
         if (!publishGate(extendDeadlineElapsedMs.get(), false, true)) {
             logger.warn("Could not publish deterrent safety gate");
@@ -604,14 +806,24 @@ public final class ScreenDeterrent {
             terminateCurrentSession();
             return;
         }
+        // The DiLink5 override that used to sit here (force
+        // restorePanelAfterSession=true regardless of the real
+        // panelIsAlreadyDark() reading) is the confirmed cause of a real
+        // sentry deterrent firing then killing its own screen ~42ms later
+        // via cleanup()'s turnBacklightOff(), while shouldShowDeterrent()
+        // still said ON with a person standing 1.0m from the car — captured
+        // live in sentry_screen.log, 2026-09-04 17:34:18. Trusting
+        // panelIsAlreadyDark() here (it was already false — the panel
+        // wasn't dark before this fire()) is what keeps the deterrent up
+        // for its full screenDeterrentDurationSeconds instead of self-
+        // aborting immediately.
         restorePanelAfterSession = panelIsAlreadyDark(ctx);
         wakePanel(ctx);
         launchActivity(inputToken);  // touch-capture in app process
-        if (!waitForInputCapture(false)) {
-            logger.warn("Screen deterrent aborted — touch capture did not become ready");
-            terminateCurrentSession();
-            return;
-        }
+        Thread captureWait = new Thread(
+                () -> waitForInputCapture(false), "DeterrentCaptureWait");
+        captureWait.setDaemon(true);
+        captureWait.start();
 
         // Resolve the real panel size once per fire() so portrait-rotated
         // Seal (1080×1920) and other models (Tang, Atto3, etc.) get a buffer
@@ -636,7 +848,7 @@ public final class ScreenDeterrent {
             imagePath = "";
         }
 
-        Object surface = null;
+        BsNativeLayer layer = null;
         Bitmap staticFrame = null;
         Movie movie = null;
         try {
@@ -650,21 +862,23 @@ public final class ScreenDeterrent {
             }
             if (stop.shouldStop()) return;
 
-            surface = createBufferLayer("ScreenDeterrent", dispW, dispH);
-            if (surface == null) {
-                logger.warn("Failed to create SurfaceControl buffer layer");
-                terminateCurrentSession();
-                return;
-            }
-            if (!applyTransaction(surface, Integer.MAX_VALUE, true)) {
-                terminateCurrentSession();
-                return;
+            // Same SurfaceControl path as cluster/blind-spot overlays:
+            // setFormat + setGeometry, HU layerStack 0 (default). The old
+            // setBufferSize+show transaction never appeared in SurfaceFlinger
+            // on DiLink 5.
+            layer = new BsNativeLayer(dispW, dispH, "ScreenDeterrent", Integer.MAX_VALUE);
+            if (!layer.create()) {
+                logger.warn("Failed to create ScreenDeterrent BsNativeLayer — "
+                        + "DeterrentActivity will paint the fallback");
+                layer = null;
+            } else {
+                layer.setGeometry(0, 0, dispW, dispH);
             }
 
             if (movie != null && movie.duration() > 0) {
-                renderGifLoop(surface, movie, dispW, dispH, stop);
+                renderGifLoop(layer, movie, dispW, dispH, stop);
             } else {
-                renderStaticLoop(surface, staticFrame, stop);
+                renderStaticLoop(layer, staticFrame, stop);
             }
         } catch (Throwable t) {
             logger.warn("Deterrent render failed: " + t.getMessage());
@@ -673,16 +887,18 @@ public final class ScreenDeterrent {
             if (staticFrame != null) {
                 try { staticFrame.recycle(); } catch (Throwable ignored) {}
             }
-            if (surface != null) releaseSurface(surface);
+            if (layer != null) {
+                try { layer.release(); } catch (Throwable ignored) {}
+            }
         }
     }
 
-    private void renderStaticLoop(Object surface, Bitmap frame,
+    private void renderStaticLoop(BsNativeLayer layer, Bitmap frame,
                                   ScreenDeterrentVideo.StopSignal stop) {
         if (stop.shouldStop()) return;
-        if (!drawBitmapToSurface(surface, frame)) {
-            terminateCurrentSession();
-            return;
+        if (layer != null && !drawBitmapToLayer(layer, frame)) {
+            logger.warn("Deterrent layer draw failed — keeping session for activity fallback");
+            try { layer.hide(); } catch (Throwable ignored) {}
         }
         while (!stop.shouldStop()) {
             maybeReassertWake();
@@ -696,7 +912,7 @@ public final class ScreenDeterrent {
         }
     }
 
-    private void renderGifLoop(Object surface, Movie movie, int dispW, int dispH,
+    private void renderGifLoop(BsNativeLayer layer, Movie movie, int dispW, int dispH,
                                ScreenDeterrentVideo.StopSignal stop) {
         Bitmap frame = null;
         try {
@@ -723,9 +939,10 @@ public final class ScreenDeterrent {
                 movie.draw(frameCanvas, 0, 0);
                 frameCanvas.restore();
 
-                if (!drawBitmapToSurface(surface, frame)) {
-                    terminateCurrentSession();
-                    return;
+                if (layer != null && !drawBitmapToLayer(layer, frame)) {
+                    logger.warn("Deterrent GIF layer draw failed — keeping session for activity fallback");
+                    try { layer.hide(); } catch (Throwable ignored) {}
+                    layer = null;
                 }
                 maybeReassertWake();
 
@@ -742,6 +959,26 @@ public final class ScreenDeterrent {
             terminateCurrentSession();
         } finally {
             if (frame != null) frame.recycle();
+        }
+    }
+
+    private static boolean drawBitmapToLayer(BsNativeLayer layer, Bitmap bitmap) {
+        if (layer == null || bitmap == null) return false;
+        Surface surface = layer.getSurface();
+        if (surface == null || !surface.isValid()) return false;
+        Canvas canvas = null;
+        try {
+            canvas = surface.lockCanvas(null);
+            if (canvas == null) return false;
+            canvas.drawBitmap(bitmap, 0, 0, null);
+            return true;
+        } catch (Throwable t) {
+            logger.warn("drawBitmapToLayer failed: " + t.getMessage());
+            return false;
+        } finally {
+            if (canvas != null) {
+                try { surface.unlockCanvasAndPost(canvas); } catch (Throwable ignored) {}
+            }
         }
     }
 
@@ -777,6 +1014,7 @@ public final class ScreenDeterrent {
         // its deadline (up to 30s) over the live driving screen. Requiring an
         // authoritative ACC-OFF state bounds that to one render tick (≤200ms).
         if (isAccUnsafe()) {
+            stoppedBecauseAccOn = true;
             return terminateCurrentSession();
         }
         long now = SystemClock.elapsedRealtime();
@@ -808,7 +1046,8 @@ public final class ScreenDeterrent {
             if (!s.optBoolean("screenDeterrentEnabled", false)) {
                 return terminateCurrentSession();
             }
-            if (!isInputCaptureReady()) return terminateCurrentSession();
+            if (isInputCaptureReady()) inputCaptureEverReady = true;
+            else if (inputCaptureEverReady) return terminateCurrentSession();
             if (s.optBoolean("screenDeterrentUserDismissed", false)) {
                 return terminateCurrentSession();
             }
@@ -831,7 +1070,8 @@ public final class ScreenDeterrent {
             if (s == null || !s.optBoolean("screenDeterrentPreviewActive", false)) {
                 return terminateCurrentSession();
             }
-            if (!isInputCaptureReady()) return terminateCurrentSession();
+            if (isInputCaptureReady()) inputCaptureEverReady = true;
+            else if (inputCaptureEverReady) return terminateCurrentSession();
             if (s.optBoolean("screenDeterrentUserDismissed", false)) {
                 return terminateCurrentSession();
             }
@@ -842,11 +1082,10 @@ public final class ScreenDeterrent {
     }
 
     private static boolean previewBlocked() {
-        if (isAccUnsafe()) return true;
         try {
-            // The deterrent's z=MAX layer must never be user-bypassable while
-            // moving. ACC-OFF is checked above; this independent movement gate
-            // is defense-in-depth against a bad vehicle-state transition.
+            // Manual Test is allowed with ACC on as long as the car is in Park
+            // and not rolling. Motion-triggered fire() still uses the parked-ACC
+            // authority gate so a z=MAX layer never covers the live driving UI.
             return DrivingSafetyGuard.isMovementBlocked();
         } catch (Throwable ignored) {
             return true;
@@ -877,7 +1116,10 @@ public final class ScreenDeterrent {
                     }
                 }
                 if (s.optBoolean("screenDeterrentUserDismissed", false)) return false;
-                if (isInputCaptureReady()) return true;
+                if (isInputCaptureReady()) {
+                    inputCaptureEverReady = true;
+                    return true;
+                }
             } catch (Throwable ignored) {
                 return false;
             }
@@ -1256,10 +1498,21 @@ public final class ScreenDeterrent {
                 // re-darken after the deterrent) as redundant and skip the write,
                 // leaving the warning invisible or the panel lit afterwards.
                 com.overdrive.app.power.StealthPanel.notePanelStateChangedExternally();
-                com.overdrive.app.power.StealthPanel.turnOn(ctx);
+                // forceTurnOn: getPowerScreenStatus() can already read ON while
+                // the backlight is off. turnOn() would skip the WithLock write.
+                com.overdrive.app.power.StealthPanel.forceTurnOn(ctx);
             }
         } catch (Throwable t) {
             logger.debug("Verified panel wake failed: " + t.getMessage());
+        }
+        // DiLink 5 IVI backlight is CarPower HOME id=1 in the app process.
+        // PowerManager TurnBacklightOn from UID 2000 does not light this panel.
+        if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+            try {
+                com.overdrive.app.byd.VehicleActuatorBridge.dispatchCarPowerBacklight("on");
+            } catch (Throwable t) {
+                logger.warn("DiLink5 CarPower ON failed: " + t.getMessage());
+            }
         }
     }
 
@@ -1276,6 +1529,15 @@ public final class ScreenDeterrent {
      * the park after every motion event.
      */
     private static void turnBacklightOff(Context ctx) {
+        if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+            try {
+                if (!com.overdrive.app.power.StealthPanel.isUserOverrideActive()) {
+                    com.overdrive.app.byd.VehicleActuatorBridge.dispatchCarPowerBacklight("off");
+                }
+            } catch (Throwable t) {
+                logger.warn("DiLink5 CarPower OFF failed: " + t.getMessage());
+            }
+        }
         try {
             if (com.overdrive.app.power.StealthPanel.isDilink4()) {
                 // Honour an in-flight user screen-on request. Without this the
@@ -1408,13 +1670,15 @@ public final class ScreenDeterrent {
     }
 
     private static boolean applyTransaction(Object surface, int z, boolean show) {
+        Object tx = null;
+        Class<?> txCls = null;
         try {
             resolveSurfaceControlReflection();
             Class<?> sc = surfaceControlReflectionResolved
                     ? surfaceControlClass
                     : Class.forName("android.view.SurfaceControl");
-            Class<?> txCls = Class.forName("android.view.SurfaceControl$Transaction");
-            Object tx = txCls.getDeclaredConstructor().newInstance();
+            txCls = Class.forName("android.view.SurfaceControl$Transaction");
+            tx = txCls.getDeclaredConstructor().newInstance();
             txCls.getMethod("setLayer", sc, int.class).invoke(tx, surface, z);
             try { txCls.getMethod("setAlpha", sc, float.class).invoke(tx, surface, 1.0f); } catch (Throwable ignored) {}
             if (show) txCls.getMethod("show", sc).invoke(tx, surface);
@@ -1423,6 +1687,10 @@ public final class ScreenDeterrent {
         } catch (Throwable t) {
             logger.warn("SurfaceControl.Transaction failed: " + t.getMessage());
             return false;
+        } finally {
+            if (tx != null && txCls != null) {
+                try { txCls.getMethod("close").invoke(tx); } catch (Throwable ignored) {}
+            }
         }
     }
 
@@ -1436,7 +1704,9 @@ public final class ScreenDeterrent {
             Object tx = txCls.getDeclaredConstructor().newInstance();
             try { txCls.getMethod("hide", sc).invoke(tx, surface); } catch (Throwable ignored) {}
             try { txCls.getMethod("reparent", sc, sc).invoke(tx, surface, null); } catch (Throwable ignored) {}
+            try { txCls.getMethod("remove", sc).invoke(tx, surface); } catch (Throwable ignored) {}
             txCls.getMethod("apply").invoke(tx);
+            try { txCls.getMethod("close").invoke(tx); } catch (Throwable ignored) {}
             try { sc.getMethod("release").invoke(surface); } catch (Throwable ignored) {}
         } catch (Throwable t) {
             logger.debug("Surface release failed: " + t.getMessage());

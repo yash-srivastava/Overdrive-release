@@ -25,6 +25,7 @@ FAST_CAM_API void fast_cam_client_destroy(FastCamClientCtx* ctx);
 
 FAST_CAM_API bool fast_cam_client_connect(FastCamClientCtx* ctx, const char* sock_path);
 FAST_CAM_API void fast_cam_client_disconnect(FastCamClientCtx* ctx);
+FAST_CAM_API bool fast_cam_client_is_connected(const FastCamClientCtx* ctx);
 
 // Waits for the next hardware frame from any active camera (timeout in milliseconds)
 FAST_CAM_API bool fast_cam_client_wait_frame(FastCamClientCtx* ctx, FastCamFrame* out_frame, int timeout_ms);
@@ -58,6 +59,10 @@ public:
 
     void disconnect() {
         fast_cam_client_disconnect(m_ctx);
+    }
+
+    bool isConnected() const {
+        return fast_cam_client_is_connected(m_ctx);
     }
 
     bool waitForFrame(FastCamFrame* out_frame, int timeout_ms = 100) {

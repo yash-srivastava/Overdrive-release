@@ -42,8 +42,8 @@
 // distinct bucket (was collapsed to 'side'). BOTH files are precached;
 // without this bump the SW would keep serving the old bytes to existing
 // installs, so the hero would render side-framed (no three-quarter
-// branch) and re-introduce the wrong-sprite-into-canvas symptom.
-const CACHE_VERSION = 'overdrive-3d-v3';
+// v4: ev-card-sprite-cache.js bump to v5 and sidebar accordion display:none fix.
+const CACHE_VERSION = 'overdrive-3d-v4';
 
 // Static, APK-bundled assets that the EV card needs on every page.
 // Same-origin only — the daemon serves these with public, max-age=86400,

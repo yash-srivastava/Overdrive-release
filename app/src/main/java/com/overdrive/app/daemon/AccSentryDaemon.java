@@ -6331,24 +6331,15 @@ public class AccSentryDaemon {
     // delegates by calling notifyAccState() — see enterSentryMode() / exitSentryMode().
 
     /**
-     * Read the current bodywork power level via reflection.
-     *
-     * Returns the raw int the HAL gave us (0..3 = real states, 4 = FAKE_OK,
-     * 255 = INVALID, anything else = unknown). Returns -1 if reflection
-     * itself failed (no HAL, no context). Callers MUST gate sentinel values
-     * (4, 255, anything outside 0..3) — see startAccStateHeartbeat().
-     *
-     * Mirrors the inline reflection used in registerBodyworkListener; kept
-     * standalone so the heartbeat doesn't have to re-register a listener
-     * just to peek at the current level.
+     * Read ACC power level directly from BYDAutoBodyworkDevice (DiLink 3/4)
+     * or via CarService dumpsys/PowerManager (DiLink 5).
+     * @return 0 (OFF), 1 (ACC), 2 (ON), or -1 if unavailable
      */
     private static int readPowerLevel() {
         if (appContext == null) return -1;
-        try {
-            if (!com.overdrive.app.monitor.AccMonitor.isAccOn()) {
-                return POWER_LEVEL_OFF;
-            }
-        } catch (Throwable ignored) {}
+        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+            return readPowerLevelDiLink5();
+        }
         try {
             Class<?> deviceClass = Class.forName(
                 "android.hardware.bydauto.bodywork.BYDAutoBodyworkDevice");
@@ -6360,6 +6351,36 @@ public class AccSentryDaemon {
         } catch (Throwable t) {
             return -1;
         }
+    }
+
+    private static int readPowerLevelDiLink5() {
+        try {
+            String carServicePower = execShell("dumpsys car_service 2>/dev/null | grep -i 'Power Mute State' -A 3 | grep 'current' | head -1");
+            if (carServicePower != null && !carServicePower.isEmpty()) {
+                if (carServicePower.contains("4=PowerMode Standby") || carServicePower.contains("8=PowerMode Sleep") ||
+                    carServicePower.contains("5=PowerMode Str") || carServicePower.contains("0=PowerMode Off") ||
+                    carServicePower.contains("1=PowerMode Pre StartUp") || carServicePower.contains("12=PowerMode Tod") ||
+                    carServicePower.contains("9=PowerMode Str Suspending")) {
+                    return POWER_LEVEL_OFF;
+                } else if (carServicePower.contains("2=PowerMode StartUp") ||
+                           carServicePower.contains("10=PowerMode DisPlay on") || carServicePower.contains("3=PowerMode Degraded")) {
+                    return POWER_LEVEL_ON;
+                }
+            }
+        } catch (Throwable t) {
+            log("readPowerLevelDiLink5 dumpsys error: " + t.getMessage());
+        }
+
+        try {
+            if (appContext != null) {
+                PowerManager pm = (PowerManager) appContext.getSystemService(Context.POWER_SERVICE);
+                if (pm != null && !pm.isInteractive()) {
+                    return POWER_LEVEL_OFF;
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        return POWER_LEVEL_OFF;
     }
 
     private static void applyHeartbeatPowerLevel(

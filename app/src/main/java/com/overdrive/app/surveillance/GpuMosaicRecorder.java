@@ -428,12 +428,22 @@ public class GpuMosaicRecorder {
         "    gl_FragColor = texture2D(uTexture, vTexCoord);\n" +
         "}\n";
 
+    private final boolean isTexture2D;
+
     public GpuMosaicRecorder() {
-        this(null, DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT);
+        this(null, DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT, false);
+    }
+
+    public GpuMosaicRecorder(boolean isTexture2D) {
+        this(null, DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT, isTexture2D);
     }
 
     public GpuMosaicRecorder(float[] quadrantStripOffsetX) {
-        this(quadrantStripOffsetX, DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT);
+        this(quadrantStripOffsetX, DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT, false);
+    }
+
+    public GpuMosaicRecorder(float[] quadrantStripOffsetX, int viewportWidth, int viewportHeight) {
+        this(quadrantStripOffsetX, viewportWidth, viewportHeight, false);
     }
 
     /**
@@ -447,8 +457,10 @@ public class GpuMosaicRecorder {
      * @param viewportHeight Encoder/mosaic height. Should match the encoder's
      *     configured height — typically {@code panoHeight*2} (1920 on Seal,
      *     1440 on Tang).
+     * @param isTexture2D True if camera source texture is GL_TEXTURE_2D (DiLink 5 native), false if GL_TEXTURE_EXTERNAL_OES.
      */
-    public GpuMosaicRecorder(float[] quadrantStripOffsetX, int viewportWidth, int viewportHeight) {
+    public GpuMosaicRecorder(float[] quadrantStripOffsetX, int viewportWidth, int viewportHeight, boolean isTexture2D) {
+        this.isTexture2D = isTexture2D;
         this.quadrantStripOffsetX = normalizeOffsets(quadrantStripOffsetX);
         this.viewportWidth = viewportWidth > 0 ? viewportWidth : DEFAULT_VIEWPORT_WIDTH;
         this.viewportHeight = viewportHeight > 0 ? viewportHeight : DEFAULT_VIEWPORT_HEIGHT;
@@ -458,7 +470,7 @@ public class GpuMosaicRecorder {
         float topBandAspect =
             ((float) this.viewportWidth / (float) this.viewportHeight) / DASHCAM_SPLIT;
         float cropY = windshieldCropY(WINDSHIELD_SOURCE_ASPECT, topBandAspect);
-        this.fragmentShader = buildFragmentShader(this.quadrantStripOffsetX, cropY);
+        this.fragmentShader = buildFragmentShader(this.quadrantStripOffsetX, cropY, isTexture2D);
     }
 
     /**
@@ -805,7 +817,11 @@ public class GpuMosaicRecorder {
 
         // Bind camera texture
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
+        if (isTexture2D) {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, cameraTextureId);
+        } else {
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
+        }
         GLES20.glUniform1i(uCameraTexLocation, 0);
         // Bind the optional windshield texture to unit 2 (dashcam top band).
         // Fall back to the camera texture when no windshield frame is ready so
@@ -813,7 +829,7 @@ public class GpuMosaicRecorder {
         // actual use on uWindshieldReady.
         GLES20.glActiveTexture(GLES20.GL_TEXTURE2);
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
-            (windshieldReady && windshieldTextureId != 0) ? windshieldTextureId : cameraTextureId);
+            (windshieldReady && windshieldTextureId != 0) ? windshieldTextureId : (isTexture2D ? 0 : cameraTextureId));
         if (uWindshieldTexLocation >= 0) {
             GLES20.glUniform1i(uWindshieldTexLocation, 2);
         }
@@ -1003,7 +1019,14 @@ public class GpuMosaicRecorder {
                 logger.error("Encoder surface dead after " + consecutiveSurfaceErrors +
                     " consecutive errors, requesting reinit");
                 needsReinit = true;
-                encoderSurface = null;  // Prevent further attempts
+                if (encoderSurface != null && eglCore != null) {
+                    try {
+                        eglCore.destroySurface(encoderSurface);
+                    } catch (Throwable t) {
+                        logger.warn("Failed to destroy dead encoderSurface: " + t.getMessage());
+                    }
+                    encoderSurface = null;  // Prevent further attempts
+                }
                 return;
             }
             if (consecutiveSurfaceErrors <= 3) {
@@ -2018,7 +2041,7 @@ public class GpuMosaicRecorder {
      * → {TL, TR, BL, BR}. 3-cam (uApaMode > 1.5) and APA (uApaMode > 0.5)
      * branches are layout-independent and stay as-is.
      */
-    private static String buildFragmentShader(float[] offsets, float windshieldCropY) {
+    private static String buildFragmentShader(float[] offsets, float windshieldCropY, boolean isTexture2D) {
         // uApaMode branches:
         //   0.0  4-camera mosaic: sample 4 quadrants of a 5120x960 horizontal
         //        strip and rearrange into 2x2 corners (legacy Seal layout).
@@ -2026,10 +2049,12 @@ public class GpuMosaicRecorder {
         //   2.0  3-camera mosaic (Atto 3): rear=left half, front=top-right,
         //        left+right=bottom-right.
         //   3.0  DiLink 4 four-corner producer remap.
+        String ext = isTexture2D ? "#extension GL_OES_EGL_image_external : enable\n" : "#extension GL_OES_EGL_image_external : require\n";
+        String camSampler = isTexture2D ? "uniform sampler2D uCameraTex;\n" : "uniform samplerExternalOES uCameraTex;\n";
         return String.format(Locale.US,
-            "#extension GL_OES_EGL_image_external : require\n" +
+            ext +
             "precision mediump float;\n" +
-            "uniform samplerExternalOES uCameraTex;\n" +
+            camSampler +
             "uniform samplerExternalOES uWindshieldTex;\n" +
             "uniform float uWindshieldReady;\n" +
             "uniform float uApaMode;\n" +
@@ -2147,9 +2172,8 @@ public class GpuMosaicRecorder {
             "            samplePos = vec2(0.25 + lx * 0.5, vTexCoord.y);\n" +
             "        }\n" +
             "    } else if (uApaMode > 0.5) {\n" +
-            "        // DiLink 5 1:1 direct camera stream: center-crop 1920x1300 source to 1920x1080 canvas (16:9)\n" +
-            "        float cropY = 0.0846;\n" +
-            "        samplePos = vec2(vTexCoord.x, cropY + vTexCoord.y * (1.0 - 2.0 * cropY));\n" +
+            "        // DiLink 5 1:1 direct camera stream: 1920x1080 native 16:9 canvas\n" +
+            "        samplePos = vTexCoord;\n" +
             "    } else if (uRecordLayout > 0.5) {\n" +
             // Dashcam composition (4-camera 360 source only). The 360 front
             // slice fills the top `split` band at full width; the 360

@@ -1024,16 +1024,55 @@ BYD.core = {
                 if (el) el.textContent = status.appVersion;
             }
 
-            // 12V Battery
-            if (status.battery) {
-                const el = document.getElementById('batteryValue');
-                const voltage = Number(status.battery.voltage);
-                const voltageFresh = status.battery.available !== false
+            // 12V Battery -- reads recordingStatus.voltage12v, a direct live
+            // car_service read on every /status poll (no staleness/caching
+            // layer, same pattern as gear/doors). The old status.battery.*
+            // path depends on a vendor data source (BYDAutoStatisticDevice)
+            // that's flaky/slow-to-bind on this vehicle.
+            // recordingStatus.dilink5 is the same DiLink5Platform.isActive()
+            // gate the backend already uses to decide which read path to
+            // even attempt -- on a DiLink5 car we go car_service-only
+            // (falling back only to the last-known-good cache during the
+            // rare gap where car_service's lastEvent hasn't fired yet, e.g.
+            // right after a reboot), and never consult the stock field at
+            // all, so a stale/flaky vendor reading can't ever shadow it. Off
+            // DiLink5 (other platforms/DiLink4 cars where car_service's
+            // dumpsysText() returns unavailable and this field is always
+            // -1), stock is the only path, same as stock ever was.
+            {
+                const rs12v = status.recordingStatus;
+                const isDiLink5 = !!(rs12v && rs12v.dilink5 === true);
+                const carSvcVoltage = (rs12v && rs12v.voltage12v !== undefined) ? Number(rs12v.voltage12v) : NaN;
+                const carSvcValid = isFinite(carSvcVoltage) && carSvcVoltage > 0;
+
+                const stockVoltage = status.battery ? Number(status.battery.voltage) : NaN;
+                const stockValid = !!status.battery
+                    && status.battery.available !== false
                     && status.battery.isStale !== true
-                    && isFinite(voltage)
-                    && voltage > 0;
-                if (el) el.textContent = voltageFresh
-                    ? voltage.toFixed(1) + 'V' : '--';
+                    && isFinite(stockVoltage)
+                    && stockVoltage > 0;
+
+                const el = document.getElementById('batteryValue');
+                if (isDiLink5) {
+                    if (carSvcValid) {
+                        if (el) el.textContent = carSvcVoltage.toFixed(1) + 'V';
+                        try { localStorage.setItem('cachedVoltage12v', String(carSvcVoltage)); } catch (e) {}
+                    } else if (el && !el.textContent) {
+                        let cached12vDl5 = null;
+                        try { cached12vDl5 = localStorage.getItem('cachedVoltage12v'); } catch (e) {}
+                        el.textContent = cached12vDl5 ? Number(cached12vDl5).toFixed(1) + 'V' : '--';
+                    }
+                } else if (stockValid) {
+                    if (el) el.textContent = stockVoltage.toFixed(1) + 'V';
+                    try { localStorage.setItem('cachedVoltage12v', String(stockVoltage)); } catch (e) {}
+                } else if (el && !el.textContent) {
+                    // Only reach for the cache on first paint (empty element);
+                    // a later invalid poll just leaves the last good text
+                    // alone instead of blanking it back to "--".
+                    let cached12v = null;
+                    try { cached12v = localStorage.getItem('cachedVoltage12v'); } catch (e) {}
+                    el.textContent = cached12v ? Number(cached12v).toFixed(1) + 'V' : '--';
+                }
             }
 
             // ACC status

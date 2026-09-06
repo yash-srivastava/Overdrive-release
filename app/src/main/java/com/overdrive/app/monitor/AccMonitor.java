@@ -51,6 +51,24 @@ public class AccMonitor {
     // -1 = no edge dispatched yet (first authoritative read is treated as an edge).
     private static volatile int lastEdgeState = -1;
 
+    public interface AccStateListener {
+        void onAccStateChanged(boolean isAccOn);
+    }
+    private static final java.util.List<AccStateListener> sListeners =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    public static void addListener(AccStateListener listener) {
+        if (listener != null && !sListeners.contains(listener)) {
+            sListeners.add(listener);
+        }
+    }
+
+    public static void removeListener(AccStateListener listener) {
+        if (listener != null) {
+            sListeners.remove(listener);
+        }
+    }
+
     // Track the last sentinel state we logged (FAKE_OK=4, INVALID=255, or
     // out-of-range value), so we log only on transitions. Without this,
     // a persistently broken HAL would emit ~2880 "powerLevel=INVALID" lines
@@ -165,6 +183,15 @@ public class AccMonitor {
     private static void notifyAccEdge(boolean isAccOn) {
         if (lastEdgeState == (isAccOn ? 1 : 0)) return;  // no real transition
         lastEdgeState = isAccOn ? 1 : 0;
+
+        for (AccStateListener l : sListeners) {
+            try {
+                l.onAccStateChanged(isAccOn);
+            } catch (Throwable t) {
+                CameraDaemon.log("notifyAccEdge listener failed: " + t.getMessage());
+            }
+        }
+
         if (!isAccOn) {
             // ACC-OFF: stop the cluster map projector so its holder releases + the
             // launched cluster Activity is torn down. Safe + idempotent if not active.
@@ -299,13 +326,36 @@ public class AccMonitor {
      * @param context Android context for BYD device API
      * @return true if ACC is OFF (sentry mode should be active), false if ACC is ON or unknown
      */
+    private static volatile long lastDiLink5PowerDumpMs = 0;
+    private static final long DILINK5_POWER_DUMP_THROTTLE_MS = 3000L;
+
     public static boolean probeAccState(android.content.Context context) {
         // 1. DI-LINK 5.0 (Android 11 Automotive / SA8155P) ACC PROBE
         // On DiLink 5.0, BYDAutoBodyworkDevice is virtualized/missing or returns sentinel 4/255.
-        // We probe dumpsys car_service PowerMode, Android PowerManager/Display power state and doorLockStatus.
+        // We probe Android PowerManager/Display power state and dumpsys car_service PowerMode (throttled).
         if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
             try {
-                // 1. Check Automotive BYD PowerMode enum (Standby=4, Sleep=8, Str=5, Off=0, Pre StartUp=1 vs StartUp=2, DisPlay on=10)
+                // 1. Check Display Interactive State first (zero-fork Binder call). Display OFF = Definitely Sleep/Parked
+                if (context != null) {
+                    android.os.PowerManager pm = (android.os.PowerManager) context.getSystemService(android.content.Context.POWER_SERVICE);
+                    if (pm != null && !pm.isInteractive()) {
+                        accOn = false;
+                        inSentryMode = true;
+                        lastProbeTrustworthy = true;
+                        accOnAuthoritative = true;
+                        notifyAccEdge(false);
+                        CameraDaemon.log("AccMonitor [DiLink5]: Display is OFF (isInteractive=false) -> accOn=false, sentryMode=true");
+                        return true;
+                    }
+                }
+
+                // 2. Throttled check for Automotive BYD PowerMode enum (Standby=4, Sleep=8, Str=5, Off=0, Pre StartUp=1 vs StartUp=2, DisPlay on=10)
+                long now = android.os.SystemClock.elapsedRealtime();
+                if (now - lastDiLink5PowerDumpMs < DILINK5_POWER_DUMP_THROTTLE_MS && lastProbeTrustworthy) {
+                    return !accOn;
+                }
+                lastDiLink5PowerDumpMs = now;
+
                 String carServicePower = execShell("dumpsys car_service 2>/dev/null | grep -i 'Power Mute State' -A 3 | grep 'current' | head -1");
                 if (!carServicePower.isEmpty()) {
                     if (carServicePower.contains("4=PowerMode Standby") || carServicePower.contains("8=PowerMode Sleep") ||
@@ -328,20 +378,6 @@ public class AccMonitor {
                         notifyAccEdge(true);
                         CameraDaemon.log("AccMonitor [DiLink5]: Vehicle PowerMode is ACTIVE/READY (" + carServicePower.trim() + ") -> accOn=true, sentryMode=false");
                         return false;
-                    }
-                }
-
-                // 2. Check Display Interactive State on DiLink 5 (Display OFF = Definitely Sleep/Parked)
-                if (context != null) {
-                    android.os.PowerManager pm = (android.os.PowerManager) context.getSystemService(android.content.Context.POWER_SERVICE);
-                    if (pm != null && !pm.isInteractive()) {
-                        accOn = false;
-                        inSentryMode = true;
-                        lastProbeTrustworthy = true;
-                        accOnAuthoritative = true;
-                        notifyAccEdge(false);
-                        CameraDaemon.log("AccMonitor [DiLink5]: Display is OFF (isInteractive=false) -> accOn=false, sentryMode=true");
-                        return true;
                     }
                 }
 
