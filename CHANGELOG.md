@@ -4,6 +4,8 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
 
 ## [In corso / Unreleased]
 
+## [v51.0] - 2026-09-06
+
 - **Power-Gate Telemetria Climatizzatore a Veicolo Spento / Standby (`VehicleControlApiHandler.java`)**:
   - **Risoluzione Letture Fantasma "AC on · Fan 2" nella Dashboard Web**:
     Android Automotive `car_service` (`dumpsys car_service` / `CarPropertyManager`) mantiene in cache l'ultimo pacchetto CAN ricevuto prima dell'arresto del veicolo (`A_C_WORK_MODE_R = 1`, `AC_CONTROLLER_WIND_LEVEL = 2`), poiché la centralina clima all'ACC OFF si spegne senza inviare un frame esplicito di reset a 0.
