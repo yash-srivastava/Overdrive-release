@@ -4,6 +4,13 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
 
 ## [In corso / Unreleased]
 
+- **Power-Gate Telemetria Climatizzatore a Veicolo Spento / Standby (`VehicleControlApiHandler.java`)**:
+  - **Risoluzione Letture Fantasma "AC on · Fan 2" nella Dashboard Web**:
+    Android Automotive `car_service` (`dumpsys car_service` / `CarPropertyManager`) mantiene in cache l'ultimo pacchetto CAN ricevuto prima dell'arresto del veicolo (`A_C_WORK_MODE_R = 1`, `AC_CONTROLLER_WIND_LEVEL = 2`), poiché la centralina clima all'ACC OFF si spegne senza inviare un frame esplicito di reset a 0.
+  - **Sincronizzazione Reale dello Stato Clima**:
+    Introdotto il controllo di alimentazione effettiva `climateActuallyActive = vehiclePoweredOn || accOn || remoteClimateActive`. Se il veicolo è in Standby/ACC OFF e il precondizionamento remoto non è attivo, `acOn` viene forzato a `false` e `fanLevel` a `0` sia per il backend DiLink 5 che per il percorso standard OEM. In questo modo la dashboard web riporta fedelmente `AC off` senza badge di attività durante la sosta del veicolo, preservando al contempo i setpoint desiderati memorizzati (`driverTempSetC`, `passengerTempSetC`).
+
+
 - **Disaccoppiamento Totale Pipeline Video da Gralloc/AHardwareBuffer e Passaggio a CPU Double-Buffering + `glTexSubImage2D` (`qcarcam_bridge.cpp`, `GlUtil.java`, `PanoramicCameraGpu.java`, `GpuMosaicRecorder.java`, `GpuDownscaler.java`, `GpuStreamScaler.java`, `FoveatedCropper.java`, `HighResPreviewSampler.java`, `GpuSurveillancePipeline.java`)**:
   - **Causa Radice del Crash/Hard Reset Veicolo alla Riaccensione**:
     L'analisi forense dei core dump (`libadreno_utils.so` in `surfaceflinger` e `byd_cam_daemon` su `validate_resource_memory_layout_metadata`) ha evidenziato che la scrittura SIMD NEON UYVY->RGBA direttamente nella memoria mappata da Gralloc/AHardwareBuffer andava a corrompere la struttura di metadati interna (`MetaData_t`) di Gralloc del driver Qualcomm. Questo corrompeva il layout di memoria condivisa del compositore di sistema, portando al freeze totale e al riavvio a cascata dell'intero infotainment all'accensione del quadro o al risveglio delle telecamere di bordo.

@@ -975,33 +975,37 @@ public class VehicleControlApiHandler {
             logger.debug("battery-heat cloud read failed: " + e.getMessage());
         }
 
-        // Climate — only report AC state if vehicle power is on (powerLevel >= 2)
-        // Otherwise stale cached data shows AC on when car is actually off
+        // Climate — only report AC state if vehicle power is on (powerLevel >= 2),
+        // ACC is on, or remote climate is active. Otherwise stale cached CAN properties
+        // from car_service/dumpsys show "AC on · Fan 2" when the car is actually off.
         JSONObject climate = new JSONObject();
         boolean vehiclePoweredOn = (data.powerLevel != BydVehicleData.UNAVAILABLE && data.powerLevel >= 2);
+        boolean accOn = com.overdrive.app.monitor.AccMonitor.isAccOn();
+        Boolean remoteClimateActive = remoteClimateActive();
+        boolean climateActuallyActive = vehiclePoweredOn || accOn || Boolean.TRUE.equals(remoteClimateActive);
+
         if (data.acStartState != BydVehicleData.UNAVAILABLE) {
-            climate.put("acOn", vehiclePoweredOn && data.acStartState == 1);
+            climate.put("acOn", climateActuallyActive && data.acStartState == 1);
         }
         if (data.hasFreshCabinTemperature() && !Double.isNaN(data.insideTempC)) {
             climate.put("insideTempC", data.insideTempC);
         }
         if (data.acWindMode != BydVehicleData.UNAVAILABLE) climate.put("windMode", data.acWindMode);
-        if (data.acFanLevel != BydVehicleData.UNAVAILABLE && vehiclePoweredOn) climate.put("fanLevel", data.acFanLevel);
-        Boolean remoteClimateActive = remoteClimateActive();
+        if (data.acFanLevel != BydVehicleData.UNAVAILABLE) {
+            climate.put("fanLevel", climateActuallyActive ? data.acFanLevel : 0);
+        }
         if (remoteClimateActive != null) {
             climate.put("remoteClimateActive", remoteClimateActive.booleanValue());
         }
-        // DiLink5-first override of just acOn: A_C_WORK_MODE_R can read "on"
-        // while AC_CONTROLLER_WIND_LEVEL (fan speed) is idle — e.g. between
-        // auto-mode cycles — which isn't "climate on" from the user's
-        // perspective. windMode/fanLevel/insideTempC/remoteClimateActive
-        // above stay stock-sourced; only acOn is confirmed live enough to
-        // override. No-op (leaves the stock acOn, if any) when car_service
-        // has no reading.
+        // DiLink5-first override of acOn and fanLevel:
+        // car_service retains the last broadcast CAN state from when the vehicle
+        // was running. If climate is not actively powered (vehicle powered off and no
+        // remote climate session), gate acOn to false and fanLevel to 0 so the dashboard
+        // reflects "AC off" instead of stale cached fan speed and work mode.
         if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
             int carSvcAcOn = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.climateAcOnRaw();
             if (carSvcAcOn >= 0) {
-                climate.put("acOn", carSvcAcOn == 1);
+                climate.put("acOn", climateActuallyActive && (carSvcAcOn == 1));
             }
             // Driver/passenger AC temperature setpoints -- never tracked
             // anywhere in this app before, native or web. See
@@ -1014,14 +1018,20 @@ public class VehicleControlApiHandler {
             if (carSvcTemps[0] >= 0) climate.put("driverTempSetC", carSvcTemps[0]);
             if (carSvcTemps[1] >= 0) climate.put("passengerTempSetC", carSvcTemps[1]);
 
-            // Fan level, read directly and unconditionally -- unlike the
-            // stock data.acFanLevel above, which the vendor code only
-            // reports while vehiclePoweredOn/its own AC-power-level gate is
-            // true, so the key goes missing entirely (not 0) whenever AC is
-            // off. Always overwrites the stock value (when present) so "fan
-            // genuinely at 0" and "no reading" stay distinguishable.
+            // Fan level: car_service retains the last wind level (e.g. 2)
+            // even after vehicle shutdown. Gate on climateActuallyActive so
+            // the dashboard does not display "AC on · Fan 2" when the car is off.
             int carSvcFanLevel = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.climateFanLevelRaw();
-            if (carSvcFanLevel >= 0) climate.put("fanLevel", carSvcFanLevel);
+            if (carSvcFanLevel >= 0) {
+                climate.put("fanLevel", climateActuallyActive ? carSvcFanLevel : 0);
+            }
+        }
+
+        // Safety fallback: if climate is not actually active, guarantee that acOn
+        // is false and fanLevel is 0 so client dashboards never show ghost readings.
+        if (!climateActuallyActive) {
+            climate.put("acOn", false);
+            climate.put("fanLevel", 0);
         }
         response.put("climate", climate);
 
