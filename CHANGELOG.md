@@ -4,7 +4,7 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
 
 ## [In corso / Unreleased]
 
-## [v50.3] - 2026-09-06
+## [v51.2] - 2026-09-06
 
 - **Risoluzione Freeze Riarmo Sentry (~48-60s) e Gestione Presenza Stazionaria (`SurveillanceEngineGpu.java`)**:
   - Introdotta finestra di recency temporale (30s) per soggetto stazionario (`recentPersonPresence`): impedisce che l'assorbimento della persona nello sfondo da parte del modello OpenCV MOG2 dopo ~53s blocchi l'avvio di nuovi cicli di registrazione.

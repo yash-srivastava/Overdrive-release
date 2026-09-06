@@ -316,7 +316,7 @@ android {
         // without a source edit per release; the defaults track the current
         // rolling head so a plain local build is still accurate.
         versionCode = (project.findProperty("overdriveVersionCode") as? String)?.toIntOrNull() ?: 105
-        versionName = (project.findProperty("overdriveVersionName") as? String) ?: "50.3"
+        versionName = (project.findProperty("overdriveVersionName") as? String) ?: "51.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
         // Note: abiFilters removed - using splits.abi instead for size optimization
