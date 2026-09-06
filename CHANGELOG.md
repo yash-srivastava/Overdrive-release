@@ -4,6 +4,13 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
 
 ## [In corso / Unreleased]
 
+## [v51.3] - 2026-09-06
+
+- **Risoluzione Alterazione Cromatica Verde su Fotogramma Chiave Telegram (`FoveatedCropper.java`, `GpuDownscaler.java`, `HighResPreviewSampler.java`, `PanoramicCameraGpu.java`)**:
+  - Estesa la salvaguardia introdotta nel commit `2149a404` (che disabilitava forzatamente il red-mask shader `RED_MASK_GLSL` su DiLink 5 per la registrazione MP4 e lo streaming live) a tutti i componenti di cattura e downscaling fotogrammi (`FoveatedCropper`, `GpuDownscaler`, `HighResPreviewSampler`).
+  - Su hardware DiLink 5 (`DiLink5QCarCamBackend.isSupported()`), `setRedMaskEnabled()` forza sempre `enabled = false`, indipendentemente dalla presenza di `"dilink4RedMask": true` nei file di configurazione.
+  - Eliminata la soppressione del canale rosso e l'amplificazione del verde sul fotogramma chiave Telegram (`event_*.jpg`) e sulle anteprime hero, restituendo colori naturali e fedeli perfettamente allineati al video registrato.
+
 ## [v51.2-b] - 2026-09-06
 
 - **Prevenzione Crash Fatale `media.hwcodec` (`QC2GrallocBuffer::getMetadata`) su Chiusura Registrazione Sentry (`SurveillanceEngineGpu.java`, `ThumbnailBuffer.java`)**:

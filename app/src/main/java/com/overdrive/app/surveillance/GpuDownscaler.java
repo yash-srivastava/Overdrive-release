@@ -1210,6 +1210,9 @@ public class GpuDownscaler {
     }
 
     public void setRedMaskEnabled(boolean enabled) {
+        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+            enabled = false;
+        }
         this.redMaskEnabled = enabled;
     }
 

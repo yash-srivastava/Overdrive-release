@@ -1464,8 +1464,11 @@ public class PanoramicCameraGpu {
                     org.json.JSONObject camCfgDs = com.overdrive.app.config
                         .UnifiedConfigManager.loadConfig().optJSONObject("camera");
                     if (camCfgDs != null) {
-                        downscaler.setRedMaskEnabled(
-                            camCfgDs.optBoolean("dilink4RedMask", false));
+                        boolean redMask = camCfgDs.optBoolean("dilink4RedMask", false);
+                        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+                            redMask = false;
+                        }
+                        downscaler.setRedMaskEnabled(redMask);
                         downscaler.setApaCenterInset(CAMERA_LAYOUT_MODE == 3
                             ? (float) camCfgDs.optDouble(
                                 "dilink4ApaCenterInset", 0.09375)
@@ -1514,8 +1517,11 @@ public class PanoramicCameraGpu {
                     org.json.JSONObject camCfgFc = com.overdrive.app.config
                         .UnifiedConfigManager.loadConfig().optJSONObject("camera");
                     if (camCfgFc != null) {
-                        foveatedCropper.setRedMaskEnabled(
-                            camCfgFc.optBoolean("dilink4RedMask", false));
+                        boolean redMask = camCfgFc.optBoolean("dilink4RedMask", false);
+                        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+                            redMask = false;
+                        }
+                        foveatedCropper.setRedMaskEnabled(redMask);
                         foveatedCropper.setApaCenterInset(CAMERA_LAYOUT_MODE == 3
                             ? (float) camCfgFc.optDouble(
                                 "dilink4ApaCenterInset", 0.09375)
@@ -6947,8 +6953,11 @@ public class PanoramicCameraGpu {
                     org.json.JSONObject camCfgHr = com.overdrive.app.config
                         .UnifiedConfigManager.loadConfig().optJSONObject("camera");
                     if (camCfgHr != null) {
-                        highResSampler.setRedMaskEnabled(
-                            camCfgHr.optBoolean("dilink4RedMask", false));
+                        boolean redMask = camCfgHr.optBoolean("dilink4RedMask", false);
+                        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+                            redMask = false;
+                        }
+                        highResSampler.setRedMaskEnabled(redMask);
                         highResSampler.setApaCenterInset(CAMERA_LAYOUT_MODE == 3
                             ? (float) camCfgHr.optDouble(
                                 "dilink4ApaCenterInset", 0.09375)
