@@ -20,10 +20,27 @@ public final class ChargingTypeClassifier {
 
     public static int classify(int gunState, double measuredPeakKw) {
         if (gunState == 2) return AC;
-        if (gunState == 1 || gunState == 5) return UNKNOWN;
 
         double peakKw = Double.isFinite(measuredPeakKw) && measuredPeakKw > 0
                 ? measuredPeakKw : 0;
+
+        // gunState == 1 is documented elsewhere (SocHistoryDatabase.
+        // isTerminalChargingStateNow) as "the gun is out" — i.e. not
+        // connected. But a session that measured real sustained power could
+        // not physically have happened with no gun connected, so any real
+        // power reading here directly falsifies that claim (observed: ~1.4 kW
+        // sessions pinned at gunState=1 for their whole duration — a portable/
+        // Level-1 charger whose control-pilot signal doesn't flip this
+        // property the way a proper wallbox does). With the claim disproven,
+        // classify from power using the same confirm floor as an explicit DC
+        // gun: nothing in this fleet charges DC below that floor, so power
+        // below it is AC by elimination. Zero measured power leaves the
+        // "not connected" claim uncontradicted, so it stays UNKNOWN.
+        if (gunState == 1) {
+            if (peakKw <= 0) return UNKNOWN;
+            return peakKw >= DC_GUN_MIN_PEAK_KW ? DC : AC;
+        }
+        if (gunState == 5) return UNKNOWN;
         if (gunState == 3) {
             return peakKw >= DC_GUN_MIN_PEAK_KW ? DC : UNKNOWN;
         }

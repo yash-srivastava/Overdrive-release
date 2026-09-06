@@ -82,7 +82,7 @@ public class BatteryMonitor {
                     // else — same as if this block didn't exist.
                     float carSvcVoltage =
                             com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.batteryVoltage12v();
-                    if (carSvcVoltage >= 0f) {
+                    if (carSvcVoltage >= 8f && carSvcVoltage <= 16f) {
                         lastBatteryVoltage = carSvcVoltage;
                         lastBatteryUpdate = System.currentTimeMillis();
                     }
