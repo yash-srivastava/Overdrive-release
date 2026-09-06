@@ -4,6 +4,23 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
 
 ## [In corso / Unreleased]
 
+- **Miglioramenti Resilienza Telemetria, Crash-Recovery Viaggi e Hardening Demoni (`feature/telemetry-improvements`)**:
+  - **Reiezione Outlier Potenza Ricarica (`SocHistoryDatabase.java`)**:
+    Implementato il filtro statistico basato su mediana (`robustPeakAndAvgKw`) per eliminare i campioni fittizi CAN di BYD (es. glitch a 359.4 kW durante ricariche lente AC), esteso con coarse-peak gating per evitare che letture spurie inquinino la potenza di picco e media delle sessioni di carica.
+  - **Normalizzazione Scala Pressione Pneumatici TPMS e Plausibility Guard (`BydDataCollector.java`)**:
+    Aggiunta la conversione per firmware europei/francesi che riportano il valore in decimi di bar anziché kPa (evitando letture errate a ~2.8 PSI), e introdotto un intervallo di plausibilità fisica (100–450 kPa) con blocco delle visualizzazioni anomale per varianti hardware sconosciute.
+  - **Checkpoint di Crash-Recovery Viaggi con Recupero SoC ed Energia (`TripDatabase.java`, `TripAnalyticsManager.java`, `TripDetector.java`, `trips.js`)**:
+    Introdotta la persistenza periodica (ogni 60s) dei dati energetici in `trip_checkpoints` e procedura di arricchimento `enrichRecoveredTripsFromCheckpoints()` al boot. Risolto il problema per cui un crash del demone recuperava solo la traccia GPS azzerando kWh e SoC. Corretto l'ordine di pulizia: il checkpoint viene rimosso solo dopo il completamento con successo di `insertTrip()`. Abilitata la visualizzazione dei valori recuperati anche nei dettagli viaggio della Web UI.
+  - **Prevenzione Istanze Multiple Watchdog via PIDFile (`DaemonLauncher.kt`)**:
+    Implementata l'autoverifica del pidfile negli script di supervisione `start_cam_daemon.sh` e `start_acc_sentry.sh`, impedendo l'avvio di watchdog concorrenti e i conseguenti crash-loop sui file lock.
+  - **Kill Preventivo Demoni Orfani al Boot (`DaemonStartupManager.kt`)**:
+    Sostituito il pattern check-then-skip con l'arresto preventivo dei processi daemon rimasti attivi da installazioni precedenti, garantendo il caricamento pulito delle classi del nuovo APK al boot.
+  - **Intercettazione Fallimento Silenzioso Inizializzazione Videosorveglianza (`CameraDaemon.java`)**:
+    Aggiunto controllo esplicito su `!gpuPipeline.isInitialized()` al termine di `init()`. Qualora un errore GL/EGL interno venga silenziato, viene sollevata un'eccezione che attiva il backoff esponenziale automatico (5s, 30s, 2m, 5m).
+  - **Badge Live Stato Videosorveglianza su Web UI (`surveillance.js`)**:
+    Aggiornato il badge di stato nelle impostazioni per interrogare in tempo reale l'endpoint `/api/surveillance/status` anziché riflettere la semplice preferenza salvata.
+
+
 - **Allineamento con Upstream `origin/main` & Risoluzione Conflitti PR**:
   - Eseguito il merge dei commit più recenti di `origin/main` (`ead978a4`).
   - Risolto il conflitto `modify/delete` causato dalla dismissione upstream della cartella `dilink-probe/`.
