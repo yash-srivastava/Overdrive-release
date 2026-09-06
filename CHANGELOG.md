@@ -4,6 +4,8 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
 
 ## [In corso / Unreleased]
 
+## [v52.0] - 2026-09-06
+
 - **Prevenzione Crash Renderer WebView (`OverdriveApplication.kt`, `WebViewFragment.kt`)**:
   - Creazione proattiva della directory `cache/WebView/Crashpad` (`File(cacheDir, "WebView/Crashpad").mkdirs()`) in `OverdriveApplication.onCreate()` e prima dell'inizializzazione in `WebViewFragment.setupWebView()`, eliminando l'abort del processo sandbox Chromium (`SIGTRAP` / crash renderer) sui dispositivi con BSP privo della cartella di crashpad.
   - Implementazione di `onRenderProcessGone` nel `WebViewClient` per distruggere in sicurezza la vista crashata, mostrare overlay di retry e restituire `true`, impedendo ad Android di terminare l'applicazione host (`Process.killProcess`).
