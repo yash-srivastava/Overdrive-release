@@ -252,8 +252,11 @@ public final class CarPropertyBridge {
             Class<?> smClass = Class.forName("android.os.ServiceManager");
             java.lang.reflect.Method getService = smClass.getMethod("getService", String.class);
             
-            // Try car_service first, then direct byd property service names
-            String[] serviceNames = new String[] { "car_service", "byd_car_property", "car_property_service", "byd_car_service" };
+            // Do not wrap Android Automotive's "car_service" (android.car.ICar)
+            // as BYD ICarPropertyService — that throws
+            // "Binder invocation to an incorrect interface" and poisons the cache.
+            // DiLink5 telemetry falls back to dumpsys car_service instead.
+            String[] serviceNames = new String[] { "byd_car_property", "car_property_service", "byd_car_service" };
             for (String name : serviceNames) {
                 IBinder binder = (IBinder) getService.invoke(null, name);
                 if (binder != null && binder.isBinderAlive()) {

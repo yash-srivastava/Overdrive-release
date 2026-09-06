@@ -1824,24 +1824,7 @@ public class AppUpdater {
         script.append("[ -f /data/local/tmp/acc_sentry_daemon.disabled ] || "
                 + "echo \"disabled for update at $(date)\" > /data/local/tmp/acc_sentry_daemon.disabled\n");
         script.append("chmod 666 /data/local/tmp/acc_sentry_daemon.disabled 2>/dev/null\n");
-        // Remove shell watchdog scripts IMMEDIATELY so no background loop respawns
-        script.append("rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/cam_watchdog.pid 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/start_acc_sentry.sh /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/start_zrok.sh 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/start_telegram.sh 2>/dev/null\n");
-        // Graceful stop stage 0: Disarm video consumers and release EGL context via HTTP/TCP API
-        // This ensures WebCodecs clients disconnect, and EGL context / AHardwareBuffers are cleanly destroyed
-        // BEFORE the process is signaled, preventing Adreno GPU UBWC corruptions in SurfaceFlinger.
-        script.append("curl -s -m 2 -X POST http://127.0.0.1:8080/api/surveillance/disable >/dev/null 2>&1 || true\n");
-        script.append("echo '{\"command\":\"STOP_RECORDING\"}' | nc -w 1 127.0.0.1 19876 >/dev/null 2>&1 || true\n");
-        script.append("sleep 1.2 2>/dev/null || sleep 2\n");
-        // Graceful stop stage 1 (SIGTERM) to let qcarcam release DMA/HWC buffers cleanly
-        script.append("killall -15 fast_cam_capture 2>/dev/null; killall -15 byd_cam_daemon 2>/dev/null\n");
-        script.append("sleep 1.0 2>/dev/null || sleep 1\n");
-        // Force stop stage 2 (SIGKILL)
         script.append(psAwkKillLine("cam_daemon"));
-        script.append(psAwkKillLine("fast_cam_capture"));
-        script.append("killall -9 fast_cam_capture 2>/dev/null\n");
         script.append(psAwkKillLine("acc_sentry"));
         script.append(psAwkKillLine("start_telegram"));
         script.append("killall -9 byd_cam_daemon 2>/dev/null\n");
@@ -1856,6 +1839,10 @@ public class AppUpdater {
         script.append("killall -9 sing-box 2>/dev/null\n");
         script.append(psAwkKillLine("tailscaled"));
         script.append("killall -9 tailscaled 2>/dev/null\n");
+        script.append("rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/cam_watchdog.pid 2>/dev/null\n");
+        script.append("rm -f /data/local/tmp/start_acc_sentry.sh /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n");
+        script.append("rm -f /data/local/tmp/start_zrok.sh 2>/dev/null\n");
+        script.append("rm -f /data/local/tmp/start_telegram.sh 2>/dev/null\n");
 
         // Per-daemon lock files (mirrors DaemonLauncher's killDaemonViaAdb
         // cleanup) so the relaunched MainActivity's daemon supervisor doesn't
@@ -1872,11 +1859,18 @@ public class AppUpdater {
         // never a broad overdrive_config* / *.json glob.
         script.append("rm -f /data/local/tmp/overdrive_config.json.tmp.* "
                 + "/data/local/tmp/overdrive_config.json.bak.tmp 2>/dev/null\n");
-        // Sentinels camera_daemon.disabled and acc_sentry_daemon.disabled are intentionally
-        // KEPT during pm install so no orphan watchdog or transient process can attempt
-        // camera access while APK is being replaced. They are cleared ONLY in the success
-        // block below.
-        script.append("sleep 1\n");
+        // Clear only machine-written CORE markers. Pre-existing UI/Telegram
+        // markers are durable manual stop intent and survive the update.
+        // POST_UPDATE_FILE / UPDATE_IN_PROGRESS_FILE stay in place; the new
+        // process consumes them via UpdateLifecycle.
+        script.append("for S in /data/local/tmp/camera_daemon.disabled "
+                + "/data/local/tmp/acc_sentry_daemon.disabled; do\n");
+        script.append("  R=$(head -1 \"$S\" 2>/dev/null)\n");
+        script.append("  case \"$R\" in 'disabled for update'*|"
+                + "'disabled by stopAllDaemons sweep'*|'disabled by killDaemon'*) "
+                + "rm -f \"$S\" 2>/dev/null;; esac\n");
+        script.append("done\n");
+        script.append("sleep 2\n");
         // Step 4: install. `pm install -r -d` allows downgrades (-d) so a
         // bad release doesn't strand the user, and replaces the existing app
         // (-r). Stdout is captured into PM_OUT so step 4b can include the
@@ -2033,17 +2027,6 @@ public class AppUpdater {
         // success hint is intentionally KEPT here so notifyTunnel frames the
         // "Overdrive updated to X" message.)
         script.append("  rm -f ").append(UpdateLifecycle.TELEGRAM_INSTALL_FAILED_HINT_FILE).append("\n");
-        // Clear machine-written CORE markers ONLY AFTER pm install SUCCESS:
-        // Pre-existing UI/Telegram markers are durable manual stop intent and survive the update.
-        script.append("  for S in /data/local/tmp/camera_daemon.disabled "
-                + "/data/local/tmp/acc_sentry_daemon.disabled; do\n");
-        script.append("    R=$(head -1 \"$S\" 2>/dev/null)\n");
-        script.append("    case \"$R\" in 'disabled for update'*|"
-                + "'disabled by stopAllDaemons sweep'*|'disabled by killDaemon'*) "
-                + "rm -f \"$S\" 2>/dev/null;; esac\n");
-        script.append("  done\n");
-        // Ensure package is enabled in case it was disabled during maintenance
-        script.append("  pm enable com.overdrive.app 2>/dev/null\n");
         script.append("fi\n");
         // Step 5: relaunch. Runs in both success and failure cases so the user
         // gets the app back either way (with the new APK on success, or with
@@ -2278,7 +2261,6 @@ public class AppUpdater {
                 "rm -f /data/local/tmp/cam_watchdog.pid 2>/dev/null\n" +
                 "rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/start_acc_sentry.sh /data/local/tmp/start_zrok.sh /data/local/tmp/start_telegram.sh 2>/dev/null\n" +
                 psAwkKillLine("cam_daemon") +
-                psAwkKillLine("fast_cam_capture") +
                 psAwkKillLine("acc_sentry") +
                 psAwkKillLine("sentry_daemon") +
                 psAwkKillLine("telegram_bot_daemon") +
@@ -2287,7 +2269,6 @@ public class AppUpdater {
                 psAwkKillLine("zrok") +
                 psAwkKillLine("sing-box") +
                 psAwkKillLine("tailscaled") +
-                "killall -9 fast_cam_capture 2>/dev/null\n" +
                 "killall -9 cloudflared 2>/dev/null\n" +
                 "killall -9 zrok 2>/dev/null\n" +
                 "killall -9 tailscaled 2>/dev/null\n" +

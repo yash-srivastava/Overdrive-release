@@ -101,9 +101,7 @@ object DashboardStatusParser {
             return DashboardStatusResult.Loading
         }
 
-        val soc = root.optJSONObject("soc")
-            ?.finiteDouble("percent")
-            ?.takeIf { it in 0.0..100.0 }
+        val soc = root.socPercent()
 
         val rangeObject = root.optJSONObject("range")
         val rangeKm = rangeObject?.let { range ->
@@ -278,6 +276,26 @@ object DashboardStatusParser {
             sessionEnergyEstimated = sessionEstimated,
             sessionEnergySource = sessionSource,
         )
+    }
+
+    /**
+     * Traction-battery percent from `/status`. Live `soc.percent` first,
+     * then charging live SoC, then DiLink 5 `recordingStatus.carSvcSoc`
+     * so a missing `soc` object does not blank the Battery tile.
+     */
+    private fun JSONObject.socPercent(): Double? {
+        optJSONObject("soc")
+            ?.finiteDouble("percent")
+            ?.takeIf { it in 0.0..100.0 }
+            ?.let { return it }
+        optJSONObject("charging")
+            ?.finiteDouble("socPercent")
+            ?.takeIf { it in 0.0..100.0 }
+            ?.let { return it }
+        val carSvc = optJSONObject("recordingStatus")
+            ?.optDouble("carSvcSoc", Double.NaN)
+            ?.takeIf { it.isFinite() && it in 0.0..100.0 }
+        return carSvc
     }
 
     private fun JSONObject.finiteDouble(key: String): Double? {

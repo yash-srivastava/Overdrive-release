@@ -374,47 +374,9 @@ public class OverlayBitmapRenderer {
                         com.overdrive.app.byd.BydDataCollector.getInstance();
                 milesMode = collector != null && collector.isMilesMode();
             } catch (Throwable ignored) {}
-
-            int displaySpeedKmh = snap != null ? snap.speedKmh : 0;
-            if (displaySpeedKmh <= 0) {
-                try {
-                    com.overdrive.app.monitor.GpsMonitor gps =
-                            com.overdrive.app.monitor.GpsMonitor.getInstance();
-                    if (gps != null && gps.hasLocation()) {
-                        float gpsSpeedKmh = gps.getSpeed() * 3.6f;
-                        if (gpsSpeedKmh >= 2.0f) {
-                            displaySpeedKmh = (int) Math.round(gpsSpeedKmh);
-                        }
-                    }
-                } catch (Throwable ignored) {}
-            }
-
-            int displayGearMode = snap != null ? snap.gearMode : 1;
-            if (displayGearMode == 1) { // 1 = GEAR_P
-                try {
-                    if (displaySpeedKmh > 3) {
-                        displayGearMode = 4; // Default to GEAR_D when moving
-                    }
-                    com.overdrive.app.monitor.GearMonitor gm =
-                            com.overdrive.app.monitor.GearMonitor.getInstance();
-                    if (gm != null) {
-                        int g = gm.getCurrentGear();
-                        if (g >= 1 && g <= 6 && (g != 1 || displaySpeedKmh <= 3)) {
-                            displayGearMode = g;
-                        }
-                    }
-                    if (displayGearMode == 1 && com.overdrive.app.byd.DiLink5Platform.isActive()) {
-                        int csg = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.gearValue();
-                        if (csg >= 1 && csg <= 6 && (csg != 1 || displaySpeedKmh <= 3)) {
-                            displayGearMode = csg;
-                        }
-                    }
-                } catch (Throwable ignored) {}
-            }
-
             String spd = milesMode
-                ? String.valueOf((int) Math.round(displaySpeedKmh * KM_TO_MI))
-                : String.valueOf(displaySpeedKmh);
+                ? String.valueOf((int) Math.round(snap.speedKmh * KM_TO_MI))
+                : String.valueOf(snap.speedKmh);
             String spdUnit = milesMode ? "mph" : "km/h";
 
             float contentW = 0f;
@@ -488,7 +450,7 @@ public class OverlayBitmapRenderer {
                 if (!fields.has(f)) continue;
                 if (!first) x += SEGMENT_GAP;
                 first = false;
-                drawSegment(c, f, x, iy, canText, blink, spd, spdUnit, displayGearMode, snap,
+                drawSegment(c, f, x, iy, canText, blink, spd, spdUnit, snap,
                         soc, volt12, lowBeam, highBeam, lat, lon, hasLoc, vin);
                 x += segWidth[f.ordinal()];
             }
@@ -566,7 +528,7 @@ public class OverlayBitmapRenderer {
 
     /** Draw a single content segment starting at {@code x} (origin = left edge). */
     private void drawSegment(Canvas c, Field f, float x, int iy, boolean canText,
-                             boolean blink, String spd, String spdUnit, int displayGearMode,
+                             boolean blink, String spd, String spdUnit,
                              TelemetrySnapshot snap, double soc, double volt12,
                              boolean lowBeam, boolean highBeam,
                              double lat, double lon, boolean hasLoc, String vin) {
@@ -580,8 +542,8 @@ public class OverlayBitmapRenderer {
                 break;
             case GEAR:
                 if (canText) {
-                    gearPaint.setColor(getGearColorForDarkBg(displayGearMode));
-                    c.drawText(String.valueOf(getGearChar(displayGearMode)), x, 54, gearPaint);
+                    gearPaint.setColor(getGearColorForDarkBg(snap.gearMode));
+                    c.drawText(String.valueOf(snap.getGearChar()), x, 54, gearPaint);
                 }
                 break;
             case BRAKE_PEDAL: {
@@ -876,18 +838,6 @@ public class OverlayBitmapRenderer {
             case 5: return 0xFFCC66FF; // M → bright purple
             case 6: return 0xFFFFAA44; // S → bright orange
             default: return 0xFFFFFFFF;
-        }
-    }
-
-    private static char getGearChar(int gearMode) {
-        switch (gearMode) {
-            case 1: return 'P';
-            case 2: return 'R';
-            case 3: return 'N';
-            case 4: return 'D';
-            case 5: return 'M';
-            case 6: return 'S';
-            default: return '?';
         }
     }
 

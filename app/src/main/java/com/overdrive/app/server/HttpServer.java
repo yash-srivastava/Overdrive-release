@@ -1232,13 +1232,15 @@ public class HttpServer {
         boolean vehicleReady = waitForVehicleDataReady(1500);
         status.put("vehicleDataReady", vehicleReady);
 
-        // App version — the installed GitHub release label, read from the
-        // world-readable version file written by every install (shared across
-        // app + daemon UIDs), falling back to the BuildConfig identity
-        // (channel + versionName) when nothing's been installed via the updater
-        // or the persisted label is stale/malformed. getDisplayVersionFromFile()
-        // → getDisplayVersion(null) → persistedGithubVersion (file-first).
-        status.put("appVersion", com.overdrive.app.updater.AppUpdater.getDisplayVersionFromFile());
+        // App version — the build's TRUE self-identity (BuildConfig), not
+        // getDisplayVersionFromFile()'s persisted GitHub label. That label is
+        // written ONLY by the in-app updater's own install path, so a plain
+        // `adb install` (sideload) — every build pushed tonight — leaves it
+        // stale: the sidebar/About version kept showing whatever was last
+        // installed THROUGH the updater, not what's actually running.
+        // getInstalledVersion() reads BuildConfig directly, so it's always
+        // correct for the binary genuinely executing, sideloaded or not.
+        status.put("appVersion", com.overdrive.app.updater.AppUpdater.getInstalledVersion());
         status.put("recording", TcpCommandServer.getRecordingCameras());
         status.put("viewing", TcpCommandServer.getViewOnlyCameras());
         status.put("active", TcpCommandServer.getActiveCameras());
@@ -1277,7 +1279,16 @@ public class HttpServer {
                         com.overdrive.app.monitor.SocHistoryDatabase.getInstance());
             status.put("charging", chargingPublication.toStatusJson());
             
-            com.overdrive.app.monitor.BatterySocData socData = vehicleMonitor.getBatterySoc();
+            com.overdrive.app.monitor.BatterySocData socData = null;
+            if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+                double carSvcSoc = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.socPercentValue();
+                if (!Double.isNaN(carSvcSoc) && carSvcSoc >= 0 && carSvcSoc <= 100) {
+                    socData = new com.overdrive.app.monitor.BatterySocData(carSvcSoc);
+                }
+            }
+            if (socData == null) {
+                socData = vehicleMonitor.getBatterySoc();
+            }
             if (socData != null) {
                 JSONObject soc = new JSONObject();
                 soc.put("percent", socData.socPercent);
@@ -1288,6 +1299,12 @@ public class HttpServer {
             }
             
             com.overdrive.app.monitor.DrivingRangeData rangeData = vehicleMonitor.getDrivingRange();
+            if (rangeData == null && com.overdrive.app.byd.DiLink5Platform.isActive()) {
+                int carSvcRange = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.elecRangeKm();
+                if (carSvcRange > 0) {
+                    rangeData = new com.overdrive.app.monitor.DrivingRangeData(carSvcRange);
+                }
+            }
             if (rangeData != null) {
                 JSONObject range = new JSONObject();
                 range.put("elecRangeKm", rangeData.elecRangeKm);
@@ -1367,13 +1384,19 @@ public class HttpServer {
             // SOH not available
         }
         
-        // GPU surveillance status — true when in sentry/surveillance mode or enabled on DiLink 5
+        // GPU surveillance status — true only when the pipeline is actually
+        // armed/running (pipeline.isSurveillanceMode()). Previously this also
+        // OR'd in the user's "Enable Surveillance" toggle (survEnabled), which
+        // made the dashboard chip show "Active" the instant the toggle was
+        // flipped on — regardless of whether the real arm condition (door
+        // lock / power-off, per armMode) had actually been met. That
+        // contradicted surveillance.js's own handling of this field (see its
+        // comment: "gpuSurveillance is runtime state... the toggle reflects
+        // the preference"), and was confirmed live: vehicle ON, doors
+        // unlocked, armMode=lock — status.active/initialized correctly false,
+        // but this field still reported true because survEnabled was true.
         com.overdrive.app.surveillance.GpuSurveillancePipeline pipeline = CameraDaemon.getGpuPipeline();
-        boolean survEnabled = false;
-        try {
-            survEnabled = com.overdrive.app.config.UnifiedConfigManager.isSurveillanceEnabled();
-        } catch (Throwable ignored) {}
-        status.put("gpuSurveillance", (pipeline != null && pipeline.isSurveillanceMode()) || survEnabled);
+        status.put("gpuSurveillance", pipeline != null && pipeline.isSurveillanceMode());
         
         // Recording mode details (for status overlay)
         try {
@@ -1400,6 +1423,8 @@ public class HttpServer {
             // the stock BatterySocMonitor reading is missing on a DiLink5
             // platform. -1 when unavailable.
             recordingStatus.put("carSvcSoc", com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.socPercent());
+            recordingStatus.put("carSvcRangeKm",
+                    com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.elecRangeKm());
             com.overdrive.app.recording.RecordingModeManager rmm = CameraDaemon.getRecordingModeManager();
             if (rmm != null) {
                 // car_service (dumpsys) gear fallback — no-op everywhere except the

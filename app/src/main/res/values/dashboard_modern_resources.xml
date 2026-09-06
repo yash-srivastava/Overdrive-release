@@ -12,6 +12,14 @@
     <string name="dashboard_modern_updating">Updating vehicle status</string>
     <string name="dashboard_modern_vehicle_unavailable">Vehicle data unavailable</string>
     <string name="dashboard_modern_vehicle_connected">Vehicle connected</string>
+    <string name="dashboard_modern_status_charging_kw">Charging (%1$.1f kW)</string>
+    <string name="dashboard_modern_status_driving">Driving (%1$s)</string>
+    <string name="dashboard_modern_status_driving_speed">Driving (%1$s) · %2$d km/h</string>
+    <string name="dashboard_modern_status_recording"> (REC)</string>
+    <string name="dashboard_modern_status_reverse">Reversing (R)</string>
+    <string name="dashboard_modern_status_neutral">Neutral (N)</string>
+    <string name="dashboard_modern_status_parked">Parked (P)</string>
+    <string name="dashboard_modern_status_sentry">Sentry active</string>
     <string name="dashboard_modern_battery">Battery</string>
     <string name="dashboard_modern_range">Estimated range</string>
     <string name="dashboard_modern_personalized_range">Personalized range</string>

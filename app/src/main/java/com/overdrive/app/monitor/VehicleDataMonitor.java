@@ -186,6 +186,14 @@ public class VehicleDataMonitor {
     }
     
     public BatterySocData getBatterySoc() {
+        if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+            try {
+                double soc = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.socPercentValue();
+                if (!Double.isNaN(soc) && soc >= 0 && soc <= 100) {
+                    return new BatterySocData(soc);
+                }
+            } catch (Throwable ignored) {}
+        }
         BydVehicleData vd = getVd();
         if (vd != null && !Double.isNaN(vd.socPercent)) {
             return new BatterySocData(vd.socPercent);
