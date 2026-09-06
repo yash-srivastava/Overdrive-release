@@ -295,6 +295,9 @@ public class ModelsApiHandler {
         // labels as "Front-left" vs "Front-right" in notifications. The
         // notifications page reads this field to paint the LHD/RHD picker.
         response.put("driveSide", vehicle.optString("driveSide", "rhd"));
+        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+            response.put("cameraMapping", com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.getCameraMappingProperty());
+        }
         HttpResponse.sendJson(out, response.toString());
     }
 
@@ -331,6 +334,20 @@ public class ModelsApiHandler {
             patch.put("modelId", defaultId);
             patch.put("modelSource", VehicleModelSelection.SOURCE_UNSET);
             modelSelectionChanged = true;
+        }
+        if (incoming.has("cameraMapping")) {
+            String mapping = incoming.optString("cameraMapping", "").trim();
+            com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.setCameraMappingProperty(mapping);
+            patch.put("cameraMapping", mapping);
+        } else if (modelSelectionChanged && patch.has("modelId")) {
+            String chosen = patch.optString("modelId");
+            if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+                if (chosen.equalsIgnoreCase("shark")) {
+                    com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.setCameraMappingProperty("8,9,5,4");
+                } else if (chosen.equalsIgnoreCase("sealion7")) {
+                    com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.setCameraMappingProperty("0,1,2,3");
+                }
+            }
         }
         if (incoming.has("color")) {
             String color = incoming.optString("color", "");
