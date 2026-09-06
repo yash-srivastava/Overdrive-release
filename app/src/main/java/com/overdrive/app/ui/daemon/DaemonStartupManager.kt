@@ -383,56 +383,81 @@ class DaemonStartupManager(
     private fun startCoreDaemonsViaAdb() {
         log.info(TAG, "Starting core daemons via ADB (Camera first, then Sentry daemons)...")
 
-        // Start Camera Daemon FIRST. Probe the actual --nice-name (`byd_cam_daemon`)
-        // not the legacy "camera_daemon" string — `ps -A` on stock Android shows
-        // the nice-name, and "camera_daemon" is not a substring of "byd_cam_daemon".
-        // The previous literal always reported false → one redundant launch+
-        // cleanup ADB round-trip on every boot (the inner `launchDaemon` does
-        // its own correct probe at DaemonLauncher.kt:328 and short-circuits, so
-        // this was cosmetic, but kept boot ~1-2 s slower than necessary).
+        // Kill-then-launch, not check-then-skip: a daemon process surviving
+        // an app update/reinstall (it's a detached shell-uid process, not
+        // part of this app's own process tree, so `pm install`/data-clear
+        // never touches it) keeps running whatever bytecode its JVM loaded
+        // at its OWN launch time — an old app version's daemon can still be
+        // alive and serving requests long after a newer APK is installed,
+        // silently running stale code with none of that update's fixes.
+        // The previous isDaemonRunning() check only asked "is a process
+        // with this name alive," never "is it OUR version," so it would
+        // happily leave a stale daemon in place forever. Unconditionally
+        // killing first (best-effort — a daemon that isn't running is a
+        // harmless no-op per killDaemon's own "not running" short-circuit)
+        // guarantees every boot picks up whatever code the just-installed
+        // APK actually contains.
         ifNotUserStopped(DaemonType.CAMERA_DAEMON) {
-            adbLauncher.isDaemonRunning(DaemonType.CAMERA_DAEMON.processName) { running ->
-                if (!running) {
-                    log.info(TAG, "Boot: Starting Camera Daemon...")
-                    val nativeLibDir = context.applicationInfo.nativeLibraryDir
-                    val outputDir = context.getExternalFilesDir(null)?.absolutePath ?: context.filesDir.absolutePath
-                    adbLauncher.launchDaemon(outputDir, nativeLibDir, createLogCallback("CameraDaemon"))
-                } else {
-                    log.info(TAG, "Boot: Camera Daemon already running")
+            log.info(TAG, "Boot: Ensuring a fresh Camera Daemon (killing any existing instance first)...")
+            adbLauncher.killDaemon(DaemonType.CAMERA_DAEMON.processName, object : AdbDaemonLauncher.LaunchCallback {
+                override fun onLog(message: String) { log.info(TAG, "Boot: [kill byd_cam_daemon] $message") }
+                override fun onLaunched() { startFreshCameraDaemon() }
+                override fun onError(error: String) {
+                    log.warn(TAG, "Boot: kill byd_cam_daemon failed ($error) — launching anyway")
+                    startFreshCameraDaemon()
                 }
-            }
+            })
         }
-        
+
         // Start Sentry Daemon after Camera Daemon has time to initialize
         handler.postDelayed({
             ifNotUserStopped(DaemonType.SENTRY_DAEMON) {
-                adbLauncher.isSentryDaemonRunning { running ->
-                    if (!running) {
-                        log.info(TAG, "Boot: Starting Sentry Daemon...")
-                        adbLauncher.launchSentryDaemon(createLogCallback("SentryDaemon"))
-                    } else {
-                        log.info(TAG, "Boot: Sentry Daemon already running")
+                log.info(TAG, "Boot: Ensuring a fresh Sentry Daemon (killing any existing instance first)...")
+                adbLauncher.killDaemon("sentry_daemon", object : AdbDaemonLauncher.LaunchCallback {
+                    override fun onLog(message: String) { log.info(TAG, "Boot: [kill sentry_daemon] $message") }
+                    override fun onLaunched() { startFreshSentryDaemon() }
+                    override fun onError(error: String) {
+                        log.warn(TAG, "Boot: kill sentry_daemon failed ($error) — launching anyway")
+                        startFreshSentryDaemon()
                     }
-                }
+                })
             }
         }, 5000)
-        
+
         // Start ACC Sentry Daemon last
         handler.postDelayed({
             ifNotUserStopped(DaemonType.ACC_SENTRY_DAEMON) {
-                adbLauncher.isDaemonRunning("acc_sentry_daemon") { running ->
-                    if (!running) {
-                        log.info(TAG, "Boot: Starting ACC Sentry Daemon...")
-                        adbLauncher.launchAccSentryDaemon(
-                            onSuccess = { log.info(TAG, "Boot: ACC Sentry Daemon started") },
-                            onError = { error -> log.error(TAG, "Boot: ACC Sentry error: $error") }
-                        )
-                    } else {
-                        log.info(TAG, "Boot: ACC Sentry Daemon already running")
+                log.info(TAG, "Boot: Ensuring a fresh ACC Sentry Daemon (killing any existing instance first)...")
+                adbLauncher.killDaemon("acc_sentry_daemon", object : AdbDaemonLauncher.LaunchCallback {
+                    override fun onLog(message: String) { log.info(TAG, "Boot: [kill acc_sentry_daemon] $message") }
+                    override fun onLaunched() { startFreshAccSentryDaemon() }
+                    override fun onError(error: String) {
+                        log.warn(TAG, "Boot: kill acc_sentry_daemon failed ($error) — launching anyway")
+                        startFreshAccSentryDaemon()
                     }
-                }
+                })
             }
         }, 10000)
+    }
+
+    private fun startFreshCameraDaemon() {
+        log.info(TAG, "Boot: Starting Camera Daemon...")
+        val nativeLibDir = context.applicationInfo.nativeLibraryDir
+        val outputDir = context.getExternalFilesDir(null)?.absolutePath ?: context.filesDir.absolutePath
+        adbLauncher.launchDaemon(outputDir, nativeLibDir, createLogCallback("CameraDaemon"))
+    }
+
+    private fun startFreshSentryDaemon() {
+        log.info(TAG, "Boot: Starting Sentry Daemon...")
+        adbLauncher.launchSentryDaemon(createLogCallback("SentryDaemon"))
+    }
+
+    private fun startFreshAccSentryDaemon() {
+        log.info(TAG, "Boot: Starting ACC Sentry Daemon...")
+        adbLauncher.launchAccSentryDaemon(
+            onSuccess = { log.info(TAG, "Boot: ACC Sentry Daemon started") },
+            onError = { error -> log.error(TAG, "Boot: ACC Sentry error: $error") }
+        )
     }
 
 

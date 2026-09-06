@@ -10378,11 +10378,24 @@ public class SocHistoryDatabase {
      * peak-guarded, so a real DC session whose coarse ticks all missed the threshold was recorded as
      * AC and priced at the AC rate. Taking the max of both makes every close path agree with the
      * curve the UI draws above it.
+     *
+     * <p>The coarse value is a plain running {@code Math.max} with no outlier rejection at all (see
+     * its update site) — a single glitch sample (the documented 359.4 idle-junk signature,
+     * CHARGING-POWER-INVARIANTS.md I4) locks in for the rest of the session and used to win this
+     * max unconditionally, re-poisoning a session whose FINE series had already median-filtered the
+     * same glitch out. Confirmed live, 2026-09-05: a slow AC session recorded a clean ~1.4 kW fine
+     * peak but still closed with peakPower=359.4, because this method took it from the coarse side
+     * of the max instead. Gating the coarse value against the fine series' own outlier ceiling stops
+     * that without losing the reason coarse exists — a genuine fast-DC ramp pulls the fine median up
+     * right alongside it, so the ceiling rises too and a real DC peak still passes.
      */
     private double resolvePeakKw(long sessionStartTime, double coarsePeak) {
-        double fine = peakSampleKw(sessionStartTime);
+        double[] fineStats = robustPeakAndAvgKw(sessionStartTime);
+        double fine = fineStats[0];
+        double ceiling = fineStats[2];
+        boolean coarseValid = isValidMeasuredChargingPower(coarsePeak) && coarsePeak <= ceiling;
         return Math.max(
-                isValidMeasuredChargingPower(coarsePeak) ? coarsePeak : 0,
+                coarseValid ? coarsePeak : 0,
                 isValidMeasuredChargingPower(fine) ? fine : 0);
     }
 
@@ -10408,43 +10421,82 @@ public class SocHistoryDatabase {
         return -1;
     }
 
-    /** Arithmetic mean of measured positive samples, or -1 when none are available. */
-    private double averageSamplePowerKw(long sessionStartTime) {
-        if (!isInitialized || connection == null || sessionStartTime <= 0) return -1;
-        try (PreparedStatement p = connection.prepareStatement(
-                "SELECT AVG(power_kw) FROM " + TABLE_CPS
-                        + " WHERE session_start_time = ?"
-                        + " AND power_kw > 0 AND power_kw <= 500;")) {
-            p.setLong(1, sessionStartTime);
-            try (ResultSet rs = p.executeQuery()) {
-                if (!rs.next()) return -1;
-                double value = rs.getDouble(1);
-                return !rs.wasNull() && isValidMeasuredChargingPower(value)
-                        ? value : -1;
+    // A sample this many times the session's own median is treated as an isolated
+    // glitch, not a real reading — see robustPeakAndAvgKw's doc comment.
+    private static final double OUTLIER_MEDIAN_MULTIPLIER = 8.0;
+    // Floor on the outlier ceiling so a very low median (slow trickle charging,
+    // ~1 kW) doesn't make ordinary tick-to-tick variance look like an outlier.
+    private static final double OUTLIER_CEILING_FLOOR_KW = 5.0;
+
+    /**
+     * Median-based outlier rejection over one session's recorded power samples,
+     * then peak = max and avg = mean of whatever survives.
+     *
+     * <p>Confirmed live, 2026-09-05: a slow overnight AC session (~200+ samples
+     * clustered around ~1.4 kW) recorded a single sample at 359.4 — the
+     * documented BYD idle-junk signature (CHARGING-POWER-INVARIANTS.md I4) — and
+     * because the OLD peak/avg here were a plain MAX/AVG over every sample, that
+     * one glitch became the session's reported "peak" and skewed its "average",
+     * which then tripped the session-level poisoned-power gate and hid the
+     * session's otherwise-real energy/avg data entirely.
+     *
+     * <p>The median is robust to a small minority of extreme samples by
+     * definition — it only reflects them once they're the MAJORITY, at which
+     * point they're not outliers, they're a real sustained high-power stretch
+     * (a genuine DC fast charge). So gating on "how far past the median" rather
+     * than a fixed kW ceiling or a specific known-bad value catches whatever
+     * bogus number a future glitch produces, without needing gun-state/AC-DC
+     * awareness and without falsely rejecting a real DC session's real peak
+     * (which pulls its own median up alongside it, so the ceiling rises with
+     * it too).
+     */
+    private double[] robustPeakAndAvgKw(long sessionStartTime) {
+        java.util.List<Double> sorted = new java.util.ArrayList<>();
+        if (isInitialized && connection != null && sessionStartTime > 0) {
+            try (PreparedStatement p = connection.prepareStatement(
+                    "SELECT power_kw FROM " + TABLE_CPS
+                            + " WHERE session_start_time = ?"
+                            + " AND power_kw > 0 AND power_kw <= 500 ORDER BY power_kw;")) {
+                p.setLong(1, sessionStartTime);
+                try (ResultSet rs = p.executeQuery()) {
+                    while (rs.next()) {
+                        double v = rs.getDouble(1);
+                        if (!rs.wasNull() && isValidMeasuredChargingPower(v)) sorted.add(v);
+                    }
+                }
+            } catch (Exception e) {
+                logger.debug("robustPeakAndAvgKw failed: " + e.getMessage());
             }
-        } catch (Exception e) {
-            logger.debug("averageSamplePowerKw failed: " + e.getMessage());
-            return -1;
         }
+        int n = sorted.size();
+        // Double.MAX_VALUE ceiling with no fine samples means "nothing to gate
+        // against" — resolvePeakKw() reads this as "trust the coarse value",
+        // matching its old behavior for sessions too short to have samples yet.
+        if (n == 0) return new double[]{0, -1, Double.MAX_VALUE};
+        double median = (n % 2 == 1)
+                ? sorted.get(n / 2)
+                : (sorted.get(n / 2 - 1) + sorted.get(n / 2)) / 2.0;
+        double ceiling = Math.max(median * OUTLIER_MEDIAN_MULTIPLIER, OUTLIER_CEILING_FLOOR_KW);
+        double sum = 0;
+        int count = 0;
+        double peak = 0;
+        for (double v : sorted) {
+            if (v > ceiling) continue; // isolated glitch, not folded into peak/avg
+            sum += v;
+            count++;
+            if (v > peak) peak = v;
+        }
+        return new double[]{peak, count > 0 ? sum / count : -1, ceiling};
     }
 
-    /** Max measured power (kW) across a session's recorded samples, or 0. */
+    /** Arithmetic mean of measured positive samples (outliers excluded), or -1 when none are available. */
+    private double averageSamplePowerKw(long sessionStartTime) {
+        return robustPeakAndAvgKw(sessionStartTime)[1];
+    }
+
+    /** Max measured power (kW) across a session's recorded samples (outliers excluded), or 0. */
     private double peakSampleKw(long sessionStartTime) {
-        if (!isInitialized || connection == null || sessionStartTime <= 0) return 0;
-        try (PreparedStatement p = connection.prepareStatement(
-                "SELECT MAX(power_kw) FROM " + TABLE_CPS
-                        + " WHERE session_start_time = ?"
-                        + " AND power_kw > 0 AND power_kw <= 500;")) {
-            p.setLong(1, sessionStartTime);
-            try (ResultSet rs = p.executeQuery()) {
-                if (rs.next()) {
-                    double value = rs.getDouble(1);
-                    return !rs.wasNull()
-                            && isValidMeasuredChargingPower(value) ? value : 0;
-                }
-            }
-        } catch (Exception ignored) {}
-        return 0;
+        return robustPeakAndAvgKw(sessionStartTime)[0];
     }
 
     /**

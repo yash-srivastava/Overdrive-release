@@ -761,6 +761,10 @@ var VC = {
                 if (self._modelLoadTimeout) { clearTimeout(self._modelLoadTimeout); self._modelLoadTimeout = null; }
                 self.carModel = gltf.scene;
 
+                var modelEntry = self.ModelStore.findEntry(self.manifest, self.activeModelId);
+                var paintMeshHint = modelEntry && typeof modelEntry.paintMeshHint === 'string'
+                    ? modelEntry.paintMeshHint.toLowerCase() : '';
+
                 self.carModel.traverse(function(node) {
                     if (node.isMesh) {
                         // Identify body paint panels vs glass/chrome/rubber/interior
@@ -768,7 +772,12 @@ var VC = {
                         var mat = node.material;
                         var isBodyPaint = false;
 
-                        if (mat && !mat.transparent && mat.opacity > 0.9) {
+                        if (paintMeshHint) {
+                            var paintName = ((node.name || '') + ' '
+                                + (mat && mat.name ? mat.name : '')).toLowerCase();
+                            isBodyPaint = !!(mat && mat.color
+                                && paintName.indexOf(paintMeshHint) >= 0);
+                        } else if (mat && !mat.transparent && mat.opacity > 0.9) {
                             // Check if it's NOT glass (glass is usually transparent or has low opacity)
                             // Check if it's NOT black rubber/tyre (very dark, roughness ~1)
                             // Check if it's NOT chrome (metalness ~1, very light color)

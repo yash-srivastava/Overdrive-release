@@ -19,7 +19,7 @@ import java.util.Set;
 
 public class BatteryChemistryMetadataTest {
     private static final Set<String> EXPECTED_MODELS = new HashSet<>(Arrays.asList(
-            "seal", "sealion7", "seal-u", "seal-u-dmi", "dolphin", "atto3",
+            "seal", "sealion7", "seal-u", "seal-u-dmi", "dolphin", "atto3", "atto2",
             "han", "tang", "m6", "seagull", "destroyer"));
     private static final Map<String, String> EXPECTED_MODEL_SOURCES = new HashMap<>();
 
@@ -30,6 +30,7 @@ public class BatteryChemistryMetadataTest {
         EXPECTED_MODEL_SOURCES.put("seal-u-dmi", "https://www.byd.com/material/byd-site/si/pdfs/2026-04/Seal_U_Dmi-0226-BPS-SLO.pdf");
         EXPECTED_MODEL_SOURCES.put("dolphin", "https://www.byd.com/content/dam/byd-site/pl/pdfs/dolphin/Dolphin-0524-BPS-PL-V1-web.pdf");
         EXPECTED_MODEL_SOURCES.put("atto3", "https://www.byd.com/content/dam/byd-site/eu/product/atto3/BYD%20ATTO%203%20Leaflet.pdf");
+        EXPECTED_MODEL_SOURCES.put("atto2", "https://www.byd.com/es-es/vehiculos-electricos/atto-2.html");
         EXPECTED_MODEL_SOURCES.put("han", "https://www.byd.com/content/dam/byd-site/de/product/han/BYD%20HAN%20.pdf");
         EXPECTED_MODEL_SOURCES.put("tang", "https://media.byd.com/all-new-pure-electric-suv-byd-tang-advances-sustainable-goals-at-uefa-euro-2024tm/?lang=eng");
         EXPECTED_MODEL_SOURCES.put("m6", "https://www.byd.com/material/byd-site/sg/2025-m6/BYD-M6-SPEC-SHEET.pdf");
@@ -40,7 +41,7 @@ public class BatteryChemistryMetadataTest {
     @Test
     public void everySupportedConfigurationHasManufacturerEvidenceAndResolvesLfp() throws Exception {
         JSONObject manifest = manifest();
-        assertEquals(9, manifest.getInt("version"));
+        assertEquals(11, manifest.getInt("version"));
 
         JSONArray models = manifest.getJSONArray("models");
         Set<String> actual = new HashSet<>();

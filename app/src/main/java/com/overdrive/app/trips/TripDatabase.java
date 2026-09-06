@@ -256,6 +256,28 @@ public class TripDatabase {
 
     private void createTables() throws Exception {
         try (Statement stmt = connection.createStatement()) {
+            // Live-trip checkpoint: periodically refreshed while a trip is
+            // ACTIVE (see TripDetector's checkpoint timer), cleared on normal
+            // completion. `trips` itself can't hold an open/in-progress row
+            // (end_time is NOT NULL, and every reader assumes a completed
+            // trip), so this is a separate, deliberately tiny table — a mid-
+            // drive daemon crash previously left NOTHING durable except the
+            // GPS telemetry file, so recovery could only reconstruct
+            // distance/speed/elevation and never energy/SoC. One row per
+            // in-progress trip; start_time is the same join key `trips` uses.
+            stmt.execute(
+                "CREATE TABLE IF NOT EXISTS trip_checkpoints (" +
+                "start_time BIGINT PRIMARY KEY," +
+                "soc_start REAL," +
+                "kwh_start REAL," +
+                "elec_con_start REAL," +
+                "soc_now REAL," +
+                "kwh_now REAL," +
+                "elec_con_now REAL," +
+                "checkpoint_at_ms BIGINT" +
+                ")"
+            );
+
             // Trip catalog
             stmt.execute(
                 "CREATE TABLE IF NOT EXISTS trips (" +
@@ -567,6 +589,169 @@ public class TripDatabase {
             reconnect();
         }
         return -1;
+    }
+
+    // ==================== TRIP CHECKPOINT (crash recovery) ====================
+
+    /**
+     * Create or refresh the in-progress checkpoint for a live trip. Called once
+     * at trip start and then periodically while ACTIVE (see TripDetector).
+     * Cheap by design — six doubles and a timestamp, upserted on the trip's
+     * start_time — so it can run every checkpoint tick without meaningfully
+     * competing with the trip-file / telemetry I/O already happening live.
+     */
+    public synchronized void upsertTripCheckpoint(long startTime, double socStart, double kwhStart,
+            double elecConStart, double socNow, double kwhNow, double elecConNow) {
+        if (!ensureConnection() || startTime <= 0) return;
+        try (PreparedStatement p = connection.prepareStatement(
+                "MERGE INTO trip_checkpoints (start_time, soc_start, kwh_start, elec_con_start, " +
+                "soc_now, kwh_now, elec_con_now, checkpoint_at_ms) KEY(start_time) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)")) {
+            p.setLong(1, startTime);
+            p.setDouble(2, socStart);
+            p.setDouble(3, kwhStart);
+            p.setDouble(4, elecConStart);
+            p.setDouble(5, socNow);
+            p.setDouble(6, kwhNow);
+            p.setDouble(7, elecConNow);
+            p.setLong(8, System.currentTimeMillis());
+            p.executeUpdate();
+        } catch (Exception e) {
+            logger.debug("upsertTripCheckpoint failed: " + e.getMessage());
+        }
+    }
+
+    /** Remove a trip's checkpoint row. Called once the trip completes normally — no longer needed. */
+    public synchronized void clearTripCheckpoint(long startTime) {
+        if (!ensureConnection() || startTime <= 0) return;
+        try (PreparedStatement p = connection.prepareStatement(
+                "DELETE FROM trip_checkpoints WHERE start_time = ?")) {
+            p.setLong(1, startTime);
+            p.executeUpdate();
+        } catch (Exception e) {
+            logger.debug("clearTripCheckpoint failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Checkpoint start_times with no matching row in `trips` — left behind by a
+     * mid-trip daemon crash (normal completion always clears its own checkpoint
+     * first). Matched on whole-second start_time, same tolerance the disk-file
+     * recovery's dedup already uses for the identical reason (ms rounding).
+     */
+    public synchronized java.util.List<Long> orphanedTripCheckpointStartTimes() {
+        java.util.List<Long> out = new java.util.ArrayList<>();
+        if (!ensureConnection()) return out;
+        try (PreparedStatement p = connection.prepareStatement(
+                "SELECT c.start_time FROM trip_checkpoints c WHERE NOT EXISTS (" +
+                "SELECT 1 FROM trips t WHERE t.start_time / 1000 = c.start_time / 1000)")) {
+            try (ResultSet rs = p.executeQuery()) {
+                while (rs.next()) out.add(rs.getLong(1));
+            }
+        } catch (Exception e) {
+            logger.debug("orphanedTripCheckpointStartTimes failed: " + e.getMessage());
+        }
+        return out;
+    }
+
+    /**
+     * {tripId, startTime} pairs where a checkpoint survives AND a `trips` row
+     * now exists for that same start_time. Normal completion always clears its
+     * checkpoint BEFORE insertTrip() runs (see TripAnalyticsManager.
+     * handleTripEnded), so a checkpoint found alongside an existing row can
+     * only mean that row was just created by disk-file recovery after a
+     * mid-trip crash — the exact case that needs enrichment.
+     */
+    public synchronized java.util.List<long[]> checkpointedTripsNeedingEnrichment() {
+        java.util.List<long[]> out = new java.util.ArrayList<>();
+        if (!ensureConnection()) return out;
+        try (PreparedStatement p = connection.prepareStatement(
+                "SELECT t.id, c.start_time FROM trip_checkpoints c " +
+                "JOIN trips t ON t.start_time / 1000 = c.start_time / 1000")) {
+            try (ResultSet rs = p.executeQuery()) {
+                while (rs.next()) out.add(new long[]{rs.getLong(1), rs.getLong(2)});
+            }
+        } catch (Exception e) {
+            logger.debug("checkpointedTripsNeedingEnrichment failed: " + e.getMessage());
+        }
+        return out;
+    }
+
+    /** One checkpoint's saved readings: {socStart, kwhStart, elecConStart, socNow, kwhNow, elecConNow}, or null. */
+    public synchronized double[] getTripCheckpoint(long startTime) {
+        if (!ensureConnection() || startTime <= 0) return null;
+        try (PreparedStatement p = connection.prepareStatement(
+                "SELECT soc_start, kwh_start, elec_con_start, soc_now, kwh_now, elec_con_now " +
+                "FROM trip_checkpoints WHERE start_time = ?")) {
+            p.setLong(1, startTime);
+            try (ResultSet rs = p.executeQuery()) {
+                if (!rs.next()) return null;
+                return new double[]{rs.getDouble(1), rs.getDouble(2), rs.getDouble(3),
+                        rs.getDouble(4), rs.getDouble(5), rs.getDouble(6)};
+            }
+        } catch (Exception e) {
+            logger.debug("getTripCheckpoint failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Best-effort enrichment for a just-recovered (GPS-only) trip row: if a
+     * checkpoint survives for the same start_time, the crash happened after at
+     * least one checkpoint tick, so real (if slightly stale) SoC/energy data
+     * exists — fill it in instead of leaving the recovered row's energy fields
+     * at the all-zero "recovered" default. Deliberately additive and separate
+     * from the disk-file recovery pass itself (recoverTripsFromDiskLocked) —
+     * that pass's dedup logic is already delicate, so this only ever runs
+     * AFTER it, patching fields on a row that already exists, never touching
+     * how that row got created or its dedup keys.
+     */
+    public synchronized void enrichRecoveredTripFromCheckpoint(long tripId, long startTime) {
+        double[] cp = getTripCheckpoint(startTime);
+        if (cp == null) return;
+        double socStart = cp[0], kwhStart = cp[1], elecConStart = cp[2];
+        double socNow = cp[3], kwhNow = cp[4], elecConNow = cp[5];
+        double energyUsedKwh = -1;
+        // Prefer the metered HAL counter delta (finer-grained than remaining-kWh,
+        // which is derived from an integer SoC) — same preference order startTrip()
+        // itself uses. Both sides must be real (>0) before trusting the delta.
+        if (elecConStart > 0 && elecConNow > 0 && elecConNow >= elecConStart) {
+            energyUsedKwh = elecConNow - elecConStart;
+        } else if (kwhStart > 0 && kwhNow > 0 && kwhStart >= kwhNow) {
+            energyUsedKwh = kwhStart - kwhNow;
+        }
+        if (!ensureConnection()) return;
+        try (PreparedStatement p = connection.prepareStatement(
+                "UPDATE trips SET soc_start = ?, soc_end = ?, kwh_start = ?, kwh_end = ?, " +
+                "elec_con_start = ?, elec_con_end = ? WHERE id = ?")) {
+            p.setDouble(1, socStart > 0 ? socStart : 0);
+            p.setDouble(2, socNow > 0 ? socNow : 0);
+            p.setDouble(3, kwhStart > 0 ? kwhStart : 0);
+            p.setDouble(4, kwhNow > 0 ? kwhNow : 0);
+            p.setDouble(5, elecConStart > 0 ? elecConStart : 0);
+            p.setDouble(6, elecConNow > 0 ? elecConNow : 0);
+            p.setLong(7, tripId);
+            p.executeUpdate();
+            logger.info("Enriched recovered trip id=" + tripId + " from checkpoint (energyUsedKwh~="
+                    + (energyUsedKwh >= 0 ? String.format(java.util.Locale.US, "%.2f", energyUsedKwh) : "unknown") + ")");
+        } catch (Exception e) {
+            logger.debug("enrichRecoveredTripFromCheckpoint failed: " + e.getMessage());
+        } finally {
+            // Job done either way — a retry loop finding the same trip row
+            // again next boot would just re-run this for no further benefit.
+            clearTripCheckpoint(startTime);
+        }
+    }
+
+    /**
+     * Run after recoverTripsFromDisk(): enrich every just-recovered trip that
+     * still has a surviving checkpoint with its real SoC/energy readings.
+     * Safe to call unconditionally — a no-op when nothing needs enrichment.
+     */
+    public void enrichRecoveredTripsFromCheckpoints() {
+        for (long[] pair : checkpointedTripsNeedingEnrichment()) {
+            enrichRecoveredTripFromCheckpoint(pair[0], pair[1]);
+        }
     }
 
     /**

@@ -9,6 +9,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import org.junit.Test;
 
 /** Guards the Vehicle screen's old-WebView spacing and model-fit behaviour. */
@@ -47,6 +49,40 @@ public class VehicleControlAssetTest {
         assertTrue(script.contains("_fitLoadedCarModel"));
         assertFalse(script.contains("activeModelId === 'atto3'"));
         assertFalse(script.contains("activeModelId == 'atto3'"));
+    }
+
+    @Test
+    public void releasedAtto2AndSealion7UseBodyPaintMeshHints() throws Exception {
+        String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
+        JSONObject manifest = new JSONObject(readRepositoryFile(
+                "app/src/main/assets/web/shared/models/manifest.json"));
+
+        assertTrue(script.contains("modelEntry.paintMeshHint"));
+        assertTrue(script.contains("paintName.indexOf(paintMeshHint) >= 0"));
+
+        JSONObject atto2 = null;
+        JSONObject sealion7 = null;
+        JSONArray models = manifest.getJSONArray("models");
+        for (int i = 0; i < models.length(); i++) {
+            JSONObject model = models.getJSONObject(i);
+            if ("atto2".equals(model.getString("id"))) {
+                atto2 = model;
+            } else if ("sealion7".equals(model.getString("id"))) {
+                sealion7 = model;
+            }
+        }
+
+        assertTrue(atto2 != null);
+        assertEquals("mk_body", atto2.getString("paintMeshHint"));
+
+        assertTrue(sealion7 != null);
+        assertEquals("bodypaint", sealion7.getString("paintMeshHint"));
+        assertEquals("sealion7.glb", sealion7.getString("file"));
+        assertEquals(1645180, sealion7.getInt("sizeBytes"));
+        assertEquals(
+                "b1bd4c94aaf50e09ee5a294381bcec52b5160fe2cc3394e4b1c9d5ce37b055e2",
+                sealion7.getString("sha256"));
+        assertFalse(sealion7.getBoolean("bundled"));
     }
 
     @Test
@@ -140,7 +176,7 @@ public class VehicleControlAssetTest {
                 + count(html, "data-state=\"3\" disabled")
                 + count(html, "data-state=\"4\" disabled")
                 + count(html, "data-state=\"5\" disabled"));
-        assertTrue(html.contains("vehicle-control.js?v=vclite7"));
+        assertTrue(html.contains("vehicle-control.js?v=vclite8"));
         assertTrue(script.contains("fetch('/api/vehicle/ac-charge-current-limit')"));
         assertTrue(script.contains("self.apiPost('/api/vehicle/ac-charge-current-limit'"));
         assertTrue(script.contains("startAcChargeCurrentSync: function()"));

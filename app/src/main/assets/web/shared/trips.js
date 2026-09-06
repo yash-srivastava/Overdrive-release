@@ -2860,13 +2860,21 @@ const TRIPS = {
             const trip = tripData.trip;
 
             const recovered = this.isRecoveredTrip(trip);
+            // A recovered trip normally has no SoC/energy data (never written to
+            // the GPS-only telemetry file) — but one enriched from a surviving
+            // live checkpoint (TripDatabase.enrichRecoveredTripFromCheckpoint)
+            // DOES have real readings despite still being "recovered" (no
+            // driving scores). Check the actual values below rather than
+            // blanket-hiding on the recovered flag, same as the trip-card fix.
+            const detailHasRealSoc = (trip.socStart || trip.soc_start || 0) > 0
+                    || (trip.socEnd || trip.soc_end || 0) > 0;
             const start = new Date(trip.startTime || trip.start_time);
             const lang = BYD.i18n.getLang();
             this.setEl('detailTitle', start.toLocaleDateString(lang, { weekday: 'long', month: 'long', day: 'numeric' }));
             this.setEl('detailSubtitle', start.toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' }) +
                 ' – ' + new Date(trip.endTime || trip.end_time).toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' }));
             this.setEl('detailDuration', this.formatDuration(trip.durationSeconds || trip.duration_seconds || 0));
-            this.setEl('detailSocDelta', recovered ? '--' : ((trip.socStart || trip.soc_start || 0) - (trip.socEnd || trip.soc_end || 0)).toFixed(2) + '%');
+            this.setEl('detailSocDelta', (recovered && !detailHasRealSoc) ? '--' : ((trip.socStart || trip.soc_start || 0) - (trip.socEnd || trip.soc_end || 0)).toFixed(2) + '%');
             // Show energy kWh or efficiency
             const detailEnergy = trip.energyUsedKwh || trip.energy_used_kwh || 0;
             // Signed net energy: negative when the pack ended FULLER than it
@@ -2882,15 +2890,19 @@ const TRIPS = {
             const energyMetered = !!(trip.energyMetered || trip.energy_metered);
             // Metered trips get 3 decimals: a sub-km hop draws ~0.1 kWh, which
             // 2 decimals would round toward a misleading "0.00".
-            this.setEl('detailEfficiency', recovered ? '--'
+            const detailHasRealEnergy = displayEnergy !== 0
+                    || (trip.efficiencySocPerKm || trip.efficiency_soc_per_km || 0) !== 0;
+            this.setEl('detailEfficiency', (recovered && !detailHasRealEnergy) ? '--'
                 : (displayEnergy !== 0 ? (energyMetered ? displayEnergy.toFixed(3) : displayEnergy.toFixed(2)) + ' kWh'
                 : (energyMetered ? '0.000 kWh' : (trip.efficiencySocPerKm || trip.efficiency_soc_per_km || 0).toFixed(2))));
             // Average consumption: kWh/100km or %/100km — convert per-100 rate
             // when the user is on miles (kWh/100mi = kWh/100km / KM_TO_MI).
             const tripDist = trip.distanceKm || trip.distance_km || 0;
-            if (recovered) {
-                this.setEl('detailConsumption', '--');
-            } else if (tripDist > 0.1 && displayEnergy !== 0) {
+            // No blanket recovered check here — a checkpoint-enriched recovered
+            // trip has real displayEnergy/socDelta, and the branches below
+            // already fall through to '--' correctly when neither is present
+            // (the unenriched recovered case), same reasoning as the fields above.
+            if (tripDist > 0.1 && displayEnergy !== 0) {
                 const per100km = (displayEnergy / tripDist) * 100;
                 this.setEl('detailConsumption', BYD.units.per100Val(per100km).toFixed(2));
             } else if (tripDist > 0.1 && energyMetered) {
@@ -2911,7 +2923,10 @@ const TRIPS = {
             }
             // Distance-per-energy efficiency (km/kWh or mi/kWh). Measured-kWh
             // only — mirrors the period-summary tile.
-            if (!recovered && tripDist > 0.1 && detailEnergy > 0) {
+            // No recovered check — detailEnergy > 0 already only holds for real
+            // measured energy (checkpoint-enriched or normal), same reasoning
+            // as detailConsumption above.
+            if (tripDist > 0.1 && detailEnergy > 0) {
                 const kmPerKwh = tripDist / detailEnergy;
                 this.setEl('detailEfficiency2', BYD.units.effVal(kmPerKwh).toFixed(1));
             } else {
@@ -2920,8 +2935,8 @@ const TRIPS = {
             this.setEl('detailDistance', BYD.units.distVal(trip.distanceKm || trip.distance_km || 0).toFixed(2));
             this.setEl('detailAvgSpeed', BYD.units.speedVal(trip.avgSpeedKmh || trip.avg_speed_kmh || 0).toFixed(2));
             this.setEl('detailMaxSpeed', BYD.units.speedVal(trip.maxSpeedKmh || trip.max_speed_kmh || 0).toFixed(2));
-            this.setEl('detailSocStart', recovered ? '--' : (trip.socStart || trip.soc_start || 0).toFixed(2) + '%');
-            this.setEl('detailSocEnd', recovered ? '--' : (trip.socEnd || trip.soc_end || 0).toFixed(2) + '%');
+            this.setEl('detailSocStart', (recovered && !detailHasRealSoc) ? '--' : (trip.socStart || trip.soc_start || 0).toFixed(2) + '%');
+            this.setEl('detailSocEnd', (recovered && !detailHasRealSoc) ? '--' : (trip.socEnd || trip.soc_end || 0).toFixed(2) + '%');
 
             // Odometer tiles — absolute start/end readings, unit-aware. Only
             // shown when both are present (>0); recovered trips and HALs that
