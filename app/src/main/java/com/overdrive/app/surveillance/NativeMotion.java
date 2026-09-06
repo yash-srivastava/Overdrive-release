@@ -23,6 +23,9 @@ public class NativeMotion {
     
     static {
         try {
+            System.loadLibrary("fast_cam_client");
+        } catch (Throwable ignored) {}
+        try {
             System.loadLibrary("surveillance");
             libraryLoaded = true;
         } catch (UnsatisfiedLinkError e) {
@@ -43,6 +46,10 @@ public class NativeMotion {
         if (libraryLoaded) return true;
         
         try {
+            // Load dependent client library first if present
+            try {
+                System.load(nativeLibDir + "/libfast_cam_client.so");
+            } catch (Throwable ignored) {}
             // Try explicit path
             String libPath = nativeLibDir + "/libsurveillance.so";
             System.load(libPath);

@@ -4,6 +4,26 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
 
 ## [In corso / Unreleased]
 
+## [v51.2-b] - 2026-09-06
+
+- **Prevenzione Crash Fatale `media.hwcodec` (`QC2GrallocBuffer::getMetadata`) su Chiusura Registrazione Sentry (`SurveillanceEngineGpu.java`, `ThumbnailBuffer.java`)**:
+  - Risolto il crash fatale di sistema `media.hwcodec` (`SIGSEGV SEGV_ACCERR` in `qc2::QC2GrallocBuffer::getMetadata` durante `memcpy_s` da 763MB) scatenato da `MediaMetadataRetriever.getFrameAtTime()` sul file MP4 in fase di finalizzazione mentre `HardwareEventRecorderGpu` operava ancora sull'`inputSurface` codec.
+  - In `ThumbnailBuffer.java`, aggiornato `pickHero()` per selezionare prioritariamente `staticHero` (frame pulito non minaccia memorizzato in RAM) anziché restituire `null` quando non vi sono bounding box o minacce live (eventi generati da solo movimento della scena o sfondi statici).
+  - In `ThumbnailBuffer.java`, aggiornato `writeJpegImpl()` per omettere bounding box / etichette nel caso di slot `staticNonThreat`, generando istantaneamente la thumbnail hero direttamente dalla RAM in <5ms. Aggiunto `writeRawRgbJpeg()` per la compressione atomica memoria-su-JPEG.
+  - In `SurveillanceEngineGpu.java`, implementato doppio buffer circolare in memoria RAM (`latestFrameRgb` e `lastTriggerFrameRgb`). Alla chiusura della registrazione, `writeFallbackHeroFromMp4()` scrive direttamente dalla memoria RAM senza mai istanziare `MediaMetadataRetriever` su piattaforma DiLink 5.
+  - Disabilitato lo sweep orfano in background all'avvio (`sweepOrphanHeroThumbnails`) su DiLink 5, eliminando a monte l'uso di decodifica `MediaMetadataRetriever`.
+
+- **Risoluzione Loop Stallo AIS e Preemption su Cattura Hardware Telecamere (`fast_cam_capture/src/main.c`)**:
+  - Corretto il blocco di preemption a `total_frames == 0`: la guardia `if (total_frames > 0 && stalled_ns > 1500000000ULL)` impediva l'uscita con codice 42 qualora il server Qualcomm AIS fosse occupato o in errore 12 fin dal primo millisecondo di avvio. Ora esce regolarmente con codice 42 (yielding cooperativo) se lo stallo supera 2.5 secondi anche a zero fotogrammi acquisiti.
+  - Aumentato lo sleep cooperativo a 25ms (`usleep(25000)`) in assenza di frame, riducendo a zero il consumo di CPU durante i periodi di camera occupata o marcia indietro.
+  - Eliminata la doppia chiusura e deallocazione (`fclose(fp_grid)`, `free(grid_canvas)`, `fclose(fp_rec)`) che causava abort `SIGSEGV` / crash da double-free nel teardown del processo nativo.
+  - Ricompilato il binario nativo ARM64 con Android NDK r26 (LLVM Clang 17 hardened/stripped) e aggiornato in `app/src/main/assets/dilink5/fast_cam_capture` e `frame_grabber_light/fast_cam_capture/bin/fast_cam_capture`.
+
+- **Prevenzione Leak Transazioni e Crash SurfaceFlinger nel Deterrente a Schermo (`ScreenDeterrent.java`)**:
+  - In `onMotionDetected()`: introdotto early return istantaneo se `!isScreenDeterrentEnabled()` o `!hotCacheEnabled`, evitando il passaggio per il thread pool ed esecuzioni superflue quando il deterrente visivo è disattivato.
+  - In `releaseSurface()`: aggiunta l'invocazione esplicita via reflection di `Transaction.remove(sc)` e `Transaction.close()`, garantendo la deallocazione immediata e pulita dei layer nativi in SurfaceFlinger ed eliminando leak di transazioni nel compositor.
+  - In `applyTransaction()`: protetta la transazione con blocco `finally` che garantisce sempre la chiusura (`tx.close()`).
+
 ## [v51.2-a] - 2026-09-06
 
 - **Protezione Crash SurfaceFlinger & Adreno GPU (`DeterrentActivity.java`, `BsNativeLayer.java`)**:

@@ -782,31 +782,30 @@ public final class ThumbnailBuffer {
      */
     static Slot pickHero(List<Slot> snap, long windowStartMs, long windowEndMs) {
         Slot hero = null, heroAny = null;
+        Slot staticHero = null, staticHeroAny = null;
         long heroScore = -1L, heroAnyScore = -1L;
+        long staticScore = -1L, staticAnyScore = -1L;
         for (Slot s : snap) {
-            // ALL-STATIC POOL ⇒ no slot hero. Static actors are kept in the pool so
-            // they can be RANKED (a live actor of any class must beat them), but if
-            // the pool contains nothing but scenery, returning one would paint a
-            // severity-coloured box and a "Notice · vehicle · far" label over a
-            // parked car — the "user sees a bbox on a static car and assumes the
-            // system flagged a threat" complaint this file already warns about.
-            // Skipping them here leaves hero==null so the caller falls back to a
-            // plain MP4 keyframe: same pixels, no threat decoration. Preserves the
-            // pre-demotion user-visible behaviour for the all-static case while
-            // keeping the live-beats-static ranking for mixed pools.
-            if (s.staticNonThreat) continue;
             long sc = score(s.severity, s.confidence, s.proximity, s.classGroup,
                     s.staticNonThreat);
-            if (sc > heroAnyScore) { heroAnyScore = sc; heroAny = s; }
             boolean inWindow = windowStartMs <= 0
                     || (s.peakWallMs >= windowStartMs
                         && (windowEndMs <= 0 || s.peakWallMs <= windowEndMs));
+            if (s.staticNonThreat) {
+                if (sc > staticAnyScore) { staticAnyScore = sc; staticHeroAny = s; }
+                if (inWindow && sc > staticScore) { staticScore = sc; staticHero = s; }
+                continue;
+            }
+            if (sc > heroAnyScore) { heroAnyScore = sc; heroAny = s; }
             if (inWindow && sc > heroScore) { heroScore = sc; hero = s; }
         }
-        // Gate active + nothing in-window → null (let the caller's MP4-keyframe
-        // fallback produce a real hero). Gate disabled → legacy best-slot pick.
-        if (hero == null && windowStartMs > 0) return null;
-        return hero != null ? hero : heroAny;
+        if (hero != null) return hero;
+        if (staticHero != null) return staticHero;
+        if (windowStartMs <= 0) {
+            return heroAny != null ? heroAny : staticHeroAny;
+        }
+        // If window gate is active and nothing matched in window, fall back to any static hero before returning null
+        return staticHeroAny != null ? staticHeroAny : heroAny;
     }
 
     /**
@@ -1010,36 +1009,38 @@ public final class ThumbnailBuffer {
                 bmp = null;  // ownership transferred to `out`
             }
 
-            // Draw bbox + label
-            Canvas canvas = new Canvas(out);
-            Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
-            stroke.setStyle(Paint.Style.STROKE);
-            stroke.setStrokeWidth(4f);
-            stroke.setColor(severityColor(s.severity));
+            // Draw bbox + label ONLY for live threats (skip for staticNonThreat scenery)
+            if (!s.staticNonThreat) {
+                Canvas canvas = new Canvas(out);
+                Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+                stroke.setStyle(Paint.Style.STROKE);
+                stroke.setStrokeWidth(4f);
+                stroke.setColor(severityColor(s.severity));
 
-            float scaleX = (float) OUT_SIDE / s.srcW;
-            float scaleY = (float) OUT_SIDE / s.srcH;
-            Rect r = new Rect(
-                    Math.round(s.bboxX * scaleX),
-                    Math.round(s.bboxY * scaleY),
-                    Math.round((s.bboxX + s.bboxW) * scaleX),
-                    Math.round((s.bboxY + s.bboxH) * scaleY));
-            canvas.drawRect(r, stroke);
+                float scaleX = (float) OUT_SIDE / s.srcW;
+                float scaleY = (float) OUT_SIDE / s.srcH;
+                Rect r = new Rect(
+                        Math.round(s.bboxX * scaleX),
+                        Math.round(s.bboxY * scaleY),
+                        Math.round((s.bboxX + s.bboxW) * scaleX),
+                        Math.round((s.bboxY + s.bboxH) * scaleY));
+                canvas.drawRect(r, stroke);
 
-            // Label uses no explicit typeface, so on a BSP with a null default
-            // typeface (DiLink 5) drawText would abort the daemon natively. Set
-            // a disk-loaded face and skip the label if the font system is
-            // unusable — the bbox rectangle above is the essential annotation.
-            Paint label = new Paint(Paint.ANTI_ALIAS_FLAG);
-            label.setColor(Color.WHITE);
-            label.setTextSize(28f);
-            label.setShadowLayer(3f, 0f, 0f, Color.BLACK);
-            DaemonFonts.apply(label, Typeface.NORMAL);
-            if (DaemonFonts.canDrawText()) {
-                String text = Actor.severityLabel(s.severity) + " · "
-                        + Actor.groupLabel(s.classGroup) + " · "
-                        + Actor.proximityLabel(s.proximity);
-                canvas.drawText(text, Math.max(8, r.left), Math.max(32, r.top - 8), label);
+                // Label uses no explicit typeface, so on a BSP with a null default
+                // typeface (DiLink 5) drawText would abort the daemon natively. Set
+                // a disk-loaded face and skip the label if the font system is
+                // unusable — the bbox rectangle above is the essential annotation.
+                Paint label = new Paint(Paint.ANTI_ALIAS_FLAG);
+                label.setColor(Color.WHITE);
+                label.setTextSize(28f);
+                label.setShadowLayer(3f, 0f, 0f, Color.BLACK);
+                DaemonFonts.apply(label, Typeface.NORMAL);
+                if (DaemonFonts.canDrawText()) {
+                    String text = Actor.severityLabel(s.severity) + " · "
+                            + Actor.groupLabel(s.classGroup) + " · "
+                            + Actor.proximityLabel(s.proximity);
+                    canvas.drawText(text, Math.max(8, r.left), Math.max(32, r.top - 8), label);
+                }
             }
 
             // Atomic write: compress to <name>.tmp, fsync, rename to <name>.
@@ -1075,6 +1076,47 @@ public final class ThumbnailBuffer {
             if (bmp != null && bmp != out) bmp.recycle();
         }
         return argbScratchLocal;
+    }
+
+    public static void writeRawRgbJpeg(byte[] rgb, int srcW, int srcH, File outFile) throws Exception {
+        if (rgb == null || rgb.length < srcW * srcH * 3 || outFile == null) return;
+        Bitmap bmp = null;
+        Bitmap out = null;
+        try {
+            bmp = Bitmap.createBitmap(srcW, srcH, Bitmap.Config.ARGB_8888);
+            int[] pixels = new int[srcW * srcH];
+            for (int i = 0, p = 0; i < pixels.length && (i * 3 + 2) < rgb.length; i++, p++) {
+                int r = rgb[i * 3] & 0xFF;
+                int g = rgb[i * 3 + 1] & 0xFF;
+                int b = rgb[i * 3 + 2] & 0xFF;
+                pixels[p] = 0xFF000000 | (r << 16) | (g << 8) | b;
+            }
+            bmp.setPixels(pixels, 0, srcW, 0, 0, srcW, srcH);
+            if (srcW != OUT_SIDE || srcH != OUT_SIDE) {
+                out = Bitmap.createScaledBitmap(bmp, OUT_SIDE, OUT_SIDE, true);
+                if (out != bmp) bmp.recycle();
+                bmp = null;
+            } else {
+                out = bmp;
+                bmp = null;
+            }
+            File tmpFile = new File(outFile.getAbsolutePath() + ".tmp");
+            try (FileOutputStream fos = new FileOutputStream(tmpFile)) {
+                out.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, fos);
+                try { fos.getFD().sync(); } catch (Throwable ignored) {}
+            }
+            try { tmpFile.setReadable(true, false); } catch (Throwable ignored) {}
+            if (!tmpFile.renameTo(outFile)) {
+                outFile.delete();
+                if (!tmpFile.renameTo(outFile)) {
+                    tmpFile.delete();
+                    throw new java.io.IOException("Failed to atomically rename " + tmpFile + " → " + outFile);
+                }
+            }
+        } finally {
+            if (bmp != null && !bmp.isRecycled() && bmp != out) bmp.recycle();
+            if (out != null && !out.isRecycled()) out.recycle();
+        }
     }
 
     private static int severityColor(Actor.Severity sev) {

@@ -1509,6 +1509,10 @@ public class SurveillanceEngineGpu {
     private int filterLogCount = 0;
     private boolean filterDebugEnabled = false;
     
+    // RAM frame cache for zero-overhead fallback hero generation (bypasses MediaMetadataRetriever)
+    private volatile byte[] latestFrameRgb = null;
+    private volatile byte[] lastTriggerFrameRgb = null;
+    
     // SOTA: Event timeline collector for JSON sidecar files
     private final EventTimelineCollector timelineCollector = new EventTimelineCollector();
     
@@ -1882,7 +1886,7 @@ public class SurveillanceEngineGpu {
         // Async — must not block init().
         new Thread(() -> {
             try {
-                if (eventDir != null && eventDir.isDirectory()) {
+                if (!com.overdrive.app.byd.DiLink5Platform.isActive() && eventDir != null && eventDir.isDirectory()) {
                     sweepOrphanHeroThumbnails(eventDir);
                 }
             } catch (Throwable t) {
@@ -2356,6 +2360,16 @@ public class SurveillanceEngineGpu {
         currentFrame.clear();
         currentFrame.put(smallRgbFrame);
         currentFrame.flip();
+        
+        // Cache latest frame in RAM for zero-latency fallback hero generation
+        if (smallRgbFrame != null && smallRgbFrame.length == FRAME_SIZE) {
+            byte[] cached = latestFrameRgb;
+            if (cached == null || cached.length != smallRgbFrame.length) {
+                cached = new byte[smallRgbFrame.length];
+                latestFrameRgb = cached;
+            }
+            System.arraycopy(smallRgbFrame, 0, cached, 0, smallRgbFrame.length);
+        }
         
         // DIAGNOSTIC: Every 100 frames, check frame validity and inter-frame diff.
         // Only in debug builds — this is pure development tooling.
@@ -8550,6 +8564,10 @@ public class SurveillanceEngineGpu {
      * file (MediaMetadataRetriever can hang on a malformed mp4).
      */
     private void sweepOrphanHeroThumbnails(File dir) {
+        if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+            logger.debug("Orphan hero sweep skipped on DiLink 5 (avoid MediaMetadataRetriever/Codec2 instability)");
+            return;
+        }
         File[] mp4s = dir.listFiles((d, name) -> name.endsWith(".mp4"));
         if (mp4s == null || mp4s.length == 0) return;
         long cutoff = System.currentTimeMillis() - 30_000L;
@@ -8665,6 +8683,30 @@ public class SurveillanceEngineGpu {
         if (mp4File == null || outFile == null) return;
         if (outFile.exists()) return;          // ThumbnailBuffer already wrote one
         if (!mp4File.exists() || mp4File.length() == 0) return;
+
+        // SAFE PATH 1: Write hero directly from captured trigger/motion RGB frame in RAM
+        byte[] rawFrame = lastTriggerFrameRgb;
+        if (rawFrame == null) rawFrame = latestFrameRgb;
+        if (rawFrame != null && rawFrame.length >= THUMBNAIL_WIDTH * THUMBNAIL_HEIGHT * 3) {
+            try {
+                ThumbnailBuffer.writeRawRgbJpeg(rawFrame, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, outFile);
+                logger.info("Fallback hero written directly from RAM frame cache: " + outFile.getName());
+                try {
+                    com.overdrive.app.storage.StorageManager.getInstance().markStorageDirty();
+                } catch (Throwable ignored) {}
+                return;
+            } catch (Throwable t) {
+                logger.warn("RAM fallback hero write failed: " + t.getMessage());
+            }
+        }
+
+        // On DiLink 5 / Qualcomm SA8155P, MediaMetadataRetriever spins up Codec2 decoder
+        // which collides with active MediaCodec encoder and crashes media.hwcodec (SIGSEGV in QC2GrallocBuffer).
+        // Skip MediaMetadataRetriever on DiLink 5 to protect hardware codec stability.
+        if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+            logger.warn("Skipping MediaMetadataRetriever on DiLink 5 to protect media.hwcodec HAL: " + mp4File.getName());
+            return;
+        }
 
         android.media.MediaMetadataRetriever mmr = null;
         try {
@@ -10072,6 +10114,9 @@ public class SurveillanceEngineGpu {
         // closes the start side. recordingGeneration is only read by the lambda
         // guard, so an extra bump is safe.
         long startedGeneration = recordingGeneration.incrementAndGet();
+        // Fresh event → snapshot trigger frame for zero-latency fallback hero
+        byte[] frameSnap = latestFrameRgb;
+        lastTriggerFrameRgb = (frameSnap != null) ? frameSnap.clone() : null;
         // Fresh event → reset the latched peak severity. Each lastActors write
         // during this recording advances it; both Telegram stages read it.
         eventPeakSeverity = null;

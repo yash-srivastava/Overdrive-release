@@ -240,6 +240,14 @@ public final class ScreenDeterrent {
         return hotCacheEnabled;
     }
 
+    public static boolean isScreenDeterrentEnabled() {
+        try {
+            return UnifiedConfigManager.getSurveillance().optBoolean("screenDeterrentEnabled", false);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     /** Called by SurveillanceIpcServer when the focused Activity opens its tokened socket. */
     public static long openInputCapture(String token) {
         ScreenDeterrent current = instance;
@@ -387,7 +395,7 @@ public final class ScreenDeterrent {
      * The hot cache is kept fresh by cacheScheduler on a separate thread.
      */
     public void onMotionDetected() {
-        if (!hotCacheEnabled) return;
+        if (!hotCacheEnabled || !isScreenDeterrentEnabled()) return;
 
         // SAFETY (deterrent-while-driving): the deterrent renders a full-screen
         // SurfaceControl layer at z=Integer.MAX_VALUE that occludes the ENTIRE
@@ -1662,13 +1670,15 @@ public final class ScreenDeterrent {
     }
 
     private static boolean applyTransaction(Object surface, int z, boolean show) {
+        Object tx = null;
+        Class<?> txCls = null;
         try {
             resolveSurfaceControlReflection();
             Class<?> sc = surfaceControlReflectionResolved
                     ? surfaceControlClass
                     : Class.forName("android.view.SurfaceControl");
-            Class<?> txCls = Class.forName("android.view.SurfaceControl$Transaction");
-            Object tx = txCls.getDeclaredConstructor().newInstance();
+            txCls = Class.forName("android.view.SurfaceControl$Transaction");
+            tx = txCls.getDeclaredConstructor().newInstance();
             txCls.getMethod("setLayer", sc, int.class).invoke(tx, surface, z);
             try { txCls.getMethod("setAlpha", sc, float.class).invoke(tx, surface, 1.0f); } catch (Throwable ignored) {}
             if (show) txCls.getMethod("show", sc).invoke(tx, surface);
@@ -1677,6 +1687,10 @@ public final class ScreenDeterrent {
         } catch (Throwable t) {
             logger.warn("SurfaceControl.Transaction failed: " + t.getMessage());
             return false;
+        } finally {
+            if (tx != null && txCls != null) {
+                try { txCls.getMethod("close").invoke(tx); } catch (Throwable ignored) {}
+            }
         }
     }
 
@@ -1690,7 +1704,9 @@ public final class ScreenDeterrent {
             Object tx = txCls.getDeclaredConstructor().newInstance();
             try { txCls.getMethod("hide", sc).invoke(tx, surface); } catch (Throwable ignored) {}
             try { txCls.getMethod("reparent", sc, sc).invoke(tx, surface, null); } catch (Throwable ignored) {}
+            try { txCls.getMethod("remove", sc).invoke(tx, surface); } catch (Throwable ignored) {}
             txCls.getMethod("apply").invoke(tx);
+            try { txCls.getMethod("close").invoke(tx); } catch (Throwable ignored) {}
             try { sc.getMethod("release").invoke(surface); } catch (Throwable ignored) {}
         } catch (Throwable t) {
             logger.debug("Surface release failed: " + t.getMessage());
