@@ -4,6 +4,21 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
 
 ## [In corso / Unreleased]
 
+## [v51.1] - 2026-09-06
+
+- **Integrazione Super-Branch Chris Hemmings (`chris-hemmings/super-branch-develop`)**:
+  - **Telemetria Avanzata e Nuovi Sensori**:
+    - Aggiunta lettura e tracciamento in tempo reale di posizione pedale acceleratore (`throttlePedal`), pedale freno (`brakePedal`), stato frecce di direzione (`turnSignalLeft`, `turnSignalRight`), stato connettore ricarica inserito (`gunConnected`) e contachilometri totale (`odometerKm`).
+    - Introdotto filtro anti-flicker con smoothing esponenziale (`lowPass()`) e caching intelligente delle letture CAN per eliminare fluttuazioni repentine e sfarfallii sulla UI web.
+  - **Sequenza di Avvio Demoni e Resilienza Boot (`BootDaemonSequenceReceiver`)**:
+    - Introdotto un ricevitore sequenziale di boot per coordinare l'avvio ordinato dei demoni di background (`ServiceLauncher`, `CameraDaemon`, `DataCollectorService`), prevenendo condizioni di gara (race conditions) con `car_service` all'avvio dell'infotainment.
+  - **Safety Net Globale Eccezioni e Checkpointing Trip**:
+    - Integrato gestore globale delle eccezioni non gestite (UncaughtExceptionHandler) per evitare crash a cascata dei servizi di telemetria.
+    - Checkpointing automatico continuo dei dati di viaggio (trip stats, consumi kWh/100km, rigenerazione) con ripristino sicuro post-riavvio.
+  - **Preservazione Fix Critici Hardware DiLink 5.0 (BYD Sealion 7 / Shark)**:
+    - Verificata e mantenuta intatta la logica di power-gate clima in standby (`VehicleControlApiHandler.java`) che azzera le letture fantasma AC a quadro spento.
+    - Mantenuta l'assegnazione dinamica del `cameraMapping` in `ModelsApiHandler.java` (`"0,1,2,3"` per Sealion 7, `"8,9,5,4"` per Shark).
+
 - **Fix Collasso Accordion Sidebar e Rimozione Spazio Vuoto Residuo (`app-shell.css`)**:
   - **Identificazione Causa Radice**: La voce `.nav-link` eredita da `styles.css` la regola `min-height: 48px;`. In `app-shell.css`, la classe `.sidebar-nav [hidden]` applicava `display: flex !important; max-height: 0 !important;` per abilitare la transizione CSS. In base alle specifiche W3C/CSS, `min-height` ha la precedenza assoluta su `max-height`: gli elementi nascosti mantenevano quindi un ingombro fisico di 48px ciascuno, sommato al `gap: 4px` del container flexbox, creando un'area vuota trasparente ("buco") di oltre 240px quando si collassava un gruppo come "Panoramica".
   - **Soluzione Applicata**: Aggiornata la regola `.sidebar-nav [hidden]` applicando `display: none !important;` e azzerando esplicitamente `min-height: 0 !important;` e `height: 0 !important;`. Gli elementi chiusi escono completamente dal flow di layout senza lasciare buchi o spazi fantasma.
