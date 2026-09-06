@@ -8,6 +8,7 @@ import com.overdrive.app.launcher.AdbShellExecutor
 import com.overdrive.app.launcher.ZrokLauncher
 import com.overdrive.app.launcher.TailscaleLauncher
 import com.overdrive.app.logging.LogManager
+import com.overdrive.app.receiver.BootDaemonSequenceReceiver
 import com.overdrive.app.telegram.config.UnifiedTelegramConfig
 import com.overdrive.app.ui.model.DaemonType
 import com.overdrive.app.ui.util.PreferencesManager
@@ -318,8 +319,8 @@ class DaemonStartupManager(
 
     private fun initializeOnBoot() {
         log.info(TAG, "=== Initializing daemon startup on boot ===")
-        log.info(TAG, "Waiting 45 seconds before starting daemons (system stabilization)...")
-        
+        log.info(TAG, "Scheduling daemon startup via AlarmManager (system stabilization: 45s)...")
+
         // Reset only the process-local cache; durable manual stops survive boot.
         userStoppedDaemons.clear()
 
@@ -329,12 +330,15 @@ class DaemonStartupManager(
         // Keep manual-stop sentinels; see initializeOnAppLaunch.
         clearStaleSentinels()
 
-        // Wait 45 seconds for system to fully stabilize before starting any daemons
-        handler.postDelayed({ startCoreDaemonsViaAdb() }, 45000)
-        handler.postDelayed({ startOptionalDaemonsViaAdb() }, 60000)
-
-        // Start periodic health check after initial daemons have had time to start
-        handler.postDelayed({ startDaemonHealthCheck() }, 90000)
+        // Stagger via BootDaemonSequenceReceiver/AlarmManager rather than
+        // Handler.postDelayed. A plain postDelayed callback is tied to this
+        // process's main Looper — if the process dies or is killed anywhere in
+        // the 45-90s window (a crash, or the system_server instability this
+        // device is known to hit right after boot), every pending callback is
+        // silently lost with it: no error, no retry, daemons just never start.
+        // AlarmManager alarms survive that — the OS resurrects the process to
+        // deliver them, same guarantee ProcessRevivalReceiver already relies on.
+        BootDaemonSequenceReceiver.schedule(context.applicationContext)
     }
 
 
@@ -380,7 +384,7 @@ class DaemonStartupManager(
         }, 10000)
     }
 
-    private fun startCoreDaemonsViaAdb() {
+    internal fun startCoreDaemonsViaAdb() {
         log.info(TAG, "Starting core daemons via ADB (Camera first, then Sentry daemons)...")
 
         // Kill-then-launch, not check-then-skip: a daemon process surviving
@@ -631,7 +635,7 @@ class DaemonStartupManager(
         }
     }
 
-    private fun startOptionalDaemonsViaAdb() {
+    internal fun startOptionalDaemonsViaAdb() {
         log.info(TAG, "Starting optional daemons via ADB...")
         try {
             // Singbox is gated by its own user toggle AND the disable sentinel
@@ -877,7 +881,7 @@ class DaemonStartupManager(
      * Core daemons are always restarted. Optional daemons only if user had them enabled.
      * Daemons intentionally stopped by the user are skipped.
      */
-    private fun startDaemonHealthCheck() {
+    internal fun startDaemonHealthCheck() {
         if (!healthCheckRunning.compareAndSet(false, true)) return
         log.info(TAG, "Daemon health check started (interval=${HEALTH_CHECK_INTERVAL_MS / 1000}s)")
         scheduleNextHealthCheck()
