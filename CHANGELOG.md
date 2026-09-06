@@ -4,6 +4,10 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
 
 ## [In corso / Unreleased]
 
+- **Risoluzione Mancata Visualizzazione Overlay per Blocco AppOps `SYSTEM_ALERT_WINDOW` (`PermissionGranter.java`, `ServiceLauncher.kt`, `safe_install_adb.sh`)**:
+  - **Identificazione Causa Radice**: Su Android Automotive / DiLink 5.0, il permesso di overlay `SYSTEM_ALERT_WINDOW` richiede sia l'assegnazione da parte del PackageManager sia la specifica modalità `allow` nel sottosistema AppOps. Anche quando `dumpsys package` riporta `granted=true` (sotto `install permissions`), la modalità AppOps effettiva rimaneva bloccata su `default`, impedendo a WindowManager di renderizzare gli overlay a schermo (`TYPE_APPLICATION_OVERLAY`) e inducendo `PermissionGranter` a saltare il permesso perché già presente in `alreadyGranted`.
+  - **Assegnazione Esplicita AppOps**: Introdotta l'esecuzione esplicita di `appops set <pkg> SYSTEM_ALERT_WINDOW allow` come fase indipendente e dedicata all'interno di `PermissionGranter.grantAllPermissions()`, in `ServiceLauncher.kt` e nello script di deploy `tools/safe_install_adb.sh`, garantendo che l'overlay sia attivo e visibile senza richiedere interventi manuali da shell.
+
 ## [v51.0] - 2026-09-06
 
 - **Power-Gate Telemetria Climatizzatore a Veicolo Spento / Standby (`VehicleControlApiHandler.java`)**:

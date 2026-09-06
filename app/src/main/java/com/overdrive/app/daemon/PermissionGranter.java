@@ -253,6 +253,18 @@ public final class PermissionGranter {
                     + " grant-list permissions already held — skipping those");
             }
 
+            // SOTA / OEM Fix: SYSTEM_ALERT_WINDOW requires both the standard permission grant AND
+            // the corresponding appop mode. On Android/OEM builds, pm grant alone does not
+            // reliably flip the appop mode from default to allow, and dumpsys package reports
+            // SYSTEM_ALERT_WINDOW as granted under install permissions (causing alreadyGranted
+            // to skip issuing any command). Enforce the appop mode explicitly as its own step.
+            int appOpResult = execAppOp(packageName, "SYSTEM_ALERT_WINDOW", "allow");
+            if (appOpResult == 0) {
+                log("appops: SYSTEM_ALERT_WINDOW set to allow");
+            } else {
+                log("WARN: failed to set appops SYSTEM_ALERT_WINDOW (code=" + appOpResult + ")");
+            }
+
             for (String permission : ALL_PERMISSIONS) {
                 // Check if daemon is shutting down — stop spawning new processes
                 if (Thread.currentThread().isInterrupted()) {
@@ -351,6 +363,23 @@ public final class PermissionGranter {
             }
             
             return -1;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    /**
+     * Explicitly set an appop mode for the target package.
+     * Handles permissions like SYSTEM_ALERT_WINDOW where the Android framework
+     * requires both the permission grant and the appop mode to be 'allow'.
+     *
+     * @return 0 = success, -1 = failed
+     */
+    static int execAppOp(String packageName, String op, String mode) {
+        try {
+            Process process = Runtime.getRuntime().exec(
+                new String[]{"sh", "-c", "appops set " + packageName + " " + op + " " + mode + " 2>&1"});
+            return process.waitFor();
         } catch (Exception e) {
             return -1;
         }
@@ -472,8 +501,10 @@ public final class PermissionGranter {
         for (String perm : ALL_PERMISSIONS) {
             sb.append("adb shell pm grant ").append(packageName).append(" ").append(perm).append("\n");
         }
+        sb.append("adb shell appops set ").append(packageName).append(" SYSTEM_ALERT_WINDOW allow\n");
         sb.append("\n# Verify:\n");
         sb.append("adb shell dumpsys package ").append(packageName).append(" | grep granted=true\n");
+        sb.append("adb shell appops get ").append(packageName).append(" SYSTEM_ALERT_WINDOW\n");
         return sb.toString();
     }
 
