@@ -4,6 +4,20 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
 
 ## [In corso / Unreleased]
 
+## [v51.2-a] - 2026-09-06
+
+- **Protezione Crash SurfaceFlinger & Adreno GPU (`DeterrentActivity.java`, `BsNativeLayer.java`)**:
+  - Aggiunto `WindowManager.LayoutParams.FLAG_SECURE` in `DeterrentActivity.java`: disabilita nativamente la cattura degli snapshot di transizione da parte di `TaskSnapshotController` di Android 11. Questo sopprime alla radice le chiamate a `SurfaceFlinger::captureScreenCommon` alla chiusura dell'attività, eliminando il crash `SIGSEGV (SEGV_ACCERR)` in `validate_resource_memory_layout_metadata` nel driver Qualcomm Adreno (`libadreno_utils.so`).
+  - Corretta la sequenza di rilascio in `BsNativeLayer.java`: invocazione di `releaseSurfaceControl()` prima di `surface.release()`, prevenendo che SurfaceFlinger tenti di comporre un layer orfano mentre l'endpoint BufferQueue lato client è già stato distrutto.
+  - Aggiunta la rimozione esplicita `Transaction.remove(sc)` via reflection in `releaseSurfaceControl()`: assicura che il layer nativo venga completamente rimosso dall'albero di composizione di SurfaceFlinger.
+
+- **Risoluzione Freeze Sentry 75s & Watchdog AI Lane (`SurveillanceEngineGpu.java`, `AiLaneWorker.java`)**:
+  - Implementato Watchdog Anti-Stall in `SurveillanceEngineGpu.java`: se la sequenza di movimento rimane soppressa senza conferme per più di 10 secondi oltre la durata minima richiesta (`motionDuration > requiredDuration + 10000L`), il timer di sequenza viene resettato (`firstMotionTime = 0`), consentendo alla pipeline di movimento e all'early-AI queueing di riarmarsi immediatamente anziché rimanere bloccati in un loop infinito di attesa ("AI gate holding" a 75s+).
+  - Estesa la finestra di recency temporale per presenza stazionaria da 30s a 60s (`recentPersonPresence`): garantisce la continuità della sorveglianza anche in presenza di movimenti lenti o pause prolungate del soggetto vicino all'auto.
+  - Ridotto il cooldown del deterrente per l'override Close-Zone da 15s a 5s (`(now - deterrentFiredTime) >= 5000L`): permette all'override di intervenire non appena terminata la presentazione visiva del deterrente.
+  - Ridotto il watchdog di blocco `AI_LANE_STUCK_MS` da 60s a 5s per un rapido recupero forzato da eventuali stalli di inferenza.
+  - Aggiunto watchdog temporale su `busy` in `AiLaneWorker.java`: se lo stato occupato persiste per più di 3 secondi, il flag viene resettato con warning, impedendo che `AiLaneGl` salti indefinitamente il readback dei pixel.
+
 ## [v51.2] - 2026-09-06
 
 - **Risoluzione Freeze Riarmo Sentry (~48-60s) e Gestione Presenza Stazionaria (`SurveillanceEngineGpu.java`)**:

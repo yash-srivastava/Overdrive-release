@@ -268,15 +268,20 @@ public final class BsNativeLayer {
         shown = true;
     }
 
-    /** Hide, reparent-null, and release the layer + Surface. */
+    /** Hide, remove from hierarchy, reparent-null, and release the layer + Surface. */
     public synchronized void release() {
-        if (surface != null) {
-            try { surface.release(); } catch (Throwable ignored) {}
-            surface = null;
-        }
+        // Critical: release and remove the SurfaceControl from SurfaceFlinger's layer
+        // hierarchy BEFORE destroying the client Surface / BufferQueue. Destroying the
+        // buffer producer while SurfaceFlinger's layer tree still holds the GraphicBuffer
+        // leads to SIGSEGV in Qualcomm's Adreno driver (validate_resource_memory_layout_metadata)
+        // during concurrent snapshot composition (e.g. captureScreenCommon).
         if (surfaceControl != null) {
             releaseSurfaceControl(surfaceControl);
             surfaceControl = null;
+        }
+        if (surface != null) {
+            try { surface.release(); } catch (Throwable ignored) {}
+            surface = null;
         }
         shown = false;
     }
@@ -907,6 +912,9 @@ public final class BsNativeLayer {
             Object tx = txCls.getDeclaredConstructor().newInstance();
             try { txCls.getMethod("hide", scCls).invoke(tx, sc); } catch (Throwable ignored) {}
             try { txCls.getMethod("reparent", scCls, scCls).invoke(tx, sc, null); } catch (Throwable ignored) {}
+            // Explicitly remove from SurfaceFlinger's layer hierarchy so snapshot compositors
+            // (TaskSnapshotController/captureScreenCommon) do not attempt to draw an orphaned layer.
+            try { txCls.getMethod("remove", scCls).invoke(tx, sc); } catch (Throwable ignored) {}
             txCls.getMethod("apply").invoke(tx);
             try { scCls.getMethod("release").invoke(sc); } catch (Throwable ignored) {}
         } catch (Throwable t) {

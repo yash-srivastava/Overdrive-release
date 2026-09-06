@@ -889,7 +889,7 @@ public class SurveillanceEngineGpu {
      * <p>60 s is still far below the ~12 min blind window the leak itself causes,
      * so the backstop retains its value.
      */
-    private static final long AI_LANE_STUCK_MS = 60_000;
+    private static final long AI_LANE_STUCK_MS = 5_000;
 
     // --- Per-stage detection counters (diagnostics only; never gate anything) ---
     // A user report of "it missed an event" is currently unfalsifiable: the only
@@ -4164,7 +4164,7 @@ public class SurveillanceEngineGpu {
                             && peakCloseZoneDuringSequence
                             && !brightnessEventCloseZoneScope
                             && !cachedIncoherentLoiter
-                            && (!deterrentActive || (now - deterrentFiredTime) >= 15000L)) {
+                            && (!deterrentActive || (now - deterrentFiredTime) >= 5000L)) {
                         int probeQ = pipelineV2.getHighestThreatQuadrant();
                         // Zone gate that does NOT require a live tracker lock. The
                         // target FN is DEFINED by the absence of a YOLO person class
@@ -4302,10 +4302,10 @@ public class SurveillanceEngineGpu {
 
                     // With AI available, a current-sequence person or new/moved non-baseline
                     // object authorizes recording. Also allow recording if:
-                    // 1) A confirmed person was seen recently (stationary-subject recency window of 30s),
+                    // 1) A confirmed person was seen recently (stationary-subject recency window of 60s),
                     //    preventing MOG2 background absorption or brief detection stalls from freezing re-arming.
                     // 2) The close-zone proximity override or motion-salience override cleared shouldSuppress above.
-                    boolean recentPersonPresence = (nowElapsed - lastPersonConfirmationElapsedMs) < 30000L
+                    boolean recentPersonPresence = (nowElapsed - lastPersonConfirmationElapsedMs) < 60000L
                             && lastPersonConfirmationElapsedMs > 0;
                     boolean overrideClearedSuppression = !shouldSuppress;
 
@@ -4324,8 +4324,21 @@ public class SurveillanceEngineGpu {
                                 brightnessEventAnyQuadrant ? "yes" : "no",
                                 brightnessEventCloseZoneScope ? "yes" : "no"));
                         }
-                        // Don't reset firstMotionTime — let the timer keep running.
-                        // When YOLO confirms a valid object, the trigger fires immediately.
+                        // ANTI-STALL WATCHDOG: When YOLO confirms, the trigger fires immediately.
+                        // However, if the sequence stays unconfirmed for >10s past requiredDuration
+                        // (e.g. subject absorbed by MOG2 background, or stationary loiter with no
+                        // detections), we must NOT allow motionDuration to run indefinitely (30s..75s+).
+                        // Resetting the sequence timer forces the motion pipeline, threat latches,
+                        // and early-AI queueing to cleanly re-arm on the next motion frame.
+                        if (motionDuration > (requiredDuration + 10000L)) {
+                            logger.info(String.format(
+                                "AI gate unstick: held unconfirmed for %.1fs (>10s past required) — resetting sequence to re-arm",
+                                motionDuration / 1000.0));
+                            firstMotionTime = 0;
+                            firstMotionElapsedMs = 0;
+                            peakThreatDuringSequence = 0;
+                            peakCloseZoneDuringSequence = false;
+                        }
                     }
                     // SOTA: Event stitching — if new motion appears shortly after the last
                     // recording stopped, start a new recording immediately. The previous

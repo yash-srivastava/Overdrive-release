@@ -130,12 +130,18 @@ public class DeterrentActivity extends Activity {
         deterrentStartedAtElapsedMs = createdAtElapsedMs;
         inputCaptureToken = inputToken(getIntent());
 
+        // FLAG_SECURE: tells Android's TaskSnapshotController to skip transition
+        // snapshots on activity finish. In Android 11, transition snapshots invoke
+        // SurfaceFlinger::captureScreenCommon -> eglCreateImageKHR -> Adreno driver,
+        // which segfaults in validate_resource_memory_layout_metadata if an ad-hoc
+        // deterrent SurfaceControl was just de-allocated.
         getWindow().addFlags(
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
                 | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
                 | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
                 | WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
                 | WindowManager.LayoutParams.FLAG_FULLSCREEN
+                | WindowManager.LayoutParams.FLAG_SECURE
         );
         applyImmersive();
 
