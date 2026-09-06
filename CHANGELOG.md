@@ -4,6 +4,14 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
 
 ## [In corso / Unreleased]
 
+- **Fix Collasso Accordion Sidebar e Rimozione Spazio Vuoto Residuo (`app-shell.css`)**:
+  - **Identificazione Causa Radice**: La voce `.nav-link` eredita da `styles.css` la regola `min-height: 48px;`. In `app-shell.css`, la classe `.sidebar-nav [hidden]` applicava `display: flex !important; max-height: 0 !important;` per abilitare la transizione CSS. In base alle specifiche W3C/CSS, `min-height` ha la precedenza assoluta su `max-height`: gli elementi nascosti mantenevano quindi un ingombro fisico di 48px ciascuno, sommato al `gap: 4px` del container flexbox, creando un'area vuota trasparente ("buco") di oltre 240px quando si collassava un gruppo come "Panoramica".
+  - **Soluzione Applicata**: Aggiornata la regola `.sidebar-nav [hidden]` applicando `display: none !important;` e azzerando esplicitamente `min-height: 0 !important;` e `height: 0 !important;`. Gli elementi chiusi escono completamente dal flow di layout senza lasciare buchi o spazi fantasma.
+
+- **Aggiornamento Sprite Cache Miniatura 3D Auto (`ev-card-sprite-cache.js`, `sw.js`)**:
+  - Eseguito il bump a `SPRITE_VERSION = 5` e `CACHE_VERSION = 'overdrive-3d-v4'` per invalidare automaticamente qualsiasi snapshot di fallback memorizzato in precedenza nella cache IndexedDB delle PWA client.
+  - Corretta la ricerca del prefisso chiave in `invalidateModel()` per supportare sia chiavi con prefisso di versione (`v5|<modelId>|`) che generiche.
+
 - **Risoluzione Mancata Visualizzazione Overlay per Blocco AppOps `SYSTEM_ALERT_WINDOW` (`PermissionGranter.java`, `ServiceLauncher.kt`, `safe_install_adb.sh`)**:
   - **Identificazione Causa Radice**: Su Android Automotive / DiLink 5.0, il permesso di overlay `SYSTEM_ALERT_WINDOW` richiede sia l'assegnazione da parte del PackageManager sia la specifica modalità `allow` nel sottosistema AppOps. Anche quando `dumpsys package` riporta `granted=true` (sotto `install permissions`), la modalità AppOps effettiva rimaneva bloccata su `default`, impedendo a WindowManager di renderizzare gli overlay a schermo (`TYPE_APPLICATION_OVERLAY`) e inducendo `PermissionGranter` a saltare il permesso perché già presente in `alreadyGranted`.
   - **Assegnazione Esplicita AppOps**: Introdotta l'esecuzione esplicita di `appops set <pkg> SYSTEM_ALERT_WINDOW allow` come fase indipendente e dedicata all'interno di `PermissionGranter.grantAllPermissions()`, in `ServiceLauncher.kt` e nello script di deploy `tools/safe_install_adb.sh`, garantendo che l'overlay sia attivo e visibile senza richiedere interventi manuali da shell.
