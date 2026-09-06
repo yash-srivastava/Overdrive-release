@@ -372,18 +372,15 @@ public class TripTelemetryRecorder {
             double altitude = fix.altitude;
             float gpsAccuracy = fix.accuracy;
 
-            // GPS speed fallback: if dynamics reported 0 or was stale while GPS indicates motion
-            if (speedKmh == 0 && !Float.isNaN(fix.speed) && fix.speed * 3.6f >= 1.5f && !fix.loadedFromCache) {
-                speedKmh = (int) Math.round(fix.speed * 3.6f);
-                dynamicsStale = false;
-            }
-
-            // Read gear from GearMonitor
+            // Read gear from GearMonitor, preferring car_service on DiLink 5
+            // where the vendor gearbox HAL is stuck on a valid Park.
             int gearMode = GearMonitor.getInstance().getCurrentGear();
-            if (gearMode == 1 && speedKmh > 3) {
-                // Vehicle in motion cannot be in PARK
-                gearMode = 4; // GEAR_D
-            }
+            try {
+                if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+                    int carSvc = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.gearValue();
+                    if (carSvc >= 1 && carSvc <= 6) gearMode = carSvc;
+                }
+            } catch (Throwable ignored) {}
 
             TelemetrySample sample = new TelemetrySample(
                     now, speedKmh, accelPedal, brakePedal,

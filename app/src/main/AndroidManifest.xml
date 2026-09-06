@@ -477,6 +477,18 @@
             android:exported="false"
             android:directBootAware="true" />
 
+        <!-- Boot Daemon Sequence Receiver - AlarmManager-driven carrier for the
+             staggered post-boot daemon launch (core/optional/health-check
+             stages), replacing an in-process Handler.postDelayed chain that
+             silently dropped its callbacks if the app process died in the
+             45-90s stagger window. No intent-filter: only invoked via
+             explicit PendingIntent. -->
+        <receiver
+            android:name="com.overdrive.app.receiver.BootDaemonSequenceReceiver"
+            android:enabled="true"
+            android:exported="false"
+            android:directBootAware="true" />
+
         <!-- Location Boot Receiver - Auto-start Location service after device reboot -->
         <receiver
             android:name="com.overdrive.app.receiver.LocationBootReceiver"

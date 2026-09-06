@@ -49,6 +49,7 @@ import com.overdrive.app.util.DeviceIdGenerator
 import java.util.Calendar
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlin.math.roundToInt
 
 /** State-driven dashboard backed by the daemon's existing /status contract. */
 class DashboardFragment : Fragment() {
@@ -150,6 +151,7 @@ class DashboardFragment : Fragment() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var metricsExecutor: ExecutorService? = null
 
+    private var lastDisplayedSocPercent: Double? = null
     private var dashboardState = DashboardUiState()
     private var todayClipCount: Int? = null
     private var storageSummary: DashboardUiState.StorageSummary? = null
@@ -159,6 +161,17 @@ class DashboardFragment : Fragment() {
 
     private var insightsProvider: DashboardInsightProvider? = null
     private var firstVisitCount: Int = -1
+    // Wall-clock time of the last successful (Ready) vehicle status. Used to bridge a
+    // transient /status failure -- confirmed live to happen every ~15-25s while driving
+    // (a single HTTP request occasionally times out against the daemon, self-recovering
+    // on the very next poll) -- without flashing this widget to "Unavailable" on every
+    // one of them. The web dashboard already tolerates exactly this by simply not
+    // updating the DOM on a bad poll; this native fragment had no equivalent and
+    // rebuilt its whole vehicle state from `result` on every tick, so one failed
+    // request was enough to blank SoC/range/driving state immediately. See
+    // VEHICLE_UNAVAILABLE_HOLD_MS below for how long a stale Ready snapshot is kept
+    // before this widget actually admits the data is gone.
+    private var lastVehicleReadyAtMs: Long = 0L
     private val statusRefreshRunnable = Runnable { refreshVehicleStatus(showLoading = false) }
     private val recordingStatsRefreshRunnable = Runnable { refreshMetricsTiles() }
 
@@ -533,6 +546,24 @@ class DashboardFragment : Fragment() {
             val result = fetchVehicleStatus()
             mainHandler.post {
                 if (!isAdded || view == null || generation != viewGeneration) return@post
+                val now = System.currentTimeMillis()
+                if (result is DashboardStatusResult.Available) {
+                    lastVehicleReadyAtMs = now
+                } else if (result is DashboardStatusResult.Unavailable
+                        && dashboardState.vehicle is DashboardUiState.VehicleState.Ready
+                        && now - lastVehicleReadyAtMs < VEHICLE_UNAVAILABLE_HOLD_MS) {
+                    // Bridge a transient /status failure: keep showing the last
+                    // known-good snapshot rather than flashing to Unavailable.
+                    // Falls through to the reducer (and genuinely shows
+                    // Unavailable) once the gap exceeds the hold window.
+                    renderVehicleState()
+                    if (dashboardResumed) {
+                        val isAccOn = (dashboardState.vehicle as? DashboardUiState.VehicleState.Ready)?.snapshot?.isAccOn == true
+                        val refreshMs = if (isAccOn) STATUS_REFRESH_ACTIVE_MS else STATUS_REFRESH_IDLE_MS
+                        mainHandler.postDelayed(statusRefreshRunnable, refreshMs)
+                    }
+                    return@post
+                }
                 dashboardState = DashboardStateReducer.status(dashboardState, result)
                 renderVehicleState()
                 if (dashboardResumed) {
@@ -650,7 +681,7 @@ class DashboardFragment : Fragment() {
                     snapshot.charging?.charging == true -> {
                         val kw = snapshot.charging.powerKw
                         if (kw != null && kw > 0.0) {
-                            "In Ricarica (${String.format(java.util.Locale.US, "%.1f", kw)} kW)"
+                            getString(R.string.dashboard_modern_status_charging_kw, kw)
                         } else {
                             getString(R.string.dashboard_modern_charging)
                         }
@@ -658,21 +689,34 @@ class DashboardFragment : Fragment() {
                     snapshot.charging?.full == true ->
                         getString(R.string.dashboard_modern_charge_complete)
                     isPowerOn && (gear == "D" || gear == "M" || gear == "S" || (speed != null && speed >= 3.0)) -> {
-                        val spdText = if (speed != null && speed >= 1.0) " · ${Math.round(speed)} km/h" else ""
-                        val recText = if (isRecording) " (REC)" else ""
-                        "In Guida (${gear ?: "D"})$spdText$recText"
+                        val gearLabel = gear ?: "D"
+                        val base = if (speed != null && speed >= 1.0) {
+                            getString(
+                                R.string.dashboard_modern_status_driving_speed,
+                                gearLabel,
+                                speed.roundToInt(),
+                            )
+                        } else {
+                            getString(R.string.dashboard_modern_status_driving, gearLabel)
+                        }
+                        appendRecordingSuffix(base, isRecording)
                     }
-                    isPowerOn && gear == "R" -> {
-                        val recText = if (isRecording) " (REC)" else ""
-                        "In Retromarcia (R)$recText"
-                    }
-                    isPowerOn && gear == "N" -> "In Folle (N)"
-                    isPowerOn && (gear == "P" || gear == null) -> "Pronta / Parcheggiata (P)"
-                    !isPowerOn && isSentry -> "Sentinella Attiva"
-                    snapshot.charging?.plugged == true -> "Collegata alla colonnina"
+                    isPowerOn && gear == "R" ->
+                        appendRecordingSuffix(
+                            getString(R.string.dashboard_modern_status_reverse),
+                            isRecording,
+                        )
+                    isPowerOn && gear == "N" -> getString(R.string.dashboard_modern_status_neutral)
+                    snapshot.charging?.plugged == true ->
+                        getString(R.string.dashboard_modern_plugged_in)
+                    isPowerOn && (gear == "P" || gear == null) ->
+                        getString(R.string.dashboard_modern_status_parked)
+                    !isPowerOn && isSentry -> getString(R.string.dashboard_modern_status_sentry)
                     else -> getString(R.string.dashboard_modern_vehicle_connected)
                 }
-                vehicleSocValue.text = snapshot.socPercent?.let {
+                val displayedSoc = snapshot.socPercent ?: lastDisplayedSocPercent
+                if (snapshot.socPercent != null) lastDisplayedSocPercent = snapshot.socPercent
+                vehicleSocValue.text = displayedSoc?.let {
                     getString(R.string.dashboard_modern_percent, it)
                 } ?: getString(R.string.dashboard_metric_value_pending)
                 // Personalized range (learned from the driver's own trips via
@@ -700,10 +744,18 @@ class DashboardFragment : Fragment() {
                     )
                 }
                 setHalRangeColumnVisible(showHalColumn)
-                renderSocGauge(snapshot.socPercent)
+                renderSocGauge(displayedSoc)
                 renderRangeBreakdown(snapshot.rangeDetails)
                 renderCharging(snapshot.charging)
             }
+        }
+    }
+
+    private fun appendRecordingSuffix(status: String, recording: Boolean): String {
+        return if (recording) {
+            status + getString(R.string.dashboard_modern_status_recording)
+        } else {
+            status
         }
     }
 
@@ -1442,14 +1494,6 @@ class DashboardFragment : Fragment() {
         val modelDropdown = dialogView.findViewById<
             com.google.android.material.textfield.MaterialAutoCompleteTextView>(
             R.id.vehicleModelDropdown)
-        val camMappingLayout = dialogView.findViewById<
-            com.google.android.material.textfield.TextInputLayout>(R.id.vehicleCameraMappingLayout)
-        val camMappingInput = dialogView.findViewById<
-            com.google.android.material.textfield.TextInputEditText>(R.id.vehicleCameraMappingInput)
-        val isDiLink5 = com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()
-        if (isDiLink5) {
-            camMappingLayout.visibility = View.VISIBLE
-        }
 
         // Track the selected model's id locally (the dropdown's text holds
         // the user-facing title; the id is what we POST). Each entry also
@@ -1469,14 +1513,7 @@ class DashboardFragment : Fragment() {
                 // value rather than leaving the field showing the previous
                 // model's number.
                 if (entry.nominalKwh > 0) {
-                    capInput.setText(String.format(java.util.Locale.US, "%.1f", entry.nominalKwh))
-                }
-                if (isDiLink5) {
-                    if (entry.id.equals("shark", ignoreCase = true)) {
-                        camMappingInput.setText("8,9,5,4")
-                    } else if (entry.id.equals("sealion7", ignoreCase = true)) {
-                        camMappingInput.setText("0,1,2,3")
-                    }
+                    capInput.setText(String.format("%.1f", entry.nominalKwh))
                 }
             }
         }
@@ -1486,10 +1523,6 @@ class DashboardFragment : Fragment() {
             .also { metricsExecutor = it }
         executor.execute {
             var initialKwh = 0.0
-            var initialCamMapping = ""
-            if (isDiLink5) {
-                initialCamMapping = com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.getCameraMappingProperty()
-            }
             val modelIds = mutableListOf<ModelEntry>()
             var initialModelId: String? = null
 
@@ -1604,7 +1637,7 @@ class DashboardFragment : Fragment() {
                 if (!isAdded || view == null) return@post
 
                 // Capacity input — current user value if any.
-                if (initialKwh > 0) capInput.setText(String.format(java.util.Locale.US, "%.1f", initialKwh))
+                if (initialKwh > 0) capInput.setText(String.format("%.1f", initialKwh))
 
                 // Model dropdown — populate using a Material adapter so the
                 // popup uses M3 list-item styling. setText(filter=false) sets
@@ -1622,15 +1655,6 @@ class DashboardFragment : Fragment() {
                     if (idx >= 0) {
                         modelDropdown.setText(titles[idx], false)
                         selectedModelId = initialModelId
-                    }
-                }
-                if (isDiLink5) {
-                    if (initialCamMapping.isNotEmpty()) {
-                        camMappingInput.setText(initialCamMapping)
-                    } else if (selectedModelId.equals("shark", ignoreCase = true)) {
-                        camMappingInput.setText("8,9,5,4")
-                    } else {
-                        camMappingInput.setText("0,1,2,3")
                     }
                 }
 
@@ -1707,14 +1731,13 @@ class DashboardFragment : Fragment() {
         dialog.setOnShowListener {
             dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
                 val raw = capInput.text?.toString()?.trim().orEmpty()
-                val kwh = raw.replace(',', '.').toDoubleOrNull()
-                if (kwh == null || kwh < 8.0 || kwh > 120.0) {
+                val kwh = raw.toDoubleOrNull()
+                if (kwh == null || kwh < 15.0 || kwh > 120.0) {
                     Toast.makeText(ctx, getString(R.string.vehicle_dialog_invalid_capacity), Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
                 completionDeferred = true
-                val customMapping = if (isDiLink5) camMappingInput.text?.toString()?.trim().orEmpty() else null
-                postNominalAndModel(kwh, selectedModelId, customMapping) { finishOnce() }
+                postNominalAndModel(kwh, selectedModelId) { finishOnce() }
                 dialog.dismiss()
             }
             dialog.getButton(android.content.DialogInterface.BUTTON_NEUTRAL).setOnClickListener {
@@ -1782,20 +1805,11 @@ class DashboardFragment : Fragment() {
     private fun postNominalAndModel(
         kwh: Double,
         modelId: String?,
-        cameraMapping: String? = null,
         onComplete: (() -> Unit)? = null,
     ) {
         val executor = metricsExecutor ?: Executors.newSingleThreadExecutor()
             .also { metricsExecutor = it }
         executor.execute {
-            if (!cameraMapping.isNullOrEmpty()) {
-                com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.setCameraMappingProperty(cameraMapping)
-            } else if (modelId.equals("shark", ignoreCase = true)) {
-                com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.setCameraMappingProperty("8,9,5,4")
-            } else if (modelId.equals("sealion7", ignoreCase = true)) {
-                com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.setCameraMappingProperty("0,1,2,3")
-            }
-
             try {
                 val conn = com.overdrive.app.util.DaemonHttpClient.open(
                     "/api/performance/soh/nominal", "POST", 3000, 5000)
@@ -1812,13 +1826,7 @@ class DashboardFragment : Fragment() {
                         "/api/models/selected", "POST", 3000, 5000)
                     conn.doOutput = true
                     conn.setRequestProperty("Content-Type", "application/json")
-                    val payload = org.json.JSONObject().apply {
-                        put("modelId", modelId)
-                        if (!cameraMapping.isNullOrEmpty()) {
-                            put("cameraMapping", cameraMapping)
-                        }
-                    }
-                    conn.outputStream.use { it.write(payload.toString().toByteArray()) }
+                    conn.outputStream.use { it.write("{\"modelId\":\"$modelId\"}".toByteArray()) }
                     conn.responseCode
                     conn.disconnect()
                 } catch (_: Throwable) {}
@@ -1846,7 +1854,6 @@ class DashboardFragment : Fragment() {
             "seagull" -> getString(R.string.vehicle_model_seagull)
             "sealion6" -> "BYD Sealion 6"
             "sealion7" -> "BYD Sealion 7"
-            "shark" -> "BYD Shark"
             "sealu", "seal-u" -> "BYD Seal U"
             else -> modelId.replaceFirstChar { it.uppercase() }
         }
@@ -1859,6 +1866,12 @@ class DashboardFragment : Fragment() {
         private const val STATE_SELECTED_TUNNEL = "dashboard.selected_tunnel"
         private const val STATUS_REFRESH_ACTIVE_MS = 2_000L
         private const val STATUS_REFRESH_IDLE_MS = 15_000L
+        // How long a stale Ready vehicle snapshot is shown across consecutive
+        // /status failures before this widget actually reports Unavailable. Sized
+        // to comfortably bridge the transient daemon stalls confirmed live (~15-25s
+        // apart, each a single failed request) while still surfacing a genuine
+        // sustained outage in well under a minute.
+        private const val VEHICLE_UNAVAILABLE_HOLD_MS = 20_000L
         private const val RECORDING_STATS_RETRY_MS = 1_500L
         private const val MAX_RECORDING_STATS_RETRIES = 3
         private const val STATUS_CONNECT_TIMEOUT_MS = 2_000

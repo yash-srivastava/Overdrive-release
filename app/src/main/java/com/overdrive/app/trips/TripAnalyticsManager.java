@@ -121,7 +121,7 @@ public class TripAnalyticsManager {
 
         // 1. Finalize active trip
         if (detector != null) {
-            detector.finalizeActiveTrip();
+            detector.shutdown();
         }
 
         // 2. Close database
@@ -172,12 +172,12 @@ public class TripAnalyticsManager {
      */
     public void onAccOn() {
         if (!enabled) return;
-        logger.info("ACC ON — trip detection ready (waiting for gear D/R)");
+        logger.info("ACC ON — trip detection ready (gear D/R or GPS/CAN motion)");
 
         // Safety net: probe current gear in case we missed the gear change event
         // during the ACC OFF→ON transition
         try {
-            int currentGear = GearMonitor.getInstance().getCurrentGear();
+            int currentGear = resolveLiveGear();
             if (currentGear != GearMonitor.GEAR_P && detector != null && !detector.isTripActive()) {
                 logger.info("ACC ON + gear already " + GearMonitor.gearToString(currentGear)
                         + " — auto-starting trip");
@@ -186,6 +186,16 @@ public class TripAnalyticsManager {
         } catch (Exception e) {
             logger.warn("ACC ON gear probe failed: " + e.getMessage());
         }
+    }
+
+    private static int resolveLiveGear() {
+        try {
+            if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
+                int carSvc = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.gearValue();
+                if (carSvc >= 1 && carSvc <= 6) return carSvc;
+            }
+        } catch (Throwable ignored) {}
+        return GearMonitor.getInstance().getCurrentGear();
     }
 
     // ==================== RUNTIME CONFIG ====================
@@ -204,10 +214,10 @@ public class TripAnalyticsManager {
         }
 
         if (!newEnabled) {
-            // Disabling — finalize active trip first
-            if (detector != null && detector.isTripActive()) {
-                logger.info("Disabling while trip active — finalizing trip");
-                detector.finalizeActiveTrip();
+            // Disabling — finalize any active trip and stop the 1 Hz motion watch
+            if (detector != null) {
+                detector.shutdown();
+                detector = null;
             }
             enabled = false;
             config.setEnabled(false);
@@ -223,7 +233,7 @@ public class TripAnalyticsManager {
             }
 
             // If gear is not P, trigger trip detection
-            int currentGear = GearMonitor.getInstance().getCurrentGear();
+            int currentGear = resolveLiveGear();
             if (currentGear != GearMonitor.GEAR_P && detector != null) {
                 logger.info("Enabling while gear=" + GearMonitor.gearToString(currentGear)
                         + " — forwarding gear to detector");
@@ -414,6 +424,7 @@ public class TripAnalyticsManager {
                 handleTripCheckpoint(trip);
             }
         });
+        detector.startMotionWatch();
 
         // Recorder
         recorder = new TripTelemetryRecorder(telemetryDataCollector);
@@ -502,10 +513,11 @@ public class TripAnalyticsManager {
         // last-charge-rate lookup, and cost math all happen below, well before
         // insertTrip() actually runs — a crash anywhere in that stretch used to
         // leave the trip with NEITHER a real row NOR a checkpoint to recover
-        // from (confirmed live: a 12-minute trip crashed during this window and
-        // came back with distance/duration only, zero SoC/energy, because the
-        // checkpoint had already been wiped up here before the row existed).
-        // It's cleared only once insertTrip() actually succeeds, below.
+        // from (confirmed live, 2026-09-05: a 12-minute trip crashed during
+        // this window and came back with distance/duration only, zero SoC/
+        // energy, because the checkpoint had already been wiped up here before
+        // the row existed). It's cleared only once insertTrip() actually
+        // succeeds, below.
 
         // Release telemetry polling ref (acquired in handleTripStarted)
         if (telemetryDataCollector != null) {

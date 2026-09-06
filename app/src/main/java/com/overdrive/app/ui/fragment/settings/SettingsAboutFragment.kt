@@ -82,16 +82,15 @@ class SettingsAboutFragment : Fragment() {
         // current and is simply mislabeled. "Is an update available?" is what
         // the Check for Updates action below answers.
         val versionView = view.findViewById<TextView>(R.id.tvAboutVersion)
-        // Show the BuildConfig identity immediately (pure in-memory, no I/O),
-        // then resolve the persisted GitHub label off the looper and post it —
-        // getDisplayVersion does a /data/local/tmp file read, which must not run
-        // on the main thread (same off-thread pattern as the channel toggle).
+        // BuildConfig identity only — no async overwrite. getDisplayVersion's
+        // persisted GitHub label is written ONLY by the in-app updater's own
+        // install path, so a sideloaded/ADB-installed build (every build
+        // pushed tonight) left it stale: this row would show the correct
+        // version for a moment, then flip to whatever was last installed
+        // THROUGH the updater. Defeats the row's whole stated purpose above
+        // ("what am I running?"). getInstalledVersion() is pure in-memory
+        // BuildConfig, always correct for the binary actually executing.
         versionView.text = AppUpdater.getInstalledVersion()
-        (avatarExecutor ?: java.util.concurrent.Executors.newSingleThreadExecutor()
-            .also { avatarExecutor = it }).execute {
-            val resolved = AppUpdater.getDisplayVersion(requireContext().applicationContext)
-            mainHandler.post { if (isAdded && view.parent != null) versionView.text = resolved }
-        }
         view.findViewById<TextView>(R.id.tvAboutBuild).text = BuildConfig.APPLICATION_ID
         setupVehicleInformation(view)
 

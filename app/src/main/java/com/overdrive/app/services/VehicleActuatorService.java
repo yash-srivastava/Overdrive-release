@@ -51,7 +51,10 @@ import java.util.concurrent.atomic.AtomicLong;
  * {@code action=hud} + {@code level}=0..100 (brightness);
  * {@code action=hud_power} + {@code on}=true|false (the dedicated HUD switch);
  * {@code action=ac_charge_current_limit} + {@code state}=1..5;
- * {@code action=energy_mode} + {@code mode}=1..5 (powertrain EV/HEV). Mirror/HUD/current-limit
+ * {@code action=energy_mode} + {@code mode}=1..5 (powertrain EV/HEV);
+ * {@code action=carpower_backlight} + {@code mode}=read|on|off (DiLink 5
+ * {@code CarPowerManager} bind probe).
+ * Mirror/HUD/current-limit
  * writes are serialized off the main thread so their daemon-backed safety state can be rechecked
  * immediately before actuation. Energy writes use their own serialized lane and bounded readback.
  */
@@ -175,6 +178,18 @@ public class VehicleActuatorService extends Service {
                 return START_STICKY;
             }
             action = intent.getStringExtra("action");
+            try {
+                java.io.File dir = getExternalFilesDir(null);
+                if (dir != null) {
+                    java.io.File f = new java.io.File(dir, "carpower_probe.txt");
+                    java.io.FileWriter w = new java.io.FileWriter(f, false);
+                    w.write("action=" + action
+                            + " extras=" + intent.getExtras()
+                            + " fg=" + foregroundStarted
+                            + "\n");
+                    w.close();
+                }
+            } catch (Throwable ignored) {}
             if ("mirror".equals(action)) {
                 boolean fold = intent.getBooleanExtra("fold", false);
                 finishesAsync = submitGuardedActuation(
@@ -227,6 +242,14 @@ public class VehicleActuatorService extends Service {
                         intent.getStringExtra("request_generation"), -1L);
                 Log.i(TAG, "energy_mode_fence sourceGeneration=" + sourceGeneration
                         + " -> accepted=" + fenceEnergyMode(sourceGeneration));
+            } else if ("carpower_backlight".equals(action)) {
+                String mode = intent.getStringExtra("mode");
+                finishesAsync = submitGuardedActuation(
+                        null,
+                        "carpower_backlight mode=" + mode,
+                        () -> logger.info("carpower_backlight -> "
+                                + com.overdrive.app.power.TsCarPowerClient.probe(
+                                        getApplicationContext(), mode)));
             } else {
                 Log.w(TAG, "unknown action: " + action);
             }
