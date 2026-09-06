@@ -8,7 +8,7 @@
  * translucent panel-overlays, layout dimensions) and the actual CSS rules.
  */
 @import url("design-tokens.css");
-@import url("app-shell.css?v=26");
+@import url("app-shell.css?v=27");
 @import url("app-tabs.css");
 @import url("app-collapse.css");
 
@@ -383,6 +383,20 @@ textarea:focus,
     white-space: normal;
     word-break: break-word;
     overflow-wrap: anywhere;
+}
+
+.sidebar-nav .nav-link[hidden],
+.sidebar-nav [hidden] {
+    display: none !important;
+    max-height: 0 !important;
+    min-height: 0 !important;
+    height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    visibility: hidden !important;
 }
 
 .nav-link > span {

@@ -4,6 +4,21 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
 
 ## [In corso / Unreleased]
 
+- **Prevenzione Crash Renderer WebView (`OverdriveApplication.kt`, `WebViewFragment.kt`)**:
+  - Creazione proattiva della directory `cache/WebView/Crashpad` (`File(cacheDir, "WebView/Crashpad").mkdirs()`) in `OverdriveApplication.onCreate()` e prima dell'inizializzazione in `WebViewFragment.setupWebView()`, eliminando l'abort del processo sandbox Chromium (`SIGTRAP` / crash renderer) sui dispositivi con BSP privo della cartella di crashpad.
+  - Implementazione di `onRenderProcessGone` nel `WebViewClient` per distruggere in sicurezza la vista crashata, mostrare overlay di retry e restituire `true`, impedendo ad Android di terminare l'applicazione host (`Process.killProcess`).
+
+- **Auto-Arming Sorveglianza all'Avvio e Ticker di Self-Heal a 30s (`CameraDaemon.java`)**:
+  - Risolto il mancato avvio automatico della modalità sentinella/sorveglianza dopo il boot o riavvio del demone a veicolo fermo (ACC OFF). Introdotto `enforceSurveillanceStartupIfRequested()` che valida `UnifiedConfigManager.isSurveillanceEnabled()`, lo stato ACC e le safe zone, inizializzando immediatamente la pipeline video senza richiedere il toggle manuale on/off dall'interfaccia web.
+  - Implementato ticker di self-heal automatico periodico a 30s (`startSurveillanceSelfHealTicker()`) speculare a quello di `OemDashcamApiHandler`, che rileva e ripristina la sorveglianza qualora la pipeline venga terminata transientemente durante la sosta prolungata.
+  - Allineato `doorLockListenerArmed = true` all'abilitazione manuale/diretta per garantire coerenza con lo schedule checker.
+  - Bumpato `BUILD_TAG` a `"20260906-surv-autoarm-1"` per identificare in modo univoco il demone aggiornato nei log di sistema.
+
+- **Azzeramento Definitivo Spazio Vuoto Accordion Sidebar e Cache Busting (`app-shell.css`, `app-shell.js`, `styles.css`)**:
+  - Inserita in `styles.css` la regola ad alta specificità `.sidebar-nav .nav-link[hidden], .sidebar-nav [hidden]` con `display: none !important; min-height: 0 !important; height: 0 !important; padding: 0 !important; margin: 0 !important; border: none !important;` per annullare definitivamente il `min-height: 48px;` nativo di `.nav-link`.
+  - In `app-shell.js`, introdotta la funzione `applyMemberCollapsed` che imposta e rimuove inline le proprietà di azzeramento dimensionale (`min-height`, `height`, `padding`, `margin`, `border`) sui link dei gruppi collassati, eliminando qualsiasi spazio bianco residuo indipendentemente dalla cache del browser.
+  - Eseguito il bump delle risorse web a `v=27` (`app-shell.css?v=27`, `styles.css?v=27`) nelle pagine principali (`index.html`, `surveillance.html`, `automations.html`).
+
 ## [v51.1] - 2026-09-06
 
 - **Integrazione Super-Branch Chris Hemmings (`chris-hemmings/super-branch-develop`)**:

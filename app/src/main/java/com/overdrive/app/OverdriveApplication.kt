@@ -24,6 +24,10 @@ class OverdriveApplication : Application() {
     override fun onCreate() {
         super.onCreate()
 
+        // Pre-create WebView Crashpad cache directory so the Chromium renderer process
+        // does not crash during initialization if the directory is missing.
+        ensureWebViewCrashpadDir()
+
         try {
             startService(Intent(this, com.overdrive.app.remote.RemoteDevViewBridgeService::class.java))
         } catch (error: Throwable) {
@@ -133,6 +137,17 @@ class OverdriveApplication : Application() {
             AppCompatDelegate.setApplicationLocales(locales)
         } catch (e: Exception) {
             Log.w("OverdriveApplication", "applyPersistedLocale failed: ${e.message}")
+        }
+    }
+
+    private fun ensureWebViewCrashpadDir() {
+        try {
+            val crashpad = java.io.File(cacheDir, "WebView/Crashpad")
+            if (!crashpad.exists()) {
+                crashpad.mkdirs()
+            }
+        } catch (t: Throwable) {
+            Log.w("OverdriveApplication", "Failed to ensure WebView/Crashpad dir: ${t.message}")
         }
     }
 }

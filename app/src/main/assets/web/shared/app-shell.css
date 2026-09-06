@@ -379,6 +379,7 @@ html.shell-ready { visibility: visible; }
                 color 0.2s ease;
 }
 
+.sidebar-nav .nav-link[hidden],
 .sidebar-nav [hidden] {
     /* Hide collapsed group members cleanly. display: none removes elements
        from flow, eliminating the empty gap caused by .nav-link min-height: 48px
@@ -387,10 +388,9 @@ html.shell-ready { visibility: visible; }
     max-height: 0 !important;
     min-height: 0 !important;
     height: 0 !important;
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
     opacity: 0 !important;
     pointer-events: none !important;
     visibility: hidden !important;

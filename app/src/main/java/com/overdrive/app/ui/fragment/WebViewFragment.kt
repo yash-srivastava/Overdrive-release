@@ -465,6 +465,13 @@ class WebViewFragment : Fragment() {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun setupWebView() {
+        try {
+            val crashpad = java.io.File(requireContext().cacheDir, "WebView/Crashpad")
+            if (!crashpad.exists()) {
+                crashpad.mkdirs()
+            }
+        } catch (_: Throwable) {}
+
         webView?.apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
@@ -949,6 +956,21 @@ class WebViewFragment : Fragment() {
                         loadInProgress = false
                         showError()
                     }
+                }
+
+                override fun onRenderProcessGone(
+                    view: WebView?, detail: android.webkit.RenderProcessGoneDetail?
+                ): Boolean {
+                    val didCrash = detail?.didCrash() ?: true
+                    android.util.Log.e("WebViewFragment", "WebView render process gone (crashed=$didCrash)")
+                    pageLoadFailed = true
+                    loadInProgress = false
+                    try {
+                        liveWebView = null
+                        view?.destroy()
+                    } catch (_: Throwable) {}
+                    showError()
+                    return true // Prevents system from killing the entire host application
                 }
 
                 override fun shouldOverrideUrlLoading(
