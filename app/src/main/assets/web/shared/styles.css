@@ -8,7 +8,7 @@
  * translucent panel-overlays, layout dimensions) and the actual CSS rules.
  */
 @import url("design-tokens.css");
-@import url("app-shell.css");
+@import url("app-shell.css?v=26");
 @import url("app-tabs.css");
 @import url("app-collapse.css");
 

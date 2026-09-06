@@ -192,7 +192,13 @@ BYD.surveillance = {
         const badge = document.getElementById('survStatusBadge');
         if (!badge) return;
         try {
-            const res = await BYD.api.getSurveillanceStatus();
+            let res = null;
+            if (window.BYD && window.BYD.api && typeof window.BYD.api.getSurveillanceStatus === 'function') {
+                res = await BYD.api.getSurveillanceStatus();
+            } else {
+                const resp = await fetch('/api/surveillance/status');
+                res = await resp.json();
+            }
             const armed = !!(res && res.success && res.status
                 && res.status.enabled && res.status.initialized !== false);
             badge.textContent = armed ? BYD.i18n.t('surveillance.badge_on') : BYD.i18n.t('surveillance.badge_off');
@@ -1380,6 +1386,7 @@ BYD.surveillance = {
             this.config.enabled = enabled;
             this.savedConfig.enabled = enabled;
             this.updateUI();
+            this.refreshLiveStatusBadge();
             if (BYD.utils && BYD.utils.toast) {
                 // deferred=true → the vehicle is on, so the preference is stored
                 // but nothing is armed yet. Say that instead of a bare "enabled".

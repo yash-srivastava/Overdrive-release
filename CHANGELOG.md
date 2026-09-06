@@ -19,9 +19,13 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
     - Verificata e mantenuta intatta la logica di power-gate clima in standby (`VehicleControlApiHandler.java`) che azzera le letture fantasma AC a quadro spento.
     - Mantenuta l'assegnazione dinamica del `cameraMapping` in `ModelsApiHandler.java` (`"0,1,2,3"` per Sealion 7, `"8,9,5,4"` per Shark).
 
-- **Fix Collasso Accordion Sidebar e Rimozione Spazio Vuoto Residuo (`app-shell.css`)**:
+- **Fix Collasso Accordion Sidebar e Rimozione Spazio Vuoto Residuo (`app-shell.css`, `app-shell.js`, `styles.css`)**:
   - **Identificazione Causa Radice**: La voce `.nav-link` eredita da `styles.css` la regola `min-height: 48px;`. In `app-shell.css`, la classe `.sidebar-nav [hidden]` applicava `display: flex !important; max-height: 0 !important;` per abilitare la transizione CSS. In base alle specifiche W3C/CSS, `min-height` ha la precedenza assoluta su `max-height`: gli elementi nascosti mantenevano quindi un ingombro fisico di 48px ciascuno, sommato al `gap: 4px` del container flexbox, creando un'area vuota trasparente ("buco") di oltre 240px quando si collassava un gruppo come "Panoramica".
-  - **Soluzione Applicata**: Aggiornata la regola `.sidebar-nav [hidden]` applicando `display: none !important;` e azzerando esplicitamente `min-height: 0 !important;` e `height: 0 !important;`. Gli elementi chiusi escono completamente dal flow di layout senza lasciare buchi o spazi fantasma.
+  - **Soluzione Applicata**: Aggiornata la regola `.sidebar-nav [hidden]` con `display: none !important;` e in `app-shell.js` forzata l'applicazione diretta inline di `style.setProperty('display', 'none', 'important')` al collasso, azzerando qualsiasi dipendenza dalla cache CSS del browser. Aggiornato l'import a `@import url("app-shell.css?v=26");` e bumpati i riferimenti HTML a `styles.css?v=26` e `app-shell.js?v=6`.
+
+- **Risoluzione Blocco Badge Live "Modalità di sorveglianza" (`surveillance.js`, `surveillance.html`)**:
+  - **Causa Radice**: La funzione `refreshLiveStatusBadge()` invocava `BYD.api.getSurveillanceStatus()`, ma `BYD.api` risiede in `utils.js`, script non importato in `surveillance.html`. La chiamata andava in errore `TypeError` silente nel blocco `catch (e)`, impedendo al badge di aggiornarsi e lasciandolo bloccato su "OFF".
+  - **Soluzione**: Sostituita con chiamata diretta e robusta a `fetch('/api/surveillance/status')` e aggiunto l'aggiornamento immediato del badge anche al tocco del toggle (`toggleSurveillance()`), con bump a `surveillance.js?v=survvideo2`.
 
 - **Aggiornamento Sprite Cache Miniatura 3D Auto (`ev-card-sprite-cache.js`, `sw.js`)**:
   - Eseguito il bump a `SPRITE_VERSION = 5` e `CACHE_VERSION = 'overdrive-3d-v4'` per invalidare automaticamente qualsiasi snapshot di fallback memorizzato in precedenza nella cache IndexedDB delle PWA client.

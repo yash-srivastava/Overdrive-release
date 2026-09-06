@@ -933,8 +933,14 @@
                 else header.removeAttribute('data-collapsed');
                 header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
                 for (var m = 0; m < group.members.length; m++) {
-                    if (collapsed) group.members[m].setAttribute('hidden', '');
-                    else group.members[m].removeAttribute('hidden');
+                    var gm = group.members[m];
+                    if (collapsed) {
+                        gm.setAttribute('hidden', '');
+                        gm.style.setProperty('display', 'none', 'important');
+                    } else {
+                        gm.removeAttribute('hidden');
+                        gm.style.removeProperty('display');
+                    }
                 }
 
                 // Skip the click/keydown bind on re-runs to avoid duplicate
@@ -964,8 +970,13 @@
                     for (var s2 = header.nextElementSibling; s2; s2 = s2.nextElementSibling) {
                         if (s2.classList.contains('nav-group-header') ||
                             s2.classList.contains('nav-divider')) break;
-                        if (nowCollapsed) s2.setAttribute('hidden', '');
-                        else s2.removeAttribute('hidden');
+                        if (nowCollapsed) {
+                            s2.setAttribute('hidden', '');
+                            s2.style.setProperty('display', 'none', 'important');
+                        } else {
+                            s2.removeAttribute('hidden');
+                            s2.style.removeProperty('display');
+                        }
                     }
                     writeState(group.slug, nowCollapsed);
                 }
