@@ -536,7 +536,7 @@ public class CameraDaemon {
 
     // Build stamp printed at startup so logs identify the running build.
     // BUMP THIS on every code change you intend to deploy + verify.
-    private static final String BUILD_TAG = "20260906-surv-autoarm-1";
+    private static final String BUILD_TAG = "20260906-sentry-rearm-hwcodec-fix-1";
 
     // Lock file for singleton enforcement
     private static final String LOCK_FILE = "/data/local/tmp/camera_daemon.lock";

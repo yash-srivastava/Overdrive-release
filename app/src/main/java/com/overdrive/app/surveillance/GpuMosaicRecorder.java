@@ -1019,7 +1019,14 @@ public class GpuMosaicRecorder {
                 logger.error("Encoder surface dead after " + consecutiveSurfaceErrors +
                     " consecutive errors, requesting reinit");
                 needsReinit = true;
-                encoderSurface = null;  // Prevent further attempts
+                if (encoderSurface != null && eglCore != null) {
+                    try {
+                        eglCore.destroySurface(encoderSurface);
+                    } catch (Throwable t) {
+                        logger.warn("Failed to destroy dead encoderSurface: " + t.getMessage());
+                    }
+                    encoderSurface = null;  // Prevent further attempts
+                }
                 return;
             }
             if (consecutiveSurfaceErrors <= 3) {

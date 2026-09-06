@@ -4164,7 +4164,7 @@ public class SurveillanceEngineGpu {
                             && peakCloseZoneDuringSequence
                             && !brightnessEventCloseZoneScope
                             && !cachedIncoherentLoiter
-                            && !deterrentActive) {
+                            && (!deterrentActive || (now - deterrentFiredTime) >= 15000L)) {
                         int probeQ = pipelineV2.getHighestThreatQuadrant();
                         // Zone gate that does NOT require a live tracker lock. The
                         // target FN is DEFINED by the absence of a YOLO person class
@@ -4300,11 +4300,16 @@ public class SurveillanceEngineGpu {
                         }
                     }
 
-                    // With AI available, only a current-sequence person or
-                    // new/moved non-baseline object may authorize recording.
-                    // This is final: motion-only timeout/proximity/salience
-                    // overrides cannot revive a static or unclassified scene.
-                    if (aiAvailable && !aiRecentlyConfirmed) {
+                    // With AI available, a current-sequence person or new/moved non-baseline
+                    // object authorizes recording. Also allow recording if:
+                    // 1) A confirmed person was seen recently (stationary-subject recency window of 30s),
+                    //    preventing MOG2 background absorption or brief detection stalls from freezing re-arming.
+                    // 2) The close-zone proximity override or motion-salience override cleared shouldSuppress above.
+                    boolean recentPersonPresence = (nowElapsed - lastPersonConfirmationElapsedMs) < 30000L
+                            && lastPersonConfirmationElapsedMs > 0;
+                    boolean overrideClearedSuppression = !shouldSuppress;
+
+                    if (aiAvailable && !aiRecentlyConfirmed && !recentPersonPresence && !overrideClearedSuppression) {
                         shouldSuppress = true;
                     }
                     

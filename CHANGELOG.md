@@ -4,7 +4,21 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
 
 ## [In corso / Unreleased]
 
-## [v52.0] - 2026-09-06
+## [v50.3] - 2026-09-06
+
+- **Risoluzione Freeze Riarmo Sentry (~48-60s) e Gestione Presenza Stazionaria (`SurveillanceEngineGpu.java`)**:
+  - Introdotta finestra di recency temporale (30s) per soggetto stazionario (`recentPersonPresence`): impedisce che l'assorbimento della persona nello sfondo da parte del modello OpenCV MOG2 dopo ~53s blocchi l'avvio di nuovi cicli di registrazione.
+  - Sbloccato il gate AI rigido (`aiAvailable && !aiRecentlyConfirmed`): se il Close-Zone Proximity Override o il Motion-Salience Override autorizzano l'evento per la presenza di un soggetto in prossimità immediata del veicolo (NEAR/MID entro la zona), il gate AI rispetta l'override e non sopprime più la registrazione.
+  - Armonizzato il timer del deterrente (`deterrentActive`) permettendo all'override ravvicinato di scattare trascorsi 15s dall'attivazione luminosa, in perfetto allineamento con il cooldown standard di registrazione.
+
+- **Robustezza Hardware MediaCodec e Prevenzione Crash a Catena `media.hwcodec` (`HardwareEventRecorderGpu.java`, `GpuMosaicRecorder.java`)**:
+  - Aumentato a 5.000 ms (5s) il timeout di join per drainer thread e disk writer thread (`ThreadJoins.joinFullDeadline`), eliminando falsi allarmi di thread bloccati dovuti a latenze I/O momentanee su schede SD o memoria flash lenta.
+  - Neutralizzato il crash fatale `SIGSEGV` in `QC2GrallocBuffer::getMetadata` / `libqcodec2_core.so` del processo di sistema Qualcomm `media.hwcodec`: nei percorsi di stop/teardown anomalo con worker bloccato, la superficie grafica `inputSurface` viene mantenuta senza deallocazione orfana, impedendo a Qualcomm Codec2 di dereferenziare metadati gralloc invalidati che causavano la morte a cascata di `media.hwcodec`, `cameraserver`, `audioserver` e `system_server` (la sequenza di tombstone a 0 byte rilevata sui dispositivi BYD con `crash_dump` non privilegiato).
+  - Gestita la distruzione esplicita e sicura dell'EGL Surface (`eglCore.destroySurface(encoderSurface)`) in `GpuMosaicRecorder` al superamento della soglia di errori di swap consecutivi (`SURFACE_ERROR_REINIT_THRESHOLD`), prevenendo leak nativi di superfici EGL.
+
+- **Diagnostica e Trasparenza File Logging (`DaemonLogger.java`, `DaemonLogConfig.java`)**:
+  - Inserito `System.out.flush()` immediato in `DaemonLogger.log()` per garantire la scrittura in tempo reale su `cam_daemon.log` evitando l'accumulo di log nel buffer da 4 KB di `app_process`.
+  - Abilitato il logging su file per `HWEncoderGpu` e `SurveillanceEngineGpu`.
 
 - **Prevenzione Crash Renderer WebView (`OverdriveApplication.kt`, `WebViewFragment.kt`)**:
   - Creazione proattiva della directory `cache/WebView/Crashpad` (`File(cacheDir, "WebView/Crashpad").mkdirs()`) in `OverdriveApplication.onCreate()` e prima dell'inizializzazione in `WebViewFragment.setupWebView()`, eliminando l'abort del processo sandbox Chromium (`SIGTRAP` / crash renderer) sui dispositivi con BSP privo della cartella di crashpad.
@@ -14,7 +28,7 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
   - Risolto il mancato avvio automatico della modalità sentinella/sorveglianza dopo il boot o riavvio del demone a veicolo fermo (ACC OFF). Introdotto `enforceSurveillanceStartupIfRequested()` che valida `UnifiedConfigManager.isSurveillanceEnabled()`, lo stato ACC e le safe zone, inizializzando immediatamente la pipeline video senza richiedere il toggle manuale on/off dall'interfaccia web.
   - Implementato ticker di self-heal automatico periodico a 30s (`startSurveillanceSelfHealTicker()`) speculare a quello di `OemDashcamApiHandler`, che rileva e ripristina la sorveglianza qualora la pipeline venga terminata transientemente durante la sosta prolungata.
   - Allineato `doorLockListenerArmed = true` all'abilitazione manuale/diretta per garantire coerenza con lo schedule checker.
-  - Bumpato `BUILD_TAG` a `"20260906-surv-autoarm-1"` per identificare in modo univoco il demone aggiornato nei log di sistema.
+  - Bumpato `BUILD_TAG` a `"20260906-sentry-rearm-hwcodec-fix-1"` per identificare in modo univoco il demone aggiornato nei log di sistema.
 
 - **Azzeramento Definitivo Spazio Vuoto Accordion Sidebar e Cache Busting (`app-shell.css`, `app-shell.js`, `styles.css`)**:
   - Inserita in `styles.css` la regola ad alta specificità `.sidebar-nav .nav-link[hidden], .sidebar-nav [hidden]` con `display: none !important; min-height: 0 !important; height: 0 !important; padding: 0 !important; margin: 0 !important; border: none !important;` per annullare definitivamente il `min-height: 48px;` nativo di `.nav-link`.
