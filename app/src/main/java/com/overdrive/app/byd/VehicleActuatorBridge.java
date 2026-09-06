@@ -123,6 +123,19 @@ public final class VehicleActuatorBridge {
     }
 
     /**
+     * DiLink 5 CarPower bind probe in the real app process. {@code mode} is
+     * {@code read}, {@code on}, or {@code off}.
+     */
+    public static void dispatchCarPowerBacklight(String mode) {
+        String m = (mode == null || mode.trim().isEmpty()) ? "read" : mode.trim();
+        exec("am start-foreground-service -n " + SERVICE
+                + " --es action carpower_backlight"
+                + " --es mode " + m);
+        logger.info("carpower_backlight mode=" + m
+                + " dispatched to app-process VehicleActuatorService");
+    }
+
+    /**
      * Retry the five-position AC inlet current setting from the normal app process.
      *
      * <p>The daemon remains responsible for reading the authoritative state after this launch. The

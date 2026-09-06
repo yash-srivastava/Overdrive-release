@@ -9,8 +9,10 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * H2 embedded database for trip catalog, rollups, and consumption buckets.
@@ -902,9 +904,28 @@ public class TripDatabase {
 
     /**
      * Delete a trip by id. Returns true if a row was deleted.
+     *
+     * <p>Reads {@code start_time} first so the weekly/monthly rollup for that
+     * trip's period can be recomputed after the row is gone. Rollups are
+     * additive on save and are not reversible, so the period is rebuilt from
+     * remaining trips rather than subtracting this one.
      */
     public synchronized boolean deleteTrip(long id) {
         if (!ensureConnection()) return false;
+
+        Long startTime = null;
+        try (PreparedStatement pstmt = connection.prepareStatement(
+                "SELECT start_time FROM trips WHERE id=?")) {
+            pstmt.setLong(1, id);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) startTime = rs.getLong(1);
+            }
+        } catch (Exception e) {
+            logger.error("Failed to read trip start_time before delete id=" + id, e);
+            reconnect();
+            return false;
+        }
+        if (startTime == null) return false;
 
         String sql = "DELETE FROM trips WHERE id=?";
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
@@ -912,6 +933,9 @@ public class TripDatabase {
             int rows = pstmt.executeUpdate();
             if (rows > 0) {
                 logger.info("Deleted trip id=" + id);
+                List<Long> startTimes = new ArrayList<>();
+                startTimes.add(startTime);
+                recomputeRollupsForStartTimes(startTimes);
                 return true;
             }
         } catch (Exception e) {
@@ -935,12 +959,27 @@ public class TripDatabase {
     public synchronized int deleteByTelemetryPath(String absPath) {
         if (absPath == null || !ensureConnection()) return 0;
 
+        List<Long> startTimes = new ArrayList<>();
+        try (PreparedStatement pstmt = connection.prepareStatement(
+                "SELECT start_time FROM trips WHERE telemetry_file_path=?")) {
+            pstmt.setString(1, absPath);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) startTimes.add(rs.getLong(1));
+            }
+        } catch (Exception e) {
+            logger.error("Failed to read trip start_time before path delete: " + absPath, e);
+            reconnect();
+            return 0;
+        }
+        if (startTimes.isEmpty()) return 0;
+
         String sql = "DELETE FROM trips WHERE telemetry_file_path=?";
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setString(1, absPath);
             int rows = pstmt.executeUpdate();
             if (rows > 0) {
                 logger.info("Deleted trip row(s) by telemetry path: " + absPath + " (" + rows + ")");
+                recomputeRollupsForStartTimes(startTimes);
             }
             return rows;
         } catch (Exception e) {
@@ -1002,13 +1041,14 @@ public class TripDatabase {
             // pass would reap more than the cap, that smells like a storm, so we
             // abort the risky deletions and preserve those rows (recovery can
             // rebuild a genuinely-gone one later; a wrongly-kept row just lingers).
-            List<Long> safeOrphans = new ArrayList<>();      // null/blank path
-            List<Long> missingFileOrphans = new ArrayList<>(); // file gone, vol up
-            String sel = "SELECT id, telemetry_file_path FROM trips";
+            List<long[]> safeOrphans = new ArrayList<>();      // [id, start_time]
+            List<long[]> missingFileOrphans = new ArrayList<>(); // file gone, vol up
+            String sel = "SELECT id, telemetry_file_path, start_time FROM trips";
             try (PreparedStatement pstmt = connection.prepareStatement(sel);
                  ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
                     String path = rs.getString("telemetry_file_path");
+                    long[] row = new long[] { rs.getLong("id"), rs.getLong("start_time") };
                     // Imported (stats-only) rows legitimately have no on-disk
                     // telemetry file — they carry the IMPORTED_PATH sentinel.
                     // Do NOT treat them as orphans, or a restore would be wiped
@@ -1016,7 +1056,7 @@ public class TripDatabase {
                     if (isImportedPath(path)) continue;
                     // A null/blank path never had a backing file — always reapable.
                     if (path == null || path.isEmpty()) {
-                        safeOrphans.add(rs.getLong("id"));
+                        safeOrphans.add(row);
                         continue;
                     }
                     // A non-blank path: only reap if the file is genuinely gone
@@ -1026,7 +1066,7 @@ public class TripDatabase {
                     // unknown → preserve (fail safe).
                     boolean volAvailable = (volumeUp == null) ? false : volumeUp.test(path);
                     if (volAvailable && !new java.io.File(path).exists()) {
-                        missingFileOrphans.add(rs.getLong("id"));
+                        missingFileOrphans.add(row);
                     }
                 }
             } catch (Exception e) {
@@ -1047,15 +1087,15 @@ public class TripDatabase {
                 missingFileOrphans.clear();
             }
 
-            List<Long> orphanIds = new ArrayList<>(safeOrphans);
-            orphanIds.addAll(missingFileOrphans);
-            if (orphanIds.isEmpty()) return 0;
+            List<long[]> orphanRows = new ArrayList<>(safeOrphans);
+            orphanRows.addAll(missingFileOrphans);
+            if (orphanRows.isEmpty()) return 0;
 
             int deleted = 0;
             String del = "DELETE FROM trips WHERE id=?";
             try (PreparedStatement pstmt = connection.prepareStatement(del)) {
-                for (Long id : orphanIds) {
-                    pstmt.setLong(1, id);
+                for (long[] row : orphanRows) {
+                    pstmt.setLong(1, row[0]);
                     deleted += pstmt.executeUpdate();
                 }
             } catch (Exception e) {
@@ -1065,6 +1105,9 @@ public class TripDatabase {
             if (deleted > 0) {
                 logger.info("Reconciled trips DB: removed " + deleted
                         + " row(s) whose telemetry file was gone from disk");
+                List<Long> startTimes = new ArrayList<>(orphanRows.size());
+                for (long[] row : orphanRows) startTimes.add(row[1]);
+                recomputeRollupsForStartTimes(startTimes);
             }
             return deleted;
         }
@@ -1227,10 +1270,8 @@ public class TripDatabase {
     public synchronized void updateWeeklyRollup(TripRecord trip) {
         if (!ensureConnection()) return;
 
-        Calendar cal = Calendar.getInstance(Locale.US);
+        Calendar cal = newTripPeriodCalendar();
         cal.setTimeInMillis(trip.startTime);
-        cal.setMinimalDaysInFirstWeek(4); // ISO week
-        cal.setFirstDayOfWeek(Calendar.MONDAY);
         int year = cal.get(Calendar.YEAR);
         int week = cal.get(Calendar.WEEK_OF_YEAR);
 
@@ -1305,7 +1346,7 @@ public class TripDatabase {
     public synchronized void updateMonthlyRollup(TripRecord trip) {
         if (!ensureConnection()) return;
 
-        Calendar cal = Calendar.getInstance(Locale.US);
+        Calendar cal = newTripPeriodCalendar();
         cal.setTimeInMillis(trip.startTime);
         int year = cal.get(Calendar.YEAR);
         int month = cal.get(Calendar.MONTH) + 1; // Calendar.MONTH is 0-based
@@ -1375,6 +1416,122 @@ public class TripDatabase {
     }
 
     /**
+     * Rebuild the weekly rollup for {@code year}/{@code week} from remaining
+     * trips. Used after a delete: rollups are purely additive on save, and the
+     * incremental-mean formula is not cleanly reversible.
+     *
+     * <p>Aggregates with {@code COUNT}/{@code SUM}/{@code AVG} against
+     * {@code trips} for the same ISO-week bucket {@link #updateWeeklyRollup}
+     * uses. If no trips remain, the rollup row is deleted.
+     */
+    public synchronized void recomputeWeeklyRollup(int year, int week) {
+        if (!ensureConnection()) return;
+
+        List<long[]> ranges = weeklyRollupRangesMs(year, week);
+        try {
+            RollupAggregate agg = ranges.isEmpty()
+                    ? RollupAggregate.EMPTY
+                    : queryTripAggregate(ranges);
+            if (agg.tripCount <= 0) {
+                try (PreparedStatement del = connection.prepareStatement(
+                        "DELETE FROM weekly_rollups WHERE \"year\"=? AND week_number=?")) {
+                    del.setInt(1, year);
+                    del.setInt(2, week);
+                    if (del.executeUpdate() > 0) {
+                        logger.debug("Removed empty weekly rollup year=" + year + " week=" + week);
+                    }
+                }
+                return;
+            }
+            String updateSql = "UPDATE weekly_rollups SET trip_count=?, " +
+                    "total_distance_km=?, total_duration_seconds=?, avg_efficiency=?, " +
+                    "total_energy_kwh=?, total_cost=?, avg_energy_per_km=?, " +
+                    "avg_anticipation=?, avg_smoothness=?, avg_speed_discipline=?, " +
+                    "avg_efficiency_score=?, avg_consistency=? " +
+                    "WHERE \"year\"=? AND week_number=?";
+            try (PreparedStatement pstmt = connection.prepareStatement(updateSql)) {
+                bindRollupAggregate(pstmt, agg);
+                pstmt.setInt(13, year);
+                pstmt.setInt(14, week);
+                if (pstmt.executeUpdate() == 0) {
+                    String insertSql = "INSERT INTO weekly_rollups (\"year\", week_number, trip_count, " +
+                            "total_distance_km, total_duration_seconds, avg_efficiency, " +
+                            "total_energy_kwh, total_cost, avg_energy_per_km, " +
+                            "avg_anticipation, avg_smoothness, avg_speed_discipline, " +
+                            "avg_efficiency_score, avg_consistency) " +
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                    try (PreparedStatement ins = connection.prepareStatement(insertSql)) {
+                        ins.setInt(1, year);
+                        ins.setInt(2, week);
+                        bindRollupAggregateFrom(ins, agg, 3);
+                        ins.executeUpdate();
+                    }
+                }
+            }
+            logger.debug("Recomputed weekly rollup year=" + year + " week=" + week
+                    + " trips=" + agg.tripCount);
+        } catch (Exception e) {
+            logger.error("Failed to recompute weekly rollup year=" + year + " week=" + week, e);
+            reconnect();
+        }
+    }
+
+    /**
+     * Rebuild the monthly rollup for {@code year}/{@code month} (1-12) from
+     * remaining trips. Same rationale as {@link #recomputeWeeklyRollup}.
+     */
+    public synchronized void recomputeMonthlyRollup(int year, int month) {
+        if (!ensureConnection()) return;
+
+        List<long[]> ranges = new ArrayList<>();
+        ranges.add(monthlyRollupRangeMs(year, month));
+        try {
+            RollupAggregate agg = queryTripAggregate(ranges);
+            if (agg.tripCount <= 0) {
+                try (PreparedStatement del = connection.prepareStatement(
+                        "DELETE FROM monthly_rollups WHERE \"year\"=? AND month_number=?")) {
+                    del.setInt(1, year);
+                    del.setInt(2, month);
+                    if (del.executeUpdate() > 0) {
+                        logger.debug("Removed empty monthly rollup year=" + year + " month=" + month);
+                    }
+                }
+                return;
+            }
+            String updateSql = "UPDATE monthly_rollups SET trip_count=?, " +
+                    "total_distance_km=?, total_duration_seconds=?, avg_efficiency=?, " +
+                    "total_energy_kwh=?, total_cost=?, avg_energy_per_km=?, " +
+                    "avg_anticipation=?, avg_smoothness=?, avg_speed_discipline=?, " +
+                    "avg_efficiency_score=?, avg_consistency=? " +
+                    "WHERE \"year\"=? AND month_number=?";
+            try (PreparedStatement pstmt = connection.prepareStatement(updateSql)) {
+                bindRollupAggregate(pstmt, agg);
+                pstmt.setInt(13, year);
+                pstmt.setInt(14, month);
+                if (pstmt.executeUpdate() == 0) {
+                    String insertSql = "INSERT INTO monthly_rollups (\"year\", month_number, trip_count, " +
+                            "total_distance_km, total_duration_seconds, avg_efficiency, " +
+                            "total_energy_kwh, total_cost, avg_energy_per_km, " +
+                            "avg_anticipation, avg_smoothness, avg_speed_discipline, " +
+                            "avg_efficiency_score, avg_consistency) " +
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                    try (PreparedStatement ins = connection.prepareStatement(insertSql)) {
+                        ins.setInt(1, year);
+                        ins.setInt(2, month);
+                        bindRollupAggregateFrom(ins, agg, 3);
+                        ins.executeUpdate();
+                    }
+                }
+            }
+            logger.debug("Recomputed monthly rollup year=" + year + " month=" + month
+                    + " trips=" + agg.tripCount);
+        } catch (Exception e) {
+            logger.error("Failed to recompute monthly rollup year=" + year + " month=" + month, e);
+            reconnect();
+        }
+    }
+
+    /**
      * Get a weekly rollup by year and ISO week number.
      */
     public synchronized WeeklyRollup getWeeklyRollup(int year, int week) {
@@ -1416,6 +1573,46 @@ public class TripDatabase {
             reconnect();
         }
         return rollups;
+    }
+
+    /**
+     * Period totals for the last {@code days} days, aggregated from the trips
+     * table with the same cutoff as {@link #getTrips(int, int, int)}.
+     *
+     * <p>Used by GET /api/trips/summary so the Period Summary card matches the
+     * trip list. Weekly rollup rows are ISO-week keyed and can describe a week
+     * that does not overlap the selected day window (or a week whose trips
+     * were already deleted).
+     */
+    public synchronized WeeklyRollup getPeriodSummary(int days) {
+        if (!ensureConnection()) return null;
+        if (days < 1) days = 1;
+
+        long cutoff = System.currentTimeMillis() - ((long) days * 86400000L);
+        List<long[]> ranges = new ArrayList<>();
+        ranges.add(new long[] { cutoff, Long.MAX_VALUE });
+        try {
+            RollupAggregate agg = queryTripAggregate(ranges);
+            if (agg.tripCount <= 0) return null;
+            WeeklyRollup rollup = new WeeklyRollup();
+            rollup.tripCount = agg.tripCount;
+            rollup.totalDistanceKm = agg.totalDistanceKm;
+            rollup.totalDurationSeconds = agg.totalDurationSeconds;
+            rollup.avgEfficiency = agg.avgEfficiency;
+            rollup.totalEnergyKwh = agg.totalEnergyKwh;
+            rollup.totalCost = agg.totalCost;
+            rollup.avgEnergyPerKm = agg.avgEnergyPerKm;
+            rollup.avgAnticipation = agg.avgAnticipation;
+            rollup.avgSmoothness = agg.avgSmoothness;
+            rollup.avgSpeedDiscipline = agg.avgSpeedDiscipline;
+            rollup.avgEfficiencyScore = agg.avgEfficiencyScore;
+            rollup.avgConsistency = agg.avgConsistency;
+            return rollup;
+        } catch (Exception e) {
+            logger.error("Failed to get period summary for days=" + days, e);
+            reconnect();
+            return null;
+        }
     }
 
     /**
@@ -2603,6 +2800,201 @@ public class TripDatabase {
             logger.error("Failed to get monthly rollup year=" + year + " month=" + month, e);
         }
         return null;
+    }
+
+    /**
+     * Calendar used to bucket a trip into weekly/monthly rollups.
+     * ISO week: Monday first day, 4 minimal days in the first week.
+     */
+    private static Calendar newTripPeriodCalendar() {
+        Calendar cal = Calendar.getInstance(Locale.US);
+        cal.setMinimalDaysInFirstWeek(4); // ISO week
+        cal.setFirstDayOfWeek(Calendar.MONDAY);
+        return cal;
+    }
+
+    /**
+     * Recompute weekly and monthly rollups for each distinct period covered by
+     * {@code startTimes} (epoch millis of deleted trips). Dedupes so a batch
+     * delete in the same week/month only rebuilds once.
+     */
+    private void recomputeRollupsForStartTimes(List<Long> startTimes) {
+        if (startTimes == null || startTimes.isEmpty()) return;
+        Set<Long> weeks = new HashSet<>();
+        Set<Long> months = new HashSet<>();
+        for (Long startTime : startTimes) {
+            if (startTime == null) continue;
+            Calendar cal = newTripPeriodCalendar();
+            cal.setTimeInMillis(startTime);
+            int year = cal.get(Calendar.YEAR);
+            int week = cal.get(Calendar.WEEK_OF_YEAR);
+            int month = cal.get(Calendar.MONTH) + 1;
+            if (weeks.add((((long) year) << 16) | (week & 0xFFFF))) {
+                recomputeWeeklyRollup(year, week);
+            }
+            if (months.add((((long) year) << 16) | (month & 0xFFFF))) {
+                recomputeMonthlyRollup(year, month);
+            }
+        }
+    }
+
+    /**
+     * Contiguous {@code [start, end)} millis ranges in calendar {@code year}
+     * whose ISO {@code WEEK_OF_YEAR} equals {@code week}.
+     *
+     * <p>A single ISO week can split across two calendar years (late Dec /
+     * early Jan), and week 1 can appear both in January and again in late
+     * December of the same calendar year. Walking the year yields the 1–2
+     * ranges that match {@link #updateWeeklyRollup}'s {@code YEAR} +
+     * {@code WEEK_OF_YEAR} bucket — a single {@code BETWEEN} would be wrong.
+     */
+    private static List<long[]> weeklyRollupRangesMs(int year, int week) {
+        List<long[]> ranges = new ArrayList<>();
+        Calendar cal = newTripPeriodCalendar();
+        cal.set(Calendar.YEAR, year);
+        cal.set(Calendar.MONTH, Calendar.JANUARY);
+        cal.set(Calendar.DAY_OF_MONTH, 1);
+        cal.set(Calendar.HOUR_OF_DAY, 0);
+        cal.set(Calendar.MINUTE, 0);
+        cal.set(Calendar.SECOND, 0);
+        cal.set(Calendar.MILLISECOND, 0);
+
+        Calendar endOfYear = newTripPeriodCalendar();
+        endOfYear.setTimeInMillis(cal.getTimeInMillis());
+        endOfYear.add(Calendar.YEAR, 1);
+        long yearEndMs = endOfYear.getTimeInMillis();
+
+        long rangeStart = -1;
+        while (cal.getTimeInMillis() < yearEndMs) {
+            boolean match = cal.get(Calendar.YEAR) == year
+                    && cal.get(Calendar.WEEK_OF_YEAR) == week;
+            if (match) {
+                if (rangeStart < 0) rangeStart = cal.getTimeInMillis();
+            } else if (rangeStart >= 0) {
+                ranges.add(new long[] { rangeStart, cal.getTimeInMillis() });
+                rangeStart = -1;
+            }
+            cal.add(Calendar.DAY_OF_YEAR, 1);
+        }
+        if (rangeStart >= 0) {
+            ranges.add(new long[] { rangeStart, yearEndMs });
+        }
+        return ranges;
+    }
+
+    /** {@code [start, end)} millis of calendar month {@code month} (1-12). */
+    private static long[] monthlyRollupRangeMs(int year, int month) {
+        Calendar cal = newTripPeriodCalendar();
+        cal.set(Calendar.YEAR, year);
+        cal.set(Calendar.MONTH, month - 1);
+        cal.set(Calendar.DAY_OF_MONTH, 1);
+        cal.set(Calendar.HOUR_OF_DAY, 0);
+        cal.set(Calendar.MINUTE, 0);
+        cal.set(Calendar.SECOND, 0);
+        cal.set(Calendar.MILLISECOND, 0);
+        long start = cal.getTimeInMillis();
+        cal.add(Calendar.MONTH, 1);
+        return new long[] { start, cal.getTimeInMillis() };
+    }
+
+    /**
+     * Fresh COUNT/SUM/AVG over trips whose {@code start_time} falls in any of
+     * {@code ranges} ({@code [start, end)} pairs). Energy uses the same
+     * cascade as {@link TripRecord#getResolvedEnergyKwh()}.
+     */
+    private static final String ROLLUP_AGGREGATE_SQL =
+            "SELECT COUNT(*) AS trip_count, " +
+            "COALESCE(SUM(distance_km), 0) AS total_distance_km, " +
+            "COALESCE(SUM(duration_seconds), 0) AS total_duration_seconds, " +
+            "COALESCE(AVG(efficiency_soc_per_km), 0) AS avg_efficiency, " +
+            "COALESCE(SUM(CASE " +
+                "WHEN kwh_start > 0 AND kwh_end > 0 AND kwh_start > kwh_end THEN kwh_start - kwh_end " +
+                "WHEN elec_con_start >= 0 AND elec_con_end >= 0 AND elec_con_end >= elec_con_start " +
+                    "AND (kwh_start <= 0 OR kwh_end <= 0 OR kwh_start = kwh_end) " +
+                    "AND (elec_con_end - elec_con_start) > 0 " +
+                    "THEN elec_con_end - elec_con_start " +
+                "WHEN energy_per_km > 0 AND distance_km > 0 THEN energy_per_km * distance_km " +
+                "ELSE 0 END), 0) AS total_energy_kwh, " +
+            "COALESCE(SUM(trip_cost), 0) AS total_cost, " +
+            "COALESCE(AVG(energy_per_km), 0) AS avg_energy_per_km, " +
+            "COALESCE(AVG(anticipation_score), 0) AS avg_anticipation, " +
+            "COALESCE(AVG(smoothness_score), 0) AS avg_smoothness, " +
+            "COALESCE(AVG(speed_discipline_score), 0) AS avg_speed_discipline, " +
+            "COALESCE(AVG(efficiency_score), 0) AS avg_efficiency_score, " +
+            "COALESCE(AVG(consistency_score), 0) AS avg_consistency " +
+            "FROM trips";
+
+    private RollupAggregate queryTripAggregate(List<long[]> ranges) throws Exception {
+        if (ranges == null || ranges.isEmpty()) return RollupAggregate.EMPTY;
+
+        StringBuilder sql = new StringBuilder(ROLLUP_AGGREGATE_SQL);
+        sql.append(" WHERE ");
+        for (int i = 0; i < ranges.size(); i++) {
+            if (i > 0) sql.append(" OR ");
+            sql.append("(start_time >= ? AND start_time < ?)");
+        }
+
+        try (PreparedStatement pstmt = connection.prepareStatement(sql.toString())) {
+            int idx = 1;
+            for (long[] range : ranges) {
+                pstmt.setLong(idx++, range[0]);
+                pstmt.setLong(idx++, range[1]);
+            }
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (!rs.next()) return RollupAggregate.EMPTY;
+                RollupAggregate a = new RollupAggregate();
+                a.tripCount = rs.getInt("trip_count");
+                a.totalDistanceKm = rs.getDouble("total_distance_km");
+                a.totalDurationSeconds = rs.getInt("total_duration_seconds");
+                a.avgEfficiency = rs.getDouble("avg_efficiency");
+                a.totalEnergyKwh = rs.getDouble("total_energy_kwh");
+                a.totalCost = rs.getDouble("total_cost");
+                a.avgEnergyPerKm = rs.getDouble("avg_energy_per_km");
+                a.avgAnticipation = (int) Math.round(rs.getDouble("avg_anticipation"));
+                a.avgSmoothness = (int) Math.round(rs.getDouble("avg_smoothness"));
+                a.avgSpeedDiscipline = (int) Math.round(rs.getDouble("avg_speed_discipline"));
+                a.avgEfficiencyScore = (int) Math.round(rs.getDouble("avg_efficiency_score"));
+                a.avgConsistency = (int) Math.round(rs.getDouble("avg_consistency"));
+                return a;
+            }
+        }
+    }
+
+    private static void bindRollupAggregate(PreparedStatement pstmt, RollupAggregate a)
+            throws Exception {
+        bindRollupAggregateFrom(pstmt, a, 1);
+    }
+
+    private static void bindRollupAggregateFrom(PreparedStatement pstmt, RollupAggregate a,
+                                                int firstIdx) throws Exception {
+        pstmt.setInt(firstIdx, a.tripCount);
+        pstmt.setDouble(firstIdx + 1, a.totalDistanceKm);
+        pstmt.setInt(firstIdx + 2, a.totalDurationSeconds);
+        pstmt.setDouble(firstIdx + 3, a.avgEfficiency);
+        pstmt.setDouble(firstIdx + 4, a.totalEnergyKwh);
+        pstmt.setDouble(firstIdx + 5, a.totalCost);
+        pstmt.setDouble(firstIdx + 6, a.avgEnergyPerKm);
+        pstmt.setInt(firstIdx + 7, a.avgAnticipation);
+        pstmt.setInt(firstIdx + 8, a.avgSmoothness);
+        pstmt.setInt(firstIdx + 9, a.avgSpeedDiscipline);
+        pstmt.setInt(firstIdx + 10, a.avgEfficiencyScore);
+        pstmt.setInt(firstIdx + 11, a.avgConsistency);
+    }
+
+    private static final class RollupAggregate {
+        static final RollupAggregate EMPTY = new RollupAggregate();
+        int tripCount;
+        double totalDistanceKm;
+        int totalDurationSeconds;
+        double avgEfficiency;
+        double totalEnergyKwh;
+        double totalCost;
+        double avgEnergyPerKm;
+        int avgAnticipation;
+        int avgSmoothness;
+        int avgSpeedDiscipline;
+        int avgEfficiencyScore;
+        int avgConsistency;
     }
 
     /**

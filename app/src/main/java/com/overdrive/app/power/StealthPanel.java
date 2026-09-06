@@ -100,7 +100,7 @@ public final class StealthPanel {
      */
     public static boolean isDilink4() {
         try {
-            if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+            if (com.overdrive.app.byd.DiLink5Platform.isActive()) {
                 return true;
             }
             JSONObject c = UnifiedConfigManager.loadConfig().optJSONObject("camera");
@@ -191,6 +191,26 @@ public final class StealthPanel {
         // the daemon that took the lock may be dead, and the process handling
         // ACC-ON may never have called turnOff itself.
         return apply(ctx, true, /* allowTier2 */ tier2LockHeld || isDilink4());
+    }
+
+    /**
+     * Wake even when {@code getPowerScreenStatus()} already claims ON.
+     * Parked DiLink 5 can report ON while the backlight is actually off;
+     * {@link #turnOn} then no-ops and a screen-deterrent layer composites
+     * onto a dark panel.
+     */
+    public static boolean forceTurnOn(Context ctx) {
+        if (ctx == null) return false;
+        boolean allowTier2 = tier2LockHeld || isDilink4();
+        boolean t1 = setBacklightViaPowerManager(ctx, true);
+        boolean t2 = allowTier2 && setBacklightWithLock(ctx, true);
+        writeUnverifiedWant(true);
+        int status = screenStatus(ctx);
+        logStateChange(true, status);
+        return t1 || t2
+                || status == SCREEN_STATUS_ON
+                || status == SCREEN_STATUS_UNKNOWN
+                || !isPlausibleStatus(status);
     }
 
     /**
