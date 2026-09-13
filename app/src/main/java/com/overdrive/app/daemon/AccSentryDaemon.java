@@ -6345,7 +6345,18 @@ public class AccSentryDaemon {
     private static int readPowerLevel() {
         if (appContext == null) return -1;
         try {
-            if (!com.overdrive.app.monitor.AccMonitor.isAccOn()) {
+            // DiLink 5.0's legacy bodywork HAL is stuck at POWER_LEVEL_ON(2) even
+            // when the car is off, so preserve the established OFF override on that
+            // platform even if its richer boot probe temporarily falls through
+            // without marking AccMonitor authoritative. On legacy DiLink 3/4,
+            // however, a non-authoritative false is only the process default and
+            // must not fabricate ACC-OFF or override a genuine listener ON.
+            if (AccPowerLevelPolicy.shouldOverrideBodyworkWithOff(
+                    com.overdrive.app.monitor.AccMonitor
+                            .isAccStateAuthoritative(),
+                    com.overdrive.app.monitor.AccMonitor.isAccOn(),
+                    com.overdrive.app.camera.dilink5
+                            .DiLink5QCarCamBackend.isSupported())) {
                 return POWER_LEVEL_OFF;
             }
         } catch (Throwable ignored) {}

@@ -952,6 +952,20 @@ public class VehicleControlApiHandler {
         }
         if (data.acWindMode != BydVehicleData.UNAVAILABLE) climate.put("windMode", data.acWindMode);
         if (data.acFanLevel != BydVehicleData.UNAVAILABLE && vehiclePoweredOn) climate.put("fanLevel", data.acFanLevel);
+        // AC temperature SETPOINT (the dial) — distinct from insideTempC, which is the
+        // MEASURED cabin air. The collector already reads both dials every poll, but they
+        // were never surfaced here, so clients had no way to show the temperature the car
+        // is actually set to and fell back to a hardcoded default. Gated on power like
+        // fanLevel, since a parked car reports the last cached dial value. Key names match
+        // BydVehicleData.toJson() so both serializations agree. tempUnit rides along
+        // because the setpoint is expressed in the head unit's display unit (0 = F).
+        if (data.acSetpointDriver != BydVehicleData.UNAVAILABLE && vehiclePoweredOn) {
+            climate.put("setpointDriver", data.acSetpointDriver);
+        }
+        if (data.acSetpointPassenger != BydVehicleData.UNAVAILABLE && vehiclePoweredOn) {
+            climate.put("setpointPassenger", data.acSetpointPassenger);
+        }
+        if (data.tempUnit != BydVehicleData.UNAVAILABLE) climate.put("tempUnit", data.tempUnit);
         Boolean remoteClimateActive = remoteClimateActive();
         if (remoteClimateActive != null) {
             climate.put("remoteClimateActive", remoteClimateActive.booleanValue());
