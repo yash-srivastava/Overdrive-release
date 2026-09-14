@@ -8614,11 +8614,9 @@ public class BydDataCollector {
         if (!com.overdrive.app.automation.condition.DoorEvent.shouldPoll()) return;
         for (int area = 1; area <= 7; area++) {
             try {
-                Object v = BydDeviceHelper.callMethod(bodyworkDevice, "getDoorState", area);
-                if (!(v instanceof Integer)) continue;
-                int raw = (Integer) v;
-                // Only 0 (closed) / 1 (open) are meaningful; 255/-1 = unavailable → skip so
-                // an unreadable area never manufactures a spurious "closed" edge.
+                int raw = readDoorOpenState(area);
+                // Only 0 (closed) / 1 (open) are meaningful; 255/65535/MIN_VALUE = unavailable →
+                // skip so an unreadable area never manufactures a spurious "closed" edge.
                 if (raw != com.overdrive.app.byd.bodywork.BodyworkConstants.STATE_OPEN
                         && raw != com.overdrive.app.byd.bodywork.BodyworkConstants.STATE_CLOSED) continue;
                 Integer prev = lastPolledDoorState.get(area);
@@ -8629,9 +8627,44 @@ public class BydDataCollector {
                 // caused the first later close/open transition to be lost as that silent seed.
                 notifyDoorStateListeners(area, raw);
             } catch (Exception ignored) {
-                // Getter absent on this trim → nothing to poll; leave to the callback path.
+                // Neither path returned a value on this trim; leave to the callback path.
             }
         }
+    }
+
+    /** Bodywork feature id for each DoorEvent area (1..7); UNRESOLVED_ID where none applies. */
+    private static int doorFeatureForArea(int area) {
+        switch (area) {
+            case 1: return BydFeatureIds.BODYWORK_DOOR_LF;   // front, drive-side normalised downstream
+            case 2: return BydFeatureIds.BODYWORK_DOOR_RF;
+            case 3: return BydFeatureIds.BODYWORK_DOOR_LR;
+            case 4: return BydFeatureIds.BODYWORK_DOOR_RR;
+            case 5: return BydFeatureIds.BODYWORK_HOOD;
+            case 6: return BydFeatureIds.BODYWORK_TRUNK;
+            case 7: return BydFeatureIds.BODYWORK_FUEL_CAP;
+            default: return BydFeatureIds.UNRESOLVED_ID;
+        }
+    }
+
+    /**
+     * Read one door/lid's open state (0=closed, 1=open, else unavailable).
+     *
+     * <p>Primary path is the manager tier — {@code BydManagerChannel.getInt(deviceType, featureId)}
+     * delegates to the BYD system service, which holds {@code BYDAUTO_BODYWORK_GET}; this is what
+     * makes the read work at all on trims that gate the per-device getter (the reported bug: a
+     * trunk left open never alerted because {@code getDoorState} threw SecurityException into a
+     * swallowed catch). Verified live on Di 3.0. Falls back to the legacy per-device
+     * {@code getDoorState(area)} for any trim where the manager channel yields nothing but the
+     * device getter is permitted.
+     */
+    private int readDoorOpenState(int area) {
+        int fid = doorFeatureForArea(area);
+        if (BydFeatureIds.isResolved(fid) && bodyworkDevice != null) {
+            int v = BydManagerChannel.getInt(context, bodyworkDevice, fid);
+            if (v != Integer.MIN_VALUE) return v;
+        }
+        Object legacy = BydDeviceHelper.callMethod(bodyworkDevice, "getDoorState", area);
+        return (legacy instanceof Integer) ? (Integer) legacy : Integer.MIN_VALUE;
     }
 
     private void collectDoorLock(BydVehicleData.Builder b) {

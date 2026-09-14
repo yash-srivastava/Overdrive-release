@@ -140,6 +140,28 @@ public final class BydFeatureIds {
     public static final int BODY_LR_DOOR_STATUS = resolveOrFallback("Body.LR_DOOR_STATUS_FLAG", 692060178);
     public static final int BODY_RR_DOOR_STATUS = resolveOrFallback("Body.RR_DOOR_STATUS_FLAG", 692060179);
 
+    // ==================== BODYWORK DOOR / LID OPEN STATE ====================
+    //
+    // Open/closed state for each door and lid. Read via the manager tier
+    // (BydManagerChannel.getInt), NOT the per-device BYDAutoBodyworkDevice.getDoorState:
+    // that named getter runs enforceCallingOrSelfPermission(BYDAUTO_BODYWORK_GET) in the
+    // caller, and GET is protectionLevel=signature / ungrantable, so it throws for every
+    // non-system app and the old poll swallowed it in catch(Exception ignored). The manager
+    // path delegates the read to the BYD system service, which holds the permission — the same
+    // route battery/window already use.
+    //
+    // These are the "Bodywork" group ids, verified LIVE on a Sealion 6 DM-i (Di 3.0) with a
+    // trunk open/close round-trip: 0=closed, 1=open, 65535=unavailable. deviceType 1001.
+    // The BODY_*_DOOR_STATUS ids above are a DIFFERENT ("Body") group that reads
+    // -10011/unavailable on this trim — kept for reference but not used for open-state.
+    public static final int BODYWORK_DOOR_LF = resolveOrFallback("Bodywork.BODYWORK_LEFT_HAND_FRONT_DOOR", 0x29400008);
+    public static final int BODYWORK_DOOR_RF = resolveOrFallback("Bodywork.BODYWORK_RIGHT_HAND_FRONT_DOOR", 0x2940000A);
+    public static final int BODYWORK_DOOR_LR = resolveOrFallback("Bodywork.BODYWORK_LEFT_HAND_REAR_DOOR", 0x2940000C);
+    public static final int BODYWORK_DOOR_RR = resolveOrFallback("Bodywork.BODYWORK_RIGHT_HAND_REAR_DOOR", 0x2940000E);
+    public static final int BODYWORK_HOOD = resolveOrFallback("Bodywork.BODYWORK_HOOD", 0x2940001C);
+    public static final int BODYWORK_TRUNK = resolveOrFallback("Bodywork.BODYWORK_LUGGAGE_DOOR", 0x2940001A);
+    public static final int BODYWORK_FUEL_CAP = resolveOrFallback("Bodywork.BODYWORK_FUEL_TANK_CAP", 0x4FB00016);
+
     // ==================== LIGHT ====================
     public static final int LIGHT_HIGH_BEAM = resolveOrFallback("Light.LIGHT_HIGH_BEAM_LIGHT", 950009868);
     public static final int LIGHT_LOW_BEAM = resolveOrFallback("Light.LIGHT_LOW_BEAM_LIGHT", 950009866);
