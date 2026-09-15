@@ -17,7 +17,7 @@
         <div id="app-shell-mount"></div>
         <main class="main-content">
             <div class="mobile-header">
-                <button class="menu-toggle" type="button" onclick="toggleSidebar()" aria-label="Open menu">
+                <button class="menu-toggle" type="button" onclick="toggleSidebar()" aria-label="Open menu" data-i18n-attr="aria-label:genai.aria_open_menu">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <line x1="4" x2="20" y1="12" y2="12"/>
                         <line x1="4" x2="20" y1="6" y2="6"/>
@@ -36,7 +36,7 @@
                 </div>
             </header>
 
-            <div class="communicate-mobile-tabs" role="tablist" aria-label="Communication mode">
+            <div class="communicate-mobile-tabs" role="tablist" aria-label="Communication mode" data-i18n-attr="aria-label:communicate.title">
                 <button type="button" class="communicate-tab is-active" id="talkTab" role="tab" aria-selected="true" aria-controls="talkPanel">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
@@ -72,13 +72,13 @@
                                 </button>
                                 <span class="talk-live-badge" id="liveBadge">
                                     <span class="talk-live-dot"></span>
-                                    <span>LIVE</span>
+                                    <span data-i18n="communicate.live">LIVE</span>
                                 </span>
                             </div>
                         </div>
 
                         <div class="talk-stage">
-                            <button type="button" class="ptt-button is-disabled" id="pttButton" aria-label="Hold to talk" aria-disabled="true">
+                            <button type="button" class="ptt-button is-disabled" id="pttButton" aria-label="Hold to talk" aria-disabled="true" data-i18n-attr="aria-label:communicate.hold_to_talk">
                                 <span class="ptt-ring" aria-hidden="true"></span>
                                 <svg class="ptt-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                                     <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
@@ -92,7 +92,7 @@
                                 <div class="talk-state-guidance" id="talkStateGuidance"></div>
                             </div>
 
-                            <div class="talk-meter" id="talkMeter" aria-label="Microphone level">
+                            <div class="talk-meter" id="talkMeter" aria-label="Microphone level" data-i18n-attr="aria-label:communicate.mic_level">
                                 <div class="talk-meter-track">
                                     <div class="talk-meter-fill" id="talkMeterFill"></div>
                                 </div>
@@ -109,7 +109,7 @@
                                 <div class="talk-output-option">
                                     <label for="remoteOutputOverride" data-i18n="communicate.output_override">Use custom voice level</label>
                                     <label class="toggle-switch talk-output-toggle">
-                                        <input type="checkbox" id="remoteOutputOverride" aria-label="Use custom voice level" disabled>
+                                        <input type="checkbox" id="remoteOutputOverride" aria-label="Use custom voice level" data-i18n-attr="aria-label:communicate.output_override" disabled>
                                         <span class="toggle-slider"></span>
                                     </label>
                                 </div>
@@ -128,6 +128,7 @@
                                         step="5"
                                         value="70"
                                         aria-label="Voice output level"
+                                        data-i18n-attr="aria-label:communicate.output_level"
                                         disabled>
                                     <output id="remoteOutputValue" for="remoteOutputLevel">70%</output>
                                 </div>
@@ -151,7 +152,7 @@
 
                             <fieldset class="message-fieldset">
                                 <legend data-i18n="communicate.presentation">Presentation</legend>
-                                <div class="communicate-segmented" id="messageKind" role="radiogroup" aria-label="Message presentation">
+                                <div class="communicate-segmented" id="messageKind" role="radiogroup" aria-label="Message presentation" data-i18n-attr="aria-label:communicate.presentation">
                                     <button type="button" class="is-selected" data-value="toast" role="radio" aria-checked="true" data-i18n="communicate.toast">Toast</button>
                                     <button type="button" data-value="dialog" role="radio" aria-checked="false" data-i18n="communicate.dialog">Dialog</button>
                                 </div>
@@ -211,7 +212,7 @@
     <script src="../shared/auth.js"></script>
     <script src="../shared/core.js?v=20"></script>
     <script src="../shared/cabin-audio.js?v=1"></script>
-    <script src="../shared/communicate.js?v=10"></script>
+    <script src="../shared/communicate.js?v=11"></script>
     <script>
         function toggleSidebar() {
             var sidebar = document.getElementById('sidebar');

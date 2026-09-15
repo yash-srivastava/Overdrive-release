@@ -1431,8 +1431,9 @@ public class StatusOverlayService extends Service {
                     try {
                         android.widget.Toast.makeText(
                             StatusOverlayService.this,
-                            "Recording mode change failed"
-                                + (hint != null ? ": " + hint : ""),
+                            hint != null
+                                ? getString(R.string.overlay_recording_mode_failed_fmt, hint)
+                                : getString(R.string.overlay_recording_mode_failed),
                             android.widget.Toast.LENGTH_SHORT).show();
                     } catch (Exception ignored) {}
                     // Kick an immediate poll so the chip reverts to

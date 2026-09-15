@@ -672,7 +672,7 @@
                 <button class="menu-toggle" onclick="toggleSidebar()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
                 </button>
-                <span style="font-weight:600;">Notifications</span>
+                <span style="font-weight:600;" data-i18n="notif.page_title">Notifications</span>
                 <div style="width:40px;"></div>
             </div>
 
@@ -2547,9 +2547,9 @@
                 await loadSubscriptions();
                 renderCategories();
                 renderMinSeverity();
-                showStatus('ok', 'Notifications disabled on this device.');
+                showStatus('ok', BYD.i18n.t('notif.disabled_on_device'));
             } catch (e) {
-                showStatus('error', 'Disable failed: ' + (e && e.message ? e.message : e));
+                showStatus('error', BYD.i18n.t('notif.disable_failed', {error: (e && e.message ? e.message : e)}));
             }
         });
 
@@ -2572,17 +2572,17 @@
                     body: JSON.stringify(testBody)
                 });
                 if (r.status === 503) {
-                    showStatus('warn', 'Backend not initialized. Reserve a Zrok URL first.');
+                    showStatus('warn', BYD.i18n.t('notif.backend_not_initialized'));
                     return;
                 }
                 if (!r.ok) {
-                    showStatus('error', 'Test failed: HTTP ' + r.status);
+                    showStatus('error', BYD.i18n.t('notif.test_failed_http', {status: r.status}));
                     return;
                 }
-                showStatus('ok', 'Test sent. Check your notification center.');
+                showStatus('ok', BYD.i18n.t('notif.test_sent'));
             } catch (e) {
                 if (isNetworkError(e)) showTunnelUnreachable();
-                else showStatus('error', 'Test failed: ' + (e && e.message ? e.message : e));
+                else showStatus('error', BYD.i18n.t('notif.test_failed', {error: (e && e.message ? e.message : e)}));
             }
         });
 

@@ -1155,18 +1155,19 @@
                     <div class="process-monitor-header">
                         <div>
                             <div class="process-monitor-title">
-                                <h2>Live Processes</h2>
-                                <span class="process-live-badge" id="topLiveBadge">Paused</span>
+                                <h2 data-i18n="performance.live_processes">Live Processes</h2>
+                                <span class="process-live-badge" id="topLiveBadge" data-i18n="performance.paused">Paused</span>
                             </div>
                             <div class="process-monitor-meta">
                                 <span id="topSource">top -b -n 1</span>
                                 <span aria-hidden="true"> · </span>
-                                <span id="topUpdated">Waiting</span>
+                                <span id="topUpdated" data-i18n="performance.waiting">Waiting</span>
                             </div>
                         </div>
                         <button class="process-refresh" id="topRefreshButton"
                                 type="button" title="Refresh process snapshot"
                                 aria-label="Refresh process snapshot"
+                                data-i18n-attr="title:performance.refresh_snapshot;aria-label:performance.refresh_snapshot"
                                 onclick="BYD.performance.refreshTopNow()">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1178,38 +1179,38 @@
 
                     <div class="process-summary">
                         <div class="process-summary-item">
-                            <div class="process-summary-label">CPU activity</div>
+                            <div class="process-summary-label" data-i18n="performance.cpu_activity">CPU activity</div>
                             <div class="process-summary-value" id="topCpuBusy">--%</div>
                             <div class="process-summary-detail" id="topCpuDetail">--</div>
                         </div>
                         <div class="process-summary-item">
-                            <div class="process-summary-label">Tasks</div>
+                            <div class="process-summary-label" data-i18n="performance.tasks">Tasks</div>
                             <div class="process-summary-value" id="topTasks">--</div>
                             <div class="process-summary-detail" id="topTasksDetail">--</div>
                         </div>
                         <div class="process-summary-item">
-                            <div class="process-summary-label">RAM</div>
+                            <div class="process-summary-label" data-i18n="performance.ram">RAM</div>
                             <div class="process-summary-value" id="topMemory">--</div>
                             <div class="process-summary-detail" id="topMemoryDetail">--</div>
                         </div>
                         <div class="process-summary-item">
-                            <div class="process-summary-label">Swap</div>
+                            <div class="process-summary-label" data-i18n="performance.swap">Swap</div>
                             <div class="process-summary-value" id="topSwap">--</div>
                             <div class="process-summary-detail" id="topSwapDetail">--</div>
                         </div>
                     </div>
 
-                    <div class="process-table" role="table" aria-label="Android processes">
+                    <div class="process-table" role="table" aria-label="Android processes" data-i18n-attr="aria-label:performance.live_processes">
                         <div class="process-table-header" role="row">
-                            <span role="columnheader">Process</span>
-                            <span role="columnheader" style="text-align:right;">CPU</span>
-                            <span role="columnheader" style="text-align:right;">Memory</span>
-                            <span role="columnheader" style="text-align:right;">Resident</span>
-                            <span role="columnheader" style="text-align:right;">User</span>
-                            <span role="columnheader" style="text-align:right;">PID</span>
+                            <span role="columnheader" data-i18n="performance.col_process">Process</span>
+                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_cpu">CPU</span>
+                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_memory">Memory</span>
+                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_resident">Resident</span>
+                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_user">User</span>
+                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_pid">PID</span>
                         </div>
                         <div id="topProcessRows" role="rowgroup">
-                            <div class="process-empty">Waiting for a process snapshot</div>
+                            <div class="process-empty" data-i18n="performance.waiting_snapshot">Waiting for a process snapshot</div>
                         </div>
                     </div>
                 </section>

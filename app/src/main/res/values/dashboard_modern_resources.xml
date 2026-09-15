@@ -48,6 +48,14 @@
     <string name="dashboard_modern_percent">%1$.0f%%</string>
     <string name="dashboard_modern_distance">%1$d %2$s</string>
     <string name="dashboard_modern_charging">Charging</string>
+    <string name="dashboard_modern_charging_kw">Charging (%1$.1f kW)</string>
+    <string name="dashboard_modern_driving">Driving (%1$s)</string>
+    <string name="dashboard_modern_driving_speed">Driving (%1$s) · %2$d km/h</string>
+    <string name="dashboard_modern_recording_mark"> (REC)</string>
+    <string name="dashboard_modern_reverse">Reverse (R)</string>
+    <string name="dashboard_modern_neutral">Neutral (N)</string>
+    <string name="dashboard_modern_park">Ready / Parked (P)</string>
+    <string name="dashboard_modern_sentry_active">Sentry active</string>
     <string name="dashboard_modern_plugged_in">Plugged in</string>
     <string name="dashboard_modern_charge_complete">Charge complete</string>
     <string name="dashboard_modern_charge_fault">Charging needs attention</string>

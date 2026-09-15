@@ -264,7 +264,7 @@
                                 <div class="setting-name" data-i18n="network.proxy_clients">Give connected devices internet (proxy)</div>
                                 <!-- Replaced at runtime with the live gateway/port; this
                                      inline copy is what shows before the first poll. -->
-                                <div class="setting-desc" id="hsProxyClientsDesc">Connecting to the hotspot is not enough — this vehicle can't route devices to the internet on its own, so each device must be pointed at the car's proxy. On the device, after joining this hotspot: 1) open its Wi-Fi settings and edit this network, 2) set Proxy to Manual, 3) enter the hostname and port shown here, 4) save, then browse. The device keeps showing "no internet" and its own mobile-data icon even when this is working — that check ignores proxies.</div>
+                                <div class="setting-desc" id="hsProxyClientsDesc" data-i18n="network.proxy_clients_desc">Makes the proxy reachable from the hotspot. Each device must set that proxy itself in its own WiFi settings — connecting alone does not route its traffic.</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -276,7 +276,7 @@
                         <div class="setting-row">
                             <div class="setting-text">
                                 <div class="setting-title" data-i18n="network.client_tunnel_title">Also encrypt connected devices' traffic</div>
-                                <div class="setting-desc" id="hsClientTunnelDesc">Sends connected devices' traffic through the encrypted tunnel before it leaves the car's SIM. Point devices at port 8122 instead of 8121. Slower, since it adds a hop. Turning this off stops that port listening immediately.</div>
+                                <div class="setting-desc" id="hsClientTunnelDesc" data-i18n="network.client_tunnel_desc_fmt">Sends connected devices' traffic through the encrypted tunnel before it leaves the car's SIM. Point devices at port {tp} instead of {rp}. Slower, since it adds a hop. Turning this off stops that port listening immediately.</div>
                             </div>
                             <label class="switch">
                                 <input type="checkbox" id="hsClientTunnel" onchange="NetworkPage.onSetting('clientTunnel', this.checked)">

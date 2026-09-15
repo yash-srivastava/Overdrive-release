@@ -5,6 +5,7 @@ import android.graphics.*
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
+import com.overdrive.app.R
 import kotlin.math.sqrt
 
 /**
@@ -80,7 +81,7 @@ class RoiDrawingView @JvmOverloads constructor(
         if (screenPoints.isEmpty()) {
             // Draw hint text
             canvas.drawText(
-                "Tap to add points (${minPoints}-${maxPoints})",
+                context.getString(R.string.roi_tap_to_add_points, minPoints, maxPoints),
                 width / 2f,
                 height / 2f,
                 textPaint

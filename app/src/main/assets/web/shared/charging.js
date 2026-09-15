@@ -1720,7 +1720,7 @@ var CHARGING = {
         this._setText('detailChartSoc', socText);
         var socCaption = chargingNow
             ? this._t('charge.detail_start_now', 'Start → Now')
-            : this._t('charge.detail_start_end', 'Start → End');
+            : this._t('charge.detail_start_end', 'Start -> End');
         this._setText('detailSocCaption', socCaption);
         this._setText('detailChartSocLabel', socCaption);
         var fillSoc = s.endSoc != null

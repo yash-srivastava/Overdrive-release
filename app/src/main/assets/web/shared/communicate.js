@@ -10,6 +10,12 @@ var CommunicatePage = {
     MAX_CAPTURE_AGE_MS: 250,
     WORKLET_MODULE_URL: '/shared/communicate-worklet.js?v=1',
 
+    tt: function (key, fallback) {
+        var v = (window.BYD && BYD.i18n && BYD.i18n.t) ? BYD.i18n.t(key) : null;
+        if (v && v !== key) return v;
+        return fallback || key;
+    },
+
     status: null,
     statusTimer: null,
     statusGeneration: 0,
@@ -50,7 +56,7 @@ var CommunicatePage = {
         this.bindMessage();
         this.bindMobileTabs();
         this.bindLifecycle();
-        this.setTalkState('disabled', 'Checking car...', '', '');
+        this.setTalkState('disabled', this.tt('communicate.checking_car', 'Checking car...'), '', '');
         this.loadOutputSettings();
         this.startStatusPolling(true);
     },
@@ -244,7 +250,7 @@ var CommunicatePage = {
             self.renderOutputStatus();
         }).catch(function () {
             self.outputSettingsReady = false;
-            self.setOutputStatus(false, 'Output level unavailable');
+            self.setOutputStatus(false, self.tt('communicate.output_unavailable', 'Output level unavailable'));
         }).then(function () {
             self.outputLoading = false;
             self.updateOutputControlState();
@@ -262,7 +268,7 @@ var CommunicatePage = {
         }
 
         this.outputSaving = true;
-        this.setOutputStatus(null, 'Saving...');
+        this.setOutputStatus(null, this.tt('communicate.saving', 'Saving...'));
         this.updateOutputControlState();
         if (this.status) this.renderStatus();
 
@@ -300,7 +306,7 @@ var CommunicatePage = {
             self.outputOverrideEnabled =
                 self.persistedOutputOverrideEnabled;
             self.renderOutputLevel();
-            self.setOutputStatus(false, 'Could not save');
+            self.setOutputStatus(false, self.tt('communicate.could_not_save', 'Could not save'));
         }).then(function () {
             self.outputSaving = false;
             self.updateOutputControlState();
@@ -329,9 +335,9 @@ var CommunicatePage = {
 
     renderOutputStatus: function (saved) {
         if (!this.outputOverrideEnabled) {
-            this.setOutputStatus(null, 'Using selected car volume');
+            this.setOutputStatus(null, this.tt('communicate.using_car_volume', 'Using selected car volume'));
         } else if (saved) {
-            this.setOutputStatus(true, 'Saved');
+            this.setOutputStatus(true, this.tt('communicate.saved', 'Saved'));
         } else {
             this.setOutputStatus(null, '');
         }
@@ -521,19 +527,19 @@ var CommunicatePage = {
                     carState: 'unreachable',
                     audioReady: false,
                     audioState: 'unreachable',
-                    audioReason: 'Car is offline or unreachable',
+                    audioReason: self.tt('communicate.offline_reason', 'Car is offline or unreachable'),
                     audioGuidance:
-                        'Check that the car is powered on and its OverDrive connection is reachable.',
+                        self.tt('communicate.offline_guidance', 'Check that the car is powered on and its OverDrive connection is reachable.'),
                     listenerReady: false,
                     listenerState: 'unreachable',
-                    listenerReason: 'Car is offline or unreachable',
+                    listenerReason: self.tt('communicate.offline_reason', 'Car is offline or unreachable'),
                     listenerGuidance:
-                        'Check that the car is powered on and its OverDrive connection is reachable.',
+                        self.tt('communicate.offline_guidance', 'Check that the car is powered on and its OverDrive connection is reachable.'),
                     messagesReady: false,
                     messageState: 'unreachable',
-                    messageReason: 'Car is offline or unreachable',
+                    messageReason: self.tt('communicate.offline_reason', 'Car is offline or unreachable'),
                     messageGuidance:
-                        'Check that the car is powered on and its OverDrive connection is reachable.'
+                        self.tt('communicate.offline_guidance', 'Check that the car is powered on and its OverDrive connection is reachable.')
                 };
                 self.renderStatus();
             });
@@ -580,22 +586,22 @@ var CommunicatePage = {
 
         if (!this.live && !this.stopping && !this.pressing) {
             if (ready && !this.outputSaving) {
-                this.setTalkState('ready', 'Hold to talk', '', '');
+                this.setTalkState('ready', this.tt('communicate.hold_to_talk', 'Hold to talk'), '', '');
             } else if (ready) {
                 this.setTalkState(
-                    'disabled', 'Saving output level...', '', '');
+                    'disabled', this.tt('communicate.saving_output', 'Saving output level...'), '', '');
             } else {
                 var title = carOff
-                    ? 'Car is off'
+                    ? this.tt('communicate.car_off', 'Car is off')
                     : unreachable
-                        ? 'Car unreachable'
+                        ? this.tt('communicate.car_unreachable', 'Car unreachable')
                         : status.audioState === 'busy'
-                            ? 'Talk unavailable'
-                            : 'Setup required';
+                            ? this.tt('communicate.talk_unavailable', 'Talk unavailable')
+                            : this.tt('communicate.setup_required', 'Setup required');
                 this.setTalkState(
                     'disabled',
                     title,
-                    status.audioReason || 'Car is unavailable',
+                    status.audioReason || this.tt('communicate.car_unavailable', 'Car is unavailable'),
                     status.audioGuidance || '');
             }
         }
@@ -623,12 +629,12 @@ var CommunicatePage = {
         banner.classList.toggle('is-unreachable', unreachable);
         if (title) {
             title.textContent = carOff
-                ? 'Car is off'
-                : unreachable ? 'Car unreachable' : 'Messages unavailable';
+                ? this.tt('communicate.car_off', 'Car is off')
+                : unreachable ? this.tt('communicate.car_unreachable', 'Car unreachable') : this.tt('communicate.messages_unavailable', 'Messages unavailable');
         }
         if (reason) {
             reason.textContent =
-                status.messageReason || 'Remote messages are unavailable';
+                status.messageReason || this.tt('communicate.remote_messages_unavailable', 'Remote messages are unavailable');
         }
         if (guidance) {
             guidance.textContent = status.messageGuidance || '';
@@ -659,13 +665,13 @@ var CommunicatePage = {
         this.staleCaptureFrames = 0;
         var generation = this.generation;
         this.stopStatusPolling();
-        this.setTalkState('connecting', 'Connecting...', '', '');
+        this.setTalkState('connecting', this.tt('communicate.connecting', 'Connecting...'), '', '');
 
         if (!this.prepareAudioContext(generation)) return;
 
         var media = navigator.mediaDevices;
         if (!media || !media.getUserMedia) {
-            this.failTalk('Microphone access requires a supported HTTPS browser');
+            this.failTalk(this.tt('communicate.mic_https', 'Microphone access requires a supported HTTPS browser'));
             return;
         }
 
@@ -697,7 +703,7 @@ var CommunicatePage = {
     prepareAudioContext: function (generation) {
         var AudioContextCtor = window.AudioContext || window.webkitAudioContext;
         if (!AudioContextCtor) {
-            this.failTalk('This browser cannot process microphone audio');
+            this.failTalk(this.tt('communicate.mic_unsupported', 'This browser cannot process microphone audio'));
             return false;
         }
         try {
@@ -710,14 +716,14 @@ var CommunicatePage = {
                     resume.catch(function () {
                         if (self.isPressCurrent(generation)
                                 && self.audioContext === context) {
-                            self.failTalk('Could not activate microphone processing');
+                            self.failTalk(self.tt('communicate.mic_activate_failed', 'Could not activate microphone processing'));
                         }
                     });
                 }
             }
             return true;
         } catch (error) {
-            this.failTalk('Could not start microphone processing');
+            this.failTalk(this.tt('communicate.mic_start_failed', 'Could not start microphone processing'));
             return false;
         }
     },
@@ -754,7 +760,7 @@ var CommunicatePage = {
         try {
             socket = new WebSocket(url);
         } catch (error) {
-            this.failTalk('Could not open the car audio connection');
+            this.failTalk(this.tt('communicate.audio_open_failed', 'Could not open the car audio connection'));
             return;
         }
         this.socket = socket;
@@ -787,7 +793,7 @@ var CommunicatePage = {
                 }
                 self.startAudioPipeline(generation);
             } else if (message.type === 'failed') {
-                self.failTalk(message.reason || 'The car audio receiver failed');
+                self.failTalk(message.reason || self.tt('communicate.audio_receiver_failed', 'The car audio receiver failed'));
             } else if (message.type === 'stopped') {
                 self.stopTalk(message.reason || 'Transmission ended');
             }
@@ -796,7 +802,7 @@ var CommunicatePage = {
             if (self.socket === socket
                     && generation === self.generation
                     && !self.stopping) {
-                self.failTalk('Car audio connection failed');
+                self.failTalk(self.tt('communicate.audio_conn_failed', 'Car audio connection failed'));
             }
         };
         socket.onclose = function () {
@@ -804,7 +810,7 @@ var CommunicatePage = {
                     && generation === self.generation
                     && !self.stopping
                     && (self.pressing || self.live)) {
-                self.failTalk('Car audio connection was lost');
+                self.failTalk(self.tt('communicate.audio_conn_lost', 'Car audio connection was lost'));
             }
         };
     },
@@ -812,7 +818,7 @@ var CommunicatePage = {
     startAudioPipeline: function (generation) {
         if (!this.isPressCurrent(generation) || !this.stream || this.live) return;
         if (!this.audioContext || this.audioContext.state === 'closed') {
-            this.failTalk('Microphone processing was not activated by the press');
+            this.failTalk(this.tt('communicate.mic_not_activated', 'Microphone processing was not activated by the press'));
             return;
         }
         var self = this;
@@ -902,7 +908,7 @@ var CommunicatePage = {
             this.connectCaptureGraph();
         } catch (error) {
             this.disconnectCaptureGraph();
-            this.failTalk('Could not start microphone processing');
+            this.failTalk(this.tt('communicate.mic_start_failed', 'Could not start microphone processing'));
             return;
         }
 
@@ -952,7 +958,7 @@ var CommunicatePage = {
                     || !self.audioContext
                     || self.audioContext.state !== 'running') {
                 if (self.isPressCurrent(generation)) {
-                    self.failTalk('Could not activate microphone processing');
+                    self.failTalk(self.tt('communicate.mic_activate_failed', 'Could not activate microphone processing'));
                 }
                 return;
             }
@@ -974,13 +980,13 @@ var CommunicatePage = {
             if (resume && typeof resume.then === 'function') {
                 resume.then(activate).catch(function () {
                     if (self.isPressCurrent(generation)) {
-                        self.failTalk('Could not activate microphone processing');
+                        self.failTalk(self.tt('communicate.mic_activate_failed', 'Could not activate microphone processing'));
                     }
                 });
                 return;
             }
         } catch (error) {
-            this.failTalk('Could not activate microphone processing');
+            this.failTalk(this.tt('communicate.mic_activate_failed', 'Could not activate microphone processing'));
             return;
         }
         activate();
@@ -1008,11 +1014,11 @@ var CommunicatePage = {
             this.setMeter(Math.min(1, Math.max(0, rms) * 4.5));
         }
         if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-            this.failTalk('Car audio connection was lost');
+            this.failTalk(this.tt('communicate.audio_conn_lost', 'Car audio connection was lost'));
             return;
         }
         if (this.socket.bufferedAmount > 131072) {
-            this.failTalk('Network is too slow for live audio');
+            this.failTalk(this.tt('communicate.network_too_slow', 'Network is too slow for live audio'));
             return;
         }
         this.socket.send(pcmBuffer);
@@ -1024,7 +1030,7 @@ var CommunicatePage = {
         this.startedAt = Date.now();
         this.lastAudioAt = this.startedAt;
         this.lastMeterAt = 0;
-        this.setTalkState('live', 'Live', '', '');
+        this.setTalkState('live', this.tt('communicate.live', 'Live'), '', '');
         this.startTalkTicker();
     },
 
@@ -1037,9 +1043,9 @@ var CommunicatePage = {
             var elapsed = now - self.startedAt;
             self.renderElapsed(elapsed);
             if (elapsed >= self.MAX_SESSION_MS) {
-                self.stopTalk('30 second limit reached');
+                self.stopTalk(self.tt('communicate.limit_30s', '30 second limit reached'));
             } else if (now - self.lastAudioAt >= self.AUDIO_INACTIVITY_MS) {
-                self.stopTalk('Microphone stream became inactive');
+                self.stopTalk(self.tt('communicate.mic_inactive', 'Microphone stream became inactive'));
             }
         }, 100);
     },
@@ -1061,7 +1067,7 @@ var CommunicatePage = {
         this.generation += 1;
         this.stopTalkTicker();
         if (hadResources && !silent) {
-            this.setTalkState('stopping', 'Stopping...', '', '');
+            this.setTalkState('stopping', this.tt('communicate.stopping', 'Stopping...'), '', '');
         }
 
         var socket = this.socket;
@@ -1099,11 +1105,11 @@ var CommunicatePage = {
 
         this.stopping = false;
         if (document.hidden || silent) {
-            this.setTalkState('disabled', 'Talk unavailable', reason || '', '');
+            this.setTalkState('disabled', this.tt('communicate.talk_unavailable', 'Talk unavailable'), reason || '', '');
             return;
         }
         if (reason && reason !== 'Released' && reason !== 'Talk tab closed') {
-            this.setTalkState('disabled', 'Talk stopped', reason, '');
+            this.setTalkState('disabled', this.tt('communicate.talk_stopped', 'Talk stopped'), reason, '');
         }
         this.startStatusPolling(true);
     },
@@ -1111,7 +1117,7 @@ var CommunicatePage = {
     failTalk: function (reason) {
         this.stopTalk(reason, true);
         if (!document.hidden) {
-            this.setTalkState('disabled', 'Cannot talk', reason, '');
+            this.setTalkState('disabled', this.tt('communicate.cannot_talk', 'Cannot talk'), reason, '');
             this.startStatusPolling(false);
         }
     },
@@ -1213,11 +1219,11 @@ var CommunicatePage = {
             this.showMessageAck(
                 false,
                 (this.status && this.status.messageReason)
-                    || 'Remote messages are unavailable');
+                    || this.tt('communicate.remote_messages_unavailable', 'Remote messages are unavailable'));
             return;
         }
         this.messagePending = true;
-        this.showMessageAck(null, 'Sending...');
+        this.showMessageAck(null, this.tt('communicate.sending', 'Sending...'));
         this.updateMessageControls();
 
         var payload = {
@@ -1243,16 +1249,16 @@ var CommunicatePage = {
             var data = result.data || {};
             if (result.ok && data.status === 'displayed') {
                 var message = data.downgraded
-                    ? 'Displayed as a toast while the vehicle is moving'
-                    : 'Displayed';
+                    ? self.tt('communicate.displayed_moving', 'Displayed as a toast while the vehicle is moving')
+                    : self.tt('communicate.displayed', 'Displayed');
                 self.showMessageAck(true, message);
                 text.value = '';
             } else {
                 self.showMessageAck(false,
-                    data.reason || 'The car failed to display the message');
+                    data.reason || self.tt('communicate.display_failed', 'The car failed to display the message'));
             }
         }).catch(function () {
-            self.showMessageAck(false, 'The car did not acknowledge the message');
+            self.showMessageAck(false, self.tt('communicate.display_no_ack', 'The car did not acknowledge the message'));
         }).then(function () {
             self.messagePending = false;
             self.updateMessageControls();

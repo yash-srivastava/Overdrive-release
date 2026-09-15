@@ -169,7 +169,7 @@ object CloudflaredPaidConfig {
                     // Encrypt before persisting; fail-open guard never writes plaintext.
                     val encrypted = CredentialCipher.encrypt(token)
                     if (token.isNotEmpty() && !CredentialCipher.isEncrypted(encrypted)) {
-                        Toast.makeText(context, "ERROR: Could not secure Cloudflared token.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, context.getString(R.string.toast_cloudflared_encrypt_failed), Toast.LENGTH_LONG).show()
                         return@setPositiveButton
                     }
                     newConfig.put("token", encrypted)
@@ -182,7 +182,7 @@ object CloudflaredPaidConfig {
                             if (success) {
                                 Toast.makeText(context, context.getString(R.string.toast_cloudflared_saved_settings), Toast.LENGTH_SHORT).show()
                             } else {
-                                Toast.makeText(context, "ERROR: Could not save Cloudflared settings. Check if Camera Daemon is running.", Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, context.getString(R.string.toast_cloudflared_save_failed), Toast.LENGTH_LONG).show()
                             }
                         }
 

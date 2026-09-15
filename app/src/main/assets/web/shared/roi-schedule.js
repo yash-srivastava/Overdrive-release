@@ -149,7 +149,7 @@ var RoiEditor = (function() {
 
     function updateStatus() {
         var el = document.getElementById('roiStatus'); if (!el) return;
-        if (!roiEnabledFlags[currentQuadrant]) { el.textContent = BYD.i18n.t('roi.full_frame', {cam: qName(currentQuadrant)}); return; }
+        if (!roiEnabledFlags[currentQuadrant]) { el.textContent = BYD.i18n.t('roi.full_frame_off', {cam: qName(currentQuadrant)}); return; }
         var ac = activeCount();
         el.textContent = BYD.i18n.t('roi.blocks_active', {cam: qName(currentQuadrant), active: ac, total: TOTAL});
     }

@@ -4070,7 +4070,11 @@ BYD.surveillance = {
                     btn.innerHTML = origText;
                     btn.disabled = false;
                 }, 2000);
-                if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to download theme', 'error');
+                if (BYD.utils && BYD.utils.toast) {
+                    var localized = BYD.i18n && BYD.i18n.t
+                        ? BYD.i18n.t('surveillance.theme_download_failed') : null;
+                    BYD.utils.toast(localized || 'Failed to download theme', 'error');
+                }
             });
     },
 
@@ -4083,15 +4087,23 @@ BYD.surveillance = {
             .then(function(data) {
                 if (!BYD.utils || !BYD.utils.toast) return;
                 if (data && data.success) {
-                    BYD.utils.toast('Deterrent triggered', 'success');
+                    var ok = BYD.i18n && BYD.i18n.t
+                        ? BYD.i18n.t('surveillance.deterrent_test_ok') : null;
+                    BYD.utils.toast(ok || 'Deterrent triggered', 'success');
                 } else {
+                    var fail = BYD.i18n && BYD.i18n.t
+                        ? BYD.i18n.t('surveillance.deterrent_test_failed') : null;
                     BYD.utils.toast(
-                        (data && data.error) || 'Failed to trigger deterrent', 'error');
+                        (data && data.error) || fail || 'Failed to trigger deterrent', 'error');
                 }
             })
             .catch(function(err) {
                 console.error('[deterrent] test failed:', err);
-                if (BYD.utils && BYD.utils.toast) BYD.utils.toast('Failed to trigger deterrent', 'error');
+                if (BYD.utils && BYD.utils.toast) {
+                    var fail = BYD.i18n && BYD.i18n.t
+                        ? BYD.i18n.t('surveillance.deterrent_test_failed') : null;
+                    BYD.utils.toast(fail || 'Failed to trigger deterrent', 'error');
+                }
             });
     },
 

@@ -176,6 +176,7 @@ class RecordingAdapter(
         private var thumbnailJob: Job? = null
 
         fun bind(recording: RecordingFile) {
+            val ctx = itemView.context
             thumbnailJob?.cancel()
             tvCameraId.text = "C${recording.cameraId}"
             tvRecordingTime.text = recording.formattedTime
@@ -252,7 +253,7 @@ class RecordingAdapter(
             when (recording.peakSeverity?.uppercase()) {
                 "CRITICAL" -> {
                     tvSeverity?.visibility = View.VISIBLE
-                    tvSeverity?.text = "CRITICAL"
+                    tvSeverity?.text = ctx.getString(R.string.recording_lib_chip_critical)
                     tvSeverity?.tintAsStatusBadge(
                         R.color.overdrive_status_danger_container,
                         R.color.overdrive_status_danger
@@ -266,7 +267,7 @@ class RecordingAdapter(
                 }
                 "ALERT" -> {
                     tvSeverity?.visibility = View.VISIBLE
-                    tvSeverity?.text = "ALERT"
+                    tvSeverity?.text = ctx.getString(R.string.recording_lib_chip_alert)
                     tvSeverity?.tintAsStatusBadge(
                         R.color.overdrive_status_warning_container,
                         R.color.overdrive_status_warning

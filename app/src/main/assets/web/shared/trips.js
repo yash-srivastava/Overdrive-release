@@ -1088,7 +1088,10 @@ const TRIPS = {
 
             if (rejected && BYD.utils && BYD.utils.toast) {
                 const fields = rejected.map(function (r) { return r.field; }).join(', ');
-                BYD.utils.toast('Some values rejected: ' + fields, 'warn');
+                BYD.utils.toast(
+                    BYD.i18n.t('trip.values_rejected', {fields: fields})
+                        || ('Some values rejected: ' + fields),
+                    'warn');
             }
         } catch (e) {
             console.warn('[Trips] Apply storage failed:', e);

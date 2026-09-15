@@ -14,6 +14,14 @@
     <string name="dashboard_modern_percent">%1$.0f%%</string>
     <string name="dashboard_modern_distance">%1$d %2$s</string>
     <string name="dashboard_modern_charging">טעינה</string>
+    <string name="dashboard_modern_charging_kw">בטעינה (%1$.1f kW)</string>
+    <string name="dashboard_modern_driving">בנסיעה (%1$s)</string>
+    <string name="dashboard_modern_driving_speed">בנסיעה (%1$s) · %2$d km/h</string>
+    <string name="dashboard_modern_recording_mark"> (REC)</string>
+    <string name="dashboard_modern_reverse">נסיעה לאחור (R)</string>
+    <string name="dashboard_modern_neutral">סרק (N)</string>
+    <string name="dashboard_modern_park">מוכן / חונה (P)</string>
+    <string name="dashboard_modern_sentry_active">Sentry פעיל</string>
     <string name="dashboard_modern_plugged_in">מחובר לחשמל</string>
     <string name="dashboard_modern_charge_complete">הטעינה הושלמה</string>
     <string name="dashboard_modern_charge_fault">הטעינה דורשת תשומת לב</string>

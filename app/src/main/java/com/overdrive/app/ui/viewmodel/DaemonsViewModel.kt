@@ -12,6 +12,7 @@ import com.overdrive.app.ui.model.DaemonStatus
 import com.overdrive.app.ui.model.DaemonType
 import com.overdrive.app.ui.model.SubprocessInfo
 import com.overdrive.app.ui.model.parseUptimeToMillis
+import com.overdrive.app.R
 
 /**
  * ViewModel for managing daemon states.
@@ -31,6 +32,10 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
     // (an ERROR posted between two poll callbacks would silently vanish).
     private val authoritativeStates =
         java.util.concurrent.ConcurrentHashMap<DaemonType, DaemonState>()
+
+    private fun appStr(id: Int, vararg args: Any): String {
+        return getApplication<Application>().getString(id, *args)
+    }
 
     private fun publishState(type: DaemonType, state: DaemonState) {
         authoritativeStates[type] = state
@@ -212,7 +217,7 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
-        updateState(type, DaemonStatus.STARTING, "Starting...")
+        updateState(type, DaemonStatus.STARTING, appStr(R.string.daemon_status_starting))
         
         controller.start(object : DaemonCallback {
             override fun onStatusChanged(status: DaemonStatus, message: String) {
@@ -325,7 +330,7 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
             
             override fun onError(error: String) {
                 // Stop failed - refresh actual status
-                updateState(type, DaemonStatus.ERROR, "Stop failed: $error")
+                updateState(type, DaemonStatus.ERROR, appStr(R.string.daemon_status_stop_failed, error))
                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                     refreshDaemonStatus(type)
                 }, 1000)
@@ -341,7 +346,7 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
             zrokController.hasEnableToken { hasToken ->
                 if (!hasToken) {
                     // No token configured - show needs config state
-                    updateZrokNeedsConfig("No token configured. Tap to set up.")
+                    updateZrokNeedsConfig(appStr(R.string.daemon_config_no_token))
                     if (logResult) {
                         LogManager.getInstance().debug("Daemons", "${type.name}: No token configured")
                     }
@@ -354,7 +359,7 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
             return
         } else if (type == DaemonType.CLOUDFLARED_TUNNEL) {
             if (!com.overdrive.app.config.CloudflaredPaidConfig.isConfigured()) {
-                updateCloudflaredNeedsConfig("Paid version requires a token. Tap to set up.")
+                updateCloudflaredNeedsConfig(appStr(R.string.daemon_config_paid_token))
                 if (logResult) {
                     LogManager.getInstance().debug("Daemons", "${type.name}: Paid version requires a token")
                 }
@@ -364,7 +369,7 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
             tailscaleController.needsLogin { needsLogin ->
                 if (needsLogin) {
                     // No token configured - show needs config state
-                    updateTailscaleNeedsLogin("Not logged in. Tap to set up.")
+                    updateTailscaleNeedsLogin(appStr(R.string.daemon_config_not_logged_in))
                     if (logResult) {
                         LogManager.getInstance().debug("Daemons", "${type.name}: Not logged in")
                     }
@@ -402,7 +407,7 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
                         // For cloudflared, also fetch the tunnel URL
                         if (type == DaemonType.CLOUDFLARED_TUNNEL) {
                             cloudflaredController.refreshTunnelUrl { url ->
-                                val statusText = url ?: "Running"
+                                val statusText = url ?: appStr(R.string.daemon_status_running)
                                 updateStateWithSubprocesses(type, DaemonStatus.RUNNING, statusText, uptime, subprocesses)
                                 if (logResult) {
                                     val uptimeStr = uptime?.let { " (uptime: $it)" } ?: ""
@@ -415,7 +420,7 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
                         } else if (type == DaemonType.ZROK_TUNNEL) {
                             // For zrok, also fetch the tunnel URL
                             zrokController.refreshTunnelUrl { url ->
-                                val statusText = url ?: "Running"
+                                val statusText = url ?: appStr(R.string.daemon_status_running)
                                 updateStateWithSubprocesses(type, DaemonStatus.RUNNING, statusText, uptime, subprocesses)
                                 if (logResult) {
                                     val uptimeStr = uptime?.let { " (uptime: $it)" } ?: ""
@@ -429,8 +434,10 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
                             // For tailscale, also fetch the tunnel URL and proxy state
                             tailscaleController.refreshTunnelUrl { url ->
                                 tailscaleController.isProxyEnabled { proxyOn ->
-                                    val base = url ?: "Running"
-                                    val statusText = if (proxyOn) "$base • Proxy: ON" else base
+                                    val base = url ?: appStr(R.string.daemon_status_running)
+                                    val statusText = if (proxyOn) {
+                                        appStr(R.string.daemon_status_proxy_on, base)
+                                    } else base
                                     updateStateWithSubprocesses(type, DaemonStatus.RUNNING, statusText, uptime, subprocesses)
                                     if (logResult) {
                                         val uptimeStr = uptime?.let { " (uptime: $it)" } ?: ""

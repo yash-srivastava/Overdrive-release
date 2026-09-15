@@ -102,6 +102,8 @@
     <string name="overlay_mode_continuous_cd">Continuous recording</string>
     <string name="overlay_mode_drive_cd">Drive-mode recording</string>
     <string name="overlay_mode_proximity_cd">Proximity-guard recording</string>
+    <string name="overlay_recording_mode_failed">Recording mode change failed</string>
+    <string name="overlay_recording_mode_failed_fmt">Recording mode change failed: %1$s</string>
 
     <!-- item_log_entry placeholders (timestamp/tag/message are runtime, but these are
          placeholder/preview text used at design time and visible in some empty states) -->
@@ -795,6 +797,23 @@
     <string name="daemon_name_zrok">Zrok Tunnel</string>
     <string name="daemon_name_tailscale">Tailscale Tunnel</string>
     <string name="daemon_name_telegram">Telegram Bot</string>
+    <string name="daemon_status_running">Running</string>
+    <string name="daemon_status_proxy_on">%1$s • Proxy: ON</string>
+    <string name="daemon_status_running_uptime">Running • Uptime: %1$s</string>
+    <string name="daemon_status_stopped">Stopped</string>
+    <string name="daemon_status_starting">Starting…</string>
+    <string name="daemon_status_stopping">Stopping…</string>
+    <string name="daemon_status_error">Error</string>
+    <string name="daemon_status_needs_config">Configuration required</string>
+    <string name="daemon_config_no_token">No token configured. Tap to set up.</string>
+    <string name="daemon_config_paid_token">Paid version requires a token. Tap to set up.</string>
+    <string name="daemon_config_not_logged_in">Not logged in. Tap to set up.</string>
+    <string name="daemon_status_stop_failed">Stop failed: %1$s</string>
+    <string name="daemon_uptime_fmt">Uptime: %1$s</string>
+    <string name="daemon_subprocess_pid">%1$s (PID: %2$d)</string>
+    <string name="toast_cloudflared_encrypt_failed">Could not secure Cloudflared token.</string>
+    <string name="toast_cloudflared_save_failed">Could not save Cloudflared settings. Check if Camera Daemon is running.</string>
+    <string name="projection_temporarily_unavailable">Projection is temporarily unavailable. Please reopen the app.</string>
     <string name="clip_label_access_code">Access Code</string>
     <string name="clip_label_url">URL</string>
 
@@ -1873,5 +1892,7 @@
     <string name="network_warn_body">This head unit has one WiFi radio, so it cannot host a hotspot and stay on a WiFi network at the same time. While the hotspot is on, the car disconnects from WiFi and uses the built-in SIM\'s mobile data for itself and for every connected device. WiFi comes back when you turn the hotspot off.</string>
     <string name="network_warn_continue">Turn on hotspot</string>
     <string name="network_warn_cancel">Cancel</string>
+
+    <string name="roi_tap_to_add_points">Tap to add points (%1$d-%2$d)</string>
 
 </resources>

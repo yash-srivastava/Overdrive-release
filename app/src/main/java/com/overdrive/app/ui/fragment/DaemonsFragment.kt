@@ -176,7 +176,7 @@ class DaemonsFragment : Fragment() {
             activity?.runOnUiThread {
                 if (!hasToken) {
                     // Update Zrok state to show configuration needed
-                    daemonsViewModel.updateZrokNeedsConfig("No token configured. Tap to set up.")
+                    daemonsViewModel.updateZrokNeedsConfig(getString(R.string.daemon_config_no_token))
                 }
             }
         }

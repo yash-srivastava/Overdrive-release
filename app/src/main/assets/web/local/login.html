@@ -329,6 +329,11 @@
         // Initialize i18n
         BYD.i18n.init();
 
+        function t(key, fallback) {
+            const v = (window.BYD && BYD.i18n && BYD.i18n.t) ? BYD.i18n.t(key) : null;
+            return (v && v !== key) ? v : fallback;
+        }
+
         // Parse redirect URL from query string
         let redirectUrl = '/';
         const urlParams = new URLSearchParams(window.location.search);
@@ -363,12 +368,12 @@
                     deviceId = data.deviceId;
                     updateDeviceIdDisplay();
                 } else {
-                    displayEl.textContent = 'Unknown device';
+                    displayEl.textContent = t('login.unknown_device', 'Unknown device');
                 }
             } catch (e) {
                 console.error('Failed to check device:', e);
                 const displayEl = document.getElementById('deviceIdDisplay');
-                displayEl.textContent = 'Connection error';
+                displayEl.textContent = t('login.connection_error', 'Connection error');
             }
         }
 
@@ -410,21 +415,21 @@
             const errorEl = document.getElementById('tokenError');
             
             if (!accessCode) {
-                errorEl.textContent = 'Please enter your access code';
+                errorEl.textContent = t('login.enter_code', 'Please enter your access code');
                 errorEl.classList.add('visible');
                 document.getElementById('tokenInput').classList.add('error');
                 return;
             }
             
             if (accessCode.length !== 8) {
-                errorEl.textContent = 'Access code must be 8 characters';
+                errorEl.textContent = t('login.code_length', 'Access code must be 8 characters');
                 errorEl.classList.add('visible');
                 document.getElementById('tokenInput').classList.add('error');
                 return;
             }
             
             if (!deviceId) {
-                showStatus('Device ID not loaded. Please refresh.', 'error');
+                showStatus(t('login.device_id_missing', 'Device ID not loaded. Please refresh.'), 'error');
                 return;
             }
             
@@ -464,19 +469,19 @@
                         console.warn('Could not save to localStorage:', e);
                     }
                     
-                    showStatus('Login successful! Redirecting...', 'success');
+                    showStatus(t('login.success', 'Login successful! Redirecting...'), 'success');
                     
                     // Redirect after short delay
                     setTimeout(() => {
                         window.location.href = redirectUrl;
                     }, 500);
                 } else {
-                    errorEl.textContent = data.error || 'Invalid access code';
+                    errorEl.textContent = data.error || t('login.invalid_code', 'Invalid access code');
                     errorEl.classList.add('visible');
                     document.getElementById('tokenInput').classList.add('error');
                 }
             } catch (e) {
-                showStatus('Connection error. Please try again.', 'error');
+                showStatus(t('login.connection_retry', 'Connection error. Please try again.'), 'error');
             } finally {
                 btn.disabled = false;
                 btnText.style.display = 'inline';

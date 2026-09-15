@@ -861,7 +861,9 @@ BYD.performance = {
         const badge = document.getElementById('topLiveBadge');
         if (!badge) return;
         badge.classList.toggle('is-live', !!live);
-        badge.textContent = live ? 'Live' : 'Paused';
+        badge.textContent = live
+            ? ((BYD.i18n && BYD.i18n.t) ? BYD.i18n.t('performance.live') : 'Live')
+            : ((BYD.i18n && BYD.i18n.t) ? BYD.i18n.t('performance.paused') : 'Paused');
     },
 
     renderTopUnavailable(error) {
@@ -873,13 +875,17 @@ BYD.performance = {
         this._setText('topMemoryDetail', '--');
         this._setText('topSwap', '--');
         this._setText('topSwapDetail', '--');
-        this._setText('topUpdated', error ? 'Unavailable' : 'Waiting');
+        this._setText('topUpdated', error
+            ? ((BYD.i18n && BYD.i18n.t) ? BYD.i18n.t('performance.unavailable') : 'Unavailable')
+            : ((BYD.i18n && BYD.i18n.t) ? BYD.i18n.t('performance.waiting') : 'Waiting'));
         const rows = document.getElementById('topProcessRows');
         if (rows) {
             rows.textContent = '';
             const empty = document.createElement('div');
             empty.className = 'process-empty';
-            empty.textContent = error || 'Process data unavailable';
+            empty.textContent = error || ((BYD.i18n && BYD.i18n.t)
+                ? BYD.i18n.t('performance.process_unavailable')
+                : 'Process data unavailable');
             rows.appendChild(empty);
         }
     },
@@ -932,7 +938,7 @@ BYD.performance = {
         const duration = Number(data.durationMs);
         let updated = isFinite(sampledAt)
             ? new Date(sampledAt).toLocaleTimeString()
-            : 'Updated';
+            : ((BYD.i18n && BYD.i18n.t) ? BYD.i18n.t('performance.meta_updated') : 'Updated');
         if (isFinite(duration)) updated += ' · ' + Math.round(duration) + ' ms';
         this._setText('topUpdated', updated);
 
@@ -945,7 +951,9 @@ BYD.performance = {
         if (!processes.length) {
             const empty = document.createElement('div');
             empty.className = 'process-empty';
-            empty.textContent = 'No process rows returned';
+            empty.textContent = (BYD.i18n && BYD.i18n.t)
+                ? BYD.i18n.t('performance.no_process_rows')
+                : 'No process rows returned';
             rows.appendChild(empty);
             return;
         }

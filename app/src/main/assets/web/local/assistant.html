@@ -313,7 +313,7 @@
         <div id="app-shell-mount"></div>
         <main class="main-content">
             <div class="mobile-header">
-                <button class="menu-toggle" onclick="toggleSidebar()" aria-label="Open menu">
+                <button class="menu-toggle" onclick="toggleSidebar()" aria-label="Open menu" data-i18n-attr="aria-label:genai.aria_open_menu">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
                 </button>
                 <span style="font-weight:600;" data-i18n="nav.assistant">Assistant</span>
@@ -323,7 +323,7 @@
             <header class="page-header">
                 <h1 class="page-title" data-i18n="genai.page_title">OverDrive Assistant</h1>
                 <div class="header-actions">
-                    <span class="status-badge inactive" id="genAiBadge">OFF</span>
+                    <span class="status-badge inactive" id="genAiBadge" data-i18n="genai.off">OFF</span>
                 </div>
             </header>
 
@@ -334,8 +334,8 @@
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="6" width="16" height="13" rx="3"/><path d="M9 3v3M8 12h.01M16 12h.01M9 16h6"/></svg>
                         </div>
                         <div class="ai-state-copy">
-                            <div class="ai-state-title" id="genAiStateTitle">Loading assistant…</div>
-                            <div class="ai-state-desc" id="genAiStateDesc">Checking the on-vehicle BYOK runtime.</div>
+                            <div class="ai-state-title" id="genAiStateTitle" data-i18n="genai.loading">Loading assistant…</div>
+                            <div class="ai-state-desc" id="genAiStateDesc" data-i18n="genai.checking_runtime">Checking the on-vehicle BYOK runtime.</div>
                         </div>
                         <div class="ai-state-action">
                             <button class="btn btn-secondary" id="genAiConfigureBtn" type="button" onclick="GenAI.openProvider()" data-i18n="genai.configure">Configure</button>
@@ -343,18 +343,18 @@
                     </div>
 
                     <div class="ai-quick-actions" aria-label="Grounded assistant actions">
-                        <button class="ai-chip" type="button" data-mode="current_vehicle" data-prompt="Explain the current vehicle state and call out anything unusual.">Current vehicle</button>
-                        <button class="ai-chip" type="button" data-mode="latest_trip" data-prompt="Explain my latest trip, including efficiency and notable moments.">Explain latest trip</button>
-                        <button class="ai-chip" type="button" data-mode="trip_comparison" data-prompt="Why did my latest trip use more battery than comparable trips?">Why more battery?</button>
-                        <button class="ai-chip" type="button" data-mode="recent_events" data-prompt="Summarize my recent recording and surveillance events.">Summarize events</button>
-                        <button class="ai-chip" type="button" data-mode="roadsense" data-prompt="Summarize recent RoadSense hazards and what they mean.">RoadSense hazards</button>
-                        <button class="ai-chip" type="button" data-mode="charging" data-prompt="Review recent charging and highlight useful trends.">Charging review</button>
-                        <button class="ai-chip" type="button" data-mode="diagnostics" data-prompt="Review current diagnostics and explain any likely issues.">Diagnostics</button>
-                        <button class="ai-chip" type="button" data-mode="diagnostic_logs" data-prompt="Analyze the recent redacted daemon warnings and errors, identify the strongest evidence, and say what is still uncertain.">Analyze logs</button>
-                        <button class="ai-chip" type="button" data-mode="automation_diagnostics" data-prompt="Why did my automation not run? Diagnose its conditions, recent logs, action timing, and safe fixes.">Diagnose automation</button>
-                        <button class="ai-chip" type="button" data-mode="vehicle_action" data-prompt="Set the cabin temperature to ">Control vehicle</button>
-                        <button class="ai-chip" type="button" data-mode="automation_draft" data-prompt="Create an automation that ">Create automation</button>
-                        <button class="ai-chip" type="button" data-mode="community_search" data-prompt="Find a community automation for ">Find automation</button>
+                        <button class="ai-chip" type="button" data-mode="current_vehicle" data-i18n="genai.chip_current_vehicle" data-prompt="Explain the current vehicle state and call out anything unusual.">Current vehicle</button>
+                        <button class="ai-chip" type="button" data-mode="latest_trip" data-i18n="genai.chip_latest_trip" data-prompt="Explain my latest trip, including efficiency and notable moments.">Explain latest trip</button>
+                        <button class="ai-chip" type="button" data-mode="trip_comparison" data-i18n="genai.chip_more_battery" data-prompt="Why did my latest trip use more battery than comparable trips?">Why more battery?</button>
+                        <button class="ai-chip" type="button" data-mode="recent_events" data-i18n="genai.chip_summarize_events" data-prompt="Summarize my recent recording and surveillance events.">Summarize events</button>
+                        <button class="ai-chip" type="button" data-mode="roadsense" data-i18n="genai.chip_roadsense" data-prompt="Summarize recent RoadSense hazards and what they mean.">RoadSense hazards</button>
+                        <button class="ai-chip" type="button" data-mode="charging" data-i18n="genai.chip_charging" data-prompt="Review recent charging and highlight useful trends.">Charging review</button>
+                        <button class="ai-chip" type="button" data-mode="diagnostics" data-i18n="genai.chip_diagnostics" data-prompt="Review current diagnostics and explain any likely issues.">Diagnostics</button>
+                        <button class="ai-chip" type="button" data-mode="diagnostic_logs" data-i18n="genai.chip_analyze_logs" data-prompt="Analyze the recent redacted daemon warnings and errors, identify the strongest evidence, and say what is still uncertain.">Analyze logs</button>
+                        <button class="ai-chip" type="button" data-mode="automation_diagnostics" data-i18n="genai.chip_diagnose_automation" data-prompt="Why did my automation not run? Diagnose its conditions, recent logs, action timing, and safe fixes.">Diagnose automation</button>
+                        <button class="ai-chip" type="button" data-mode="vehicle_action" data-i18n="genai.chip_control_vehicle" data-prompt="Set the cabin temperature to ">Control vehicle</button>
+                        <button class="ai-chip" type="button" data-mode="automation_draft" data-i18n="genai.chip_create_automation" data-prompt="Create an automation that ">Create automation</button>
+                        <button class="ai-chip" type="button" data-mode="community_search" data-i18n="genai.chip_find_automation" data-prompt="Find a community automation for ">Find automation</button>
                     </div>
 
                     <div class="card ai-chat-card" data-tab="assistant">
@@ -368,15 +368,15 @@
                             </div>
                             <div class="ai-composer-dock">
                                 <form class="ai-composer" id="genAiComposer">
-                                    <button class="btn btn-secondary ai-icon-button" id="genAiVoiceBtn" type="button" disabled aria-label="Voice unavailable" aria-pressed="false" title="Native realtime voice is unavailable for this provider">
+                                    <button class="btn btn-secondary ai-icon-button" id="genAiVoiceBtn" type="button" disabled aria-label="Voice unavailable" aria-pressed="false" title="Native realtime voice is unavailable for this provider" data-i18n-attr="aria-label:genai.voice_unavailable;title:genai.voice_unavailable">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"/></svg>
                                     </button>
                                     <textarea id="genAiInput" rows="1" maxlength="12000" placeholder="Ask OverDrive…" data-i18n-attr="placeholder:genai.input_placeholder"></textarea>
-                                    <button class="btn btn-primary ai-icon-button" id="genAiSendBtn" type="submit" aria-label="Send">
+                                    <button class="btn btn-primary ai-icon-button" id="genAiSendBtn" type="submit" aria-label="Send" data-i18n-attr="aria-label:genai.aria_send">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
                                     </button>
                                 </form>
-                                <div class="ai-voice-note" id="genAiVoiceNote">Voice appears only for providers with native realtime audio; OverDrive does not add speech-to-text fallback.</div>
+                                <div class="ai-voice-note" id="genAiVoiceNote" data-i18n="genai.voice_note">Voice appears only for providers with native realtime audio; OverDrive does not add speech-to-text fallback.</div>
                             </div>
                         </div>
                     </div>
@@ -388,7 +388,7 @@
                             <div class="card-header">
                                 <div class="card-title">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18"/><path d="m5 5 14 14"/></svg>
-                                    <span>Generate an insight</span>
+                                    <span data-i18n="genai.generate_insight">Generate an insight</span>
                                 </div>
                             </div>
                             <div class="card-body">
@@ -396,29 +396,29 @@
                                     <div class="md-field">
                                         <div class="md-field-box">
                                             <select class="md-input" id="genAiInsightMode">
-                                                <option value="overview">Vehicle overview</option>
-                                                <option value="current_vehicle">Current vehicle</option>
-                                                <option value="latest_trip">Latest trip</option>
-                                                <option value="trip_comparison">Trip consumption comparison</option>
-                                                <option value="recent_events">Recent events</option>
-                                                <option value="roadsense">RoadSense hazards</option>
-                                                <option value="charging">Charging</option>
-                                                <option value="diagnostics">Diagnostics</option>
+                                                <option value="overview" data-i18n="genai.mode_overview">Vehicle overview</option>
+                                                <option value="current_vehicle" data-i18n="genai.mode_current_vehicle">Current vehicle</option>
+                                                <option value="latest_trip" data-i18n="genai.mode_latest_trip">Latest trip</option>
+                                                <option value="trip_comparison" data-i18n="genai.mode_trip_comparison">Trip consumption comparison</option>
+                                                <option value="recent_events" data-i18n="genai.mode_recent_events">Recent events</option>
+                                                <option value="roadsense" data-i18n="genai.mode_roadsense">RoadSense hazards</option>
+                                                <option value="charging" data-i18n="genai.mode_charging">Charging</option>
+                                                <option value="diagnostics" data-i18n="genai.mode_diagnostics">Diagnostics</option>
                                             </select>
-                                            <label class="md-label" for="genAiInsightMode">Insight type</label>
+                                            <label class="md-label" for="genAiInsightMode" data-i18n="genai.insight_type">Insight type</label>
                                         </div>
                                     </div>
                                     <div class="md-field">
                                         <div class="md-field-box">
                                             <input class="md-input" id="genAiInsightPrompt" type="text" maxlength="600" placeholder=" ">
-                                            <label class="md-label" for="genAiInsightPrompt">Optional focus</label>
+                                            <label class="md-label" for="genAiInsightPrompt" data-i18n="genai.optional_focus">Optional focus</label>
                                         </div>
                                     </div>
                                 </div>
                                 <div class="setting-row" style="margin-top:12px;">
                                     <div class="setting-info">
-                                        <div class="setting-name">Also send a notification</div>
-                                        <div class="setting-desc">One-time delivery for this generation only.</div>
+                                        <div class="setting-name" data-i18n="genai.notify_once">Also send a notification</div>
+                                        <div class="setting-desc" data-i18n="genai.notify_once_desc">One-time delivery for this generation only.</div>
                                     </div>
                                     <div class="setting-control">
                                         <label class="toggle-switch">
@@ -428,7 +428,7 @@
                                     </div>
                                 </div>
                                 <div class="ai-actions">
-                                    <button class="btn btn-primary" id="genAiInsightGenerateBtn" type="button" onclick="GenAI.generateInsight()">Generate now</button>
+                                    <button class="btn btn-primary" id="genAiInsightGenerateBtn" type="button" onclick="GenAI.generateInsight()" data-i18n="genai.generate_now">Generate now</button>
                                 </div>
                             </div>
                         </div>
@@ -437,14 +437,14 @@
                             <div class="card-header">
                                 <div class="card-title">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-                                    <span>Dashboard insights</span>
+                                    <span data-i18n="genai.dashboard_insights">Dashboard insights</span>
                                 </div>
                             </div>
                             <div class="card-body">
                                 <div class="setting-row">
                                     <div class="setting-info">
-                                        <div class="setting-name">Show latest insight on dashboards</div>
-                                        <div class="setting-desc">Displays the latest saved insight in the native dashboard and web dashboard only while GenAI is enabled.</div>
+                                        <div class="setting-name" data-i18n="genai.show_on_dashboard">Show latest insight on dashboards</div>
+                                        <div class="setting-desc" data-i18n="genai.show_on_dashboard_desc">Displays the latest saved insight in the native dashboard and web dashboard only while GenAI is enabled.</div>
                                     </div>
                                     <div class="setting-control">
                                         <label class="toggle-switch">
@@ -457,53 +457,53 @@
                                     <div class="md-field">
                                         <div class="md-field-box">
                                             <select class="md-input" id="genAiInsightSchedule">
-                                                <option value="off">Off</option>
-                                                <option value="daily">Daily</option>
-                                                <option value="weekly">Weekly</option>
+                                                <option value="off" data-i18n="genai.freq_off">Off</option>
+                                                <option value="daily" data-i18n="genai.freq_daily">Daily</option>
+                                                <option value="weekly" data-i18n="genai.freq_weekly">Weekly</option>
                                             </select>
-                                            <label class="md-label" for="genAiInsightSchedule">Frequency</label>
+                                            <label class="md-label" for="genAiInsightSchedule" data-i18n="genai.frequency">Frequency</label>
                                         </div>
                                     </div>
                                     <div class="md-field">
                                         <div class="md-field-box">
                                             <input class="md-input" id="genAiInsightTime" type="time" value="20:00">
-                                            <label class="md-label" for="genAiInsightTime">Local time</label>
+                                            <label class="md-label" for="genAiInsightTime" data-i18n="genai.local_time">Local time</label>
                                         </div>
                                     </div>
                                     <div class="md-field wide" id="genAiInsightDayField">
                                         <div class="md-field-box">
                                             <select class="md-input" id="genAiInsightDay">
-                                                <option value="1">Monday</option>
-                                                <option value="2">Tuesday</option>
-                                                <option value="3">Wednesday</option>
-                                                <option value="4">Thursday</option>
-                                                <option value="5">Friday</option>
-                                                <option value="6">Saturday</option>
-                                                <option value="7">Sunday</option>
+                                                <option value="1" data-i18n="genai.monday">Monday</option>
+                                                <option value="2" data-i18n="genai.tuesday">Tuesday</option>
+                                                <option value="3" data-i18n="genai.wednesday">Wednesday</option>
+                                                <option value="4" data-i18n="genai.thursday">Thursday</option>
+                                                <option value="5" data-i18n="genai.friday">Friday</option>
+                                                <option value="6" data-i18n="genai.saturday">Saturday</option>
+                                                <option value="7" data-i18n="genai.sunday">Sunday</option>
                                             </select>
-                                            <label class="md-label" for="genAiInsightDay">Day</label>
+                                            <label class="md-label" for="genAiInsightDay" data-i18n="genai.day">Day</label>
                                         </div>
                                     </div>
                                     <div class="md-field wide">
                                         <div class="md-field-box">
                                             <select class="md-input" id="genAiInsightScheduleMode">
-                                                <option value="overview">Vehicle overview</option>
-                                                <option value="current_vehicle">Current vehicle</option>
-                                                <option value="latest_trip">Latest trip</option>
-                                                <option value="trip_comparison">Trip consumption comparison</option>
-                                                <option value="recent_events">Recent events</option>
-                                                <option value="roadsense">RoadSense hazards</option>
-                                                <option value="charging">Charging</option>
-                                                <option value="diagnostics">Diagnostics</option>
+                                                <option value="overview" data-i18n="genai.mode_overview">Vehicle overview</option>
+                                                <option value="current_vehicle" data-i18n="genai.mode_current_vehicle">Current vehicle</option>
+                                                <option value="latest_trip" data-i18n="genai.mode_latest_trip">Latest trip</option>
+                                                <option value="trip_comparison" data-i18n="genai.mode_trip_comparison">Trip consumption comparison</option>
+                                                <option value="recent_events" data-i18n="genai.mode_recent_events">Recent events</option>
+                                                <option value="roadsense" data-i18n="genai.mode_roadsense">RoadSense hazards</option>
+                                                <option value="charging" data-i18n="genai.mode_charging">Charging</option>
+                                                <option value="diagnostics" data-i18n="genai.mode_diagnostics">Diagnostics</option>
                                             </select>
-                                            <label class="md-label" for="genAiInsightScheduleMode">Scheduled summary type</label>
+                                            <label class="md-label" for="genAiInsightScheduleMode" data-i18n="genai.schedule_type">Scheduled summary type</label>
                                         </div>
                                     </div>
                                 </div>
                                 <div class="setting-row" style="margin-top:12px;">
                                     <div class="setting-info">
-                                        <div class="setting-name">Notify when ready</div>
-                                        <div class="setting-desc">Off keeps scheduled summaries stored on this vehicle without sending a notification.</div>
+                                        <div class="setting-name" data-i18n="genai.notify_when_ready">Notify when ready</div>
+                                        <div class="setting-desc" data-i18n="genai.notify_when_ready_desc">Off keeps scheduled summaries stored on this vehicle without sending a notification.</div>
                                     </div>
                                     <div class="setting-control">
                                         <label class="toggle-switch">
@@ -512,10 +512,10 @@
                                         </label>
                                     </div>
                                 </div>
-                                <div class="ai-inline-note">The dashboard only reads already-generated text; displaying it never calls the provider. Daily and weekly presets use the existing automation clock. For after-trip, charging, RoadSense, or another trigger, add the “Generate AI insight” action in Automations.</div>
+                                <div class="ai-inline-note" data-i18n="genai.schedule_note">The dashboard only reads already-generated text; displaying it never calls the provider. Daily and weekly presets use the existing automation clock. For after-trip, charging, RoadSense, or another trigger, add the “Generate AI insight” action in Automations.</div>
                                 <div class="ai-actions">
-                                    <button class="btn btn-primary" id="genAiInsightScheduleSaveBtn" type="button" onclick="GenAI.saveInsightSettings()">Save settings</button>
-                                    <button class="btn btn-secondary" type="button" onclick="window.location.href='/automations'">Open Automations</button>
+                                    <button class="btn btn-primary" id="genAiInsightScheduleSaveBtn" type="button" onclick="GenAI.saveInsightSettings()" data-i18n="genai.save_settings">Save settings</button>
+                                    <button class="btn btn-secondary" type="button" onclick="window.location.href='/automations'" data-i18n="genai.open_automations">Open Automations</button>
                                 </div>
                             </div>
                         </div>
@@ -563,9 +563,9 @@
                                     </div>
                                     <div class="md-field-box ai-custom-model-field" id="genAiModelCustomField" hidden>
                                         <input class="md-input" id="genAiModel" type="text" maxlength="200" autocomplete="off" placeholder=" ">
-                                        <label class="md-label" for="genAiModel">Custom model ID</label>
+                                        <label class="md-label" for="genAiModel" data-i18n="genai.custom_model">Custom model ID</label>
                                     </div>
-                                    <span class="md-supporting" id="genAiModelHint">Choose a suggested model or enter any compatible model ID.</span>
+                                    <span class="md-supporting" id="genAiModelHint" data-i18n="genai.model_hint">Choose a suggested model or enter any compatible model ID.</span>
                                 </div>
                                 <div class="md-field wide">
                                     <div class="md-field-box">
@@ -579,7 +579,7 @@
                                         <input class="md-input" id="genAiApiKey" type="password" maxlength="8192" autocomplete="off" placeholder=" ">
                                         <label class="md-label" for="genAiApiKey" data-i18n="genai.api_key">API key</label>
                                     </div>
-                                    <span class="md-supporting" id="genAiKeyHint">Leave blank to keep the saved key.</span>
+                                    <span class="md-supporting" id="genAiKeyHint" data-i18n="genai.key_keep">Leave blank to keep the saved key.</span>
                                 </div>
                                 <div class="md-field">
                                     <div class="md-field-box">
@@ -594,7 +594,7 @@
                                     </div>
                                     <div class="md-field-box ai-custom-model-field" id="genAiRealtimeModelCustomField" hidden>
                                         <input class="md-input" id="genAiRealtimeModel" type="text" maxlength="200" autocomplete="off" placeholder=" ">
-                                        <label class="md-label" for="genAiRealtimeModel">Custom realtime model ID</label>
+                                        <label class="md-label" for="genAiRealtimeModel" data-i18n="genai.custom_realtime_model">Custom realtime model ID</label>
                                     </div>
                                     <span class="md-supporting" data-i18n="genai.realtime_hint">Used only for provider-native realtime audio. It is never routed through a speech-to-text fallback.</span>
                                 </div>
@@ -618,18 +618,18 @@
                         </div>
                         <div class="card-body">
                             <ul class="ai-privacy-list">
-                                <li>The API key uses the same device-bound encrypted storage path as BYD Cloud credentials and is never returned to this page.</li>
-                                <li>Chat history stays only in this WebView's memory and is cleared when the page closes or reloads.</li>
-                                <li>Vehicle context is sent only for an explicit grounded action. Context is treated as data, never as provider instructions.</li>
-                                <li>Starting voice opens a provider-native realtime session through the daemon. It closes when stopped, when this page leaves the foreground, or after inactivity.</li>
-                                <li>When the master switch is off, active calls are cancelled and the provider connection pool and dispatcher are destroyed.</li>
-                                <li>Requests re-evaluate the OverDrive proxy route each time. If a Tailscale proxy is expected but unavailable, the request fails closed instead of dialing directly.</li>
+                                <li data-i18n="genai.privacy_1">The API key uses the same device-bound encrypted storage path as BYD Cloud credentials and is never returned to this page.</li>
+                                <li data-i18n="genai.privacy_2">Chat history stays only in this WebView's memory and is cleared when the page closes or reloads.</li>
+                                <li data-i18n="genai.privacy_3">Vehicle context is sent only for an explicit grounded action. Context is treated as data, never as provider instructions.</li>
+                                <li data-i18n="genai.privacy_4">Starting voice opens a provider-native realtime session through the daemon. It closes when stopped, when this page leaves the foreground, or after inactivity.</li>
+                                <li data-i18n="genai.privacy_5">When the master switch is off, active calls are cancelled and the provider connection pool and dispatcher are destroyed.</li>
+                                <li data-i18n="genai.privacy_6">Requests re-evaluate the OverDrive proxy route each time. If a Tailscale proxy is expected but unavailable, the request fails closed instead of dialing directly.</li>
                             </ul>
                             <div class="ai-runtime-grid">
-                                <div class="ai-runtime-item"><span>Parked availability</span><strong id="genAiParked">—</strong></div>
-                                <div class="ai-runtime-item"><span>Current transport</span><strong id="genAiTransport">—</strong></div>
-                                <div class="ai-runtime-item"><span>Proxy policy</span><strong id="genAiProxy">—</strong></div>
-                                <div class="ai-runtime-item"><span>Active requests</span><strong id="genAiActiveRequests">0</strong></div>
+                                <div class="ai-runtime-item"><span data-i18n="genai.runtime_parked">Parked availability</span><strong id="genAiParked">—</strong></div>
+                                <div class="ai-runtime-item"><span data-i18n="genai.runtime_transport">Current transport</span><strong id="genAiTransport">—</strong></div>
+                                <div class="ai-runtime-item"><span data-i18n="genai.runtime_proxy">Proxy policy</span><strong id="genAiProxy">—</strong></div>
+                                <div class="ai-runtime-item"><span data-i18n="genai.runtime_active">Active requests</span><strong id="genAiActiveRequests">0</strong></div>
                             </div>
                             <div class="ai-actions">
                                 <button class="btn btn-danger" type="button" onclick="GenAI.clearCredentials()" data-i18n="genai.clear">Disable and clear API key</button>
@@ -647,7 +647,7 @@
     <script src="../shared/auth.js"></script>
     <script src="../shared/core.js?v=20"></script>
     <script src="../shared/update-flow.js"></script>
-    <script src="../shared/genai.js?v=9"></script>
+    <script src="../shared/genai.js?v=10"></script>
     <script>
         function toggleSidebar() {
             var sidebar = document.getElementById('sidebar');

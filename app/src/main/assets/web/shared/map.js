@@ -283,7 +283,8 @@ BYD.map = {
      */
     showMyLocation() {
         if (!navigator.geolocation) {
-            BYD.utils && BYD.utils.toast('Geolocation not supported', 'error');
+            BYD.utils && BYD.utils.toast(
+                BYD.i18n.t('map.geo_not_supported') || 'Geolocation not supported', 'error');
             return;
         }
         
@@ -299,7 +300,10 @@ BYD.map = {
                 if (accuracy > 500) {
                     console.warn('[Map] Location too inaccurate:', accuracy, 'm');
                     if (btn) btn.classList.remove('loading');
-                    BYD.utils && BYD.utils.toast('Location inaccurate (' + Math.round(accuracy) + 'm). Try enabling GPS.', 'warning');
+                    BYD.utils && BYD.utils.toast(
+                        BYD.i18n.t('map.location_inaccurate', {m: Math.round(accuracy)})
+                            || ('Location inaccurate (' + Math.round(accuracy) + 'm). Try enabling GPS.'),
+                        'warning');
                     return;
                 }
                 
@@ -322,12 +326,14 @@ BYD.map = {
                 this.fitBounds();
                 
                 if (btn) btn.classList.remove('loading');
-                BYD.utils && BYD.utils.toast('Location found', 'success');
+                BYD.utils && BYD.utils.toast(
+                    BYD.i18n.t('map.location_found') || 'Location found', 'success');
             },
             (err) => {
                 console.error('[Map] Geolocation error:', err);
                 if (btn) btn.classList.remove('loading');
-                BYD.utils && BYD.utils.toast('Could not get location', 'error');
+                BYD.utils && BYD.utils.toast(
+                    BYD.i18n.t('map.location_failed') || 'Could not get location', 'error');
             },
             {
                 enableHighAccuracy: true,
@@ -426,7 +432,8 @@ BYD.map = {
      */
     openDirections() {
         if (!this.carPosition.lat) {
-            BYD.utils && BYD.utils.toast('Car location not available', 'error');
+            BYD.utils && BYD.utils.toast(
+                BYD.i18n.t('map.car_location_unavailable') || 'Car location not available', 'error');
             return;
         }
         

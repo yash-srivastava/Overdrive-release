@@ -738,7 +738,7 @@ class DashboardFragment : Fragment() {
                     snapshot.charging?.charging == true -> {
                         val kw = snapshot.charging.powerKw
                         if (kw != null && kw > 0.0) {
-                            "In Ricarica (${String.format(java.util.Locale.US, "%.1f", kw)} kW)"
+                            getString(R.string.dashboard_modern_charging_kw, kw)
                         } else {
                             getString(R.string.dashboard_modern_charging)
                         }
@@ -746,18 +746,22 @@ class DashboardFragment : Fragment() {
                     snapshot.charging?.full == true ->
                         getString(R.string.dashboard_modern_charge_complete)
                     isPowerOn && (gear == "D" || gear == "M" || gear == "S" || (speed != null && speed >= 3.0)) -> {
-                        val spdText = if (speed != null && speed >= 1.0) " · ${Math.round(speed)} km/h" else ""
-                        val recText = if (isRecording) " (REC)" else ""
-                        "In Guida (${gear ?: "D"})$spdText$recText"
+                        val recText = if (isRecording) getString(R.string.dashboard_modern_recording_mark) else ""
+                        val body = if (speed != null && speed >= 1.0) {
+                            getString(R.string.dashboard_modern_driving_speed, gear ?: "D", Math.round(speed).toInt())
+                        } else {
+                            getString(R.string.dashboard_modern_driving, gear ?: "D")
+                        }
+                        body + recText
                     }
                     isPowerOn && gear == "R" -> {
-                        val recText = if (isRecording) " (REC)" else ""
-                        "In Retromarcia (R)$recText"
+                        val recText = if (isRecording) getString(R.string.dashboard_modern_recording_mark) else ""
+                        getString(R.string.dashboard_modern_reverse) + recText
                     }
-                    isPowerOn && gear == "N" -> "In Folle (N)"
-                    isPowerOn && (gear == "P" || gear == null) -> "Pronta / Parcheggiata (P)"
-                    !isPowerOn && isSentry -> "Sentinella Attiva"
-                    snapshot.charging?.plugged == true -> "Collegata alla colonnina"
+                    isPowerOn && gear == "N" -> getString(R.string.dashboard_modern_neutral)
+                    isPowerOn && (gear == "P" || gear == null) -> getString(R.string.dashboard_modern_park)
+                    !isPowerOn && isSentry -> getString(R.string.dashboard_modern_sentry_active)
+                    snapshot.charging?.plugged == true -> getString(R.string.dashboard_modern_plugged_in)
                     else -> getString(R.string.dashboard_modern_vehicle_connected)
                 }
                 vehicleSocValue.text = snapshot.socPercent?.let {

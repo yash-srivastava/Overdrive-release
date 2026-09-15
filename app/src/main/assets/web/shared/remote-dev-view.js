@@ -3,6 +3,12 @@
 
     if (typeof BYDAuth === 'undefined' || !BYDAuth.requireAuth()) return;
 
+    function t(key, fallback, vars) {
+        var v = (window.BYD && BYD.i18n && BYD.i18n.t) ? BYD.i18n.t(key, vars) : null;
+        if (v && v !== key) return v;
+        return fallback || key;
+    }
+
     var session = null;
     var stopped = true;
     var fetchingFrame = false;
@@ -70,7 +76,7 @@
     function setRunning(running) {
         stopped = !running;
         startButton.disabled = running;
-        startButton.textContent = running ? 'Session active' : 'Start session';
+        startButton.textContent = running ? t('remote_dev.session_active', 'Session active') : t('remote_dev.start_session', 'Start session');
         stopButton.disabled = !running;
         refreshButton.disabled = !running;
         fullscreenButton.disabled = !running;
@@ -83,11 +89,11 @@
         fullscreenRefreshButton.disabled = !running;
         fullscreenStopButton.disabled = !running;
         liveDot.className = running ? 'status-dot live' : 'status-dot';
-        connectionState.textContent = running ? 'Connected' : 'Stopped';
+        connectionState.textContent = running ? t('remote_dev.connected', 'Connected') : t('remote_dev.stopped', 'Stopped');
         if (!running) {
             exitFullscreen();
             closeFrameStream();
-            clearFrame('Start a session to view Overdrive.');
+            clearFrame(t('remote_dev.placeholder', 'Start a session to view Overdrive.'));
             fetchingFrame = false;
             consecutiveFrameFailures = 0;
             pollingFallback = false;
@@ -115,7 +121,7 @@
 
     function syncFullscreenState() {
         var active = isFullscreen();
-        fullscreenButton.textContent = active ? 'Exit fullscreen' : 'Fullscreen';
+        fullscreenButton.textContent = active ? t('remote_dev.exit_fullscreen', 'Exit fullscreen') : t('remote_dev.fullscreen', 'Fullscreen');
         fullscreenButton.setAttribute('aria-pressed', active ? 'true' : 'false');
     }
 
@@ -179,8 +185,8 @@
     function startSession() {
         if (session) return;
         startButton.disabled = true;
-        startButton.textContent = 'Starting...';
-        connectionState.textContent = 'Starting';
+        startButton.textContent = t('remote_dev.starting', 'Starting...');
+        connectionState.textContent = t('remote_dev.start', 'Starting');
         setMessage('', false);
         jsonRequest('/api/dev-view/session', 'POST', { confirm: 'I UNDERSTAND' })
             .then(function (data) {
@@ -249,7 +255,7 @@
         socket.onopen = function () {
             if (socket !== frameSocket || token !== session) return;
             reconnectAttempts = 0;
-            connectionState.textContent = 'Live stream';
+            connectionState.textContent = t('remote_dev.live_stream', 'Live stream');
             setMessage('', false);
         };
 
@@ -266,7 +272,7 @@
         };
 
         socket.onerror = function () {
-            if (socket === frameSocket) connectionState.textContent = 'Stream reconnecting';
+            if (socket === frameSocket) connectionState.textContent = t('remote_dev.stream_reconnecting', 'Stream reconnecting');
         };
 
         socket.onclose = function (event) {
@@ -276,12 +282,12 @@
             if (event && event.code === 1008) {
                 session = null;
                 setRunning(false);
-                setMessage('Developer-view session expired.', true);
+                setMessage(t('remote_dev.session_expired', 'Developer-view session expired.'), true);
                 return;
             }
             reconnectAttempts += 1;
             if (reconnectAttempts <= 3) {
-                connectionState.textContent = 'Stream reconnecting';
+                connectionState.textContent = t('remote_dev.stream_reconnecting', 'Stream reconnecting');
                 reconnectTimer = window.setTimeout(openFrameStream,
                     Math.min(1500, reconnectAttempts * 350));
             } else {
@@ -294,7 +300,7 @@
         var data;
         try { data = JSON.parse(text); } catch (error) { return; }
         if (data.type === 'ready') {
-            connectionState.textContent = 'Live stream';
+            connectionState.textContent = t('remote_dev.live_stream', 'Live stream');
             return;
         }
         if (data.type !== 'frame') return;
@@ -302,15 +308,15 @@
         if (!data.success) {
             consecutiveFrameFailures += 1;
             if (data.pixelCopyResult === 'LOCKED') {
-                clearFrame('Unlock the physical Overdrive UI to resume.');
-                connectionState.textContent = 'Locked';
+                clearFrame(t('remote_dev.unlock_resume', 'Unlock the physical Overdrive UI to resume.'));
+                connectionState.textContent = t('remote_dev.locked', 'Locked');
                 setMessage(data.detail ||
                     'Unlock the physical Overdrive UI to resume.', true);
                 return;
             }
             if (!currentObjectUrl) {
-                connectionState.textContent = 'Waiting for a stable frame';
-                placeholder.textContent = 'Waiting for a stable app frame...';
+                connectionState.textContent = t('remote_dev.waiting_frame', 'Waiting for a stable frame');
+                placeholder.textContent = t('remote_dev.waiting_frame_long', 'Waiting for a stable app frame...');
             }
             return;
         }
@@ -321,7 +327,7 @@
         pixelCopyState.textContent = (data.captureBackend || 'PixelCopy') + ' ' +
             (data.pixelCopyResult || '--') + ' (' +
             (typeof data.pixelCopyCode === 'number' ? data.pixelCopyCode : '--') + ')';
-        activityState.textContent = 'Activity ' + shortActivity(data.activity);
+        activityState.textContent = t('remote_dev.activity', 'Activity {name}', {name: shortActivity(data.activity)});
         consecutiveFrameFailures = 0;
         setMessage('', false);
     }
@@ -379,7 +385,7 @@
             var elapsed = frameTimes[frameTimes.length - 1] - frameTimes[0];
             if (elapsed > 0) {
                 var fps = (frameTimes.length - 1) * 1000 / elapsed;
-                connectionState.textContent = 'Live · ' + fps.toFixed(1) + ' fps';
+                connectionState.textContent = t('remote_dev.live_stream', 'Live stream') + ' · ' + fps.toFixed(1) + ' fps';
             }
         }
     }
@@ -388,7 +394,7 @@
         if (stopped || !session) return;
         closeFrameStream();
         pollingFallback = true;
-        connectionState.textContent = 'Connected · compatibility';
+        connectionState.textContent = t('remote_dev.connected_compat', 'Connected · compatibility');
         if (reason) setMessage(reason, false);
         requestFrame();
     }
@@ -424,8 +430,9 @@
                 (response.headers.get('X-Overdrive-Capture-Backend') || 'PixelCopy') + ' ' +
                 (response.headers.get('X-Overdrive-PixelCopy-Result') || '--') + ' (' +
                 (response.headers.get('X-Overdrive-PixelCopy-Code') || '--') + ')';
-            activityState.textContent = 'Activity ' +
-                shortActivity(response.headers.get('X-Overdrive-Activity'));
+            activityState.textContent = t('remote_dev.activity', 'Activity {name}', {
+                name: shortActivity(response.headers.get('X-Overdrive-Activity'))
+            });
             return response.blob();
         }).then(function (blob) {
             if (!blob || token !== session) return;
@@ -440,15 +447,15 @@
                 setRunning(false);
             }
             if (error.remoteLocked) {
-                clearFrame('Unlock the physical Overdrive UI to resume.');
-                connectionState.textContent = 'Locked';
+                clearFrame(t('remote_dev.unlock_resume', 'Unlock the physical Overdrive UI to resume.'));
+                connectionState.textContent = t('remote_dev.locked', 'Locked');
                 setMessage(error.message, true);
             } else if (error.sessionInvalid) setMessage(error.message + '.', true);
             else {
                 connectionState.textContent = currentObjectUrl
                     ? 'Connected - holding last frame'
                     : 'Waiting for a stable frame';
-                if (!currentObjectUrl) placeholder.textContent = 'Waiting for a stable app frame...';
+                if (!currentObjectUrl) placeholder.textContent = t('remote_dev.waiting_frame_long', 'Waiting for a stable app frame...');
             }
         }).then(function () {
             fetchingFrame = false;
@@ -556,8 +563,8 @@
         screenshotInFlight = busy;
         screenshotButton.disabled = stopped || busy;
         fullscreenScreenshotButton.disabled = stopped || busy;
-        screenshotButton.textContent = busy ? 'Capturing...' : 'Screenshot';
-        fullscreenScreenshotButton.textContent = busy ? 'Capturing...' : 'Screenshot';
+        screenshotButton.textContent = busy ? t('remote_dev.capturing', 'Capturing...') : t('remote_dev.screenshot', 'Screenshot');
+        fullscreenScreenshotButton.textContent = busy ? t('remote_dev.capturing', 'Capturing...') : t('remote_dev.screenshot', 'Screenshot');
     }
 
     function captureScreenshot() {
@@ -602,7 +609,7 @@
                 session = null;
                 setRunning(false);
             }
-            setMessage('Screenshot failed: ' + error.message, true);
+            setMessage(t('remote_dev.screenshot_failed', 'Screenshot failed: {error}', {error: error.message}), true);
         }).then(function () {
             setScreenshotBusy(false);
         });
@@ -709,7 +716,7 @@
         if (!token) return Promise.resolve();
         return jsonRequest('/api/dev-view/session', 'DELETE', { session: token })
             .then(function () {
-                if (!silent) setMessage('Developer-view session ended.', false);
+                if (!silent) setMessage(t('remote_dev.session_ended', 'Developer-view session ended.'), false);
             }).catch(function (error) {
                 if (!silent) setMessage(error.message, true);
             });
@@ -746,13 +753,13 @@
         }
     });
     keyboardCapture.addEventListener('focus', function () {
-        keyboardButton.textContent = 'Keyboard active';
-        fullscreenKeyboardButton.textContent = 'Keyboard active';
+        keyboardButton.textContent = t('remote_dev.keyboard_active', 'Keyboard active');
+        fullscreenKeyboardButton.textContent = t('remote_dev.keyboard_active', 'Keyboard active');
     });
     keyboardCapture.addEventListener('blur', function () {
         flushKeyboardText();
-        keyboardButton.textContent = 'Keyboard';
-        fullscreenKeyboardButton.textContent = 'Keyboard';
+        keyboardButton.textContent = t('remote_dev.keyboard', 'Keyboard');
+        fullscreenKeyboardButton.textContent = t('remote_dev.keyboard', 'Keyboard');
     });
     keyboardCapture.addEventListener('compositionstart', function () {
         keyboardComposing = true;
@@ -775,7 +782,7 @@
     document.addEventListener('visibilitychange', function () {
         if (document.hidden) {
             closeFrameStream();
-            clearFrame('Return to this tab to resume the live view.');
+            clearFrame(t('remote_dev.resume_tab', 'Return to this tab to resume the live view.'));
             if (pollTimer) window.clearTimeout(pollTimer);
             pollTimer = null;
         } else if (session) {
@@ -803,4 +810,7 @@
     bindPointer();
     setRunning(false);
     syncFullscreenState();
+    if (window.BYD && BYD.i18n && BYD.i18n.init) {
+        BYD.i18n.init();
+    }
 })();

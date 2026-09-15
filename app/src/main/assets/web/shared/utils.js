@@ -423,10 +423,12 @@ const BYD = {
 
             if (res && res.success) {
                 this.config.enabled = enabled;
-                BYD.ui.toast(enabled ? 'Surveillance enabled' : 'Surveillance disabled', 'success');
+                BYD.ui.toast(enabled
+                    ? ((BYD.i18n && BYD.i18n.t) ? BYD.i18n.t('common.surveillance_enabled') : 'Surveillance enabled')
+                    : ((BYD.i18n && BYD.i18n.t) ? BYD.i18n.t('common.surveillance_disabled') : 'Surveillance disabled'), 'success');
                 this.load(); // Refresh status
             } else {
-                BYD.ui.toast('Failed to update surveillance', 'error');
+                BYD.ui.toast((BYD.i18n && BYD.i18n.t) ? BYD.i18n.t('common.surveillance_update_failed') : 'Failed to update surveillance', 'error');
                 if (enabledEl) enabledEl.checked = !enabled; // Revert
             }
         },
@@ -454,9 +456,9 @@ const BYD = {
 
             if (res && res.success) {
                 this.config = { ...this.config, ...config };
-                BYD.ui.toast('Settings saved', 'success');
+                BYD.ui.toast((BYD.i18n && BYD.i18n.t) ? BYD.i18n.t('common.settings_saved') : 'Settings saved', 'success');
             } else {
-                BYD.ui.toast('Failed to save settings', 'error');
+                BYD.ui.toast((BYD.i18n && BYD.i18n.t) ? BYD.i18n.t('common.settings_save_failed') : 'Failed to save settings', 'error');
             }
         },
 
@@ -536,9 +538,9 @@ const BYD = {
             });
 
             if (res && res.success) {
-                BYD.ui.toast('Quality settings saved', 'success');
+                BYD.ui.toast((BYD.i18n && BYD.i18n.t) ? BYD.i18n.t('common.quality_settings_saved') : 'Quality settings saved', 'success');
             } else {
-                BYD.ui.toast('Failed to save settings', 'error');
+                BYD.ui.toast((BYD.i18n && BYD.i18n.t) ? BYD.i18n.t('common.settings_save_failed') : 'Failed to save settings', 'error');
             }
         }
     },

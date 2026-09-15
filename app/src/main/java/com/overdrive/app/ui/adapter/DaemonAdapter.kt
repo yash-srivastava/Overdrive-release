@@ -58,20 +58,31 @@ class DaemonAdapter(
             ivDaemonIcon.setImageResource(getDaemonIcon(state.type))
             
             // Build status text with uptime
+            val ctx = itemView.context
             val statusText = when {
-                state.needsConfiguration -> state.configurationMessage ?: "Configuration required"
+                state.needsConfiguration -> state.configurationMessage
+                    ?: ctx.getString(R.string.daemon_status_needs_config)
                 state.status == DaemonStatus.RUNNING -> {
+                    val extra = state.statusText
                     val uptimeStr = state.uptime
-                    if (!uptimeStr.isNullOrEmpty()) {
-                        "Running • Uptime: $uptimeStr"
-                    } else {
-                        "Running"
+                    when {
+                        isEndpointStatus(extra) && !uptimeStr.isNullOrEmpty() ->
+                            "$extra • $uptimeStr"
+                        isEndpointStatus(extra) -> extra
+                        !uptimeStr.isNullOrEmpty() ->
+                            ctx.getString(R.string.daemon_status_running_uptime, uptimeStr)
+                        else -> ctx.getString(R.string.daemon_status_running)
                     }
                 }
-                state.status == DaemonStatus.STOPPED -> "Stopped"
-                state.status == DaemonStatus.STARTING -> state.statusText.ifEmpty { "Starting..." }
-                state.status == DaemonStatus.STOPPING -> state.statusText.ifEmpty { "Stopping..." }
-                state.status == DaemonStatus.ERROR -> state.statusText.ifEmpty { "Error" }
+                state.status == DaemonStatus.STOPPED ->
+                    ctx.getString(R.string.daemon_status_stopped)
+                state.status == DaemonStatus.STARTING ->
+                    ctx.getString(R.string.daemon_status_starting)
+                state.status == DaemonStatus.STOPPING ->
+                    ctx.getString(R.string.daemon_status_stopping)
+                state.status == DaemonStatus.ERROR -> state.statusText.ifEmpty {
+                    ctx.getString(R.string.daemon_status_error)
+                }
                 else -> state.statusText
             }
             tvDaemonStatus.text = statusText
@@ -192,13 +203,13 @@ class DaemonAdapter(
                         .inflate(android.R.layout.simple_list_item_2, subprocessList, false)
 
                     subView.findViewById<TextView>(android.R.id.text1).apply {
-                        text = "${subprocess.name} (PID: ${subprocess.pid})"
+                        text = ctx.getString(R.string.daemon_subprocess_pid, subprocess.name, subprocess.pid)
                         setTextColor(onSurface)
                         textSize = 13f
                     }
 
                     subView.findViewById<TextView>(android.R.id.text2).apply {
-                        text = "Uptime: ${subprocess.uptime}"
+                        text = ctx.getString(R.string.daemon_uptime_fmt, subprocess.uptime)
                         setTextColor(onSurfaceVariant)
                         textSize = 11f
                     }
@@ -222,9 +233,17 @@ class DaemonAdapter(
         private fun hasLogFile(type: DaemonType): Boolean {
             return getLogFilePath(type) != null
         }
+
+        private fun isEndpointStatus(text: String): Boolean {
+            if (text.isBlank()) return false
+            if (text.contains("://")) return true
+            if (text.contains("Proxy", ignoreCase = true)) return true
+            return IPV4.containsMatchIn(text)
+        }
     }
     
     companion object {
+        private val IPV4 = Regex("""\d{1,3}(?:\.\d{1,3}){3}""")
         /**
          * Map daemon types to their log file paths.
          * Returns null for daemons without a known log file.

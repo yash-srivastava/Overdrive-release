@@ -860,13 +860,13 @@
                 <button class="menu-toggle" onclick="toggleSidebar()">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
                 </button>
-                <span id="chargingMobileTitle" style="font-weight:600;">Charging</span>
+                <span id="chargingMobileTitle" style="font-weight:600;" data-i18n="charge.title">Charging</span>
                 <div style="width:40px;"></div>
             </div>
 
             <header class="page-header charging-page-header">
                 <div class="charging-page-heading">
-                    <h1 class="page-title" id="chargingPageTitle">Charging</h1>
+                    <h1 class="page-title" id="chargingPageTitle" data-i18n="charge.title">Charging</h1>
                     <p data-i18n="charge.subtitle">Monitor your charging sessions and energy usage</p>
                 </div>
                 <div class="header-actions">
@@ -1291,11 +1291,11 @@
                     <section class="ch-detail-panel ch-detail-overview app-surface-card">
                         <div class="ch-detail-overview-item">
                             <svg class="ch-detail-overview-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v6l4 2"/></svg>
-                            <div class="ch-detail-overview-copy"><div class="ch-detail-kicker" id="detailTimeLabel">Duration</div><div class="ch-detail-value" id="detailDuration">--</div><div class="ch-detail-caption" id="detailStartedAt">--</div></div>
+                            <div class="ch-detail-overview-copy"><div class="ch-detail-kicker" id="detailTimeLabel" data-i18n="charge.detail_duration">Duration</div><div class="ch-detail-value" id="detailDuration">--</div><div class="ch-detail-caption" id="detailStartedAt">--</div></div>
                         </div>
                         <div class="ch-detail-overview-item ch-detail-overview-item--soc">
                             <svg class="ch-detail-overview-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="17" rx="2"/><path d="M9 2h6v3M9 10h6M9 14h6"/></svg>
-                            <div class="ch-detail-overview-copy"><div class="ch-detail-soc-top"><div class="ch-detail-kicker" data-i18n="charge.hero_soc">State of charge</div><div class="ch-detail-caption" id="detailSocCaption">Start → End</div></div><div class="ch-detail-value" id="detailSocValue">--</div><div class="ch-detail-soc-track"><span class="ch-detail-soc-fill" id="detailSocFill"></span></div></div>
+                            <div class="ch-detail-overview-copy"><div class="ch-detail-soc-top"><div class="ch-detail-kicker" data-i18n="charge.hero_soc">State of charge</div><div class="ch-detail-caption" id="detailSocCaption" data-i18n="charge.detail_start_end">Start -> End</div></div><div class="ch-detail-value" id="detailSocValue">--</div><div class="ch-detail-soc-track"><span class="ch-detail-soc-fill" id="detailSocFill"></span></div></div>
                         </div>
                         <div class="ch-detail-overview-item ch-detail-overview-item--location" id="detailLocRow" style="display:none;">
                             <svg class="ch-detail-overview-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-6-5.5-6-10a6 6 0 0 1 12 0c0 4.5-6 10-6 10z"/><circle cx="12" cy="11" r="2"/></svg>
@@ -1330,7 +1330,7 @@
                             <div class="ch-detail-chart-stats">
                                 <div class="ch-detail-chart-stat ch-detail-stat--peak"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg><div><strong id="detailChartPeak">--</strong><span data-i18n="charge.detail_peak_power">Peak power</span></div></div>
                                 <div class="ch-detail-chart-stat ch-detail-stat--duration"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="13" r="8"/><path d="M12 9v5l3 2M9 2h6"/></svg><div><strong id="detailChartDuration">--</strong><span data-i18n="charge.detail_duration">Duration</span></div></div>
-                                <div class="ch-detail-chart-stat ch-detail-stat--soc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="17" rx="2"/><path d="M9 2h6v3M9 10h6M9 14h6"/></svg><div><strong id="detailChartSoc">--</strong><span id="detailChartSocLabel">Start → End</span></div></div>
+                                <div class="ch-detail-chart-stat ch-detail-stat--soc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="17" rx="2"/><path d="M9 2h6v3M9 10h6M9 14h6"/></svg><div><strong id="detailChartSoc">--</strong><span id="detailChartSocLabel" data-i18n="charge.detail_start_end">Start -> End</span></div></div>
                             </div>
                         </section>
                         <section class="ch-detail-panel ch-detail-chart-card app-surface-card">

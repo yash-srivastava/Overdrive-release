@@ -166,7 +166,7 @@ class ProjectionFragment : Fragment() {
                 "layout inflate failed (stale resources after update?) — degrading", t)
             inflateFailed = true
             TextView(inflater.context).apply {
-                text = "Projection is temporarily unavailable. Please reopen the app."
+                text = inflater.context.getString(R.string.projection_temporarily_unavailable)
                 val pad = (16 * resources.displayMetrics.density).toInt()
                 setPadding(pad, pad, pad, pad)
             }
