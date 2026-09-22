@@ -4,10 +4,11 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
 
 ## [In corso / Unreleased]
 
-- **Allineamento con Upstream `origin/main` & Risoluzione Conflitti PR**:
-  - Eseguito il merge dei commit più recenti di `origin/main` (`ead978a4`).
-  - Risolto il conflitto `modify/delete` causato dalla dismissione upstream della cartella `dilink-probe/`.
-  - Verificata la completa compatibilità di compilazione con Gradle e Corretto 17 (`BUILD SUCCESSFUL`).
+- **Ripristino Pipeline Stabile `ANativeWindow` & Hardening Demone `fast_cam_capture`**:
+  - Allineato il ramo `main` al commit upstream più recente di Yash (`origin/main`, commit `748a0d8f`), ripristinando la collaudata e stabile architettura di rendering su `Surface` / `ANativeWindow` ed eliminando le criticità di corruzione memoria Gralloc / `SIGSEGV in Adreno` legate all'acquisizione sperimentale `AHardwareBuffer`.
+  - Aggiornato il binario nativo del demone `fast_cam_capture` (`app/src/main/assets/dilink5/fast_cam_capture`): integrato l'auto-exit pulito con codice 42 su loop di stallo hardware AIS (`qcarcam_get_frame ERR 12`) per consentire il recupero immediato e riavvio supervisionato.
+  - Aggiornata la libreria `libfast_cam_client.so` e gli header/sorgenti C++ (`fast_cam_bridge.h`, `fast_cam_ipc.h`, `fast_cam_bridge.cpp`): ripristinate ed esportate le routine di composizione mosaico `fast_cam_compose_2x2` e `fast_cam_compose_4k`, garantendo piena retrocompatibilità JNI runtime e zero errori di link dinamico con l'implementazione di Overdrive.
+
 
 - **Architettura Ibrida Dual-Pipeline 4K Ultra-HD & Streaming Web 720p (`video_Improve.md`, `qcarcam_bridge.cpp`, `GpuPipelineConfig.java`, `GpuSurveillancePipeline.java`, `DiLink5QCarCamBackend.java`, `CMakeLists.txt`)**:
   - **Integrazione Nuovi Binari Precompilati `fast_cam_capture` & `libfast_cam_client.so`**: Sostituiti gli asset e le librerie native con la build ARM64 compilata da `frame_grabber_light/fast_cam_capture/` (binario 21.912 bytes con supporto `--all --time 0` e libreria client da 8.344 bytes con `SONAME: libfast_cam_client.so`).
