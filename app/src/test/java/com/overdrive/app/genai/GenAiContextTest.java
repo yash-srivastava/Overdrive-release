@@ -1,4 +1,5 @@
 package com.overdrive.app.genai;
+import com.overdrive.app.util.ScratchPaths;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -88,7 +89,7 @@ public class GenAiContextTest {
                 "normal heartbeat\n"
                         + "[WARN] request failed at https://secret.example/path "
                         + "from 10.0.0.8 user@example.com "
-                        + "/data/local/tmp/private.mp4 lat=12.345\n"
+                        + ScratchPaths.path("private.mp4") + " lat=12.345\n"
                         + "at com.example.Work.run(Work.java:1)\n"
                         + "normal again\n",
                 2);

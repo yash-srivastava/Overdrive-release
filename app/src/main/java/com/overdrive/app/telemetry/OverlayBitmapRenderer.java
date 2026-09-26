@@ -1,4 +1,5 @@
 package com.overdrive.app.telemetry;
+import com.overdrive.app.util.ScratchPaths;
 
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -49,7 +50,9 @@ public class OverlayBitmapRenderer {
 
     private static final int WIDTH = 1280;
     private static final int HEIGHT = 80;
-    private static final String ICON_DIR = "/data/local/tmp/overlay/";
+    private static String iconDir() {
+        return ScratchPaths.path("overlay/");
+    }
     private static final int ICON_SIZE = 40;
     private static final double KM_TO_MI = 0.621371;
 
@@ -236,7 +239,7 @@ public class OverlayBitmapRenderer {
 
     private Bitmap loadAlpha(String name) {
         try {
-            File f = new File(ICON_DIR + name);
+            File f = new File(iconDir() + name);
             if (f.exists()) {
                 Bitmap src = BitmapFactory.decodeFile(f.getAbsolutePath());
                 if (src != null) {

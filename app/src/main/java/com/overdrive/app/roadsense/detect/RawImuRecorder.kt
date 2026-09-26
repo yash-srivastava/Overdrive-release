@@ -1,4 +1,5 @@
 package com.overdrive.app.roadsense.detect
+import com.overdrive.app.util.ScratchPaths
 
 import android.util.Log
 import java.io.BufferedWriter
@@ -73,7 +74,7 @@ class RawImuRecorder(
      * drive is unaffected).
      */
     @Synchronized
-    fun start(dir: String = DEFAULT_DIR): String? {
+    fun start(dir: String = defaultDir): String? {
         if (running) return filePath
         // STORAGE GUARDRAILS (don't bloat /data/local/tmp): (1) prune old recordings first,
         // (2) refuse to start if free space is below the floor — a debug capture must never
@@ -255,7 +256,8 @@ class RawImuRecorder(
     companion object {
         private const val TAG = "RoadSense/RawRec"
         /** Daemon (uid 2000) writes here — same dir as cam_daemon.log + the H2 stores. */
-        const val DEFAULT_DIR = "/data/local/tmp"
+        private val defaultDir: String
+            get() = ScratchPaths.getDir()
         /** Hard per-recording size cap (~30 min of 200 Hz accel+gyro at ~150 B/row). Auto-
          *  stops at this size so one recording can't bloat /data/local/tmp. */
         private const val MAX_FILE_BYTES = 64L * 1024 * 1024   // 64 MB

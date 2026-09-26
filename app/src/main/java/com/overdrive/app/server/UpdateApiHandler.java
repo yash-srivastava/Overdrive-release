@@ -1,4 +1,5 @@
 package com.overdrive.app.server;
+import com.overdrive.app.util.ScratchPaths;
 
 import android.content.Context;
 
@@ -43,7 +44,9 @@ import java.util.concurrent.atomic.AtomicReference;
 public class UpdateApiHandler {
 
     private static final String TAG = "UpdateApi";
-    private static final String PROGRESS_FILE = "/data/local/tmp/overdrive_update_progress.json";
+    private static String progressFile() {
+        return ScratchPaths.path("overdrive_update_progress.json");
+    }
 
     // One install at a time. AtomicReference so we don't hold an updater past
     // the install (it's GC'd along with the dying process anyway).
@@ -382,7 +385,7 @@ public class UpdateApiHandler {
         // named cloudflared tunnels) and fall back to process probe.
         // AdbDaemonLauncher.tunnelType is intentionally NOT used; it's a default
         // value that's never reassigned at runtime.
-        String lastUrl = readTextFile("/data/local/tmp/tunnel_url.txt");
+        String lastUrl = readTextFile(ScratchPaths.path("tunnel_url.txt"));
         String tunnelType = "none";
         boolean tunnelUrlMayChange = false;
         if (lastUrl != null && !lastUrl.isEmpty()) {
@@ -703,7 +706,7 @@ public class UpdateApiHandler {
     // ================== /api/update/progress ==================
 
     private static void handleProgress(OutputStream out) throws Exception {
-        File f = new File(PROGRESS_FILE);
+        File f = new File(progressFile());
         if (!f.exists()) {
             // No install ever started, or the file was cleaned up after a
             // long-completed install. Return a sentinel "idle".
@@ -714,7 +717,7 @@ public class UpdateApiHandler {
             HttpResponse.sendJson(out, r.toString());
             return;
         }
-        String json = readTextFile(PROGRESS_FILE);
+        String json = readTextFile(progressFile());
         if (json == null || json.isEmpty()) {
             // Empty/zero-byte read: the non-atomic writeProgress (new FileWriter
             // truncates-then-writes) leaves a momentary zero-length window a poll
@@ -783,7 +786,7 @@ public class UpdateApiHandler {
             if (error != null) r.put("error", error);
             r.put("ts", System.currentTimeMillis());
         } catch (Exception ignored) {}
-        try (FileWriter fw = new FileWriter(PROGRESS_FILE)) {
+        try (FileWriter fw = new FileWriter(progressFile())) {
             fw.write(r.toString());
         } catch (Exception e) {
             CameraDaemon.log("UpdateApi: progress write failed: " + e.getMessage());

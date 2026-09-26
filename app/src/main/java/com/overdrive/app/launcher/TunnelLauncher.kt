@@ -1,4 +1,5 @@
 package com.overdrive.app.launcher
+import com.overdrive.app.util.ScratchPaths
 
 import android.content.Context
 import com.overdrive.app.logging.LogManager
@@ -19,8 +20,10 @@ class TunnelLauncher(
         private const val LAUNCH_GUARD_TIMEOUT_SECONDS = 90L
         
         // Cloudflared paths
-        private const val CLOUDFLARED_TMP_PATH = "/data/local/tmp/cloudflared"
-        private const val CLOUDFLARED_LOG = "/data/local/tmp/cloudflared.log"
+        private val cloudflaredTmpPath: String
+            get() = ScratchPaths.path("cloudflared")
+        private val cloudflaredLog: String
+            get() = ScratchPaths.path("cloudflared.log")
         
         // Process name for identification
         private const val CLOUDFLARED_PROCESS = "cloudflared"
@@ -192,7 +195,7 @@ class TunnelLauncher(
                     // Not running, check if binary is installed
                     callback.onLog("Setting up cloudflared...")
                     adbShellExecutor.execute(
-                        command = "test -x $CLOUDFLARED_TMP_PATH && echo yes || echo no",
+                        command = "test -x $cloudflaredTmpPath && echo yes || echo no",
                         callback = object : AdbShellExecutor.ShellCallback {
                             override fun onSuccess(output: String) {
                                 if (output.trim() == "yes") {
@@ -229,10 +232,10 @@ class TunnelLauncher(
                         // important is dropped (defense-in-depth even though
                         // the script form already prevents the suicide).
                         val killScript =
-                            "[ -f /data/local/tmp/zrok.disabled ] || " +
-                            "echo \"disabled — cloudflared starting at \$(date)\" > /data/local/tmp/zrok.disabled\n" +
-                            "chmod 666 /data/local/tmp/zrok.disabled 2>/dev/null\n" +
-                            "rm -f /data/local/tmp/start_zrok.sh 2>/dev/null\n" +
+                            "[ -f ${ScratchPaths.path("zrok.disabled")} ] || " +
+                            "echo \"disabled — cloudflared starting at \$(date)\" > ${ScratchPaths.path("zrok.disabled")}\n" +
+                            "chmod 666 ${ScratchPaths.path("zrok.disabled")} 2>/dev/null\n" +
+                            "rm -f ${ScratchPaths.path("start_zrok.sh")} 2>/dev/null\n" +
                             com.overdrive.app.launcher.DaemonLauncher.psAwkKillLine("zrok") +
                             "killall -9 zrok 2>/dev/null\n" +
                             "echo done\n"
@@ -275,7 +278,7 @@ class TunnelLauncher(
                     
                     // Copy and make executable
                     adbShellExecutor.execute(
-                        command = "cp $srcPath $CLOUDFLARED_TMP_PATH && chmod +x $CLOUDFLARED_TMP_PATH",
+                        command = "cp $srcPath $cloudflaredTmpPath && chmod +x $cloudflaredTmpPath",
                         callback = object : AdbShellExecutor.ShellCallback {
                             override fun onSuccess(copyOutput: String) {
                                 callback.onLog("cloudflared installed")
@@ -340,8 +343,8 @@ class TunnelLauncher(
 // FIX: Removed invalid flags. Added 'retries' and 'grace-period'.
 // --grace-period 45s: Waits 45s before panicking (Covers the 24s blackout)
 // --retries 20: Keeps trying to reconnect for a long time
-            append("$CLOUDFLARED_TMP_PATH ${com.overdrive.app.config.CloudflaredPaidConfig.getArgs()}")
-            append("' > $CLOUDFLARED_LOG 2>&1 &")
+            append("$cloudflaredTmpPath ${com.overdrive.app.config.CloudflaredPaidConfig.getArgs()}")
+            append("' > $cloudflaredLog 2>&1 &")
         }
         
         // Redact the cloudflared paid token before logging — the command can
@@ -370,7 +373,7 @@ class TunnelLauncher(
         if (attempt > 30) {
             // Timeout - get final log
             adbShellExecutor.execute(
-                command = "cat $CLOUDFLARED_LOG 2>/dev/null",
+                command = "cat $cloudflaredLog 2>/dev/null",
                 callback = object : AdbShellExecutor.ShellCallback {
                     override fun onSuccess(output: String) {
                         logManager.error(TAG, "Cloudflared timed out. Log: ${output.takeLast(500)}")
@@ -398,7 +401,7 @@ class TunnelLauncher(
 
     private fun doWaitForTunnelUrlPoll(callback: TunnelCallback, attempt: Int) {
         adbShellExecutor.execute(
-            command = com.overdrive.app.config.CloudflaredPaidConfig.getUrlExtractionCommand(CLOUDFLARED_LOG),
+            command = com.overdrive.app.config.CloudflaredPaidConfig.getUrlExtractionCommand(cloudflaredLog),
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(logContent: String) {
                     val tunnelUrl = com.overdrive.app.config.CloudflaredPaidConfig.parseUrl(logContent)
@@ -492,7 +495,7 @@ class TunnelLauncher(
         // Use grep to find URL directly instead of loading entire log
         // This eliminates large memory allocations from reading log files
         adbShellExecutor.execute(
-            command = com.overdrive.app.config.CloudflaredPaidConfig.getGrepUrlCommand(CLOUDFLARED_LOG),
+            command = com.overdrive.app.config.CloudflaredPaidConfig.getGrepUrlCommand(cloudflaredLog),
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
                     var url = output.trim()
@@ -524,7 +527,7 @@ class TunnelLauncher(
      */
     fun hasLogFile(callback: (Boolean) -> Unit) {
         adbShellExecutor.execute(
-            command = "test -f $CLOUDFLARED_LOG && echo yes || echo no",
+            command = "test -f $cloudflaredLog && echo yes || echo no",
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
                     callback(output.trim() == "yes")

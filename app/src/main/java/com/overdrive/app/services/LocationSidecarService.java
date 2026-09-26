@@ -815,7 +815,7 @@ public class LocationSidecarService extends Service implements LocationListener 
         // async marker clear lands. Mirrors DaemonKeepaliveService.onStartCommand.
         try {
             if (com.overdrive.app.config.UnifiedConfigManager.isVehicleOnOnlyMode()
-                    && new java.io.File(com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH).exists()
+                    && new java.io.File(com.overdrive.app.ui.model.ParkedShutdown.markerPath()).exists()
                     && !com.overdrive.app.ui.daemon.DaemonStartupManager.getRecoveryInProgress()) {
                 Log.i(TAG, "onOnly + parked-shutdown marker present — stopping location sidecar");
                 stopSelf();

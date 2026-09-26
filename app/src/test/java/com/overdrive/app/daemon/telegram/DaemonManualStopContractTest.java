@@ -79,7 +79,7 @@ public class DaemonManualStopContractTest {
         assertTrue(clear >= 0 && next > clear);
         assertFalse(startup.substring(clear, next).contains("rm -f"));
         assertTrue(count(hotspot,
-                "[ -f /data/local/tmp/singbox.disabled ]") >= 2);
+                "ScratchPaths.path(\"singbox.disabled\")") >= 2);
     }
 
     @Test
@@ -112,13 +112,13 @@ public class DaemonManualStopContractTest {
         assertTrue(handler.indexOf("stopDaemon(\"zrok\", ctx);")
                 < handler.indexOf("if (isRunning)"));
         assertTrue(lifecycle.contains(
-                "[ -f /data/local/tmp/camera_daemon.disabled ] || "));
+                "ScratchPaths.path(\"camera_daemon.disabled\")"));
         assertTrue(updater.contains(
-                "[ -f /data/local/tmp/acc_sentry_daemon.disabled ] || "));
+                "ScratchPaths.path(\"acc_sentry_daemon.disabled\")"));
         assertTrue(updater.contains(
                 "'disabled by stopAllDaemons sweep'*|"));
         assertTrue(launcher.contains(
-                "[ -f /data/local/tmp/acc_sentry_daemon.disabled ] || "));
+                "ScratchPaths.path(\"acc_sentry_daemon.disabled\")"));
         int privilegedKill = launcher.indexOf(
                 "private fun killDaemonViaPrivilegedShell");
         int adbKill = launcher.indexOf(

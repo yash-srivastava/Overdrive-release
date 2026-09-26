@@ -1,4 +1,5 @@
 package com.overdrive.app.ui.daemon
+import com.overdrive.app.util.ScratchPaths
 
 import android.content.Context
 import com.overdrive.app.launcher.AdbDaemonLauncher
@@ -42,7 +43,7 @@ class CameraDaemonController(
     override fun start(callback: DaemonCallback) {
         callback.onStatusChanged(DaemonStatus.STARTING, "Starting camera daemon...")
         
-        val outputDir = context.getExternalFilesDir(null)?.absolutePath ?: "/data/local/tmp/overdrive"
+        val outputDir = context.getExternalFilesDir(null)?.absolutePath ?: ScratchPaths.path("overdrive")
         val nativeLibDir = context.applicationInfo.nativeLibraryDir
         
         adbLauncher.launchDaemon(
@@ -91,9 +92,9 @@ class CameraDaemonController(
             // runs the script body. Order: sentinel first (defense),
             // then watchdog/lock cleanup, then kill cascade.
             val killScript = buildString {
-                append("echo \"disabled by ui at \$(date)\" > /data/local/tmp/camera_daemon.disabled\n")
-                append("chmod 666 /data/local/tmp/camera_daemon.disabled 2>/dev/null\n")
-                append("rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/cam_watchdog.pid 2>/dev/null\n")
+                append("echo \"disabled by ui at \$(date)\" > ${ScratchPaths.path("camera_daemon.disabled")}\n")
+                append("chmod 666 ${ScratchPaths.path("camera_daemon.disabled")} 2>/dev/null\n")
+                append("rm -f ${ScratchPaths.path("start_cam_daemon.sh")} ${ScratchPaths.path("cam_watchdog.pid")} 2>/dev/null\n")
                 append(gracefulExitWait)
                 append(com.overdrive.app.launcher.DaemonLauncher.psAwkKillLine("cam_daemon"))
                 relatedProcesses(diLink5Selected).forEach { proc ->
@@ -104,8 +105,8 @@ class CameraDaemonController(
                 // rm-after-pkill prevents the lockfile resurrection race
                 // (daemon writes PID back into lock between rm and kill).
                 append("sleep 1\n")
-                append("rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null\n")
-                append("rm -rf /data/local/tmp/cam_watchdog.lock 2>/dev/null\n")
+                append("rm -f ${ScratchPaths.path("camera_daemon.lock")} 2>/dev/null\n")
+                append("rm -rf ${ScratchPaths.path("cam_watchdog.lock")} 2>/dev/null\n")
                 append("echo done\n")
             }
             adbLauncher.executeShellScript(
@@ -179,7 +180,7 @@ class CameraDaemonController(
         // teardown so we don't need the disable sentinel here — the user
         // is exiting the app, not telling the daemon to stay dead.
         val killScript = buildString {
-            append("rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/cam_watchdog.pid 2>/dev/null\n")
+            append("rm -f ${ScratchPaths.path("start_cam_daemon.sh")} ${ScratchPaths.path("cam_watchdog.pid")} 2>/dev/null\n")
             append(gracefulExitWait)
             append(com.overdrive.app.launcher.DaemonLauncher.psAwkKillLine("cam_daemon"))
             relatedProcesses(diLink5Selected).forEach { proc ->
@@ -187,8 +188,8 @@ class CameraDaemonController(
                 append("killall -9 $proc 2>/dev/null\n")
             }
             append("sleep 1\n")
-            append("rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null\n")
-            append("rm -rf /data/local/tmp/cam_watchdog.lock 2>/dev/null\n")
+            append("rm -f ${ScratchPaths.path("camera_daemon.lock")} 2>/dev/null\n")
+            append("rm -rf ${ScratchPaths.path("cam_watchdog.lock")} 2>/dev/null\n")
             append("echo done\n")
         }
         adbLauncher.executeShellScript(

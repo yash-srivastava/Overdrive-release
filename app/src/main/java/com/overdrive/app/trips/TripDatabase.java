@@ -1,4 +1,5 @@
 package com.overdrive.app.trips;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -21,7 +22,9 @@ public class TripDatabase {
     private static final String TAG = "TripDatabase";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
-    private static final String DB_PATH = "/data/local/tmp/overdrive_trips_h2";
+    private static String dbPath() {
+        return ScratchPaths.path("overdrive_trips_h2");
+    }
     // DB_CLOSE_ON_EXIT=FALSE: avoid H2's JVM shutdown hook racing the
     // daemon's explicit close path. Without this we hit the same orphaned-
     // lock-file pattern as SocHistoryDatabase, which blocks the next
@@ -32,10 +35,12 @@ public class TripDatabase {
     // process architecture: only CameraDaemon writes, TripApiHandler reads
     // from the same JVM. FILE_LOCK=SOCKET handles cross-process safety.
     // AUTO_COMPACT_FILL_RATE=50: idle-CPU tuning shared by all seven H2 stores
-    // (see SocHistoryDatabase.JDBC_URL for the full rationale).
-    private static final String JDBC_URL = "jdbc:h2:file:" + DB_PATH +
+    // (see SocHistoryDatabase.jdbcUrl() for the full rationale).
+    private static String jdbcUrl() {
+        return "jdbc:h2:file:" + dbPath() +
             ";FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
             ";AUTO_COMPACT_FILL_RATE=50";
+    }
 
     // volatile: reassigned by reconnect() (now synchronized); the fence gives a
     // happens-before edge so any reader sees the freshly-swapped connection.
@@ -47,7 +52,7 @@ public class TripDatabase {
     public void init() {
         if (isInitialized) return;
 
-        logger.info("Initializing H2 trip database at: " + DB_PATH);
+        logger.info("Initializing H2 trip database at: " + dbPath());
 
         // Load H2 JDBC driver
         try {
@@ -62,7 +67,7 @@ public class TripDatabase {
 
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+                connection = DriverManager.getConnection(jdbcUrl(), "sa", "");
                 logger.info("H2 connection established");
 
                 // Tune H2 for embedded daemon use
@@ -72,7 +77,7 @@ public class TripDatabase {
 
                 createTables();
                 isInitialized = true;
-                logger.info("Trip Database initialized via H2 (Pure Java): " + DB_PATH);
+                logger.info("Trip Database initialized via H2 (Pure Java): " + dbPath());
 
                 // Kick off the one-shot size_bytes backfill for legacy
                 // rows. Runs on its own daemon thread, no-op when every
@@ -143,7 +148,7 @@ public class TripDatabase {
     private synchronized void reconnect() {
         try {
             if (connection == null || connection.isClosed()) {
-                connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+                connection = DriverManager.getConnection(jdbcUrl(), "sa", "");
                 // Idempotent (IF NOT EXISTS throughout). A reopen against a wiped
                 // or replaced .mv.db would otherwise yield a table-less store that
                 // probe() still calls healthy (SELECT 1 needs no table), turning
@@ -193,7 +198,7 @@ public class TripDatabase {
             connection = null;
         }
         try {
-            connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+            connection = DriverManager.getConnection(jdbcUrl(), "sa", "");
             createTables();   // idempotent; see reconnect()
             isInitialized = true;
             logger.warn("H2 trip database force-reconnected after failed liveness probe");
@@ -236,7 +241,7 @@ public class TripDatabase {
 
     private void cleanupStaleLocks() {
         try {
-            java.io.File lockFile = new java.io.File(DB_PATH + ".lock.db");
+            java.io.File lockFile = new java.io.File(dbPath() + ".lock.db");
             if (lockFile.exists()) {
                 long ageMs = System.currentTimeMillis() - lockFile.lastModified();
                 if (ageMs > 5 * 60 * 1000) {
@@ -245,7 +250,7 @@ public class TripDatabase {
                     }
                 }
             }
-            java.io.File traceFile = new java.io.File(DB_PATH + ".trace.db");
+            java.io.File traceFile = new java.io.File(dbPath() + ".trace.db");
             if (traceFile.exists()) {
                 traceFile.delete();
             }

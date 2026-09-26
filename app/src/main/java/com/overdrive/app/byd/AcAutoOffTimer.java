@@ -1,4 +1,5 @@
 package com.overdrive.app.byd;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.byd.routing.VehicleCommandRouter;
 import com.overdrive.app.logging.DaemonLogger;
@@ -123,7 +124,9 @@ public final class AcAutoOffTimer {
      * switch it off. That is the battery drain this class exists to prevent. A watchdog restart
      * or crash has the same effect.
      */
-    private static final String STATE_PATH = "/data/local/tmp/overdrive_ac_auto_off_due";
+    private static String statePath() {
+        return ScratchPaths.path("overdrive_ac_auto_off_due");
+    }
 
     private AcAutoOffTimer() {}
 
@@ -235,7 +238,7 @@ public final class AcAutoOffTimer {
     }
 
     private static void persistDueAt(long dueAtMs) {
-        try (java.io.FileWriter fw = new java.io.FileWriter(STATE_PATH)) {
+        try (java.io.FileWriter fw = new java.io.FileWriter(statePath())) {
             fw.write(String.valueOf(dueAtMs));
         } catch (Exception e) {
             // Non-fatal: the in-memory timer still works for this process lifetime. Warn, because
@@ -244,7 +247,7 @@ public final class AcAutoOffTimer {
             return;
         }
         try {
-            java.io.File f = new java.io.File(STATE_PATH);
+            java.io.File f = new java.io.File(statePath());
             f.setReadable(true, false);
             f.setWritable(true, false);
         } catch (Exception ignored) {}
@@ -252,18 +255,18 @@ public final class AcAutoOffTimer {
 
     private static void clearPersisted() {
         try {
-            java.io.File f = new java.io.File(STATE_PATH);
+            java.io.File f = new java.io.File(statePath());
             if (!f.exists()) return;
             if (f.delete()) return;
             // Could not unlink (permissions) — blank it so restore() can't resurrect a
             // cancelled window on the next boot.
-            try (java.io.FileWriter fw = new java.io.FileWriter(STATE_PATH)) { fw.write("0"); }
+            try (java.io.FileWriter fw = new java.io.FileWriter(statePath())) { fw.write("0"); }
         } catch (Exception e) {
             // BOTH the unlink and the blanking failed, so the marker survives: restore() would
             // re-arm (or immediately fire) a window the user just cancelled. Warn rather than
             // swallow — silence here is exactly how a cancelled shutdown comes back from the dead,
             // and it is the same standard persistDueAt holds itself to.
-            logger.warn("Could not clear the persisted AC auto-off deadline (" + STATE_PATH
+            logger.warn("Could not clear the persisted AC auto-off deadline (" + statePath()
                     + ") — a cancelled window may be restored after a restart: " + e.getMessage());
         }
     }
@@ -271,7 +274,7 @@ public final class AcAutoOffTimer {
     /** The persisted deadline in epoch millis, or 0 when absent/unreadable/blank. */
     private static long readPersisted() {
         try {
-            java.io.File f = new java.io.File(STATE_PATH);
+            java.io.File f = new java.io.File(statePath());
             if (!f.isFile()) return 0L;
             byte[] raw = java.nio.file.Files.readAllBytes(f.toPath());
             String s = new String(raw, java.nio.charset.StandardCharsets.UTF_8).trim();

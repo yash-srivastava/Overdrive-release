@@ -1,4 +1,5 @@
 package com.overdrive.app.server;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.storage.StorageManager;
@@ -40,8 +41,12 @@ public class QualitySettingsApiHandler {
     private static String recordingBitrate = "STANDARD";
     private static String recordingCodec = "H264";      // H264 or H265
     
-    private static final String UNIFIED_CONFIG_FILE = "/data/local/tmp/overdrive_config.json";
-    private static final String LEGACY_SETTINGS_FILE = "/data/local/tmp/camera_settings.json";
+    private static String unifiedConfigFile() {
+        return ScratchPaths.path("overdrive_config.json");
+    }
+    private static String legacySettingsFile() {
+        return ScratchPaths.LEGACY_DIR + "/camera_settings.json";
+    }
     
     /**
      * Handle quality settings API requests.
@@ -517,7 +522,7 @@ public class QualitySettingsApiHandler {
         response.put("success", true);
         
         try {
-            File unifiedFile = new File(UNIFIED_CONFIG_FILE);
+            File unifiedFile = new File(unifiedConfigFile());
             if (unifiedFile.exists()) {
                 BufferedReader reader = new BufferedReader(new FileReader(unifiedFile));
                 StringBuilder sb = new StringBuilder();
@@ -980,7 +985,7 @@ public class QualitySettingsApiHandler {
         long lastModified = System.currentTimeMillis();
         
         try {
-            File unifiedFile = new File(UNIFIED_CONFIG_FILE);
+            File unifiedFile = new File(unifiedConfigFile());
             if (unifiedFile.exists()) {
                 lastModified = unifiedFile.lastModified();
                 
@@ -1612,7 +1617,7 @@ public class QualitySettingsApiHandler {
     public static void loadPersistedSettings() {
         // Try unified config first
         try {
-            File unifiedFile = new File(UNIFIED_CONFIG_FILE);
+            File unifiedFile = new File(unifiedConfigFile());
             if (unifiedFile.exists()) {
                 BufferedReader reader = new BufferedReader(new FileReader(unifiedFile));
                 StringBuilder sb = new StringBuilder();
@@ -1665,7 +1670,7 @@ public class QualitySettingsApiHandler {
                     CameraDaemon.log("Restored streaming quality from unified: " + quality);
                 }
                 
-                CameraDaemon.log("Settings loaded from unified config: " + UNIFIED_CONFIG_FILE);
+                CameraDaemon.log("Settings loaded from unified config: " + unifiedConfigFile());
                 return;
             }
         } catch (Exception e) {
@@ -1678,8 +1683,8 @@ public class QualitySettingsApiHandler {
 
     private static void loadLegacySettings() {
         try {
-            File file = new File(LEGACY_SETTINGS_FILE);
-            CameraDaemon.log("Loading settings from legacy: " + LEGACY_SETTINGS_FILE + " (exists=" + file.exists() + ")");
+            File file = new File(legacySettingsFile());
+            CameraDaemon.log("Loading settings from legacy: " + legacySettingsFile() + " (exists=" + file.exists() + ")");
             if (file.exists()) {
                 BufferedReader reader = new BufferedReader(new FileReader(file));
                 StringBuilder sb = new StringBuilder();
@@ -1723,7 +1728,7 @@ public class QualitySettingsApiHandler {
                     StreamingApiHandler.setStreamingQuality(quality);
                 }
                 
-                CameraDaemon.log("Settings loaded from legacy " + LEGACY_SETTINGS_FILE);
+                CameraDaemon.log("Settings loaded from legacy " + legacySettingsFile());
                 // Migrate to unified config
                 persistSettings();
             }

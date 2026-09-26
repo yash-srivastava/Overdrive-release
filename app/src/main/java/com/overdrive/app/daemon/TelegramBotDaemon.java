@@ -1,4 +1,5 @@
 package com.overdrive.app.daemon;
+import com.overdrive.app.util.ScratchPaths;
 
 import android.os.Looper;
 
@@ -51,12 +52,18 @@ public class TelegramBotDaemon {
     
     // ==================== ENCRYPTED CONSTANTS (SOTA Java obfuscation) ====================
     // Decrypted at runtime via Safe.s() - AES-256-CBC with stack-based key reconstruction
-    /** /data/local/tmp */
-    private static String PATH_DATA_LOCAL_TMP() { return Safe.s("vuaMjrmBGBFh07qqnUuL8w=="); }
+    /** /data/local/tmp (remapped via ScratchPaths when not legacy) */
+    private static String PATH_DATA_LOCAL_TMP() {
+        return ScratchPaths.path(Safe.s("vuaMjrmBGBFh07qqnUuL8w=="));
+    }
     /** /data/local/tmp/telegram_config.properties */
-    private static String PATH_TELEGRAM_CONFIG() { return Safe.s("ZHx6IP38aGV/Q7iMCCcxzwQSn0P1N0jxHygc8N+4Ft+9mlR8XQ+WvEw0ktanrtNx"); }
+    private static String PATH_TELEGRAM_CONFIG() {
+        return ScratchPaths.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxzwQSn0P1N0jxHygc8N+4Ft+9mlR8XQ+WvEw0ktanrtNx"));
+    }
     /** /data/local/tmp/tunnel_url.txt */
-    private static String PATH_TELEGRAM_URL_FILE() { return Safe.s("ZHx6IP38aGV/Q7iMCCcxz/kVx51CDNRiQ/Mc5+npiPo="); }
+    private static String PATH_TELEGRAM_URL_FILE() {
+        return ScratchPaths.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxz/kVx51CDNRiQ/Mc5+npiPo="));
+    }
     /** https://api.telegram.org/bot */
     private static String TELEGRAM_API_BASE() { return Safe.s("FS7R/5I0wopp0qBqyJXzvDKg6eI9UXmD/Oei3NbaaGQ="); }
     
@@ -71,7 +78,9 @@ public class TelegramBotDaemon {
     private static final int IPC_PORT = 19880;
     
     // Singleton lock (same pattern as CameraDaemon / AccSentryDaemon)
-    private static final String LOCK_FILE = "/data/local/tmp/telegram_bot_daemon.lock";
+    private static String lockFilePath() {
+        return com.overdrive.app.util.ScratchPaths.path("telegram_bot_daemon.lock");
+    }
     private static java.io.RandomAccessFile lockFileHandle;
     private static java.nio.channels.FileLock fileLock;
     
@@ -180,16 +189,20 @@ public class TelegramBotDaemon {
     private static CommandRouter commandRouter;
     
     public static void main(String[] args) {
+        com.overdrive.app.util.ScratchPaths.syncFromEnv();
+        com.overdrive.app.util.ScratchPaths.ensureDir();
+
         int myUid = android.os.Process.myUid();
         int myPid = android.os.Process.myPid();
         
         // Configure DaemonLogger for daemon context (enable stdout for app_process)
         DaemonLogger.configure(DaemonLogger.Config.defaults()
+            .withLogDir(com.overdrive.app.util.ScratchPaths.getDir())
             .withStdoutLog(true)
             .withFileLog(true)
             .withConsoleLog(true));
         
-        logger = DaemonLogger.getInstance(TAG, PATH_DATA_LOCAL_TMP());
+        logger = DaemonLogger.getInstance(TAG, com.overdrive.app.util.ScratchPaths.getDir());
         
         log("=== Telegram Bot Daemon Starting ===");
         log("UID: " + myUid + " (expected: 2000 shell)");
@@ -317,7 +330,7 @@ public class TelegramBotDaemon {
             Thread.sleep(500);
             
             // Clean up stale lock file (SIGKILL doesn't trigger shutdown hooks)
-            new java.io.File(LOCK_FILE).delete();
+            new java.io.File(lockFilePath()).delete();
             
             log("Old instance cleanup complete (my PID: " + myPid + ")");
         } catch (Exception e) {
@@ -350,7 +363,7 @@ public class TelegramBotDaemon {
      */
     private static boolean acquireSingletonLock() {
         try {
-            java.io.File lockFileObj = new java.io.File(LOCK_FILE);
+            java.io.File lockFileObj = new java.io.File(lockFilePath());
             lockFileHandle = new java.io.RandomAccessFile(lockFileObj, "rw");
             java.nio.channels.FileChannel channel = lockFileHandle.getChannel();
 
@@ -530,7 +543,7 @@ public class TelegramBotDaemon {
                 lockFileHandle.close();
                 lockFileHandle = null;
             }
-            new java.io.File(LOCK_FILE).delete();
+            new java.io.File(lockFilePath()).delete();
         } catch (Exception e) {
             log("Error releasing singleton lock: " + e.getMessage());
         }
@@ -580,7 +593,8 @@ public class TelegramBotDaemon {
                 if (com.overdrive.app.telegram.config.UnifiedTelegramConfig.botTokenPresentButUndecryptable()) {
                     log("ERROR: bot token is stored but could NOT be decrypted "
                             + "(firmware/OTA changed the key, or "
-                            + "/data/local/tmp/.byd_device_id is missing/unreadable). "
+                            + ScratchPaths.path(".byd_device_id")
+                            + " is missing/unreadable). "
                             + "Re-enter the token in the Telegram settings to recover.");
                 } else {
                     log("bot_token not set in unified config");
@@ -1356,7 +1370,7 @@ public class TelegramBotDaemon {
                             // the hint and deny the next legit notify its
                             // post-update framing.
                             boolean postUpdatePresent = new File(
-                                    "/data/local/tmp/overdrive_post_update_pending_telegram"
+                                    ScratchPaths.path("overdrive_post_update_pending_telegram")
                                 ).exists();
                             // A FAILED install (Telegram-triggered) leaves the
                             // failure hint instead of the success hint — bypass
@@ -1364,7 +1378,7 @@ public class TelegramBotDaemon {
                             // install failed NOW, not 10 min later (symmetric
                             // with the post-update success bypass above).
                             boolean installFailedPresent = new File(
-                                    "/data/local/tmp/overdrive_install_failed_pending_telegram"
+                                    ScratchPaths.path("overdrive_install_failed_pending_telegram")
                                 ).exists();
                             if (!postUpdatePresent
                                     && !installFailedPresent
@@ -1839,7 +1853,9 @@ public class TelegramBotDaemon {
      * generous for actual uptime feedback while collapsing crash-loop noise
      * to a single message.
      */
-    private static final String GREETING_STAMP_FILE = "/data/local/tmp/.tg_last_greeted";
+    private static String greetingStampFile() {
+        return ScratchPaths.path(".tg_last_greeted");
+    }
     private static final long GREETING_THROTTLE_MS = 60L * 60L * 1000L; // 1 hour
 
     /**
@@ -1874,7 +1890,9 @@ public class TelegramBotDaemon {
     // health-check restart loop produces a "URL changed" Telegram message
     // unless throttled. 10 min window matches "user-meaningful URL
     // change" — anything more frequent IS the loop, not real change.
-    private static final String TUNNEL_NOTIFY_STAMP_FILE = "/data/local/tmp/.tunnel_last_notified";
+    private static String tunnelNotifyStampFile() {
+        return ScratchPaths.path(".tunnel_last_notified");
+    }
     private static final long TUNNEL_NOTIFY_THROTTLE_MS = 10L * 60L * 1000L; // 10 min
 
     // Serializes the notifyTunnel IPC critical section. IPC_WORKERS is a
@@ -1893,7 +1911,7 @@ public class TelegramBotDaemon {
 
     private static boolean shouldThrottleTunnelNotify() {
         try {
-            File stamp = new File(TUNNEL_NOTIFY_STAMP_FILE);
+            File stamp = new File(tunnelNotifyStampFile());
             if (!stamp.exists()) return false;
             long age = System.currentTimeMillis() - stamp.lastModified();
             if (age < 0 || age >= TUNNEL_NOTIFY_THROTTLE_MS) return false;
@@ -1926,7 +1944,7 @@ public class TelegramBotDaemon {
 
     private static void stampTunnelNotify() {
         try {
-            File stamp = new File(TUNNEL_NOTIFY_STAMP_FILE);
+            File stamp = new File(tunnelNotifyStampFile());
             String body = readBootId();
             try (java.io.FileWriter fw = new java.io.FileWriter(stamp)) {
                 fw.write(body);
@@ -1983,7 +2001,7 @@ public class TelegramBotDaemon {
         String currentBootId = readBootId();
         {
             try {
-                File stamp = new File(GREETING_STAMP_FILE);
+                File stamp = new File(greetingStampFile());
                 if (stamp.exists()) {
                     // Clamp a future mtime to "just now" instead of treating it as
                     // un-throttled. The head unit boots with a wrong RTC and
@@ -2062,7 +2080,7 @@ public class TelegramBotDaemon {
                 // Provably never reached Telegram — release the claim so the
                 // next start retries. A replay cannot duplicate.
                 log("Startup greeting not delivered — clearing stamp so the next start retries");
-                try { new File(GREETING_STAMP_FILE).delete(); } catch (Exception ignored) {}
+                try { new File(greetingStampFile()).delete(); } catch (Exception ignored) {}
             } else if (outcome == SEND_AMBIGUOUS) {
                 log("Startup greeting outcome ambiguous — keeping stamp to avoid a duplicate");
             } else {
@@ -2080,7 +2098,7 @@ public class TelegramBotDaemon {
      */
     private static void writeGreetingStamp(String currentBootId) {
         try {
-            File stamp = new File(GREETING_STAMP_FILE);
+            File stamp = new File(greetingStampFile());
             try (java.io.FileWriter fw = new java.io.FileWriter(stamp)) {
                 fw.write(currentBootId == null || currentBootId.isEmpty() ? "" : currentBootId);
             }
@@ -3313,7 +3331,7 @@ public class TelegramBotDaemon {
      * avoid pulling the whole updater package transitively.
      */
     private static String consumePostUpdateHint() {
-        File hint = new File("/data/local/tmp/overdrive_post_update_pending_telegram");
+        File hint = new File(ScratchPaths.path("overdrive_post_update_pending_telegram"));
         if (!hint.exists()) return null;
         String version = null;
         try (BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(hint)))) {
@@ -3344,7 +3362,7 @@ public class TelegramBotDaemon {
      * process and we avoid pulling the whole updater package transitively.
      */
     private static String consumeInstallFailedHint() {
-        File hint = new File("/data/local/tmp/overdrive_install_failed_pending_telegram");
+        File hint = new File(ScratchPaths.path("overdrive_install_failed_pending_telegram"));
         if (!hint.exists()) return null;
         String reason = null;
         try (BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(hint)))) {

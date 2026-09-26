@@ -525,7 +525,7 @@ public class StatusOverlayService extends Service {
         // is unaffected; recoveryInProgress guard avoids self-stopping on the recovery edge.
         try {
             if (com.overdrive.app.config.UnifiedConfigManager.isVehicleOnOnlyMode()
-                    && new java.io.File(com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH).exists()
+                    && new java.io.File(com.overdrive.app.ui.model.ParkedShutdown.markerPath()).exists()
                     && !com.overdrive.app.ui.daemon.DaemonStartupManager.getRecoveryInProgress()) {
                 Log.w(TAG, "onOnly + parked-shutdown marker present — stopping status overlay");
                 stopSelf();

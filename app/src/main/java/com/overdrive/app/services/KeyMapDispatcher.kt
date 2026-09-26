@@ -1,4 +1,5 @@
 package com.overdrive.app.services
+import com.overdrive.app.util.ScratchPaths
 
 import android.os.FileObserver
 import android.util.Log
@@ -105,7 +106,8 @@ object KeyMapDispatcher {
     // instead of one per REFRESH_THROTTLE_MS — the zero-overhead-when-disabled bar.
     private const val REENABLE_POLL_MS = 30_000L
     // Unified config file — watched for instant propagation of settings edits.
-    private const val CONFIG_PATH = "/data/local/tmp/overdrive_config.json"
+    private val configPath: String
+        get() = ScratchPaths.path("overdrive_config.json")
 
     // Pooled I/O executor for daemon POSTs and config refreshes. Cached (not
     // single-thread) so one slow/hung POST never blocks either the timing
@@ -290,7 +292,7 @@ object KeyMapDispatcher {
         // the guarded claim below (an observer is only ever built once).
         if (watcher != null) return
         try {
-            val cfg = File(CONFIG_PATH)
+            val cfg = File(configPath)
             val dir = cfg.parentFile ?: return
             val name = cfg.name
             val mask = FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO or FileObserver.CREATE

@@ -1,4 +1,5 @@
 package com.overdrive.app.charging;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -114,7 +115,9 @@ public final class CounterScaleCalibrator {
     /** Rises below this are quantisation noise on either series, kWh. */
     private static final double MIN_STEP_KWH = 0.005;
 
-    private static final String STATE_FILE = "/data/local/tmp/od_counter_scale.json";
+    private static String stateFile() {
+        return ScratchPaths.path("od_counter_scale.json");
+    }
     private static final String IDENTITY_KEY = "__identity";
 
     private static final ConcurrentHashMap<String, Calibration> calibrations =
@@ -361,7 +364,7 @@ public final class CounterScaleCalibrator {
         if (loaded) return;
         loaded = true;
         try {
-            File f = new File(STATE_FILE);
+            File f = new File(stateFile());
             if (!f.exists()) return;
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
             try (FileInputStream in = new FileInputStream(f)) {
@@ -408,7 +411,7 @@ public final class CounterScaleCalibrator {
         try {
             JSONObject root = describe();
             try { root.put(IDENTITY_KEY, currentIdentity()); } catch (Exception ignored) {}
-            try (FileOutputStream out = new FileOutputStream(STATE_FILE)) {
+            try (FileOutputStream out = new FileOutputStream(stateFile())) {
                 out.write(root.toString().getBytes("UTF-8"));
             }
         } catch (Exception e) {

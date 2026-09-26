@@ -1,6 +1,7 @@
 package com.overdrive.app.camera.dilink5;
 
 import com.overdrive.app.config.UnifiedConfigManager;
+import com.overdrive.app.util.ScratchPaths;
 
 import org.json.JSONObject;
 
@@ -17,10 +18,13 @@ public final class DiLink5Platform {
     private static final String MODE_DILINK5 = "dilink5";
     private static final String MODE_DEFAULT = "default";
     private static final String MODE_DILINK4 = "dilink4";
-    private static final String ACTIVE_MODE_PATH =
-            "/data/local/tmp/overdrive_active_vehicle_mode";
-    private static final String PENDING_MODE_PATH =
-            "/data/local/tmp/overdrive_pending_vehicle_mode";
+    private static String activeModePath() {
+        return ScratchPaths.path("overdrive_active_vehicle_mode");
+    }
+
+    private static String pendingModePath() {
+        return ScratchPaths.path("overdrive_pending_vehicle_mode");
+    }
     private static final long MODE_MARKER_MAX_BYTES = 1_024L;
     private static final String CAMERA_UTILITY_PATH =
             "/system/lib64/libais_test_util.so";
@@ -111,8 +115,8 @@ public final class DiLink5Platform {
         }
         ModeMarkerSnapshot before = snapshotModeMarkersLocked();
         if (before == null) return false;
-        if (writeMode(PENDING_MODE_PATH, requested)
-                && writeMode(ACTIVE_MODE_PATH, active)) {
+        if (writeMode(pendingModePath(), requested)
+                && writeMode(activeModePath(), active)) {
             return true;
         }
         restoreModeMarkersLocked(before);
@@ -163,7 +167,7 @@ public final class DiLink5Platform {
                         return null;
                     }
                     if (!deletePendingMode()
-                            || !writeMode(ACTIVE_MODE_PATH, configured)) {
+                            || !writeMode(activeModePath(), configured)) {
                         processMode = restoreModeMarkersLocked(before)
                                 ? previous
                                 : effectiveMode(
@@ -224,7 +228,7 @@ public final class DiLink5Platform {
 
     /** Cross-process fence for app-process vehicle requests. */
     public static String currentActiveModeGeneration() {
-        return readModeGeneration(ACTIVE_MODE_PATH);
+        return readModeGeneration(activeModePath());
     }
 
     public static boolean matchesActiveModeGeneration(String expected) {
@@ -270,11 +274,11 @@ public final class DiLink5Platform {
     }
 
     private static String readActiveMode() {
-        return readMode(ACTIVE_MODE_PATH);
+        return readMode(activeModePath());
     }
 
     private static String readPendingMode() {
-        return readMode(PENDING_MODE_PATH);
+        return readMode(pendingModePath());
     }
 
     private static String readMode(String path) {
@@ -335,8 +339,8 @@ public final class DiLink5Platform {
     private static ModeMarkerSnapshot snapshotModeMarkersLocked() {
         try {
             return new ModeMarkerSnapshot(
-                    readMarkerBytes(ACTIVE_MODE_PATH),
-                    readMarkerBytes(PENDING_MODE_PATH));
+                    readMarkerBytes(activeModePath()),
+                    readMarkerBytes(pendingModePath()));
         } catch (Exception ignored) {
             return null;
         }
@@ -345,8 +349,8 @@ public final class DiLink5Platform {
     private static boolean restoreModeMarkersLocked(
             ModeMarkerSnapshot snapshot) {
         if (snapshot == null) return false;
-        boolean pending = restoreMarkerBytes(PENDING_MODE_PATH, snapshot.pending);
-        boolean active = restoreMarkerBytes(ACTIVE_MODE_PATH, snapshot.active);
+        boolean pending = restoreMarkerBytes(pendingModePath(), snapshot.pending);
+        boolean active = restoreMarkerBytes(activeModePath(), snapshot.active);
         return pending && active;
     }
 
@@ -400,7 +404,7 @@ public final class DiLink5Platform {
     }
 
     private static boolean deletePendingMode() {
-        return restoreMarkerBytes(PENDING_MODE_PATH, null);
+        return restoreMarkerBytes(pendingModePath(), null);
     }
 
     private static String normalizeMode(String mode) {

@@ -23,6 +23,8 @@ public final class CameraProfiles {
     public static final String PROFILE_ATTO_3 = "atto3";
     public static final String PROFILE_TANG_2022 = "tang_2022";
     public static final String PROFILE_DILINK5_SEALION7 = "dilink5_sealion7";
+    /** Shark 6 DiLink 5; hardware IDs are remapped by the FastCam backend. */
+    public static final String PROFILE_DILINK5_SHARK = "dilink5_shark6";
 
     private static final LinkedHashMap<String, CameraProfile> PROFILES = new LinkedHashMap<>();
 
@@ -100,6 +102,20 @@ public final class CameraProfiles {
                 1920,
                 1080));
 
+        register(new CameraProfile(
+                PROFILE_DILINK5_SHARK,
+                "BYD DiLink 5.0 (Shark 6 / Snapdragon 8155)",
+                0,
+                1920,
+                1080,
+                0,
+                1920,
+                1080,
+                dilink5Mappings,
+                FOV_DEG_DEFAULT,
+                1920,
+                1080));
+
         EnumMap<CameraRole, CameraSourceRef> tangMappings = new EnumMap<>(legacyMappings);
         tangMappings.put(CameraRole.WINDSHIELD, CameraSourceRef.direct(0));
         register(new CameraProfile(
@@ -137,9 +153,29 @@ public final class CameraProfiles {
                     .replace("-", "")
                     .replace("_", "")
                     .replace(" ", "");
+            if (normalized.contains("shark") || normalized.contains("dmo")
+                    || PROFILE_DILINK5_SHARK.replace("_", "").equals(normalized)) {
+                return get(PROFILE_DILINK5_SHARK);
+            }
+            if (normalized.contains("sealion")) {
+                return get(PROFILE_DILINK5_SEALION7);
+            }
+            if (normalized.contains("dilink5")) {
+                return com.overdrive.app.camera.dilink5.DiLink5PlatformHelper
+                        .isSharkProfile(vehicleModel)
+                        ? get(PROFILE_DILINK5_SHARK)
+                        : get(PROFILE_DILINK5_SEALION7);
+            }
             if (normalized.contains("atto3") || normalized.contains("yuanplus")) {
                 return get(PROFILE_ATTO_3);
             }
+        }
+
+        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+            return com.overdrive.app.camera.dilink5.DiLink5PlatformHelper
+                    .isSharkProfile(vehicleModel)
+                    ? get(PROFILE_DILINK5_SHARK)
+                    : get(PROFILE_DILINK5_SEALION7);
         }
 
         // Tang profile split remains disabled. Its separate profile caused

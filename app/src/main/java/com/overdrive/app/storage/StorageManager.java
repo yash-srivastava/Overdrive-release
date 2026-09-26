@@ -1,4 +1,5 @@
 package com.overdrive.app.storage;
+import com.overdrive.app.util.ScratchPaths;
 
 import android.os.StatFs;
 import android.util.Log;
@@ -220,7 +221,9 @@ public class StorageManager {
     public static final String TRIPS_SUBDIR = "trips";
     
     // Config file location
-    private static final String CONFIG_FILE = "/data/local/tmp/overdrive_config.json";
+    private static String configFile() {
+        return ScratchPaths.path("overdrive_config.json");
+    }
 
     // Persisted UUID of whichever public volume we've previously confirmed as
     // the SD card. Used as the first-class signal in classifyPublicVolume()
@@ -232,7 +235,9 @@ public class StorageManager {
     // serial from a previous successful cycle bridges the gap. File is
     // tiny (~10 bytes), atomic-write semantics not required because a stale
     // value still resolves to the same physical card.
-    private static final String LEARNED_SD_UUID_FILE = "/data/local/tmp/overdrive_sd_uuid";
+    private static String learnedSdUuidFile() {
+        return ScratchPaths.path("overdrive_sd_uuid");
+    }
 
     /**
      * Cross-process proof that CameraDaemon recently observed the configured
@@ -242,8 +247,9 @@ public class StorageManager {
      * lease refreshed immediately before ACC-off is still valid at the first
      * ~30-second reactive-recovery decision.
      */
-    private static final String SD_MOUNTED_LEASE_FILE =
-            "/data/local/tmp/overdrive_sd_mounted_lease";
+    private static String sdMountedLeaseFile() {
+        return ScratchPaths.path("overdrive_sd_mounted_lease");
+    }
     private static final long SD_MOUNTED_LEASE_MS = 60_000L;
     private static final long SD_MOUNTED_LEASE_FAILURE_LOG_INTERVAL_MS =
             5 * 60_000L;
@@ -3049,11 +3055,11 @@ public class StorageManager {
 
     /**
      * Read the persisted UUID of the volume previously confirmed as SD. See
-     * {@link #LEARNED_SD_UUID_FILE} for why this exists. Returns empty string
+     * {@link #learnedSdUuidFile()} for why this exists. Returns empty string
      * if no learned value (first boot, or file missing).
      */
     private String readLearnedSdUuid() {
-        File f = new File(LEARNED_SD_UUID_FILE);
+        File f = new File(learnedSdUuidFile());
         if (!f.exists() || !f.canRead()) return "";
         try (BufferedReader r = new BufferedReader(new FileReader(f))) {
             String line = r.readLine();
@@ -3071,11 +3077,11 @@ public class StorageManager {
     private void learnSdUuid(String uuid) {
         if (uuid == null || uuid.isEmpty()) return;
         if (uuid.equalsIgnoreCase(readLearnedSdUuid())) return;  // unchanged, skip write
-        try (FileWriter w = new FileWriter(LEARNED_SD_UUID_FILE, false)) {
+        try (FileWriter w = new FileWriter(learnedSdUuidFile(), false)) {
             w.write(uuid);
             // 0644 — daemon (UID 2000) writes, app process needs to read on
             // the rare path where it walks classifyPublicVolume itself.
-            try { new File(LEARNED_SD_UUID_FILE).setReadable(true, false); } catch (Exception ignored) {}
+            try { new File(learnedSdUuidFile()).setReadable(true, false); } catch (Exception ignored) {}
             logInfo("Learned SD UUID for future classification: " + uuid);
         } catch (Exception e) {
             logDebug("learnSdUuid write failed: " + e.getMessage());
@@ -3791,7 +3797,7 @@ public class StorageManager {
      */
     private void loadConfig() {
         try {
-            File configFile = new File(CONFIG_FILE);
+            File configFile = new File(configFile());
             if (configFile.exists()) {
                 BufferedReader reader = new BufferedReader(new FileReader(configFile));
                 StringBuilder sb = new StringBuilder();
@@ -4045,7 +4051,9 @@ public class StorageManager {
     }
     
     /** Marker file that stores the epoch millis of the last successful broadcast scan. */
-    private static final String BROADCAST_MARKER_FILE = "/data/local/tmp/overdrive_last_mediascan";
+    private static String broadcastMarkerFile() {
+        return ScratchPaths.path("overdrive_last_mediascan");
+    }
     
     /** Throttle delay between individual file broadcasts (ms). */
     private static final long BROADCAST_THROTTLE_MS = 50;
@@ -4056,7 +4064,7 @@ public class StorageManager {
      */
     private long loadLastBroadcastTimestamp() {
         try {
-            File marker = new File(BROADCAST_MARKER_FILE);
+            File marker = new File(broadcastMarkerFile());
             if (marker.exists()) {
                 String content = new java.util.Scanner(marker).useDelimiter("\\A").next().trim();
                 return Long.parseLong(content);
@@ -4072,7 +4080,7 @@ public class StorageManager {
      */
     private void saveLastBroadcastTimestamp(long timestamp) {
         try {
-            java.io.FileWriter fw = new java.io.FileWriter(BROADCAST_MARKER_FILE);
+            java.io.FileWriter fw = new java.io.FileWriter(broadcastMarkerFile());
             fw.write(String.valueOf(timestamp));
             fw.close();
         } catch (Exception e) {
@@ -9567,7 +9575,7 @@ public class StorageManager {
         // the last pre-transition proof on that first failed watchdog tick
         // would defeat the entire cross-process contract.
         synchronized (SD_MOUNTED_LEASE_LOCK) {
-            java.io.File lease = new java.io.File(SD_MOUNTED_LEASE_FILE);
+            java.io.File lease = new java.io.File(sdMountedLeaseFile());
             long deadline = readSdMountedLeaseDeadline(lease);
             long now = System.currentTimeMillis();
             if (deadline > now && deadline <= now + SD_MOUNTED_LEASE_MS * 5L) {
@@ -9600,13 +9608,13 @@ public class StorageManager {
             byte[] payload = Long.toString(deadlineMs)
                     .getBytes(java.nio.charset.StandardCharsets.US_ASCII);
             java.io.File tmp =
-                    new java.io.File(SD_MOUNTED_LEASE_FILE + ".tmp");
+                    new java.io.File(sdMountedLeaseFile() + ".tmp");
             try (java.io.FileOutputStream output =
                          new java.io.FileOutputStream(tmp)) {
                 output.write(payload);
             }
             java.io.File destination =
-                    new java.io.File(SD_MOUNTED_LEASE_FILE);
+                    new java.io.File(sdMountedLeaseFile());
             if (!tmp.renameTo(destination)) {
                 try (java.io.FileOutputStream output =
                              new java.io.FileOutputStream(destination)) {
@@ -10439,14 +10447,16 @@ public class StorageManager {
      * directory cannot be created (callers fall back to the trips dir).
      */
     public File getTripJournalDir() {
-        File dir = new File(TRIP_JOURNAL_DIR);
+        File dir = new File(tripJournalDir());
         try {
             if (dir.isDirectory() || dir.mkdirs()) return dir;
         } catch (Throwable ignored) {}
         return null;
     }
 
-    private static final String TRIP_JOURNAL_DIR = "/data/local/tmp/overdrive_trip_journal";
+    private static String tripJournalDir() {
+        return ScratchPaths.path("overdrive_trip_journal");
+    }
 
     /**
      * Absolute path of the telemetry file for the trip CURRENTLY being recorded,

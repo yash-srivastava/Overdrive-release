@@ -1,4 +1,5 @@
 package com.overdrive.app.launcher;
+import com.overdrive.app.util.ScratchPaths;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
@@ -334,7 +335,7 @@ public final class ZrokRuntimeProbe {
 
     private static boolean isZrokProcess(int pid) {
         String cmdline = readCmdline(new File("/proc/" + pid + "/cmdline"));
-        return cmdline.contains("/data/local/tmp/zrok") && cmdline.contains("share");
+        return cmdline.contains(ScratchPaths.path("zrok")) && cmdline.contains("share");
     }
 
 
@@ -405,7 +406,7 @@ public final class ZrokRuntimeProbe {
         try {
             ProcessBuilder builder = new ProcessBuilder(command);
             builder.redirectErrorStream(true);
-            builder.environment().put("HOME", "/data/local/tmp");
+            builder.environment().put("HOME", ScratchPaths.getDir());
             Process process = builder.start();
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             Thread reader = new Thread(() -> copyOutput(process.getInputStream(), output), "zrok-version-reader");

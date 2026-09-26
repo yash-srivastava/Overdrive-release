@@ -1,4 +1,5 @@
 package com.overdrive.app.geo;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.daemon.CameraDaemon;
 
@@ -50,7 +51,9 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class GeoCache {
 
     private static final String TAG = "GeoCache";
-    private static final String CACHE_PATH = "/data/local/tmp/geocache.json";
+    private static String cachePath() {
+        return ScratchPaths.path("geocache.json");
+    }
     private static final long TTL_MS = 365L * 24L * 60L * 60L * 1000L; // 1 year
     private static final int SOFT_CAP_ENTRIES = 10_000;
     private static final int CACHE_VERSION = 1;
@@ -286,9 +289,9 @@ public final class GeoCache {
     // ---- Persistence ------------------------------------------------------
 
     private void loadFromDisk() {
-        File f = new File(CACHE_PATH);
+        File f = new File(cachePath());
         if (!f.exists() || !f.canRead()) {
-            CameraDaemon.log(TAG + ": no cache file yet at " + CACHE_PATH);
+            CameraDaemon.log(TAG + ": no cache file yet at " + cachePath());
             return;
         }
         try (FileReader r = new FileReader(f)) {
@@ -332,8 +335,8 @@ public final class GeoCache {
     }
 
     private void saveToDisk() {
-        File target = new File(CACHE_PATH);
-        File tmp = new File(CACHE_PATH + ".tmp");
+        File target = new File(cachePath());
+        File tmp = new File(cachePath() + ".tmp");
         try {
             JSONObject root = new JSONObject();
             root.put("version", CACHE_VERSION);

@@ -141,13 +141,13 @@ class DaemonStartupManager(
         @Volatile
         private var activityManager: DaemonStartupManager? = null
 
-        /** Last park-END breadcrumb epoch this process acted on (see [ParkedShutdown.ENDED_PATH]). */
+        /** Last park-END breadcrumb epoch this process acted on (see [ParkedShutdown.endedPath]). */
         @Volatile
         private var consumedParkEndStamp: Long? = null
 
         private fun readParkEndedStamp(): Long? {
             return try {
-                val f = java.io.File(com.overdrive.app.ui.model.ParkedShutdown.ENDED_PATH)
+                val f = java.io.File(com.overdrive.app.ui.model.ParkedShutdown.endedPath())
                 if (!f.isFile || f.length() > 32) return null
                 f.readText().trim().toLongOrNull()
             } catch (e: Exception) {
@@ -168,7 +168,7 @@ class DaemonStartupManager(
             // The one thing that MAY run while parked is the judge itself: it is the
             // only process that can end the park, so a start request that finds the
             // marker makes sure acc_sentry_daemon is alive and does nothing else.
-            if (java.io.File(com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH).exists()) {
+            if (java.io.File(com.overdrive.app.ui.model.ParkedShutdown.markerPath()).exists()) {
                 parkObserved = true
                 android.util.Log.i(TAG, "startOnBoot: parked-shutdown marker present — not starting (stay asleep)")
                 ensureAccSentryJudgeRunning(context)
@@ -358,7 +358,7 @@ class DaemonStartupManager(
             attempt: Int,
             onResult: (Boolean) -> Unit
         ) {
-            val marker = com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH
+            val marker = com.overdrive.app.ui.model.ParkedShutdown.markerPath()
             fun retryOrFail(reason: String) {
                 if (!java.io.File(marker).exists()) {
                     onResult(true)
@@ -672,7 +672,7 @@ class DaemonStartupManager(
         val parkedGate = if (type == DaemonType.ACC_SENTRY_DAEMON) {
             ""
         } else {
-            "P='${com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH}'; " +
+            "P='${com.overdrive.app.ui.model.ParkedShutdown.markerPath()}'; " +
                 "if [ -f \"\$P\" ]; then echo PARKED_BLOCKED; exit 0; fi; "
         }
         val probe =
@@ -1259,7 +1259,7 @@ class DaemonStartupManager(
         // on, and a dead daemon while parked is the intended state — except for
         // acc_sentry_daemon, the parked ACC judge, which this health check is the
         // one periodic app-side mechanism able to revive mid-park.
-        val parkedMarker = com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH
+        val parkedMarker = com.overdrive.app.ui.model.ParkedShutdown.markerPath()
         val stoppedProbe = if (type == DaemonType.ACC_SENTRY_DAEMON) {
             "test -f ${type.sentinelPath} && echo STOPPED || echo OK"
         } else {

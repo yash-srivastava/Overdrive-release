@@ -1,4 +1,5 @@
 package com.overdrive.app.telegram.config;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.byd.cloud.crypto.CredentialCipher;
 import com.overdrive.app.config.UnifiedConfigManager;
@@ -103,8 +104,9 @@ public final class UnifiedTelegramConfig {
      * gets the tier-key copy on first run after this upgrade.
      */
     private static final String K_TIER_MIGRATED = "_tierMigrated";
-    private static final String LEGACY_PROPS_PATH =
-            "/data/local/tmp/telegram_config.properties";
+    private static String legacyPropsPath() {
+        return ScratchPaths.LEGACY_DIR + "/telegram_config.properties";
+    }
 
     /**
      * Per-process latch that suppresses repeated migration attempts within
@@ -498,7 +500,7 @@ public final class UnifiedTelegramConfig {
             return;
         }
 
-        File legacy = new File(LEGACY_PROPS_PATH);
+        File legacy = new File(legacyPropsPath());
         if (!legacy.exists()) {
             // Nothing to import. Don't fire a stampMigrated() write just to
             // record that fact — when the app UID can't write to

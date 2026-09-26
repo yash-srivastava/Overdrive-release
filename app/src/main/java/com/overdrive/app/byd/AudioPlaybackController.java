@@ -1,4 +1,5 @@
 package com.overdrive.app.byd;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -50,7 +51,9 @@ public final class AudioPlaybackController {
     // Library dir whose files the app can't read directly (mirror of AudioApiHandler
     // / VehicleControlApiHandler). A path under here → stream by name; anything else
     // (e.g. /storage/emulated/0/Music/x.mp3) → the app opens it directly.
-    private static final String AUDIO_LIBRARY_DIR = "/data/local/tmp/.overdrive/audio";
+    private static String audioLibraryDir() {
+        return ScratchPaths.path(".overdrive/audio");
+    }
 
     // Exported app-process components (see AndroidManifest). Our own package — the same
     // literal the Screen Deterrent / sidecars use in their `am` execs.
@@ -207,7 +210,7 @@ public final class AudioPlaybackController {
         String libName = null, filePath = null;
         try {
             String canon = f.getCanonicalPath();
-            if (canon.startsWith(AUDIO_LIBRARY_DIR)) {
+            if (canon.startsWith(audioLibraryDir())) {
                 libName = f.getName();
             } else {
                 // Direct path — must exist and be readable when the app opens it. We

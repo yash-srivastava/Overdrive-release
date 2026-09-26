@@ -1,4 +1,5 @@
 package com.overdrive.app.od
+import com.overdrive.app.util.ScratchPaths
 
 import android.content.Context
 import android.content.pm.PackageManager
@@ -27,7 +28,7 @@ object Od {
         loaded = try {
             System.load("$nativeLibDir/libod.so"); true
         } catch (_: Throwable) {
-            try { System.load("/data/local/tmp/libod.so"); true } catch (_: Throwable) { false }
+            try { System.load(ScratchPaths.path("libod.so")); true } catch (_: Throwable) { false }
         }
         return loaded
     }

@@ -9673,6 +9673,13 @@ public class GpuSurveillancePipeline {
     * @param mode 0=Mosaic (2x2 grid), 1=Front, 2=Right, 3=Rear, 4=Left
      */
     public void setStreamViewMode(int mode) {
+        if (com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend.isSupported()) {
+            int hookMode =
+                    com.overdrive.app.camera.dilink5.DiLink5PlatformHelper
+                            .aisByteForViewMode(mode);
+            com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                    .setActiveCamera(hookMode);
+        }
         com.overdrive.app.streaming.GpuStreamScaler scaler = streamScaler;
         if (scaler != null) {
             if (com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled()) {

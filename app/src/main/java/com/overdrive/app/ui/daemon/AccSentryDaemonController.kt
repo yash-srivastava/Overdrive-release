@@ -1,4 +1,5 @@
 package com.overdrive.app.ui.daemon
+import com.overdrive.app.util.ScratchPaths
 
 import com.overdrive.app.launcher.AdbDaemonLauncher
 import com.overdrive.app.ui.model.DaemonStatus
@@ -47,13 +48,13 @@ class AccSentryDaemonController(
         // chmod first, watchdog-script rm, pkill, then settle + lock-rm.
         // Lock rm AFTER pkill prevents the lockfile-resurrection race.
         adbLauncher.executeShellScript(
-            "echo \"disabled by ui at \$(date)\" > /data/local/tmp/acc_sentry_daemon.disabled\n" +
-            "chmod 666 /data/local/tmp/acc_sentry_daemon.disabled 2>/dev/null\n" +
-            "rm -f /data/local/tmp/start_acc_sentry.sh 2>/dev/null\n" +
+            "echo \"disabled by ui at \$(date)\" > ${ScratchPaths.path("acc_sentry_daemon.disabled")}\n" +
+            "chmod 666 ${ScratchPaths.path("acc_sentry_daemon.disabled")} 2>/dev/null\n" +
+            "rm -f ${ScratchPaths.path("start_acc_sentry.sh")} 2>/dev/null\n" +
             com.overdrive.app.launcher.DaemonLauncher.psAwkKillLine("acc_sentry") +
             "sleep 1\n" +
-            "rm -f /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n" +
-            "rm -rf /data/local/tmp/acc_sentry_watchdog.lock 2>/dev/null\n" +
+            "rm -f ${ScratchPaths.path("acc_sentry_daemon.lock")} 2>/dev/null\n" +
+            "rm -rf ${ScratchPaths.path("acc_sentry_watchdog.lock")} 2>/dev/null\n" +
             "echo done\n",
             object : AdbDaemonLauncher.LaunchCallback {
                 override fun onLog(message: String) {}
@@ -86,11 +87,11 @@ class AccSentryDaemonController(
     override fun cleanup() {
         // Use executeShellScript (tmpfile) for self-match defense.
         adbLauncher.executeShellScript(
-            "rm -f /data/local/tmp/start_acc_sentry.sh 2>/dev/null\n" +
+            "rm -f ${ScratchPaths.path("start_acc_sentry.sh")} 2>/dev/null\n" +
             com.overdrive.app.launcher.DaemonLauncher.psAwkKillLine("acc_sentry") +
             "sleep 1\n" +
-            "rm -f /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n" +
-            "rm -rf /data/local/tmp/acc_sentry_watchdog.lock 2>/dev/null\n" +
+            "rm -f ${ScratchPaths.path("acc_sentry_daemon.lock")} 2>/dev/null\n" +
+            "rm -rf ${ScratchPaths.path("acc_sentry_watchdog.lock")} 2>/dev/null\n" +
             "echo done\n",
             object : AdbDaemonLauncher.LaunchCallback {
                 override fun onLog(message: String) {}

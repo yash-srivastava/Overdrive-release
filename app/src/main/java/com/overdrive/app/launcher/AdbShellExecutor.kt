@@ -2,6 +2,7 @@ package com.overdrive.app.launcher
 
 import android.content.Context
 import com.overdrive.app.logging.LogManager
+import com.overdrive.app.util.ScratchPaths
 import dadb.AdbKeyPair
 import dadb.Dadb
 import java.io.File
@@ -135,6 +136,9 @@ class AdbShellExecutor(private val context: Context) {
         @Volatile
         private var cachedKeyPair: AdbKeyPair? = null
         private val keyPairLock = Object()
+
+        /** True after a successful connect has run the scratch write probe. */
+        private val scratchProbed = AtomicBoolean(false)
 
         // Auth state tracking
         private val isAuthPending = AtomicBoolean(false)
@@ -333,7 +337,7 @@ class AdbShellExecutor(private val context: Context) {
      * SIGKILL's the shell, dropping every command after the first pkill.
      *
      * Writing the script to a file first means the running shell's argv
-     * is just `sh /data/local/tmp/<id>.sh` — no daemon pattern in argv —
+     * is just `sh <scratch>/<id>.sh` — no daemon pattern in argv —
      * so pkill cannot self-match. The script content is read from disk
      * by `sh`, not from argv.
      *
@@ -366,7 +370,7 @@ class AdbShellExecutor(private val context: Context) {
             // (any future script body containing the literal delimiter on
             // its own line would terminate the heredoc early).
             val nonce = "${System.nanoTime()}_${scriptSeq.incrementAndGet()}"
-            val scriptPath = "/data/local/tmp/.adb_script_${nonce}.sh"
+            val scriptPath = ScratchPaths.path(".adb_script_${nonce}.sh")
             val eofMarker = "__ADB_SCRIPT_EOF_${nonce}__"
             try {
                 logger.debug(TAG, "Executing script via $scriptPath (${scriptBody.length} bytes)")
@@ -377,10 +381,10 @@ class AdbShellExecutor(private val context: Context) {
                 // body never appears in any shell's argv and self-match
                 // is impossible. No chmod needed: `sh <path>` reads the
                 // script regardless of x-bit, so the previous `chmod 755`
-                // was dead code.
+                // was dead code. Prefix env so scratch dir exists before cat.
                 val writeCmd = "cat > $scriptPath <<'$eofMarker'\n" +
-                        scriptBody +
-                        "\n$eofMarker"
+                    scriptBody +
+                    "\n$eofMarker"
                 val writeResult = shellGuarded(conn, writeCmd, DEFAULT_DEADLINE_MS, seq)
                 if (writeResult.exitCode != 0) {
                     // Best-effort cleanup of any partial write
@@ -517,7 +521,7 @@ class AdbShellExecutor(private val context: Context) {
                     }
                 }, remaining, TimeUnit.MILLISECONDS)
                 try {
-                    val result = conn.adb.shell(command)
+                    val result = conn.adb.shell(ScratchPaths.prepareShellCommand(command))
                     if (settled.compareAndSet(false, true)) {
                         cmdWatchdog.cancel(false)
                         logger.debug(TAG, "adb#$seq DONE-BULK total=${System.currentTimeMillis() - t0}ms exit=${result.exitCode}")
@@ -622,7 +626,6 @@ class AdbShellExecutor(private val context: Context) {
         return try {
             val conn = acquireConnection()
             val result = shellGuarded(conn, "pgrep -f '$processName'", DEFAULT_DEADLINE_MS, cmdSeq.incrementAndGet())
-
             if (result.exitCode == 0 && result.allOutput.trim().isNotEmpty()) {
                 result.allOutput.trim().lines().firstOrNull()?.toIntOrNull()
             } else {
@@ -675,7 +678,6 @@ class AdbShellExecutor(private val context: Context) {
             if (waited > 1000) logger.warn(TAG, "acquireConnection: waited ${waited}ms for sharedDadbLock")
 
             sharedConn?.let { return it }
-
             // Check if ADB port is even listening before trying to connect
             if (!isAdbPortOpen()) {
                 logger.warn(TAG, "ADB port $ADB_PORT not open - ADB not enabled?")
@@ -718,6 +720,7 @@ class AdbShellExecutor(private val context: Context) {
         pollingStarted.set(false)
         logger.info(TAG, "ADB connection established successfully (gen=$gen)")
         authCallback?.onAuthGranted()
+        probeScratchAfterConnect(dadb)
         if (gen > 1) {
             reconnectNotifier.execute {
                 logger.info(TAG, "ADB connection RE-established (gen=$gen) — notifying " +
@@ -783,7 +786,7 @@ class AdbShellExecutor(private val context: Context) {
             }
         }, deadlineMs, TimeUnit.MILLISECONDS)
         try {
-            val result = conn.dadb.shell(command)
+            val result = conn.dadb.shell(ScratchPaths.prepareShellCommand(command))
             if (settled.compareAndSet(false, true)) {
                 watchdog.cancel(false)
             }
@@ -803,6 +806,27 @@ class AdbShellExecutor(private val context: Context) {
             // The exception is the consequence of our own deadline close.
             throw Exception("deadline ${deadlineMs}ms exceeded after adb#$seq " +
                 "(connection closed to unblock)", e)
+        }
+    }
+
+    /**
+     * Once per process: try writing `/data/local/tmp` via shell (Sealion keeps
+     * legacy). Only if that fails do we lock in the app-files fallback (Shark).
+     * Uses a raw [Dadb.shell] — must not go through [ScratchPaths.prepareShellCommand]
+     * or the probe path itself would be remapped.
+     */
+    private fun probeScratchAfterConnect(dadb: Dadb) {
+        if (!scratchProbed.compareAndSet(false, true)) return
+        try {
+            ScratchPaths.probeViaShell { cmd ->
+                val result = dadb.shell(cmd)
+                if (result.exitCode == 0) result.allOutput else null
+            }
+            logger.info(TAG, "Scratch probe done: ${ScratchPaths.describe()}")
+        } catch (t: Throwable) {
+            logger.warn(TAG, "Scratch probe failed: ${t.message}")
+            // Allow a later connect to retry if this one blew up mid-probe.
+            scratchProbed.set(false)
         }
     }
 

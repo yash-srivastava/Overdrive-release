@@ -1,4 +1,5 @@
 package com.overdrive.app.byd.cloud.crypto;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -26,7 +27,9 @@ public final class CredentialCipher {
     private static final int IV_LEN = 12;
     private static final int TAG_BITS = 128;
     private static final String KD_SALT = "overdrive-byd-cred-v1";
-    private static final String DID_PATH = "/data/local/tmp/.byd_device_id";
+    private static String didPath() {
+        return ScratchPaths.path(".byd_device_id");
+    }
 
     private CredentialCipher() {}
 
@@ -188,7 +191,7 @@ public final class CredentialCipher {
     }
 
     /**
-     * Device-bound AES key. The persisted device id ({@link #DID_PATH}) is the
+     * Device-bound AES key. The persisted device id ({@link #didPath()}) is the
      * sole device binding for the going-forward (stable) key. The legacy key
      * additionally mixes {@code Build.FINGERPRINT}, which is what made an OTA
      * silently invalidate every stored credential — the fingerprint adds no
@@ -203,7 +206,7 @@ public final class CredentialCipher {
             // encrypt() to fail-open to plaintext (visibly unprotected, not
             // falsely "ENC:"-tagged) and decrypt() to fail-closed to "" —
             // both already-handled paths in the callers below.
-            throw new IllegalStateException("device id unavailable at " + DID_PATH);
+            throw new IllegalStateException("device id unavailable at " + didPath());
         }
         MessageDigest d = MessageDigest.getInstance("SHA-256");
         String material = KD_SALT + ":" + did;
@@ -230,7 +233,7 @@ public final class CredentialCipher {
      */
     private static String readDid() {
         try {
-            File f = new File(DID_PATH);
+            File f = new File(didPath());
             if (f.exists()) {
                 BufferedReader r = new BufferedReader(new FileReader(f));
                 String id = r.readLine();

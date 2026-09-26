@@ -1,4 +1,5 @@
 package com.overdrive.app.monitor;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -31,7 +32,9 @@ public class SocHistoryDatabase {
     // H2 JDBC URL - file-based embedded database
     // FILE_LOCK=SOCKET uses socket-based locking (more reliable than file locks on Android)
     // AUTO_SERVER=TRUE allows multiple processes to connect via TCP fallback
-    private static final String DB_PATH = "/data/local/tmp/overdrive_soc_h2";
+    private static String dbPath() {
+        return ScratchPaths.path("overdrive_soc_h2");
+    }
     // DB_CLOSE_ON_EXIT=FALSE: we drive shutdown ourselves from CameraDaemon.shutdown().
     // Without it, H2's JVM shutdown hook runs concurrently with our explicit
     // stop() and our last in-flight 2-minute SOC tick, producing the
@@ -50,9 +53,11 @@ public class SocHistoryDatabase {
     // touching durability. WRITE_DELAY is deliberately left at its 500ms default:
     // a head unit loses power abruptly with the car, and raising the delay widens
     // the delayed-write loss window on every one of these stores.
-    private static final String JDBC_URL = "jdbc:h2:file:" + DB_PATH +
-        ";FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
-        ";AUTO_COMPACT_FILL_RATE=50";
+    private static String jdbcUrl() {
+        return "jdbc:h2:file:" + dbPath() +
+            ";FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
+            ";AUTO_COMPACT_FILL_RATE=50";
+    }
     
     // Table names
     private static final String TABLE_SOC = "soc_history";
@@ -67,8 +72,9 @@ public class SocHistoryDatabase {
             "soc_history_remaining_kwh_frame";
     private static final int REMAINING_KWH_FORMAT_VERSION = 1;
     private static final int REMAINING_KWH_MIGRATION_ATTEMPTS = 3;
-    private static final String CHARGING_LIFECYCLE_JOURNAL_PATH =
-            "/data/local/tmp/overdrive_charging_lifecycle.json";
+    private static String chargingLifecycleJournalPath() {
+        return ScratchPaths.path("overdrive_charging_lifecycle.json");
+    }
     private static final int CHARGING_LIFECYCLE_JOURNAL_VERSION = 1;
 
     /** Intentional physical/session boundary; it breaks integration but is not itself missing data. */
@@ -436,7 +442,7 @@ public class SocHistoryDatabase {
     private volatile com.overdrive.app.abrp.SohEstimator sohEstimator;
     
     private SocHistoryDatabase() {
-        this(new java.io.File(CHARGING_LIFECYCLE_JOURNAL_PATH));
+        this(new java.io.File(chargingLifecycleJournalPath()));
     }
 
     SocHistoryDatabase(java.io.File chargingLifecycleJournalFile) {
@@ -471,7 +477,7 @@ public class SocHistoryDatabase {
         synchronized (lock) {
             if (isInitialized) return;  // Double-check after acquiring lock
             
-            logger.info("Initializing H2 database at: " + DB_PATH);
+            logger.info("Initializing H2 database at: " + dbPath());
             // The sidecar owns lifecycle durability while H2 is unavailable. Load it before attempting
             // JDBC so a process that cannot open H2 at all can still journal its first physical ON edge.
             loadChargingLifecycleJournal();
@@ -482,7 +488,7 @@ public class SocHistoryDatabase {
             for (int attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
                     // Open H2 connection (pure Java - no native code)
-                    connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+                    connection = DriverManager.getConnection(jdbcUrl(), "sa", "");
                     logger.info("H2 connection established");
                     
                     // Tune H2 for embedded daemon use
@@ -496,7 +502,7 @@ public class SocHistoryDatabase {
                     isInitialized = true;
                     reconcileChargingLifecycleJournalWithDatabase();
                     replayPendingChargingPostCommitMetadata();
-                    logger.info("SOC History Database initialized via H2 (Pure Java): " + DB_PATH);
+                    logger.info("SOC History Database initialized via H2 (Pure Java): " + dbPath());
                     return;  // Success - exit
                     
                 } catch (Exception e) {
@@ -527,7 +533,7 @@ public class SocHistoryDatabase {
      */
     private void cleanupStaleLocks() {
         try {
-            java.io.File lockFile = new java.io.File(DB_PATH + ".lock.db");
+            java.io.File lockFile = new java.io.File(dbPath() + ".lock.db");
             if (lockFile.exists()) {
                 // Check if the lock file is stale (older than 5 minutes with no active process)
                 long ageMs = System.currentTimeMillis() - lockFile.lastModified();
@@ -539,7 +545,7 @@ public class SocHistoryDatabase {
             }
             
             // Also try to clean up trace files
-            java.io.File traceFile = new java.io.File(DB_PATH + ".trace.db");
+            java.io.File traceFile = new java.io.File(dbPath() + ".trace.db");
             if (traceFile.exists()) {
                 traceFile.delete();
             }
@@ -1035,7 +1041,7 @@ public class SocHistoryDatabase {
                     try { connection.close(); } catch (Exception ignored) { /* already dead */ }
                     connection = null;
                 }
-                connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+                connection = DriverManager.getConnection(jdbcUrl(), "sa", "");
                 // Re-assert the schema BEFORE flagging ready. If the store
                 // file was wiped or recreated, H2 hands back a fresh EMPTY
                 // database — flagging initialized without this would leave
@@ -12041,7 +12047,7 @@ public class SocHistoryDatabase {
      */
     public long getDatabaseSize() {
         try {
-            java.io.File dbFile = new java.io.File(DB_PATH + ".mv.db");
+            java.io.File dbFile = new java.io.File(dbPath() + ".mv.db");
             return dbFile.exists() ? dbFile.length() : 0;
         } catch (Exception e) {
             return 0;

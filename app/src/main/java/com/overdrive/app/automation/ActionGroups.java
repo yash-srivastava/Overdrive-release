@@ -1,4 +1,5 @@
 package com.overdrive.app.automation;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -36,10 +37,18 @@ import java.util.UUID;
 public final class ActionGroups {
     private static final DaemonLogger logger = DaemonLogger.getInstance("Automations");
 
-    private static final File HOME = new File("/data/local/tmp/.automations");
-    private static final File CONFIG = new File(HOME, "action_groups.json");
-    private static final File BACKUP = new File(HOME, "action_groups.json.bak");
-    private static final File TMP = new File(HOME, "action_groups.json.tmp");
+    private static File home() {
+        return new File(ScratchPaths.path(".automations"));
+    }
+    private static File config() {
+        return new File(home(), "action_groups.json");
+    }
+    private static File backup() {
+        return new File(home(), "action_groups.json.bak");
+    }
+    private static File tmp() {
+        return new File(home(), "action_groups.json.tmp");
+    }
     private static final Object SAVE_LOCK = new Object();
 
     // id -> group. LinkedHashMap preserves display order.
@@ -278,17 +287,17 @@ public final class ActionGroups {
      */
     public static boolean saveToFile() {
         synchronized (SAVE_LOCK) {
-            if (!HOME.exists()) HOME.mkdirs();
+            if (!home().exists()) home().mkdirs();
             byte[] bytes = toJson().toString().getBytes(StandardCharsets.UTF_8);
-            try (FileOutputStream fos = new FileOutputStream(TMP)) {
+            try (FileOutputStream fos = new FileOutputStream(tmp())) {
                 fos.write(bytes);
                 fos.getFD().sync();
             } catch (IOException e) {
                 logger.error("Failed to write action-groups scratch file");
                 return false;
             }
-            if (CONFIG.exists()) copyFile(CONFIG, BACKUP);
-            if (!TMP.renameTo(CONFIG)) {
+            if (config().exists()) copyFile(config(), backup());
+            if (!tmp().renameTo(config())) {
                 logger.error("Failed to promote action-groups scratch file");
                 return false;
             }
@@ -298,8 +307,8 @@ public final class ActionGroups {
 
     public static void loadFromFile() {
         synchronized (SAVE_LOCK) {
-            if (tryLoadFrom(CONFIG)) return;
-            if (BACKUP.exists() && tryLoadFrom(BACKUP)) {
+            if (tryLoadFrom(config())) return;
+            if (backup().exists() && tryLoadFrom(backup())) {
                 logger.info("Recovered action groups from backup");
             }
         }

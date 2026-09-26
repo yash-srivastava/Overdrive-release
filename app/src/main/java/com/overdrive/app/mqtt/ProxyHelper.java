@@ -1,4 +1,5 @@
 package com.overdrive.app.mqtt;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -41,7 +42,9 @@ public class ProxyHelper {
     private static final String PROXY_HOST = "127.0.0.1";
     private static final int PROXY_PORT = 8119;
     private static final int TAILSCALE_PROXY_PORT = 8539;
-    private static final String PROXY_ENABLED_FILE = "/data/local/tmp/.tailscale/proxy_enabled";
+    private static String proxyEnabledFile() {
+        return ScratchPaths.path(".tailscale/proxy_enabled");
+    }
     // Loopback TCP connect budget. 200ms was too tight: a cold/loaded sing-box (or a
     // probe issued while the proxy is still binding) could miss, and a SINGLE miss
     // poisoned a whole minute (see the asymmetric cache below) → every map search /
@@ -167,7 +170,7 @@ public class ProxyHelper {
      * that cannot reach a proxy-only (e.g. subnet-routed LAN) broker off Wi-Fi.
      */
     public static boolean isProxyExpected() {
-        try (BufferedReader r = new BufferedReader(new FileReader(PROXY_ENABLED_FILE))) {
+        try (BufferedReader r = new BufferedReader(new FileReader(proxyEnabledFile()))) {
             return isProxyEnabledValue(r.readLine());
         } catch (Exception e) {
             return false;

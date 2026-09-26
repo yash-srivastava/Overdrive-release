@@ -1,4 +1,5 @@
 package com.overdrive.app.genai;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.automation.Automation;
 import com.overdrive.app.automation.AutomationAction;
@@ -624,7 +625,7 @@ public final class GenAiInsights {
 
     private static File home() {
         return new File(System.getProperty(
-                HOME_PROPERTY, "/data/local/tmp/.genai"));
+                HOME_PROPERTY, ScratchPaths.path(".genai")));
     }
 
     private static File storeFile() {

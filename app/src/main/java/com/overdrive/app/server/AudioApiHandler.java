@@ -1,4 +1,5 @@
 package com.overdrive.app.server;
+import com.overdrive.app.util.ScratchPaths;
 
 import android.media.AudioFormat;
 import android.media.AudioManager;
@@ -128,7 +129,9 @@ public class AudioApiHandler {
 
     // Where uploaded sounds live. World-readable dir so the daemon (UID 2000) can
     // both write (here, running as the daemon) and play them back.
-    private static final String AUDIO_DIR = "/data/local/tmp/.overdrive/audio";
+    private static String audioDir() {
+        return ScratchPaths.path(".overdrive/audio");
+    }
     private static final String[] AUDIO_EXTS = { "mp3", "wav", "mp4", "m4a", "aac", "ogg" };
     // 48 MB per file — enough for a short alert/deterrent video clip, while keeping the
     // base64-in-JSON upload's transient memory safe on the daemon (a 48 MB file is a
@@ -168,7 +171,7 @@ public class AudioApiHandler {
         JSONObject resp = new JSONObject();
         org.json.JSONArray arr = new org.json.JSONArray();
         try {
-            java.io.File dir = new java.io.File(AUDIO_DIR);
+            java.io.File dir = new java.io.File(audioDir());
             java.io.File[] files = dir.exists() ? dir.listFiles() : null;
             if (files != null) {
                 java.util.Arrays.sort(files, (a, b) -> a.getName().compareToIgnoreCase(b.getName()));
@@ -213,7 +216,7 @@ public class AudioApiHandler {
         if (data.length == 0) { HttpResponse.sendJsonError(out, "Empty file"); return; }
         if (data.length > MAX_AUDIO_BYTES) { HttpResponse.sendJsonError(out, "File too large (max 48MB)"); return; }
 
-        java.io.File dir = new java.io.File(AUDIO_DIR);
+        java.io.File dir = new java.io.File(audioDir());
         if (!dir.exists()) {
             dir.mkdirs();
             try { dir.setReadable(true, false); dir.setExecutable(true, false); } catch (Exception ignored) {}
@@ -320,7 +323,7 @@ public class AudioApiHandler {
         }
         String safe = safeAudioName(name);
         if (safe == null) { HttpResponse.sendJsonError(out, "Invalid name"); return; }
-        java.io.File f = new java.io.File(AUDIO_DIR, safe);
+        java.io.File f = new java.io.File(audioDir(), safe);
         boolean deleted = f.exists() && f.delete();
         resp.put("success", deleted);
         if (!deleted) resp.put("error", "Not found");
@@ -344,7 +347,7 @@ public class AudioApiHandler {
         String safe = safeAudioName(req.optString("name", ""));
         if (safe == null) { HttpResponse.sendJsonError(out, "Invalid name"); return; }
         String channel = req.optString("channel", "media");
-        java.io.File f = new java.io.File(AUDIO_DIR, safe);
+        java.io.File f = new java.io.File(audioDir(), safe);
         // Verify the sound still EXISTS before claiming success. dispatchPlay is
         // fire-and-forget (it shells `am` and returns true unconditionally), so a
         // sound the user has since deleted — or an automation still holding a stale
@@ -366,7 +369,7 @@ public class AudioApiHandler {
      * generic handler) so the {@code rangeHeader} reaches us. Consumed by the app-process
      * media player (which can't open the file by path; see the route comment). The name is
      * sanitized to a basename, so this can only ever serve a file that already exists
-     * inside {@link #AUDIO_DIR} — no traversal.
+     * inside {@link #audioDir()} — no traversal.
      *
      * <p>Range matters for VIDEO: a streaming MediaPlayer/VideoView issues Range requests
      * to locate a non-faststart MP4's trailing {@code moov} atom; without a 206 reply the
@@ -387,7 +390,7 @@ public class AudioApiHandler {
         }
         String safe = safeAudioName(name);
         if (safe == null) { HttpResponse.sendError(out, 400, "Invalid name"); return; }
-        java.io.File f = new java.io.File(AUDIO_DIR, safe);
+        java.io.File f = new java.io.File(audioDir(), safe);
         if (!f.exists() || !f.isFile()) { HttpResponse.sendError(out, 404, "Not found"); return; }
         String ext = safe.substring(safe.lastIndexOf('.') + 1).toLowerCase();
         HttpResponse.sendMediaFileRanged(out, f, mimeForAudioExt(ext), rangeHeader);

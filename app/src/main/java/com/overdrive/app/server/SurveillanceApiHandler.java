@@ -1,4 +1,5 @@
 package com.overdrive.app.server;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.surveillance.GpuSurveillancePipeline;
@@ -21,7 +22,9 @@ import java.io.OutputStream;
  */
 public class SurveillanceApiHandler {
     
-    private static final String UNIFIED_CONFIG_FILE = "/data/local/tmp/overdrive_config.json";
+    private static String unifiedConfigFile() {
+        return ScratchPaths.path("overdrive_config.json");
+    }
     
     /**
      * Handle surveillance API requests.
@@ -118,8 +121,9 @@ public class SurveillanceApiHandler {
      * screenDeterrentImagePath at /etc/* and have the web server stream or
      * delete arbitrary readable files.
      */
-    private static final String SCREEN_DETERRENT_DIR =
-            com.overdrive.app.surveillance.ScreenDeterrentAsset.DIRECTORY;
+    private static String screenDeterrentDir() {
+        return com.overdrive.app.surveillance.ScreenDeterrentAsset.directory();
+    }
     private static final String SCREEN_DETERRENT_PREFIX =
             com.overdrive.app.surveillance.ScreenDeterrentAsset.PREFIX;
     private static final int SCREEN_DETERRENT_MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -312,7 +316,7 @@ public class SurveillanceApiHandler {
     private static void persistScreenDeterrentAsset(
             OutputStream out, byte[] data, String ext, boolean isVideo) throws Exception {
         synchronized (SCREEN_DETERRENT_ASSET_LOCK) {
-            java.io.File dir = new java.io.File(SCREEN_DETERRENT_DIR);
+            java.io.File dir = new java.io.File(screenDeterrentDir());
             if (!dir.isDirectory() && !dir.mkdirs()) {
                 HttpResponse.sendJsonError(out, "Could not create deterrent asset directory");
                 return;
@@ -635,7 +639,7 @@ public class SurveillanceApiHandler {
         }
         
         try {
-            java.io.File unifiedFile = new java.io.File(UNIFIED_CONFIG_FILE);
+            java.io.File unifiedFile = new java.io.File(unifiedConfigFile());
             config.put("lastModified", unifiedFile.exists() ? unifiedFile.lastModified() : System.currentTimeMillis());
         } catch (Exception e) {
             config.put("lastModified", System.currentTimeMillis());
@@ -1665,7 +1669,7 @@ public class SurveillanceApiHandler {
                                 "Could not clear deterrent asset");
                         return;
                     }
-                    java.io.File dir = new java.io.File(SCREEN_DETERRENT_DIR);
+                    java.io.File dir = new java.io.File(screenDeterrentDir());
                     if (dir.isDirectory()) {
                         deleteDeterrentAssetsExcept(dir, null);
                     }

@@ -80,7 +80,7 @@ class BootReceiver : BroadcastReceiver() {
         // Guarded to the marker-present case so onAndOff (no marker) is completely unaffected.
         if (isRecoveryTrigger(action)) {
             try {
-                if (java.io.File(com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH).exists()) {
+                if (java.io.File(com.overdrive.app.ui.model.ParkedShutdown.markerPath()).exists()) {
                     Log.i(TAG, "Recovery trigger '$action' with parked marker — recovering pre-debounce")
                     if (!PreferencesManager.isInitialized()) {
                         try { PreferencesManager.init(context.applicationContext) } catch (e: Exception) {}
@@ -315,7 +315,7 @@ class BootReceiver : BroadcastReceiver() {
         val appCtx = context.applicationContext
         try {
             val markerPresent = java.io.File(
-                com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH).exists()
+                com.overdrive.app.ui.model.ParkedShutdown.markerPath()).exists()
             if (markerPresent) {
                 if (isRecoveryTrigger(trigger)) {
                     Log.i(TAG, "Recovery trigger '$trigger' with parked marker present — recovering (verified marker erase, then relaunch)")

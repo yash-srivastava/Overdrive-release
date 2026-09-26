@@ -38,6 +38,12 @@
   ],
   "models": [
     {
+      "id": "shark6",
+      "name": "BYD Shark 6",
+      "phev": true,
+      "nominalKwh": 29.58
+    },
+    {
       "id": "seal",
       "name": "BYD Seal",
       "file": "seal.glb",

@@ -1,4 +1,5 @@
 package com.overdrive.app.server;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.logging.DaemonLogger;
@@ -2528,7 +2529,7 @@ public class SurveillanceIpcServer implements Runnable {
                                 ? versionRef[0]
                                 : com.overdrive.app.updater.AppUpdater.getInstalledVersion();
                 try (java.io.FileWriter fw = new java.io.FileWriter(
-                        com.overdrive.app.updater.UpdateLifecycle.TELEGRAM_POST_UPDATE_HINT_FILE)) {
+                        com.overdrive.app.updater.UpdateLifecycle.telegramPostUpdateHintFile())) {
                     fw.write(hintVersion);
                     fw.write('\n');
                 }
@@ -2633,7 +2634,7 @@ public class SurveillanceIpcServer implements Runnable {
             r.put("ts", System.currentTimeMillis());
         } catch (Exception ignored) {}
         try (java.io.FileWriter fw = new java.io.FileWriter(
-                "/data/local/tmp/overdrive_update_progress.json")) {
+                ScratchPaths.path("overdrive_update_progress.json"))) {
             fw.write(r.toString());
         } catch (Exception ignored) {}
     }
@@ -2659,7 +2660,7 @@ public class SurveillanceIpcServer implements Runnable {
      */
     private static void surfaceIpcInstallFailure(String error) {
         java.io.File hint = new java.io.File(
-                com.overdrive.app.updater.UpdateLifecycle.TELEGRAM_POST_UPDATE_HINT_FILE);
+                com.overdrive.app.updater.UpdateLifecycle.telegramPostUpdateHintFile());
         boolean wasIpcTriggered = hint.exists();
         if (wasIpcTriggered) {
             try { hint.delete(); } catch (Exception ignored) {}
@@ -2693,7 +2694,7 @@ public class SurveillanceIpcServer implements Runnable {
      */
     private void handleGetUpdateProgress(JSONObject response) throws Exception {
         response.put("success", true);
-        java.io.File f = new java.io.File("/data/local/tmp/overdrive_update_progress.json");
+        java.io.File f = new java.io.File(ScratchPaths.path("overdrive_update_progress.json"));
         if (!f.exists()) {
             response.put("phase", "idle");
             response.put("percent", -1);

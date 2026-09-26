@@ -218,11 +218,13 @@ public class DiLink5RuntimeContractTest {
                         + "PanoramicCameraGpu.java");
 
         assertTrue(safety.contains(
-                "/data/local/tmp/overdrive_dilink5_camera_session"));
+                "ScratchPaths.path(\"overdrive_dilink5_camera_session\")"));
         assertTrue(safety.contains(
-                "/data/local/tmp/overdrive_dilink5_camera_blocked"));
+                "ScratchPaths.path(\"overdrive_dilink5_camera_blocked\")"));
         assertTrue(safety.contains(
-                "/data/local/tmp/overdrive_dilink5_camera_release"));
+                "ScratchPaths.path(\"overdrive_dilink5_camera_release\")"));
+        assertFalse(safety.contains(
+                "\"/data/local/tmp/overdrive_dilink5_camera_"));
         assertTrue(safety.contains(
                 "/proc/sys/kernel/random/boot_id"));
         assertTrue(safety.contains(
@@ -249,10 +251,10 @@ public class DiLink5RuntimeContractTest {
         assertOrdered(
                 safety.substring(safety.indexOf(
                         "private static synchronized boolean admitCurrentProcess()")),
-                "if (BLOCK_MARKER.exists())",
-                "safeDelete(BLOCK_MARKER);",
+                "if (blockMarker.exists())",
+                "safeDelete(blockMarker);",
                 "Previous daemon ended without releasing QCarCam",
-                "safeDelete(SESSION_MARKER);",
+                "safeDelete(sessionMarker);",
                 "recordForeignRelease(0);");
         assertOrdered(
                 backend.substring(backend.indexOf(
@@ -2138,8 +2140,8 @@ public class DiLink5RuntimeContractTest {
                 "canStageMode(\n"
                         + "                active, pending, configured, requested)",
                 "ModeMarkerSnapshot before = snapshotModeMarkersLocked();",
-                "writeMode(PENDING_MODE_PATH, requested)",
-                "writeMode(ACTIVE_MODE_PATH, active)",
+                "writeMode(pendingModePath(), requested)",
+                "writeMode(activeModePath(), active)",
                 "restoreModeMarkersLocked(before)");
         assertOrdered(
                 platform,
@@ -2149,8 +2151,16 @@ public class DiLink5RuntimeContractTest {
                 "synchronized (DiLink5Platform.class)",
                 "ModeMarkerSnapshot before = snapshotModeMarkersLocked();",
                 "deletePendingMode()",
-                "writeMode(ACTIVE_MODE_PATH, configured)",
+                "writeMode(activeModePath(), configured)",
                 "restoreModeMarkersLocked(before)");
+        assertTrue(platform.contains(
+                "ScratchPaths.path(\"overdrive_active_vehicle_mode\")"));
+        assertTrue(platform.contains(
+                "ScratchPaths.path(\"overdrive_pending_vehicle_mode\")"));
+        assertFalse(platform.contains(
+                "\"/data/local/tmp/overdrive_active_vehicle_mode\""));
+        assertFalse(platform.contains(
+                "\"/data/local/tmp/overdrive_pending_vehicle_mode\""));
         assertOrdered(
                 platform,
                 "public static void refreshActiveMode()",

@@ -56,7 +56,19 @@ tasks.register("downloadOpenH264") {
 }
 
 tasks.matching { it.name.contains("CMake") || it.name.contains("ExternalNative") }.configureEach {
-    dependsOn("downloadOpenH264", "downloadOpenCV", "downloadFastCam")
+    dependsOn("downloadOpenH264", "downloadOpenCV", "downloadFastCam", "syncLibcxxShared")
+}
+
+// Shark: capture PIE must live under /data/app/.../lib/arm64 (apk_data_file, executable).
+// Emulated Android/data scratch is media_rw — not executable. Keep jniLibs in sync with
+// the assets binary so PackageManager extracts libfast_cam_capture.so on install.
+tasks.matching {
+    it.name.startsWith("merge") && it.name.contains("JniLibFolders")
+}.configureEach {
+    dependsOn("downloadFastCam", "syncLibcxxShared")
+}
+tasks.matching { it.name == "preBuild" || it.name.endsWith("PreBuild") }.configureEach {
+    dependsOn("downloadFastCam", "syncLibcxxShared")
 }
 
 // Hebrew: Android/Java still match the legacy `iw` qualifier. AppCompat already
@@ -168,41 +180,82 @@ tasks.register("checkSurveillanceDeps") {
     dependsOn("downloadOpenCV", "downloadFastCam")
 }
 
-// Ensure fast_cam precompiled binaries are present before CMake build
+// Ensure fast_cam precompiled binaries are present before CMake build.
+// Shark requires a capture binary that supports `--cams 8,9,5,4` (FAST_CAM_CAPTURE
+// multi-model). The older Sealion-only build only has `--all` (hardcoded 0,1,2,3)
+// and will show identical tiles on Shark when OverDrive passes `--cams`.
 tasks.register("downloadFastCam") {
-    val jniLib = file("src/main/jniLibs/arm64-v8a/libfast_cam_client.so")
+    val jniClient = file("src/main/jniLibs/arm64-v8a/libfast_cam_client.so")
+    val jniCapture = file("src/main/jniLibs/arm64-v8a/libfast_cam_capture.so")
     val assetBin = file("src/main/assets/dilink5/fast_cam_capture")
     val header = file("src/main/cpp/include/fast_cam_bridge.h")
 
+    fun File.supportsCamsFlag(): Boolean {
+        if (!exists() || length() < 1000) return false
+        return inputStream().use { inp ->
+            val buf = ByteArray(minOf(length(), 256_000L).toInt())
+            val n = inp.read(buf)
+            if (n <= 0) return@use false
+            String(buf, 0, n, Charsets.ISO_8859_1).contains("--cams")
+        }
+    }
+
+    fun copyCaptureLayout(tempDir: File) {
+        val unpackedBin = sequenceOf(
+            file("${tempDir}/bin/fast_cam_capture"),
+            file("${tempDir}/fast_cam_capture"),
+            file("${tempDir}/assets/dilink5/fast_cam_capture")
+        ).firstOrNull { it.exists() }
+        val unpackedLib = sequenceOf(
+            file("${tempDir}/lib/libfast_cam_client.so"),
+            file("${tempDir}/jniLibs/arm64-v8a/libfast_cam_client.so"),
+            file("${tempDir}/libfast_cam_client.so")
+        ).firstOrNull { it.exists() }
+        val unpackedH = sequenceOf(
+            file("${tempDir}/include/fast_cam_bridge.h"),
+            file("${tempDir}/fast_cam_bridge.h")
+        ).firstOrNull { it.exists() }
+
+        if (unpackedLib != null) {
+            jniClient.parentFile.mkdirs()
+            unpackedLib.copyTo(jniClient, overwrite = true)
+        }
+        if (unpackedBin != null) {
+            assetBin.parentFile.mkdirs()
+            unpackedBin.copyTo(assetBin, overwrite = true)
+        }
+        if (unpackedH != null) {
+            header.parentFile.mkdirs()
+            unpackedH.copyTo(header, overwrite = true)
+        }
+    }
+
     doLast {
-        if (!jniLib.exists() || !assetBin.exists() || !header.exists()) {
-            val relArchive = rootProject.file("releases/overdrive_fast_cam_release.tar.gz")
-            val localArchive = if (relArchive.exists()) relArchive else rootProject.file("frame_grabber_light/release/overdrive_fast_cam_release.tar.gz")
+        val needsFetch = !jniClient.exists() || !assetBin.exists() || !header.exists()
+                || !assetBin.supportsCamsFlag()
+
+        if (needsFetch) {
+            if (assetBin.exists() && !assetBin.supportsCamsFlag()) {
+                println("⚠ assets/dilink5/fast_cam_capture lacks --cams (Sealion-only); refreshing multi-model FastCam")
+            }
+            val localArchives = listOf(
+                rootProject.file("releases/fast_cam_capture_v1.0.0_arm64.tar.gz"),
+                rootProject.file("releases/overdrive_fast_cam_release.tar.gz"),
+                rootProject.file("frame_grabber_light/release/overdrive_fast_cam_release.tar.gz")
+            )
+            val localArchive = localArchives.firstOrNull { it.exists() }
             val altLocal = rootProject.file("frame_grabber_light/fast_cam_capture")
 
-            if (localArchive.exists()) {
-                println("Extracting fast_cam binaries from local release archive: ${localArchive.absolutePath}")
+            if (localArchive != null) {
+                println("Extracting fast_cam binaries from local archive: ${localArchive.absolutePath}")
+                val unpackDir = layout.buildDirectory.dir("fast_cam_unpack").get().asFile
+                unpackDir.mkdirs()
                 ant.invokeMethod("untar", mapOf(
                     "src" to localArchive.absolutePath,
-                    "dest" to layout.buildDirectory.dir("fast_cam_unpack").get().asFile.absolutePath,
+                    "dest" to unpackDir.absolutePath,
                     "compression" to "gzip"
                 ))
-                val tempDir = layout.buildDirectory.dir("fast_cam_unpack").get().asFile
-                val unpackedLib = file("${tempDir}/jniLibs/arm64-v8a/libfast_cam_client.so")
-                if (unpackedLib.exists()) {
-                    jniLib.parentFile.mkdirs()
-                    unpackedLib.copyTo(jniLib, overwrite = true)
-                }
-                val unpackedBin = file("${tempDir}/bin/fast_cam_capture")
-                if (unpackedBin.exists()) {
-                    assetBin.parentFile.mkdirs()
-                    unpackedBin.copyTo(assetBin, overwrite = true)
-                }
-                val unpackedH = file("${tempDir}/include/fast_cam_bridge.h")
-                if (unpackedH.exists()) {
-                    header.parentFile.mkdirs()
-                    unpackedH.copyTo(header, overwrite = true)
-                }
+                copyCaptureLayout(unpackDir)
                 println("✓ fast_cam binaries unpacked and configured successfully")
             } else if (altLocal.exists()) {
                 println("Copying fast_cam binaries from local fast_cam_capture directory...")
@@ -210,8 +263,8 @@ tasks.register("downloadFastCam") {
                 val binSrc = file("${altLocal}/bin/fast_cam_capture")
                 val hSrc = file("${altLocal}/include/fast_cam_bridge.h")
                 if (libSrc.exists()) {
-                    jniLib.parentFile.mkdirs()
-                    libSrc.copyTo(jniLib, overwrite = true)
+                    jniClient.parentFile.mkdirs()
+                    libSrc.copyTo(jniClient, overwrite = true)
                 }
                 if (binSrc.exists()) {
                     assetBin.parentFile.mkdirs()
@@ -223,22 +276,22 @@ tasks.register("downloadFastCam") {
                 }
                 println("✓ fast_cam binaries synchronized from source project")
             } else {
-                println("Downloading fast_cam binaries from GitHub release...")
-                val releaseUrl = "https://github.com/francescodoffizi/Overdrive-release/releases/download/fast_cam_v1.0/overdrive_fast_cam_release.tar.gz"
-                val dlFile = layout.buildDirectory.file("overdrive_fast_cam_release.tar.gz").get().asFile
+                println("Downloading multi-model fast_cam binaries from FAST_CAM_CAPTURE release...")
+                val releaseUrl =
+                    "https://github.com/francescodoffizi/FAST_CAM_CAPTURE/releases/download/v1.0.0/fast_cam_capture_v1.0.0_arm64.tar.gz"
+                val dlFile = layout.buildDirectory.file("fast_cam_capture_v1.0.0_arm64.tar.gz").get().asFile
                 dlFile.parentFile.mkdirs()
                 try {
                     ant.invokeMethod("get", mapOf("src" to releaseUrl, "dest" to dlFile.absolutePath))
                     if (dlFile.exists() && dlFile.length() > 1000) {
+                        val unpackDir = layout.buildDirectory.dir("fast_cam_unpack").get().asFile
+                        unpackDir.mkdirs()
                         ant.invokeMethod("untar", mapOf(
                             "src" to dlFile.absolutePath,
-                            "dest" to layout.buildDirectory.dir("fast_cam_unpack").get().asFile.absolutePath,
+                            "dest" to unpackDir.absolutePath,
                             "compression" to "gzip"
                         ))
-                        val tempDir = layout.buildDirectory.dir("fast_cam_unpack").get().asFile
-                        file("${tempDir}/jniLibs/arm64-v8a/libfast_cam_client.so").copyTo(jniLib, overwrite = true)
-                        file("${tempDir}/bin/fast_cam_capture").copyTo(assetBin, overwrite = true)
-                        file("${tempDir}/include/fast_cam_bridge.h").copyTo(header, overwrite = true)
+                        copyCaptureLayout(unpackDir)
                         println("✓ fast_cam binaries downloaded and configured successfully")
                     }
                 } catch (e: Exception) {
@@ -246,8 +299,97 @@ tasks.register("downloadFastCam") {
                 }
             }
         } else {
-            println("✓ fast_cam precompiled binaries present")
+            println("✓ fast_cam precompiled binaries present (with --cams)")
         }
+
+        if (assetBin.exists() && !assetBin.supportsCamsFlag()) {
+            throw GradleException(
+                "downloadFastCam: capture binary still lacks --cams. " +
+                    "Shark requires FAST_CAM_CAPTURE multi-model (e.g. v1.0.0). " +
+                    "Sealion-only --all (0,1,2,3) makes all Shark tiles look identical."
+            )
+        }
+
+        // Always mirror assets capture PIE → jniLibs so PM extracts an executable
+        // under /data/app/.../lib/arm64 (required on Shark; media_rw scratch is not exec).
+        if (assetBin.exists() && assetBin.isFile) {
+            val needsSync = !jniCapture.exists() || jniCapture.length() != assetBin.length()
+            if (needsSync) {
+                jniCapture.parentFile.mkdirs()
+                assetBin.copyTo(jniCapture, overwrite = true)
+                println("✓ synced assets/dilink5/fast_cam_capture → jniLibs libfast_cam_capture.so (${assetBin.length()} bytes)")
+            }
+        } else {
+            println("⚠ assets/dilink5/fast_cam_capture missing — Shark capture exec from APK lib will fail")
+        }
+    }
+}
+
+// libfast_cam_client.so DT_NEEDs libc++_shared.so. Package the NDK STL into jniLibs.
+tasks.register("syncLibcxxShared") {
+    val jniStl = file("src/main/jniLibs/arm64-v8a/libc++_shared.so")
+    doLast {
+        if (jniStl.exists() && jniStl.length() > 1000) {
+            println("✓ libc++_shared.so already present in jniLibs")
+            return@doLast
+        }
+        val ndkEnv = System.getenv("ANDROID_NDK_HOME")
+            ?: System.getenv("ANDROID_NDK_ROOT")
+            ?: ""
+        fun sdkFromLocalProperties(): File? {
+            val propsFile = rootProject.file("local.properties")
+            if (!propsFile.exists()) return null
+            val line = propsFile.readLines()
+                .firstOrNull { it.trim().startsWith("sdk.dir=") }
+                ?: return null
+            val raw = line.substringAfter("sdk.dir=").trim()
+                .replace("\\\\", "\\")
+            if (raw.isEmpty()) return null
+            return File(raw)
+        }
+        val sdkDir = try {
+            android.sdkDirectory
+        } catch (_: Throwable) {
+            null
+        } ?: sdkFromLocalProperties()
+            ?: File(System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT") ?: "")
+        val candidates = mutableListOf<File>()
+        if (ndkEnv.isNotBlank()) candidates += File(ndkEnv)
+        // Prefer the version documented in shark.md when present.
+        candidates += File(sdkDir, "ndk/26.1.10909125")
+        val ndkSideBySide = File(sdkDir, "ndk")
+        if (ndkSideBySide.isDirectory) {
+            ndkSideBySide.listFiles()?.sortedByDescending { it.name }?.forEach { candidates += it }
+        }
+
+        var src: File? = null
+        for (ndk in candidates) {
+            if (!ndk.isDirectory) continue
+            val prebuilt = File(ndk, "toolchains/llvm/prebuilt")
+            if (!prebuilt.isDirectory) continue
+            val hosts = prebuilt.listFiles()?.filter { it.isDirectory }.orEmpty()
+            for (host in hosts) {
+                val candidate = File(
+                    host,
+                    "sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
+                )
+                if (candidate.exists() && candidate.length() > 1000) {
+                    src = candidate
+                    break
+                }
+            }
+            if (src != null) break
+        }
+        if (src == null) {
+            throw GradleException(
+                "syncLibcxxShared: libc++_shared.so not found under NDK " +
+                    "(set ANDROID_NDK_HOME or install ndk/26.1.10909125). " +
+                    "Required by libfast_cam_client.so on device. sdkDir=" + sdkDir.absolutePath
+            )
+        }
+        jniStl.parentFile.mkdirs()
+        src.copyTo(jniStl, overwrite = true)
+        println("✓ synced ${src.absolutePath} → jniLibs libc++_shared.so")
     }
 }
 
@@ -335,7 +477,12 @@ android {
         
         // Note: abiFilters removed - using splits.abi instead for size optimization
 
-        externalNativeBuild { cmake { cppFlags += "-std=c++17" } }
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++17"
+                arguments += listOf("-DANDROID_STL=c++_shared")
+            }
+        }
 
         // Default diagnostics fields (overridden per buildType). LOG_CAPTURE gates the
         // in-app log-upload UI; LOG_UPLOAD_URL is the Cloudflare Worker endpoint. Both
@@ -502,6 +649,11 @@ android {
                 "lib/armeabi-v7a/**",
                 "lib/x86/**",
                 "lib/x86_64/**"
+            )
+            // NDK STL + FastCam client may also arrive via CMake packaging.
+            pickFirsts += listOf(
+                "**/libc++_shared.so",
+                "**/libfast_cam_client.so"
             )
         }
     }

@@ -1,4 +1,5 @@
 package com.overdrive.app.server;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.byd.BydDataCollector;
 import com.overdrive.app.byd.BydVehicleData;
@@ -2773,9 +2774,11 @@ public class VehicleControlApiHandler {
         return "'" + s.replace("'", "'\\''") + "'";
     }
 
-    // Audio library dir (mirror of AudioApiHandler.AUDIO_DIR) — where uploaded
+    // Audio library dir (mirror of AudioApiHandler.audioDir()) — where uploaded
     // sounds picked by the "Play Audio" action live. A "name" payload resolves here.
-    private static final String AUDIO_LIBRARY_DIR = "/data/local/tmp/.overdrive/audio";
+    private static String audioLibraryDir() {
+        return ScratchPaths.path(".overdrive/audio");
+    }
 
     /**
      * Play an uploaded sound (by library {@code name}) or an explicit {@code path} on
@@ -2815,7 +2818,7 @@ public class VehicleControlApiHandler {
                 // Resolve the library name to its path. Guard against traversal by
                 // taking only the basename before joining to the library dir.
                 String base = new java.io.File(name.trim()).getName();
-                resolved = new java.io.File(AUDIO_LIBRARY_DIR, base).getAbsolutePath();
+                resolved = new java.io.File(audioLibraryDir(), base).getAbsolutePath();
             } else if (path != null && !path.trim().isEmpty()) {
                 resolved = path.trim();
             }

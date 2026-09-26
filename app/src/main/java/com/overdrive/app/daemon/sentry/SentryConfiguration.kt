@@ -1,4 +1,5 @@
 package com.overdrive.app.daemon.sentry
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * Sentry daemon configuration constants.
@@ -15,7 +16,8 @@ object SentryConfiguration {
     
     // Log file paths
     const val LOG_FILE_SYSTEM = "/data/system/sentry_daemon.log"
-    const val LOG_FILE_SHELL = "/data/local/tmp/sentry_daemon.log"
+    private val logFileShell: String
+        get() = ScratchPaths.path("sentry_daemon.log")
     
     // Package name
     const val PACKAGE_NAME = "com.overdrive.app"
@@ -42,7 +44,7 @@ object SentryConfiguration {
      * Get log file path based on UID.
      */
     fun getLogFilePath(uid: Int): String {
-        return if (uid == 1000) LOG_FILE_SYSTEM else LOG_FILE_SHELL
+        return if (uid == 1000) LOG_FILE_SYSTEM else logFileShell
     }
     
     /**

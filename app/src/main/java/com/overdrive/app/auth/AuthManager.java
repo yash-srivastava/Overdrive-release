@@ -1,4 +1,5 @@
 package com.overdrive.app.auth;
+import com.overdrive.app.util.ScratchPaths;
 
 import android.util.Base64;
 
@@ -61,12 +62,16 @@ public class AuthManager {
     // Legacy single-purpose auth file. Read-only at this point — kept
     // around purely so existing installs can be migrated forward into
     // the unified config without forcing the user to re-pair.
-    private static final String LEGACY_AUTH_FILE = "/data/local/tmp/.byd_auth.json";
+    private static String legacyAuthFile() {
+        return ScratchPaths.LEGACY_DIR + "/.byd_auth.json";
+    }
 
     // Device ID file — written via ADB shell from MainActivity, survives
     // app reinstall. Consulted only when the unified config has no
     // deviceId yet (cold-start before MainActivity has synced).
-    private static final String DEVICE_ID_FILE = "/data/local/tmp/.overdrive_device_id";
+    private static String deviceIdFile() {
+        return ScratchPaths.path(".overdrive_device_id");
+    }
 
     // JWT settings.
     //
@@ -193,7 +198,7 @@ public class AuthManager {
                         state.deviceId = loadDeviceId();
                     }
                     if (writeToConfig(state)) {
-                        log("Migrated auth state from legacy file " + LEGACY_AUTH_FILE);
+                        log("Migrated auth state from legacy file " + legacyAuthFile());
                     } else {
                         log("Legacy auth state held in-memory; will be migrated when unified config becomes writable");
                     }
@@ -582,7 +587,7 @@ public class AuthManager {
      */
     private static boolean unifiedConfigContainsSecret(String expectedSecret) {
         try {
-            File file = new File("/data/local/tmp/overdrive_config.json");
+            File file = new File(ScratchPaths.path("overdrive_config.json"));
             if (!file.exists() || !file.canRead()) return false;
             StringBuilder sb = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
@@ -605,7 +610,7 @@ public class AuthManager {
      */
     private static AuthState loadLegacyAuthFile() {
         try {
-            File file = new File(LEGACY_AUTH_FILE);
+            File file = new File(legacyAuthFile());
             if (!file.exists() || !file.canRead()) return null;
 
             StringBuilder sb = new StringBuilder();
@@ -626,7 +631,7 @@ public class AuthManager {
 
     private static String loadDeviceId() {
         try {
-            File file = new File(DEVICE_ID_FILE);
+            File file = new File(deviceIdFile());
             if (file.exists()) {
                 try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
                     String id = reader.readLine();

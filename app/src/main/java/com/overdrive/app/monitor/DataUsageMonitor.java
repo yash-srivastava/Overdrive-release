@@ -1,4 +1,5 @@
 package com.overdrive.app.monitor;
+import com.overdrive.app.util.ScratchPaths;
 
 import android.content.Context;
 
@@ -73,15 +74,19 @@ public class DataUsageMonitor {
     private static final String TAG = "DataUsageMonitor";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
-    private static final String DB_PATH = "/data/local/tmp/overdrive_datausage_h2";
+    private static String dbPath() {
+        return ScratchPaths.path("overdrive_datausage_h2");
+    }
     // Same H2 flags rationale as SocHistoryDatabase: socket lock, no trace file,
     // we own shutdown (DB_CLOSE_ON_EXIT=FALSE). Single writer (the sampler thread)
     // + same-JVM HTTP reads, so AUTO_SERVER is intentionally omitted.
     // AUTO_COMPACT_FILL_RATE=50: idle-CPU tuning shared by all seven H2 stores
-    // (see SocHistoryDatabase.JDBC_URL for the full rationale).
-    private static final String JDBC_URL = "jdbc:h2:file:" + DB_PATH +
+    // (see SocHistoryDatabase.jdbcUrl() for the full rationale).
+    private static String jdbcUrl() {
+        return "jdbc:h2:file:" + dbPath() +
             ";FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
             ";AUTO_COMPACT_FILL_RATE=50";
+    }
 
     private static final String TABLE_DAILY = "data_usage_daily";
     private static final String TABLE_STATE = "data_usage_state";
@@ -230,13 +235,13 @@ public class DataUsageMonitor {
         synchronized (lock) {
             if (isInitialized) return;
             try {
-                connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+                connection = DriverManager.getConnection(jdbcUrl(), "sa", "");
                 try (Statement st = connection.createStatement()) {
                     st.execute("SET CACHE_SIZE 2048");
                 }
                 createTables();
                 isInitialized = true;
-                logger.info("DataUsageMonitor: H2 initialized at " + DB_PATH);
+                logger.info("DataUsageMonitor: H2 initialized at " + dbPath());
             } catch (Throwable t) {
                 logger.error("DataUsageMonitor: init failed: " + t.getMessage(), t);
             }

@@ -1,4 +1,5 @@
 package com.overdrive.app.roadsense.label
+import com.overdrive.app.util.ScratchPaths
 
 import com.overdrive.app.logging.DaemonLogger
 import com.overdrive.app.roadsense.detect.DetectionCandidate
@@ -44,7 +45,7 @@ class GroundTruthStore private constructor() {
                 connection = DriverManager.getConnection(JDBC_URL)
                 createTable()
                 initialized = true
-                logger.info("GroundTruthStore initialized at $DB_PATH")
+                logger.info("GroundTruthStore initialized at $dbPath")
             } catch (e: Exception) {
                 logger.error("GroundTruthStore init failed: " + e.message, e)
             }
@@ -198,11 +199,12 @@ class GroundTruthStore private constructor() {
 
     companion object {
         private val logger = DaemonLogger.getInstance("RoadSense/GroundTruth")
-        private const val DB_PATH = "/data/local/tmp/overdrive_roadsense_labels_h2"
+        private val dbPath: String
+            get() = ScratchPaths.path("overdrive_roadsense_labels_h2")
         // AUTO_COMPACT_FILL_RATE=50: idle-CPU tuning shared by all seven H2
         // stores (see SocHistoryDatabase.JDBC_URL for the rationale).
-        private const val JDBC_URL =
-            "jdbc:h2:file:$DB_PATH;FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
+        private val JDBC_URL: String
+            get() = "jdbc:h2:file:${dbPath};FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
                 ";AUTO_COMPACT_FILL_RATE=50"
 
         @Volatile private var instance: GroundTruthStore? = null

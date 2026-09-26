@@ -34,52 +34,80 @@ public final class Enc {
 
     // ==================== PATHS ====================
     /** /data/local/tmp/singbox_config.json */
-    public static final String SINGBOX_CONFIG = Safe.s("ZHx6IP38aGV/Q7iMCCcxzwYi8Dqee5TiGPRAGrXFGxQK19NSN/ULRr1XYqE0nHYW");
+    public static String SINGBOX_CONFIG() {
+        return com.overdrive.app.util.ScratchPaths.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxzwYi8Dqee5TiGPRAGrXFGxQK19NSN/ULRr1XYqE0nHYW"));
+    }
 
     /** /data/local/tmp/singbox.log */
-    public static final String SINGBOX_LOG = Safe.s("ZHx6IP38aGV/Q7iMCCcxz3vxHXoriO/4/mUU2N2RxN4=");
+    public static String SINGBOX_LOG() {
+        return com.overdrive.app.util.ScratchPaths.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxz3vxHXoriO/4/mUU2N2RxN4="));
+    }
 
     /** /data/local/tmp/sing-box */
-    public static final String SINGBOX_BIN = Safe.s("ZHx6IP38aGV/Q7iMCCcxz3TnY8grp670bzPyWlLlY9c=");
+    public static String SINGBOX_BIN() {
+        return com.overdrive.app.util.ScratchPaths.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxz3TnY8grp670bzPyWlLlY9c="));
+    }
 
     /** /data/local/tmp/global_proxy.log */
-    public static final String PROXY_LOG = Safe.s("ZHx6IP38aGV/Q7iMCCcxz5q9/uqUtW8BShQTy+DvGbRG9DHIjhkEadRt3RoxzdGj");
+    public static String PROXY_LOG() {
+        return com.overdrive.app.util.ScratchPaths.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxz5q9/uqUtW8BShQTy+DvGbRG9DHIjhkEadRt3RoxzdGj"));
+    }
 
     /** /data/local/tmp/telegram_config.properties */
-    public static final String TELEGRAM_CONFIG = Safe.s("ZHx6IP38aGV/Q7iMCCcxzwQSn0P1N0jxHygc8N+4Ft+9mlR8XQ+WvEw0ktanrtNx");
+    public static String TELEGRAM_CONFIG() {
+        return com.overdrive.app.util.ScratchPaths.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxzwQSn0P1N0jxHygc8N+4Ft+9mlR8XQ+WvEw0ktanrtNx"));
+    }
 
     /** /data/local/tmp/telegram_bot.log */
-    public static final String TELEGRAM_LOG = Safe.s("ZHx6IP38aGV/Q7iMCCcxz1Vh6sm+brMq1q/o0Wusp6KtnIKKcEFOQmmXMyZ3w/KB");
+    public static String TELEGRAM_LOG() {
+        return com.overdrive.app.util.ScratchPaths.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxz1Vh6sm+brMq1q/o0Wusp6KtnIKKcEFOQmmXMyZ3w/KB"));
+    }
 
     /** /data/local/tmp/tunnel_url.txt */
-    public static final String TELEGRAM_URL_FILE = Safe.s("ZHx6IP38aGV/Q7iMCCcxz/kVx51CDNRiQ/Mc5+npiPo=");
+    public static String TELEGRAM_URL_FILE() {
+        return com.overdrive.app.util.ScratchPaths.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxz/kVx51CDNRiQ/Mc5+npiPo="));
+    }
 
     /** /data/system/sentry_daemon.log */
     public static final String SENTRY_LOG_SYSTEM = Safe.s("9tdDgaIWuXyXxqP8qmKWMPvAEj729chJmgA4XiF9VOo=");
 
     /** /data/local/tmp/sentry_daemon.log */
-    public static final String SENTRY_LOG_TMP = Safe.s("ZHx6IP38aGV/Q7iMCCcxz9TTr71BkwVSU1UO8CyXRy7yB1SvKmAAYi99Xx5v11Xa");
+    public static String SENTRY_LOG_TMP() {
+        return com.overdrive.app.util.ScratchPaths.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxz9TTr71BkwVSU1UO8CyXRy7yB1SvKmAAYi99Xx5v11Xa"));
+    }
 
     /** /data/local/tmp/sentry_daemon.pid */
-    public static final String SENTRY_PID = Safe.s("ZHx6IP38aGV/Q7iMCCcxzy1lsQShZtcRseW7dNE1si25na89IOT5cRwBuRuJBcXS");
+    public static String SENTRY_PID() {
+        return com.overdrive.app.util.ScratchPaths.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxzy1lsQShZtcRseW7dNE1si25na89IOT5cRwBuRuJBcXS"));
+    }
 
     /** /data/local/tmp/sentry_network_diag.log */
-    public static final String SENTRY_NETWORK_DIAG_LOG = Safe.s("ZHx6IP38aGV/Q7iMCCcxz3F+jKfo+GyPGXQzNQPg1lqNYmt3ujG7x4QjuN3pYK2f");
+    public static String SENTRY_NETWORK_DIAG_LOG() {
+        return com.overdrive.app.util.ScratchPaths.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxz3F+jKfo+GyPGXQzNQPg1lqNYmt3ujG7x4QjuN3pYK2f"));
+    }
 
     /** /data/local/tmp/acc_sentry.log */
-    public static final String ACC_SENTRY_LOG = Safe.s("ZHx6IP38aGV/Q7iMCCcxz4BdefvSzYGU61RsHmJQJ+g=");
+    public static String ACC_SENTRY_LOG() {
+        return com.overdrive.app.util.ScratchPaths.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxz4BdefvSzYGU61RsHmJQJ+g="));
+    }
 
     /** /data/local/tmp/cam_stream */
-    public static final String CAMERA_STREAM_DIR = Safe.s("ZHx6IP38aGV/Q7iMCCcxzxuq9ag7mKGoQaOvzuwMDqM=");
+    public static String CAMERA_STREAM_DIR() {
+        return com.overdrive.app.util.ScratchPaths.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxzxuq9ag7mKGoQaOvzuwMDqM="));
+    }
 
     /** /sdcard/DCIM/BYDCam */
     public static final String CAMERA_OUTPUT_DIR = Safe.s("C6E+8XkzSNnhdgOIKBfVSXGyuhqY7qDiNp4pBP/hRuY=");
 
     /** /data/local/tmp/stream_mode.txt */
-    public static final String CAMERA_STREAM_MODE_FILE = Safe.s("ZHx6IP38aGV/Q7iMCCcxz4A79W/sQd0NkqiGs/MIZWo=");
+    public static String CAMERA_STREAM_MODE_FILE() {
+        return com.overdrive.app.util.ScratchPaths.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxz4A79W/sQd0NkqiGs/MIZWo="));
+    }
 
     /** /data/local/tmp/.byd_device_id */
-    public static final String CAMERA_DEVICE_ID_FILE = Safe.s("ZHx6IP38aGV/Q7iMCCcxz8mvs/gQENVv3FEZ6OVKD54=");
+    public static String CAMERA_DEVICE_ID_FILE() {
+        return com.overdrive.app.util.ScratchPaths.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxz8mvs/gQENVv3FEZ6OVKD54="));
+    }
 
     /** /sys/power/wake_lock */
     public static final String WAKE_LOCK_PATH = Safe.s("kb7HnwNgcQAsfjzzZ2HOBMxdOhkMxwXzhyFBtedHnSE=");
@@ -88,7 +116,9 @@ public final class Enc {
     public static final String WAKE_UNLOCK_PATH = Safe.s("kb7HnwNgcQAsfjzzZ2HOBFL9LU9wOcz7uvaGd3r+PHU=");
 
     /** /data/local/tmp */
-    public static final String DATA_LOCAL_TMP = Safe.s("vuaMjrmBGBFh07qqnUuL8w==");
+    public static String DATA_LOCAL_TMP() {
+        return com.overdrive.app.util.ScratchPaths.path(Safe.s("vuaMjrmBGBFh07qqnUuL8w=="));
+    }
 
     /** /data/data/com.android.providers.settings */
     public static final String DATA_SYSTEM_SETTINGS = Safe.s("4FWGV7tPhe9614nkUCor4bnqFPfssDPoiHYPJxgenGAPG3xCP+0Cb2Hm04LZxNNJ");

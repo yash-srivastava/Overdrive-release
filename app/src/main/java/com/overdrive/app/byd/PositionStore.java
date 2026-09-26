@@ -1,4 +1,5 @@
 package com.overdrive.app.byd;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.daemon.CameraDaemon;
 
@@ -53,7 +54,9 @@ import java.nio.file.Files;
 public final class PositionStore {
 
     private static final String TAG = "PositionStore";
-    public static final String STORE_FILE = "/data/local/tmp/seat_positions.json";
+    public static String storeFile() {
+        return ScratchPaths.path("seat_positions.json");
+    }
     private static final int VERSION = 1;
 
     private static final Object LOCK = new Object();
@@ -83,11 +86,11 @@ public final class PositionStore {
      * stored position with nothing, and this file is the only record of them.
      */
     private JSONObject readRoot(boolean forWrite) {
-        File f = new File(STORE_FILE);
+        File f = new File(storeFile());
         if (!f.exists()) {
             // Absent primary but a surviving .bak means the last rename was interrupted;
             // recovering from it is the difference between "one save lost" and "all of them".
-            JSONObject fromBak = parseFile(new File(STORE_FILE + ".bak"));
+            JSONObject fromBak = parseFile(new File(storeFile() + ".bak"));
             if (fromBak != null) {
                 log("primary store missing; recovered from .bak");
                 return fromBak;
@@ -96,7 +99,7 @@ public final class PositionStore {
         }
         JSONObject root = parseFile(f);
         if (root != null) return root;
-        JSONObject bak = parseFile(new File(STORE_FILE + ".bak"));
+        JSONObject bak = parseFile(new File(storeFile() + ".bak"));
         if (bak != null) {
             log("store unparseable; recovered from .bak");
             return bak;
@@ -143,7 +146,7 @@ public final class PositionStore {
      * into the target directly would truncate the only good copy before replacing it.
      */
     private boolean save(JSONObject root) {
-        File tmp = new File(STORE_FILE + ".tmp");
+        File tmp = new File(storeFile() + ".tmp");
         try {
             root.put("version", VERSION);
             byte[] bytes = root.toString(2).getBytes("UTF-8");
@@ -152,9 +155,9 @@ public final class PositionStore {
                 fos.flush();
                 fos.getFD().sync();
             }
-            File target = new File(STORE_FILE);
+            File target = new File(storeFile());
             if (target.exists()) {
-                File bak = new File(STORE_FILE + ".bak");
+                File bak = new File(storeFile() + ".bak");
                 try {
                     bak.delete();
                     Files.copy(target.toPath(), bak.toPath());
@@ -163,7 +166,7 @@ public final class PositionStore {
                 } catch (Throwable ignored) { /* best effort */ }
             }
             if (!tmp.renameTo(target)) {
-                log("save FAILED: could not rename over " + STORE_FILE + "; store left intact");
+                log("save FAILED: could not rename over " + storeFile() + "; store left intact");
                 tmp.delete();
                 return false;
             }

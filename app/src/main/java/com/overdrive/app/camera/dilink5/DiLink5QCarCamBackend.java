@@ -1,6 +1,7 @@
 package com.overdrive.app.camera.dilink5;
 
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.util.ScratchPaths;
 
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -711,12 +712,28 @@ public class DiLink5QCarCamBackend {
                 return false;
             }
 
-            java.io.File binary = new java.io.File(FAST_CAM_PATH);
-            if (!deployVerifiedAsset(
-                    context, FAST_CAM_ASSET, binary, 0700)) {
-                logger.error("fast_cam_capture is unavailable at "
-                        + FAST_CAM_PATH);
-                return false;
+            String nativeLibDir =
+                    context.getApplicationInfo().nativeLibraryDir;
+            java.io.File binary;
+            if (ScratchPaths.usesLegacyDir()) {
+                binary = new java.io.File(FAST_CAM_PATH);
+                if (!deployVerifiedAsset(
+                        context, FAST_CAM_ASSET, binary, 0700)) {
+                    logger.error("fast_cam_capture is unavailable at "
+                            + FAST_CAM_PATH);
+                    return false;
+                }
+            } else {
+                binary = new java.io.File(
+                        nativeLibDir,
+                        System.mapLibraryName("fast_cam_capture"));
+                if (!binary.isFile() || binary.length() <= 0L) {
+                    logger.error("Packaged fast_cam_capture is unavailable at "
+                            + binary.getPath());
+                    return false;
+                }
+                logger.info("Using packaged fast_cam_capture at "
+                        + binary.getPath());
             }
             int[] cameraMapping = resolveCameraMapping();
             String cameraIds = DiLink5CameraMapping.toCsv(cameraMapping);
@@ -753,8 +770,6 @@ public class DiLink5QCarCamBackend {
             }
             if (!isStartAllowed(startEpoch, acquisitionGeneration)) return false;
 
-            String nativeLibDir =
-                    context.getApplicationInfo().nativeLibraryDir;
             java.io.File releaseGuard = new java.io.File(
                     nativeLibDir,
                     System.mapLibraryName("fast_cam_release_guard"));
@@ -813,7 +828,11 @@ public class DiLink5QCarCamBackend {
                     "--socket", socketPath);
             processBuilder.environment().put(
                     "LD_LIBRARY_PATH",
-                    "/vendor/lib64:/system/lib64:/data/local/tmp");
+                    "/vendor/lib64:/system/lib64:"
+                            + nativeLibDir + ":" + ScratchPaths.getDir());
+            processBuilder.environment().put(
+                    ScratchPaths.ENV_SCRATCH, ScratchPaths.getDir());
+            processBuilder.environment().put("TMPDIR", ScratchPaths.getDir());
             processBuilder.environment().put(
                     "LD_PRELOAD", releaseGuard.getAbsolutePath());
             processBuilder.redirectErrorStream(true);
@@ -1351,6 +1370,10 @@ public class DiLink5QCarCamBackend {
                 configuredModel,
                 android.os.Build.MODEL,
                 android.os.Build.PRODUCT);
+        if (DiLink5PlatformHelper.isSharkHardware()
+                || DiLink5PlatformHelper.isSharkProfile(configuredModel)) {
+            mapping = new int[]{8, 9, 5, 4};
+        }
         String cameraIds = DiLink5CameraMapping.toCsv(mapping);
         logger.info(("8,9,5,4".equals(cameraIds)
                 ? "Detected BYD Shark/DMO"

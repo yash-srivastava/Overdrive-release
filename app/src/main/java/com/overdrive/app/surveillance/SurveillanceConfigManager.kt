@@ -1,4 +1,5 @@
 package com.overdrive.app.surveillance
+import com.overdrive.app.util.ScratchPaths
 
 import android.os.Process
 import android.util.Log
@@ -22,15 +23,17 @@ class SurveillanceConfigManager(
         
         // Legacy paths (for migration only)
         private const val SYSTEM_CONFIG_PATH = "/data/data/com.android.providers.settings/sentry_config.json"
-        private const val SHELL_CONFIG_PATH = "/data/local/tmp/sentry_config.json"
+        private val shellConfigPath: String
+            get() = ScratchPaths.LEGACY_DIR + "/sentry_config.json"
         
         // SOTA: Use unified config path
-        private const val UNIFIED_CONFIG_PATH = "/data/local/tmp/overdrive_config.json"
+        private val unifiedConfigPath: String
+            get() = ScratchPaths.path("overdrive_config.json")
         
         private fun getDefaultConfigFile(): File {
             val uid = Process.myUid()
             // Always use unified config path now
-            return File(UNIFIED_CONFIG_PATH).also {
+            return File(unifiedConfigPath).also {
                 Log.i(TAG, "Using unified config file: ${it.absolutePath} (UID=$uid)")
             }
         }
@@ -109,7 +112,7 @@ class SurveillanceConfigManager(
         }
         
         // Try legacy fallback paths
-        val fallbackFile = File(SHELL_CONFIG_PATH)
+        val fallbackFile = File(shellConfigPath)
         if (fallbackFile.exists() && fallbackFile.absolutePath != configFile.absolutePath) {
             try {
                 val json = JSONObject(fallbackFile.readText())
@@ -169,7 +172,7 @@ class SurveillanceConfigManager(
         
         // Check legacy paths
         if (configFile.exists()) return true
-        val fallbackFile = File(SHELL_CONFIG_PATH)
+        val fallbackFile = File(shellConfigPath)
         return fallbackFile.exists()
     }
     

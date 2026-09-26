@@ -1,4 +1,5 @@
 package com.overdrive.app.automation;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.automation.action.Action;
 import com.overdrive.app.automation.action.Actions;
@@ -34,14 +35,22 @@ import java.util.concurrent.ConcurrentHashMap;
 public class Automations {
     private static final DaemonLogger logger = DaemonLogger.getInstance("Automations");
     static final String AUTOMATION_HOME_PROPERTY = "overdrive.automation.home";
-    private static final File AUTOMATION_HOME = new File(System.getProperty(
-            AUTOMATION_HOME_PROPERTY, "/data/local/tmp/.automations"));
-    private static final File AUTOMATION_CONFIG = new File(AUTOMATION_HOME, "config.json");
+    private static File automationHome() {
+        return new File(System.getProperty(
+                AUTOMATION_HOME_PROPERTY, ScratchPaths.path(".automations")));
+    }
+    private static File automationConfig() {
+        return new File(automationHome(), "config.json");
+    }
     // Last-known-good backup + scratch file for the atomic write. loadFromFile falls back to .bak when
     // the live file is truncated/corrupt (e.g. daemon killed mid-write on ACC-off), so a torn write can
     // never silently wipe every configured automation.
-    private static final File AUTOMATION_BACKUP = new File(AUTOMATION_HOME, "config.json.bak");
-    private static final File AUTOMATION_TMP = new File(AUTOMATION_HOME, "config.json.tmp");
+    private static File automationBackup() {
+        return new File(automationHome(), "config.json.bak");
+    }
+    private static File automationTmp() {
+        return new File(automationHome(), "config.json.tmp");
+    }
     // Serializes the read-snapshot-write sequence so two concurrent HTTP request threads can't interleave
     // their FileOutputStreams and produce a mangled file.
     private static final Object SAVE_LOCK = new Object();
@@ -1204,10 +1213,10 @@ public class Automations {
      */
     public static boolean saveToFile() {
         synchronized (SAVE_LOCK) {
-            if (!AUTOMATION_HOME.exists()) AUTOMATION_HOME.mkdirs();
+            if (!automationHome().exists()) automationHome().mkdirs();
             // Snapshot to bytes under the lock so the persisted content is internally consistent.
             byte[] bytes = toJson().toString().getBytes(StandardCharsets.UTF_8);
-            try (FileOutputStream fos = new FileOutputStream(AUTOMATION_TMP)) {
+            try (FileOutputStream fos = new FileOutputStream(automationTmp())) {
                 fos.write(bytes);
                 fos.getFD().sync();
             } catch (IOException e) {
@@ -1219,14 +1228,14 @@ public class Automations {
             // may become the backup: the live file is the thing suspected of being corrupt (that is
             // why .bak exists), and copying it blind destroys the last known good — after which a
             // second interruption loses every automation.
-            if (AUTOMATION_CONFIG.exists() && isParseable(AUTOMATION_CONFIG)) {
-                copyFile(AUTOMATION_CONFIG, AUTOMATION_BACKUP);
+            if (automationConfig().exists() && isParseable(automationConfig())) {
+                copyFile(automationConfig(), automationBackup());
             }
-            if (!AUTOMATION_TMP.renameTo(AUTOMATION_CONFIG)) {
+            if (!automationTmp().renameTo(automationConfig())) {
                 logger.error("Failed to promote automations scratch file to live config");
                 return false;
             }
-            logger.info("Saved " + automations.size() + " Automations to " + AUTOMATION_CONFIG);
+            logger.info("Saved " + automations.size() + " Automations to " + automationConfig());
             return true;
         }
     }
@@ -1266,14 +1275,14 @@ public class Automations {
      */
     public static void loadFromFile() {
         synchronized (SAVE_LOCK) {
-            if (tryLoadFrom(AUTOMATION_CONFIG)) return;
+            if (tryLoadFrom(automationConfig())) return;
             // Live file missing/corrupt — recover from the backup rather than silently starting empty.
-            if (AUTOMATION_BACKUP.exists()) {
-                if (tryLoadFrom(AUTOMATION_BACKUP)) {
+            if (automationBackup().exists()) {
+                if (tryLoadFrom(automationBackup())) {
                     // Repair the live file NOW. Leaving it corrupt keeps the system one
                     // interruption away from total loss, and until it is repaired every save
                     // must decline to refresh the backup, so the .bak ages indefinitely.
-                    copyFile(AUTOMATION_BACKUP, AUTOMATION_CONFIG);
+                    copyFile(automationBackup(), automationConfig());
                     logger.info("Recovered automations from backup after live config was "
                             + "unreadable; restored the live config from it");
                     return;

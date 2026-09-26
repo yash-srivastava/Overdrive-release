@@ -17,10 +17,11 @@ object CameraConfiguration {
     const val TCP_PORT = 19876
     const val HTTP_PORT = 8080
 
-    // Directories
-    const val STREAM_DIR = "/data/local/tmp/cam_stream"
+    // Directories (legacy /data/local/tmp when writable; else app-files scratch)
+    fun streamDir(): String = com.overdrive.app.util.ScratchPaths.path("cam_stream")
     const val APP_STREAM_DIR = "/storage/emulated/0/Android/data/com.overdrive.app/files/stream"
     const val DEFAULT_OUTPUT_DIR = "/sdcard/DCIM/BYDCam"
+
 
     // Recording config defaults (legacy Seal/Atto profile)
     val PANO_WIDTH  = CameraProfiles.getLegacyDefault().panoWidth

@@ -1,4 +1,5 @@
 package com.overdrive.app.abrp;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.logging.DaemonLogger;
 import org.json.JSONObject;
@@ -19,7 +20,9 @@ public class AbrpConfig {
     private static final String TAG = "AbrpConfig";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
-    private static final String CONFIG_PATH = "/data/local/tmp/abrp_config.properties";
+    private static String configPath() {
+        return ScratchPaths.path("abrp_config.properties");
+    }
     private static final String PROP_USER_TOKEN = "user_token";
     private static final String PROP_ENABLED = "enabled";
     private static final String PROP_CAR_MODEL = "car_model";
@@ -82,9 +85,9 @@ public class AbrpConfig {
      */
     public boolean load() {
         try {
-            File configFile = new File(CONFIG_PATH);
+            File configFile = new File(configPath());
             if (!configFile.exists()) {
-                logger.info("Config file not found: " + CONFIG_PATH);
+                logger.info("Config file not found: " + configPath());
                 return false;
             }
 
@@ -173,12 +176,12 @@ public class AbrpConfig {
             if (appActiveMode != null) props.setProperty(PROP_APP_ACTIVE_MODE, appActiveMode);
             props.setProperty(PROP_APP_GRACE, String.valueOf(appGraceSeconds));
 
-            File configFile = new File(CONFIG_PATH);
+            File configFile = new File(configPath());
             try (FileOutputStream fos = new FileOutputStream(configFile)) {
                 props.store(fos, "ABRP Configuration");
             }
 
-            logger.info("Config saved to " + CONFIG_PATH);
+            logger.info("Config saved to " + configPath());
             return true;
         } catch (Exception e) {
             logger.error("Config save error: " + e.getMessage());

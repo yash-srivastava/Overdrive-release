@@ -1,4 +1,5 @@
 package com.overdrive.app.notifications;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -40,12 +41,16 @@ public final class NotificationStore {
     // Dedicated H2 file — NOT shared with overdrive_soc_h2. DB_CLOSE_ON_EXIT=FALSE:
     // shutdown is driven explicitly from CameraDaemon.shutdown() (mirrors
     // SocHistoryDatabase). FILE_LOCK=SOCKET is the cross-process safety net.
-    private static final String DB_PATH = "/data/local/tmp/overdrive_notif_h2";
+    private static String dbPath() {
+        return ScratchPaths.path("overdrive_notif_h2");
+    }
     // AUTO_COMPACT_FILL_RATE=50: idle-CPU tuning shared by all seven H2 stores
-    // (see SocHistoryDatabase.JDBC_URL for the full rationale).
-    private static final String JDBC_URL = "jdbc:h2:file:" + DB_PATH +
+    // (see SocHistoryDatabase.jdbcUrl() for the full rationale).
+    private static String jdbcUrl() {
+        return "jdbc:h2:file:" + dbPath() +
             ";FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
             ";AUTO_COMPACT_FILL_RATE=50";
+    }
 
     private static final String TABLE = "notifications";
 
@@ -123,14 +128,14 @@ public final class NotificationStore {
             int retryDelayMs = 500;
             for (int attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
-                    connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+                    connection = DriverManager.getConnection(jdbcUrl(), "sa", "");
                     try (Statement stmt = connection.createStatement()) {
                         stmt.execute("SET CACHE_SIZE 4096");
                     }
                     createTable();
                     isInitialized = true;
                     isRunning = true;
-                    logger.info("NotificationStore initialized via H2: " + DB_PATH);
+                    logger.info("NotificationStore initialized via H2: " + dbPath());
                     break;
                 } catch (Exception e) {
                     String msg = e.getMessage();
@@ -193,7 +198,7 @@ public final class NotificationStore {
     /** Clean up a stale lock/trace file left by a crashed prior daemon. */
     private void cleanupStaleLocks() {
         try {
-            java.io.File lockFile = new java.io.File(DB_PATH + ".lock.db");
+            java.io.File lockFile = new java.io.File(dbPath() + ".lock.db");
             if (lockFile.exists()) {
                 long ageMs = System.currentTimeMillis() - lockFile.lastModified();
                 if (ageMs > 5 * 60 * 1000) {
@@ -202,7 +207,7 @@ public final class NotificationStore {
                     }
                 }
             }
-            java.io.File traceFile = new java.io.File(DB_PATH + ".trace.db");
+            java.io.File traceFile = new java.io.File(dbPath() + ".trace.db");
             if (traceFile.exists()) traceFile.delete();
         } catch (Exception e) {
             logger.debug("NotificationStore lock cleanup failed: " + e.getMessage());
@@ -238,7 +243,7 @@ public final class NotificationStore {
         if (!isRunning) return;
         try {
             if (connection == null || connection.isClosed()) {
-                connection = DriverManager.getConnection(JDBC_URL, "sa", "");
+                connection = DriverManager.getConnection(jdbcUrl(), "sa", "");
                 isInitialized = true;
                 logger.debug("NotificationStore connection re-established");
             }

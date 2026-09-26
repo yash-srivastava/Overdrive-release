@@ -30,6 +30,18 @@ class OverdriveApplication : Application() {
             Log.w("OverdriveApplication", "Remote dev-view bridge unavailable: ${error.message}")
         }
 
+        // Scratch dir before anything that touches /data/local/tmp: Sealion keeps
+        // legacy when writable; Shark falls back to app external-files/daemon.
+        com.overdrive.app.util.ScratchPaths.init(this)
+
+        // Warm DiLink5 JNI after scratch is known (static init may race Context).
+        try {
+            com.overdrive.app.camera.dilink5.DiLink5QCarCamBackend
+                .ensureNativeLibrariesLoaded(null)
+        } catch (error: Throwable) {
+            Log.w("OverdriveApplication", "DiLink5 JNI warm skipped: ${error.message}")
+        }
+
         // Apply the user-picked locale before any Activity/Fragment is created.
         // Auto-mode (or unset) writes an empty list so AppCompat falls back to
         // Locale.getDefault() — i.e. the BYD head unit's system language.

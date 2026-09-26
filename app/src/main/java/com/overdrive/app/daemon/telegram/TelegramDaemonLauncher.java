@@ -1,4 +1,5 @@
 package com.overdrive.app.daemon.telegram;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -25,8 +26,9 @@ public final class TelegramDaemonLauncher {
     public static final String DAEMON_PROCESS = "telegram_bot_daemon";
     private static final String DAEMON_CLASS =
             "com.overdrive.app.daemon.TelegramBotDaemon";
-    private static final String DAEMON_LOG =
-            "/data/local/tmp/telegrambotdaemon.log";
+    private static String daemonLog() {
+        return ScratchPaths.path("telegrambotdaemon.log");
+    }
 
     private TelegramDaemonLauncher() {}
 
@@ -63,7 +65,7 @@ public final class TelegramDaemonLauncher {
                 "app_process /system/bin " +
                 "--nice-name=" + DAEMON_PROCESS + " " +
                 DAEMON_CLASS +
-                " >> " + DAEMON_LOG + " 2>&1";
+                " >> " + daemonLog() + " 2>&1";
 
         // Detached fire-and-forget — same recipe AppUpdater.runDetachedInstall
         // uses (AppUpdater.java:741-745). Three tricks make this safe:

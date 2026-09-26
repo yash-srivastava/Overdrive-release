@@ -250,14 +250,14 @@ class DaemonAdapter(
          */
         fun getLogFilePath(type: DaemonType): String? {
             return when (type) {
-                DaemonType.CAMERA_DAEMON -> "/data/local/tmp/cam_daemon.log"
-                DaemonType.SENTRY_DAEMON -> "/data/local/tmp/sentry_daemon.log"
-                DaemonType.ACC_SENTRY_DAEMON -> "/data/local/tmp/acc_sentry_daemon.log"
-                DaemonType.CLOUDFLARED_TUNNEL -> "/data/local/tmp/cloudflared.log"
-                DaemonType.ZROK_TUNNEL -> "/data/local/tmp/zrok.log"
-                DaemonType.TAILSCALE_TUNNEL -> "/data/local/tmp/.tailscale/tailscale.log"
-                DaemonType.SINGBOX_PROXY -> "/data/local/tmp/singbox.log"
-                DaemonType.TELEGRAM_DAEMON -> "/data/local/tmp/telegrambotdaemon.log"
+                DaemonType.CAMERA_DAEMON -> com.overdrive.app.util.ScratchPaths.path("cam_daemon.log")
+                DaemonType.SENTRY_DAEMON -> com.overdrive.app.util.ScratchPaths.path("sentry_daemon.log")
+                DaemonType.ACC_SENTRY_DAEMON -> com.overdrive.app.util.ScratchPaths.path("acc_sentry_daemon.log")
+                DaemonType.CLOUDFLARED_TUNNEL -> com.overdrive.app.util.ScratchPaths.path("cloudflared.log")
+                DaemonType.ZROK_TUNNEL -> com.overdrive.app.util.ScratchPaths.path("zrok.log")
+                DaemonType.TAILSCALE_TUNNEL -> com.overdrive.app.util.ScratchPaths.path(".tailscale/tailscale.log")
+                DaemonType.SINGBOX_PROXY -> com.overdrive.app.util.ScratchPaths.path("singbox.log")
+                DaemonType.TELEGRAM_DAEMON -> com.overdrive.app.util.ScratchPaths.path("telegrambotdaemon.log")
             }
         }
 

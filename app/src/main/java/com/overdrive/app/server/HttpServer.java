@@ -1,4 +1,5 @@
 package com.overdrive.app.server;
+import com.overdrive.app.util.ScratchPaths;
 
 import android.content.res.AssetManager;
 import android.util.Base64;
@@ -49,7 +50,9 @@ import java.util.concurrent.TimeUnit;
  */
 public class HttpServer {
 
-    private static final String WEB_ROOT = "/data/local/tmp/web";
+    private static String webRoot() {
+        return ScratchPaths.path("web");
+    }
     private final int port;
     private ServerSocket serverSocket;
     private volatile boolean running = true;
@@ -72,7 +75,7 @@ public class HttpServer {
         }
         
         try {
-            File webRoot = new File(WEB_ROOT);
+            File webRoot = new File(webRoot());
             
             // Always delete and recreate to ensure fresh files on app update
             if (webRoot.exists()) {
@@ -82,26 +85,26 @@ public class HttpServer {
             webRoot.mkdirs();
             
             // Extract web/local and web/shared directories
-            extractAssetDir(assetManager, "web/local", new File(WEB_ROOT, "local"));
-            extractAssetDir(assetManager, "web/shared", new File(WEB_ROOT, "shared"));
+            extractAssetDir(assetManager, "web/local", new File(webRoot(), "local"));
+            extractAssetDir(assetManager, "web/shared", new File(webRoot(), "shared"));
             // Extract i18n catalogs (one JSON per supported locale).
             // The web/i18n directory is created by the NLLB translation pipeline
             // — at minimum web/i18n/en.json must exist for the runtime to load.
-            extractAssetDir(assetManager, "web/i18n", new File(WEB_ROOT, "i18n"));
+            extractAssetDir(assetManager, "web/i18n", new File(webRoot(), "i18n"));
             // Extract server-side i18n catalogs (Messages.java lookup source).
             // Kept distinct from web/i18n so the HTTP /i18n/ route doesn't accidentally
             // expose internal error keys, and the two catalogs can diverge if needed.
-            extractAssetDir(assetManager, "server-i18n", new File(WEB_ROOT, "server-i18n"));
+            extractAssetDir(assetManager, "server-i18n", new File(webRoot(), "server-i18n"));
 
             // Extract overlay icons for telemetry overlay
-            extractAssetDir(assetManager, "overlay", new File("/data/local/tmp/overlay"));
+            extractAssetDir(assetManager, "overlay", new File(ScratchPaths.path("overlay")));
             
             // Extract BYD cloud crypto tables — re-extract whenever the cache
             // is missing or fails magic/size validation, so a stale or
             // truncated /data/local/tmp file from a prior build can't poison
             // every reader with "Bad magic: expected BGTB".
             try {
-                File bydTablesFile = new File(com.overdrive.app.byd.cloud.crypto.BangcleTablesFile.CACHE_PATH);
+                File bydTablesFile = new File(com.overdrive.app.byd.cloud.crypto.BangcleTablesFile.cachePath());
                 if (!com.overdrive.app.byd.cloud.crypto.BangcleTablesFile.isValid(bydTablesFile)) {
                     if (com.overdrive.app.byd.cloud.crypto.BangcleTablesFile.extractFromAssets(assetManager, bydTablesFile)) {
                         CameraDaemon.log("Extracted BYD Bangcle tables to " + bydTablesFile.getAbsolutePath() + " (" + bydTablesFile.length() + " bytes)");
@@ -117,7 +120,7 @@ public class HttpServer {
             // account is configured, but pre-extracting is harmless and primes
             // the cache so the first CN login doesn't pay the extract cost.
             try {
-                File wbskTablesFile = new File(com.overdrive.app.byd.cloud.crypto.WbskTablesFile.CACHE_PATH);
+                File wbskTablesFile = new File(com.overdrive.app.byd.cloud.crypto.WbskTablesFile.cachePath());
                 if (!com.overdrive.app.byd.cloud.crypto.WbskTablesFile.isValid(wbskTablesFile)) {
                     if (com.overdrive.app.byd.cloud.crypto.WbskTablesFile.extractFromAssets(assetManager, wbskTablesFile)) {
                         CameraDaemon.log("Extracted BYD WBSK tables to " + wbskTablesFile.getAbsolutePath() + " (" + wbskTablesFile.length() + " bytes)");
@@ -129,7 +132,7 @@ public class HttpServer {
                 CameraDaemon.log("Could not extract BYD WBSK tables: " + e.getMessage());
             }
             
-            CameraDaemon.log("Web assets extracted to " + WEB_ROOT);
+            CameraDaemon.log("Web assets extracted to " + webRoot());
         } catch (Exception e) {
             CameraDaemon.log("Failed to extract web assets: " + e.getMessage());
         }
@@ -1823,7 +1826,7 @@ public class HttpServer {
     }
 
     /**
-     * Serves static files from WEB_ROOT with streaming for large files.
+     * Serves static files from webRoot() with streaming for large files.
      */
     private boolean serveStaticFile(OutputStream out, String relativePath) {
         return serveStaticFile(out, relativePath, null);
@@ -1835,7 +1838,7 @@ public class HttpServer {
         }
 
         // Catalogs are versioned with the APK. Prefer the bundled bytes over
-        // /data/local/tmp so a stale extraction from the previous app version
+        // the scratch directory so a stale extraction from the previous app version
         // can never hide a new or corrected translation.
         if (relativePath.startsWith("i18n/")
                 && relativePath.endsWith(".json")
@@ -1843,11 +1846,11 @@ public class HttpServer {
             return true;
         }
 
-        File file = new File(WEB_ROOT, relativePath);
+        File file = new File(webRoot(), relativePath);
         if (!file.exists() || !file.isFile()) {
             // Fall back to the persistent models cache for GLBs that were downloaded
-            // at runtime. The bundled default (seal.glb) lives in WEB_ROOT; everything
-            // else is fetched on demand into ModelsApiHandler.MODELS_DIR.
+            // at runtime. The bundled default (seal.glb) lives in webRoot(); everything
+            // else is fetched on demand into ModelsApiHandler.modelsDir().
             if (relativePath.startsWith("shared/models/") && relativePath.endsWith(".glb")) {
                 String fileName = relativePath.substring("shared/models/".length());
                 File cached = ModelsApiHandler.cachedModelFile(fileName);
@@ -1956,7 +1959,7 @@ public class HttpServer {
 
     /**
      * APK asset fallback for web catalogs. Phone installs may not be able to
-     * create /data/local/tmp/web, and a running daemon may still have files
+     * create the scratch web directory, and a running daemon may still have files
      * extracted by an older app version.
      */
     private boolean serveAssetFallback(OutputStream out, String relativePath, String ifNoneMatch) {

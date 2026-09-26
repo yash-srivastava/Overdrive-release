@@ -1,4 +1,5 @@
 package com.overdrive.app.launcher
+import com.overdrive.app.util.ScratchPaths
 
 import android.content.Context
 import com.overdrive.app.logging.LogManager
@@ -18,9 +19,12 @@ class SingboxLauncher(
         private const val TAG = "SingboxLauncher"
         
         // Paths
-        private const val SINGBOX_TMP_PATH = "/data/local/tmp/sing-box"
-        private const val SINGBOX_CONFIG_PATH = "/data/local/tmp/singbox_config.json"
-        private const val SINGBOX_LOG = "/data/local/tmp/singbox.log"
+        private val singboxTmpPath: String
+            get() = ScratchPaths.path("sing-box")
+        private val singboxConfigPath: String
+            get() = ScratchPaths.path("singbox_config.json")
+        private val singboxLog: String
+            get() = ScratchPaths.path("singbox.log")
         
         // Default proxy port
         private const val PROXY_PORT = 8119
@@ -41,7 +45,7 @@ class SingboxLauncher(
         
         // Check if binary is installed
         adbShellExecutor.execute(
-            command = "test -x $SINGBOX_TMP_PATH && echo yes || echo no",
+            command = "test -x $singboxTmpPath && echo yes || echo no",
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
                     if (output.trim() == "yes") {
@@ -77,7 +81,7 @@ class SingboxLauncher(
                     
                     // Copy and make executable
                     adbShellExecutor.execute(
-                        command = "cp $srcPath $SINGBOX_TMP_PATH && chmod +x $SINGBOX_TMP_PATH",
+                        command = "cp $srcPath $singboxTmpPath && chmod +x $singboxTmpPath",
                         callback = object : AdbShellExecutor.ShellCallback {
                             override fun onSuccess(copyOutput: String) {
                                 callback.onLog("sing-box installed")
@@ -128,7 +132,7 @@ class SingboxLauncher(
     private fun cleanupAndLaunch(callback: SingboxCallback) {
         // Remove old config and logs
         adbShellExecutor.execute(
-            command = "rm -f $SINGBOX_CONFIG_PATH $SINGBOX_LOG 2>/dev/null || true",
+            command = "rm -f $singboxConfigPath $singboxLog 2>/dev/null || true",
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
                     createConfigAndLaunch(callback)
@@ -148,7 +152,7 @@ class SingboxLauncher(
         // Updated for sing-box 1.12.0+ (removed deprecated geoip rules and legacy DNS format)
         val config = """
 {
-  "log": { "level": "warn", "timestamp": true, "output": "$SINGBOX_LOG" },
+  "log": { "level": "warn", "timestamp": true, "output": "$singboxLog" },
   "dns": {
     "servers": [
       { "tag": "google", "address": "tcp://8.8.8.8", "detour": "proxy" }
@@ -197,7 +201,7 @@ class SingboxLauncher(
         // Write config via shell
         val escapedConfig = config.replace("\"", "\\\"").replace("\n", "\\n")
         adbShellExecutor.execute(
-            command = "echo '$config' > $SINGBOX_CONFIG_PATH",
+            command = "echo '$config' > $singboxConfigPath",
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
                     launchSingboxInternal(callback)
@@ -214,7 +218,7 @@ class SingboxLauncher(
     private fun launchSingboxInternal(callback: SingboxCallback) {
         callback.onLog("Starting sing-box...")
         
-        val cmd = "nohup $SINGBOX_TMP_PATH run -c $SINGBOX_CONFIG_PATH > $SINGBOX_LOG 2>&1 &"
+        val cmd = "nohup $singboxTmpPath run -c $singboxConfigPath > $singboxLog 2>&1 &"
         
         logManager.debug(TAG, "Executing: $cmd")
         
@@ -238,7 +242,7 @@ class SingboxLauncher(
     private fun waitForStartup(callback: SingboxCallback, attempt: Int) {
         if (attempt > 10) {
             adbShellExecutor.execute(
-                command = "cat $SINGBOX_LOG 2>/dev/null | tail -20",
+                command = "cat $singboxLog 2>/dev/null | tail -20",
                 callback = object : AdbShellExecutor.ShellCallback {
                     override fun onSuccess(output: String) {
                         logManager.error(TAG, "sing-box startup timed out. Log: $output")

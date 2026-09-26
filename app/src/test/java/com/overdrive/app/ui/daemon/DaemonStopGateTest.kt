@@ -1,4 +1,5 @@
 package com.overdrive.app.ui.daemon
+import com.overdrive.app.util.ScratchPaths
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -15,8 +16,11 @@ import org.junit.Test
  */
 class DaemonStopGateTest {
 
-    private val SENTINEL = "/data/local/tmp/tailscale.disabled"
-    private val MARKER = "/data/local/tmp/overdrive_parked_shutdown"
+    private val sentinel: String
+
+        get() = ScratchPaths.path("tailscale.disabled")
+    private val marker: String
+        get() = ScratchPaths.path("overdrive_parked_shutdown")
 
     private fun present(vararg paths: String) = { p: String -> p in paths }
 
@@ -24,12 +28,12 @@ class DaemonStopGateTest {
 
     @Test
     fun startup_allowsWhenNothingPresent() {
-        assertFalse(DaemonStopGate.isStartBlocked(SENTINEL, present()))
+        assertFalse(DaemonStopGate.isStartBlocked(sentinel, present()))
     }
 
     @Test
     fun startup_blockedByUserStopSentinel() {
-        assertTrue(DaemonStopGate.isStartBlocked(SENTINEL, present(SENTINEL)))
+        assertTrue(DaemonStopGate.isStartBlocked(sentinel, present(sentinel)))
     }
 
     @Test
@@ -37,48 +41,50 @@ class DaemonStopGateTest {
         // The startup paths cannot run under a live marker (BootReceiver gates the boot path;
         // initializeOnAppLaunch clears it first), so a lingering marker must not block them.
         // This reproduces the previous ADB probe exactly: `test -f <sentinel>`, no marker term.
-        assertFalse(DaemonStopGate.isStartBlocked(SENTINEL, present(MARKER)))
+        assertFalse(DaemonStopGate.isStartBlocked(sentinel, present(marker)))
     }
 
     // ---- health-check policy: sentinel OR parked marker ----
 
     @Test
     fun relaunch_allowsWhenNothingPresent() {
-        assertFalse(DaemonStopGate.isRelaunchBlocked(SENTINEL, MARKER, present()))
+        assertFalse(DaemonStopGate.isRelaunchBlocked(sentinel, marker, present()))
     }
 
     @Test
     fun relaunch_blockedByUserStopSentinel() {
-        assertTrue(DaemonStopGate.isRelaunchBlocked(SENTINEL, MARKER, present(SENTINEL)))
+        assertTrue(DaemonStopGate.isRelaunchBlocked(sentinel, marker, present(sentinel)))
     }
 
     @Test
     fun relaunch_HONOURS_parkedMarker() {
         // The regression that matters: without this the health check revives a parked stack.
-        assertTrue(DaemonStopGate.isRelaunchBlocked(SENTINEL, MARKER, present(MARKER)))
+        assertTrue(DaemonStopGate.isRelaunchBlocked(sentinel, marker, present(marker)))
     }
 
     @Test
     fun relaunch_blockedWhenBothPresent() {
-        assertTrue(DaemonStopGate.isRelaunchBlocked(SENTINEL, MARKER, present(SENTINEL, MARKER)))
+        assertTrue(DaemonStopGate.isRelaunchBlocked(sentinel, marker, present(sentinel, marker)))
     }
 
     @Test
     fun relaunch_checksSentinelIndependentlyOfMarker() {
         // Guards against a short-circuit that only ever consults one of the two paths.
-        assertFalse(DaemonStopGate.isRelaunchBlocked(SENTINEL, MARKER, present("/some/other/file")))
+        assertFalse(DaemonStopGate.isRelaunchBlocked(sentinel, marker, present("/some/other/file")))
     }
 
     // ---- content-aware startup policy (Telegram): sentinel text discriminates user vs machine stop ----
 
-    private val TELEGRAM_SENTINEL = "/data/local/tmp/telegram_bot_daemon.disabled"
+    private val telegramSentinel: String
+
+        get() = ScratchPaths.path("telegram_bot_daemon.disabled")
     private fun firstLine(map: Map<String, String?>) = { p: String -> map[p] }
 
     @Test
     fun contentAware_allowsWhenSentinelAbsent() {
         assertFalse(
             DaemonStopGate.isStartBlockedContentAware(
-                TELEGRAM_SENTINEL, present(), firstLine(emptyMap())
+                telegramSentinel, present(), firstLine(emptyMap())
             )
         )
     }
@@ -88,8 +94,8 @@ class DaemonStopGateTest {
         // A user stop leaves text that is NOT a machine marker → block.
         assertTrue(
             DaemonStopGate.isStartBlockedContentAware(
-                TELEGRAM_SENTINEL, present(TELEGRAM_SENTINEL),
-                firstLine(mapOf(TELEGRAM_SENTINEL to "stopped by user 2026-08-02"))
+                telegramSentinel, present(telegramSentinel),
+                firstLine(mapOf(telegramSentinel to "stopped by user 2026-08-02"))
             )
         )
     }
@@ -100,14 +106,14 @@ class DaemonStopGateTest {
         // stops, not user stops — a pref-enabled daemon must start.
         assertFalse(
             DaemonStopGate.isStartBlockedContentAware(
-                TELEGRAM_SENTINEL, present(TELEGRAM_SENTINEL),
-                firstLine(mapOf(TELEGRAM_SENTINEL to "stopAllDaemons before update"))
+                telegramSentinel, present(telegramSentinel),
+                firstLine(mapOf(telegramSentinel to "stopAllDaemons before update"))
             )
         )
         assertFalse(
             DaemonStopGate.isStartBlockedContentAware(
-                TELEGRAM_SENTINEL, present(TELEGRAM_SENTINEL),
-                firstLine(mapOf(TELEGRAM_SENTINEL to "ACC-on edge"))
+                telegramSentinel, present(telegramSentinel),
+                firstLine(mapOf(telegramSentinel to "ACC-on edge"))
             )
         )
     }
@@ -117,8 +123,8 @@ class DaemonStopGateTest {
         // Present but unreadable (null first line) → block, matching the old `grep` echoing STOPPED.
         assertTrue(
             DaemonStopGate.isStartBlockedContentAware(
-                TELEGRAM_SENTINEL, present(TELEGRAM_SENTINEL),
-                firstLine(mapOf(TELEGRAM_SENTINEL to null))
+                telegramSentinel, present(telegramSentinel),
+                firstLine(mapOf(telegramSentinel to null))
             )
         )
     }
@@ -127,14 +133,14 @@ class DaemonStopGateTest {
 
     @Test
     fun theTwoPoliciesDifferOnTheMarker() {
-        val markerOnly = present(MARKER)
+        val markerOnly = present(marker)
         assertFalse(
             "startup must ignore the park marker",
-            DaemonStopGate.isStartBlocked(SENTINEL, markerOnly)
+            DaemonStopGate.isStartBlocked(sentinel, markerOnly)
         )
         assertTrue(
             "health check must honour the park marker",
-            DaemonStopGate.isRelaunchBlocked(SENTINEL, MARKER, markerOnly)
+            DaemonStopGate.isRelaunchBlocked(sentinel, marker, markerOnly)
         )
     }
 }

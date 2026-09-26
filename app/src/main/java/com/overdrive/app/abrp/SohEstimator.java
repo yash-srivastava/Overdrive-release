@@ -1,4 +1,5 @@
 package com.overdrive.app.abrp;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.byd.BydVehicleData;
 import com.overdrive.app.config.UnifiedConfigManager;
@@ -42,7 +43,9 @@ public class SohEstimator {
     private double nominalCapacityKwh = 0;
     private String nominalSource = "unset"; // "user" | "auto" | "unset"
 
-    private static final String SOH_FILE = "/data/local/tmp/abrp_soh_estimate.properties";
+    private static String sohFile() {
+        return ScratchPaths.path("abrp_soh_estimate.properties");
+    }
     private final File sohFile;
     private final PersistenceWriter persistenceWriter;
     private final UserNominalConfig userNominalConfig;
@@ -96,7 +99,7 @@ public class SohEstimator {
             };
 
     public SohEstimator() {
-        this(new File(SOH_FILE));
+        this(new File(sohFile()));
     }
 
     SohEstimator(File sohFile) {

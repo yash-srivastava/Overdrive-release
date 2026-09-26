@@ -1,4 +1,5 @@
 package com.overdrive.app.daemon;
+import com.overdrive.app.util.ScratchPaths;
 
 import android.content.Context;
 import android.hardware.bydauto.bodywork.AbsBYDAutoBodyworkListener;
@@ -60,10 +61,14 @@ public class AccSentryDaemon {
     private static String CMD_DATA_ALWAYS_ON() { return Safe.s("kSl507BgPZXbv0JUusGzZofsus1EHyUHZji5UFGB7WLLwoz58e3wRdD6/xbXC307"); }
     /** settings get global mobile_data */
     private static String CMD_DATA_GET() { return Safe.s("4/qqmGNE2vhiGGggG70n0sRfHtz6gZempQZl+6FiiZk="); }
-    /** /data/local/tmp */
-    private static String PATH_DATA_LOCAL_TMP() { return Safe.s("vuaMjrmBGBFh07qqnUuL8w=="); }
+    /** /data/local/tmp (remapped via ScratchPaths when not legacy) */
+    private static String PATH_DATA_LOCAL_TMP() {
+        return com.overdrive.app.util.ScratchPaths.path(Safe.s("vuaMjrmBGBFh07qqnUuL8w=="));
+    }
     /** /data/local/tmp/telegram_config.properties */
-    private static String PATH_TELEGRAM_CONFIG() { return Safe.s("ZHx6IP38aGV/Q7iMCCcxzwQSn0P1N0jxHygc8N+4Ft+9mlR8XQ+WvEw0ktanrtNx"); }
+    private static String PATH_TELEGRAM_CONFIG() {
+        return com.overdrive.app.util.ScratchPaths.path(Safe.s("ZHx6IP38aGV/Q7iMCCcxzwQSn0P1N0jxHygc8N+4Ft+9mlR8XQ+WvEw0ktanrtNx"));
+    }
 
     // Power levels from BYDAutoBodyworkDevice
     private static final int POWER_LEVEL_OFF = 0;
@@ -203,24 +208,33 @@ public class AccSentryDaemon {
             readProcessStartIdentity(android.os.Process.myPid());
     private static final String PROCESS_INSTANCE_NONCE =
             createProcessInstanceNonce();
-    private static final String PARK_REAPER_PATH =
-            "/data/local/tmp/overdrive_park_reaper.sh";
-    private static final String PARK_REAPER_CONTROL_PATH =
-            "/data/local/tmp/overdrive_park_reaper.control";
-    private static final String PARK_REAPER_STATE_PATH =
-            "/data/local/tmp/overdrive_park_reaper.state";
-    private static final String PARK_REAPER_LEASE_PATH =
-            "/data/local/tmp/overdrive_park_reaper.lease";
-    private static final String PARK_REAPER_LEASE_OWNER_PATH =
-            PARK_REAPER_LEASE_PATH + "/owner";
-    private static final String PARK_REAPER_RUN_PATH =
-            "/data/local/tmp/overdrive_park_reaper.running";
-    private static final String PARK_REAPER_RUN_OWNER_PATH =
-            PARK_REAPER_RUN_PATH + "/owner";
-    private static final String PARK_REAPER_ACK_PREFIX =
-            "/data/local/tmp/overdrive_park_reaper.ack.";
-    private static final String PARK_REAPER_DONE_PREFIX =
-            "/data/local/tmp/overdrive_park_reaper.done.";
+    private static String parkReaperPath() {
+        return ScratchPaths.path("overdrive_park_reaper.sh");
+    }
+    private static String parkReaperControlPath() {
+        return ScratchPaths.path("overdrive_park_reaper.control");
+    }
+    private static String parkReaperStatePath() {
+        return ScratchPaths.path("overdrive_park_reaper.state");
+    }
+    private static String parkReaperLeasePath() {
+        return ScratchPaths.path("overdrive_park_reaper.lease");
+    }
+    private static String parkReaperLeaseOwnerPath() {
+        return parkReaperLeasePath() + "/owner";
+    }
+    private static String parkReaperRunPath() {
+        return ScratchPaths.path("overdrive_park_reaper.running");
+    }
+    private static String parkReaperRunOwnerPath() {
+        return parkReaperRunPath() + "/owner";
+    }
+    private static String parkReaperAckPrefix() {
+        return ScratchPaths.path("overdrive_park_reaper.ack.");
+    }
+    private static String parkReaperDonePrefix() {
+        return ScratchPaths.path("overdrive_park_reaper.done.");
+    }
 
     /** Process-local app context. Returns null before main() initialises it. */
     public static Context getAppContext() { return appContext; }
@@ -1423,21 +1437,27 @@ public class AccSentryDaemon {
         }
     }
     
-    // Lock file for singleton enforcement
-    private static final String LOCK_FILE = "/data/local/tmp/acc_sentry_daemon.lock";
+    // Lock file for singleton enforcement (legacy tmp when writable)
+    private static String lockFilePath() {
+        return com.overdrive.app.util.ScratchPaths.path("acc_sentry_daemon.lock");
+    }
     private static java.io.RandomAccessFile lockFileHandle;
     private static java.nio.channels.FileLock fileLock;
 
     public static void main(String[] args) {
+        com.overdrive.app.util.ScratchPaths.syncFromEnv();
+        com.overdrive.app.util.ScratchPaths.ensureDir();
+
         int myUid = android.os.Process.myUid();
 
         // Configure DaemonLogger for daemon context (enable stdout for app_process)
         DaemonLogger.configure(DaemonLogger.Config.defaults()
+            .withLogDir(com.overdrive.app.util.ScratchPaths.getDir())
             .withStdoutLog(true)
             .withFileLog(true)
             .withConsoleLog(true));
 
-        logger = DaemonLogger.getInstance(TAG, PATH_DATA_LOCAL_TMP());
+        logger = DaemonLogger.getInstance(TAG, com.overdrive.app.util.ScratchPaths.getDir());
         
         // CRITICAL: Acquire singleton lock FIRST - exit if another instance is running
         if (!acquireSingletonLock()) {
@@ -1675,7 +1695,7 @@ public class AccSentryDaemon {
      */
     private static boolean acquireSingletonLock() {
         try {
-            java.io.File lockFileObj = new java.io.File(LOCK_FILE);
+            java.io.File lockFileObj = new java.io.File(lockFilePath());
             lockFileHandle = new java.io.RandomAccessFile(lockFileObj, "rw");
             java.nio.channels.FileChannel channel = lockFileHandle.getChannel();
             
@@ -1722,7 +1742,7 @@ public class AccSentryDaemon {
                 lockFileHandle.close();
                 lockFileHandle = null;
             }
-            new java.io.File(LOCK_FILE).delete();
+            new java.io.File(lockFilePath()).delete();
         } catch (Exception e) {
             log("Error releasing singleton lock: " + e.getMessage());
         }
@@ -6629,8 +6649,9 @@ public class AccSentryDaemon {
      * A missing/unparseable lease → false, so legacy fleets (that write neither)
      * keep the existing power-save behaviour bit-exact.
      */
-    private static final String CAMERA_ACTIVE_LEASE_PATH =
-        "/data/local/tmp/camera_active_lease";
+    private static String cameraActiveLeasePath() {
+        return com.overdrive.app.util.ScratchPaths.path("camera_active_lease");
+    }
 
     // Upper bound on how far ahead of "now" a lease deadline may legitimately be.
     // CameraDaemon only ever writes now + 8s, so any live lease is <=8s out; we
@@ -6656,7 +6677,7 @@ public class AccSentryDaemon {
         long now = System.currentTimeMillis();
         // Primary: the dedicated sidecar file (cheap, lock-free, no config parse).
         try {
-            java.io.File f = new java.io.File(CAMERA_ACTIVE_LEASE_PATH);
+            java.io.File f = new java.io.File(cameraActiveLeasePath());
             if (f.exists()) {
                 byte[] raw = java.nio.file.Files.readAllBytes(f.toPath());
                 long deadline = Long.parseLong(new String(raw, java.nio.charset.StandardCharsets.US_ASCII).trim());
@@ -8323,7 +8344,7 @@ public class AccSentryDaemon {
         ShellResult result = runTelegramShell(
                 generation,
                 enabled,
-                "SELF=$$; T=/data/local/tmp/telegram_probe.$$; "
+                "SELF=$$; T=" + ScratchPaths.path("telegram_probe.") + "$$; "
                 + "trap 'rm -f \"$T\" 2>/dev/null' 0 HUP INT TERM; "
                 + "ps -A -o PID,ARGS > \"$T\" 2>/dev/null || exit 41; "
                 + "D=$(awk -v self=\"$SELF\" "
@@ -8331,7 +8352,7 @@ public class AccSentryDaemon {
                 + "|| index($0,\"--nice-name=telegram_bot_daemon\") > 0) "
                 + "{print 1; exit}' \"$T\") || exit 42; "
                 + "W=$(awk -v self=\"$SELF\" "
-                + "'$1 != self && index($0,\"/data/local/tmp/start_telegram.sh\") > 0 "
+                + "'$1 != self && index($0,\"" + ScratchPaths.path("start_telegram.sh") + "\") > 0 "
                 + "{print 1; exit}' \"$T\") || exit 43; "
                 + "printf 'daemon=%s watchdog=%s\\n' \"${D:-0}\" \"${W:-0}\" "
                 + "|| exit 44");
@@ -8435,7 +8456,7 @@ public class AccSentryDaemon {
         //
         // A missing file falls through to auto-start; an unreadable one retries.
         java.io.File telegramSentinel =
-            new java.io.File("/data/local/tmp/telegram_bot_daemon.disabled");
+            new java.io.File(ScratchPaths.path("telegram_bot_daemon.disabled"));
         if (telegramSentinel.exists()) {
             String reason = readSentinelReason(telegramSentinel);
             if (reason == null) {
@@ -8525,7 +8546,7 @@ public class AccSentryDaemon {
                     ShellResult logResult = runTelegramShell(
                             transitionGeneration,
                             true,
-                            "tail -20 /data/local/tmp/telegrambotdaemon.log "
+                            "tail -20 " + ScratchPaths.path("telegrambotdaemon.log") + " "
                                     + "2>/dev/null || true");
                     if (logResult.success
                             && !logResult.output.isEmpty()) {
@@ -8620,7 +8641,7 @@ public class AccSentryDaemon {
         ShellResult shellResult = runTelegramShell(
                 transitionGeneration,
                 true,
-                "rm -f /data/local/tmp/telegram_bot_daemon.disabled "
+                "rm -f " + ScratchPaths.path("telegram_bot_daemon.disabled") + " "
                         + "2>/dev/null");
         if (!shellResult.success) {
             return shellResult.canceled;
@@ -8673,7 +8694,7 @@ public class AccSentryDaemon {
         shellResult = runTelegramShell(
                 transitionGeneration,
                 true,
-                "rm -f /data/local/tmp/telegram_bot_daemon.lock 2>/dev/null");
+                "rm -f " + ScratchPaths.path("telegram_bot_daemon.lock") + " 2>/dev/null");
         if (!shellResult.success) {
             return shellResult.canceled;
         }
@@ -8688,7 +8709,7 @@ public class AccSentryDaemon {
         // next ACC cycle or the next 30s in-process health-check tick
         // (only fires when MainActivity is alive). The watchdog respawns
         // on any non-zero exit, sentinel-gated for legitimate stops.
-        String scriptPath = "/data/local/tmp/start_telegram.sh";
+        String scriptPath = ScratchPaths.path("start_telegram.sh");
         try {
             // proxyArgs="" because AccSentry-launched daemon doesn't have
             // visibility into Android global HTTP proxy from this context.
@@ -8814,13 +8835,13 @@ public class AccSentryDaemon {
         ShellResult shellResult = runTelegramShell(
             transitionGeneration,
             false,
-            "S=/data/local/tmp/telegram_bot_daemon.disabled; T=\"$S.tmp.$$\"; "
+            "S=" + ScratchPaths.path("telegram_bot_daemon.disabled") + "; T=\"$S.tmp.$$\"; "
             + "R=$(head -1 \"$S\" 2>/dev/null); "
             + "case \"$R\" in "
             + "'disabled by ui'*|'disabled by telegram'*|'disabled by user'*) :;; "
             + "*) printf 'disabled by ACC-on at %s\\n' \"$(date)\" > \"$T\" "
             + "&& chmod 666 \"$T\" && mv -f \"$T\" \"$S\";; esac; "
-            + "rm -f /data/local/tmp/start_telegram.sh"
+            + "rm -f " + ScratchPaths.path("start_telegram.sh")
         );
         if (!shellResult.success) {
             return shellResult.canceled;
@@ -8863,7 +8884,7 @@ public class AccSentryDaemon {
         shellResult = runTelegramShell(
                 transitionGeneration,
                 false,
-                "rm -f /data/local/tmp/telegram_bot_daemon.lock 2>/dev/null");
+                "rm -f " + ScratchPaths.path("telegram_bot_daemon.lock") + " 2>/dev/null");
         if (!shellResult.success) {
             return shellResult.canceled;
         }
@@ -9298,16 +9319,16 @@ public class AccSentryDaemon {
             String stateToken = parkReaperStateToken(latest);
             if (active) {
                 boolean stateWritten = writeParkReaperToken(
-                        PARK_REAPER_STATE_PATH, stateToken);
+                        parkReaperStatePath(), stateToken);
                 return stateWritten && writeParkReaperToken(
-                        PARK_REAPER_CONTROL_PATH,
+                        parkReaperControlPath(),
                         parkReaperArmToken(stateToken));
             }
             boolean canceled = writeParkReaperToken(
-                    PARK_REAPER_CONTROL_PATH,
+                    parkReaperControlPath(),
                     parkReaperCancelToken(stateToken));
             boolean stateWritten = writeParkReaperToken(
-                    PARK_REAPER_STATE_PATH, stateToken);
+                    parkReaperStatePath(), stateToken);
             return canceled && stateWritten;
         } finally {
             lease.close();
@@ -9398,13 +9419,13 @@ public class AccSentryDaemon {
             closed = true;
             try {
                 java.io.File owner =
-                        new java.io.File(PARK_REAPER_LEASE_OWNER_PATH);
+                        new java.io.File(parkReaperLeaseOwnerPath());
                 String current = readSmallAsciiFile(owner);
                 if (!ownerToken.equals(current)) {
                     return;
                 }
                 owner.delete();
-                new java.io.File(PARK_REAPER_LEASE_PATH).delete();
+                new java.io.File(parkReaperLeasePath()).delete();
             } catch (Throwable ignored) {}
         }
     }
@@ -9417,12 +9438,12 @@ public class AccSentryDaemon {
                 + "|" + BOOT_IDENTITY
                 + "|" + PROCESS_INSTANCE_NONCE
                 + "|" + System.nanoTime();
-        java.io.File leaseDir = new java.io.File(PARK_REAPER_LEASE_PATH);
+        java.io.File leaseDir = new java.io.File(parkReaperLeasePath());
         while (android.os.SystemClock.elapsedRealtime() < deadline) {
             try {
                 java.nio.file.Files.createDirectory(leaseDir.toPath());
                 if (!writeParkReaperToken(
-                        PARK_REAPER_LEASE_OWNER_PATH, ownerToken)) {
+                        parkReaperLeaseOwnerPath(), ownerToken)) {
                     leaseDir.delete();
                     return null;
                 }
@@ -9448,9 +9469,9 @@ public class AccSentryDaemon {
     private static void reclaimDeadParkReaperLease() {
         try {
             java.io.File leaseDir =
-                    new java.io.File(PARK_REAPER_LEASE_PATH);
+                    new java.io.File(parkReaperLeasePath());
             java.io.File ownerFile =
-                    new java.io.File(PARK_REAPER_LEASE_OWNER_PATH);
+                    new java.io.File(parkReaperLeaseOwnerPath());
             String owner = readSmallAsciiFile(ownerFile);
             long leaseAgeMs = Math.max(
                     0L, System.currentTimeMillis()
@@ -9538,9 +9559,9 @@ public class AccSentryDaemon {
     }
 
     private static boolean hasLiveParkReaperExecution() {
-        java.io.File runDir = new java.io.File(PARK_REAPER_RUN_PATH);
+        java.io.File runDir = new java.io.File(parkReaperRunPath());
         java.io.File ownerFile =
-                new java.io.File(PARK_REAPER_RUN_OWNER_PATH);
+                new java.io.File(parkReaperRunOwnerPath());
         String owner = readSmallAsciiFile(ownerFile);
         if (owner != null && !owner.isEmpty()) {
             String[] parts = owner.split("\\|", -1);
@@ -9606,7 +9627,7 @@ public class AccSentryDaemon {
 
     private static boolean terminateIdentityOwnedParkReaper() {
         java.io.File ownerFile =
-                new java.io.File(PARK_REAPER_RUN_OWNER_PATH);
+                new java.io.File(parkReaperRunOwnerPath());
         String owner = readSmallAsciiFile(ownerFile);
         if (owner == null || owner.isEmpty()) {
             ProcessIdentity pending =
@@ -9615,7 +9636,7 @@ public class AccSentryDaemon {
                 return terminatePendingParkReaper(pending);
             }
             return !new java.io.File(
-                    PARK_REAPER_RUN_PATH).exists();
+                    parkReaperRunPath()).exists();
         }
         String[] parts = owner.split("\\|", -1);
         if (parts.length < 6 || !"v1".equals(parts[0])) {
@@ -9673,7 +9694,7 @@ public class AccSentryDaemon {
                 if (owner.equals(readSmallAsciiFile(ownerFile))) {
                     ownerFile.delete();
                     new java.io.File(
-                            PARK_REAPER_RUN_PATH).delete();
+                            parkReaperRunPath()).delete();
                 }
                 return true;
             }
@@ -9700,7 +9721,7 @@ public class AccSentryDaemon {
 
     private static ProcessIdentity
             findIdentityOwnedParkReaperProcess() {
-        String commandMarker = PARK_REAPER_PATH + "."
+        String commandMarker = parkReaperPath() + "."
                 + PROCESS_INSTANCE_NONCE + ".";
         java.io.File[] processes =
                 new java.io.File("/proc").listFiles();
@@ -9742,7 +9763,7 @@ public class AccSentryDaemon {
 
     private static boolean terminatePendingParkReaper(
             ProcessIdentity identity) {
-        String commandMarker = PARK_REAPER_PATH + "."
+        String commandMarker = parkReaperPath() + "."
                 + PROCESS_INSTANCE_NONCE + ".";
         if (!identity.start.equals(
                     readProcessStartIdentity(identity.pid))) {
@@ -9788,19 +9809,19 @@ public class AccSentryDaemon {
             return false;
         }
 
-        final String marker = com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH;
+        final String marker = com.overdrive.app.ui.model.ParkedShutdown.markerPath();
         final String expectedState =
                 parkReaperStateToken(latestSentryTransition);
         final String expectedControl = parkReaperArmToken(expectedState);
         if (!expectedState.equals(readSmallAsciiFile(
-                        new java.io.File(PARK_REAPER_STATE_PATH)))
+                        new java.io.File(parkReaperStatePath())))
                 || !expectedControl.equals(readSmallAsciiFile(
-                        new java.io.File(PARK_REAPER_CONTROL_PATH)))) {
+                        new java.io.File(parkReaperControlPath())))) {
             return false;
         }
-        final String ackPath = PARK_REAPER_ACK_PREFIX
+        final String ackPath = parkReaperAckPrefix()
                 + PROCESS_INSTANCE_NONCE + "." + transitionGeneration;
-        final String donePath = PARK_REAPER_DONE_PREFIX
+        final String donePath = parkReaperDonePrefix()
                 + PROCESS_INSTANCE_NONCE + "." + transitionGeneration;
         if (expectedState.equals(readSmallAsciiFile(
                         new java.io.File(donePath)))
@@ -9813,7 +9834,7 @@ public class AccSentryDaemon {
             deleteFileIfPresent(ackPath);
             deleteFileIfPresent(donePath);
         }
-        final String reaperPath = PARK_REAPER_PATH + "."
+        final String reaperPath = parkReaperPath() + "."
                 + PROCESS_INSTANCE_NONCE + "." + transitionGeneration + "."
                 + Long.toUnsignedString(System.nanoTime(), 36);
 
@@ -9822,15 +9843,15 @@ public class AccSentryDaemon {
         sb.append("EXPECTED_STATE='").append(expectedState).append("'\n");
         sb.append("EXPECTED_CONTROL='").append(expectedControl).append("'\n");
         sb.append("BOOT_ID='").append(BOOT_IDENTITY).append("'\n");
-        sb.append("STATE_PATH='").append(PARK_REAPER_STATE_PATH).append("'\n");
-        sb.append("CONTROL_PATH='").append(PARK_REAPER_CONTROL_PATH).append("'\n");
+        sb.append("STATE_PATH='").append(parkReaperStatePath()).append("'\n");
+        sb.append("CONTROL_PATH='").append(parkReaperControlPath()).append("'\n");
         sb.append("ACK_PATH='").append(ackPath).append("'\n");
         sb.append("DONE_PATH='").append(donePath).append("'\n");
         sb.append("MARKER_PATH='").append(marker).append("'\n");
         sb.append("MARKER_VALUE='").append(System.currentTimeMillis()).append("'\n");
-        sb.append("LEASE_PATH='").append(PARK_REAPER_LEASE_PATH).append("'\n");
+        sb.append("LEASE_PATH='").append(parkReaperLeasePath()).append("'\n");
         sb.append("LEASE_OWNER=\"$LEASE_PATH/owner\"\n");
-        sb.append("RUN_PATH='").append(PARK_REAPER_RUN_PATH).append("'\n");
+        sb.append("RUN_PATH='").append(parkReaperRunPath()).append("'\n");
         sb.append("RUN_OWNER=\"$RUN_PATH/owner\"\n");
         sb.append("SELF='").append(reaperPath).append("'\n");
         sb.append("WORK_PREFIX=\"$SELF.work\"\n");
@@ -10064,9 +10085,10 @@ public class AccSentryDaemon {
         sb.append("owned_begin || stale_exit\n");
         // Also drop the previous park-END breadcrumb: a new park has begun, and the
         // app must not mistake the old stamp for this park's end.
-        sb.append("run_bounded 20 rm -f /data/local/tmp/camera_daemon.lock ")
-          .append("/data/local/tmp/telegram_bot_daemon.lock ")
-          .append(com.overdrive.app.ui.model.ParkedShutdown.ENDED_PATH)
+        sb.append("run_bounded 20 rm -f ")
+          .append(ScratchPaths.path("camera_daemon.lock")).append(" ")
+          .append(ScratchPaths.path("telegram_bot_daemon.lock")).append(" ")
+          .append(com.overdrive.app.ui.model.ParkedShutdown.endedPath())
           .append(" || true\n");
         sb.append("owns_state || { release_lease; stale_exit; }\n");
         sb.append("atomic_write \"$DONE_PATH\" \"$EXPECTED_STATE\" || { release_lease; failed_exit; }\n");
@@ -10206,9 +10228,9 @@ public class AccSentryDaemon {
                 return true;
             }
             if (!expectedState.equals(readSmallAsciiFile(
-                            new java.io.File(PARK_REAPER_STATE_PATH)))
+                            new java.io.File(parkReaperStatePath())))
                     || !expectedControl.equals(readSmallAsciiFile(
-                            new java.io.File(PARK_REAPER_CONTROL_PATH)))) {
+                            new java.io.File(parkReaperControlPath())))) {
                 return false;
             }
             return writeParkReaperToken(
@@ -10242,13 +10264,13 @@ public class AccSentryDaemon {
                 return true;
             }
             if (!stateToken.equals(readSmallAsciiFile(
-                            new java.io.File(PARK_REAPER_STATE_PATH)))
+                            new java.io.File(parkReaperStatePath())))
                     || !cancelToken.equals(readSmallAsciiFile(
-                            new java.io.File(PARK_REAPER_CONTROL_PATH)))) {
+                            new java.io.File(parkReaperControlPath())))) {
                 return false;
             }
             java.io.File markerFile = new java.io.File(
-                    com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH);
+                    com.overdrive.app.ui.model.ParkedShutdown.markerPath());
             boolean markerExisted = markerFile.isFile();
             boolean markerDeleted = deleteFileIfPresent(markerFile.getPath());
             log("Canceled detached parked reaper for generation "

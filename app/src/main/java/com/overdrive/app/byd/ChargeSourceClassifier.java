@@ -1,4 +1,5 @@
 package com.overdrive.app.byd;
+import com.overdrive.app.util.ScratchPaths;
 
 import android.content.Context;
 
@@ -169,7 +170,7 @@ public final class ChargeSourceClassifier {
     public static synchronized void initializePersistence(Context context) {
         if (context == null) return;
         File next = android.os.Process.myUid() == 2000
-                ? new File("/data/local/tmp/od_charge_source_kinds.json")
+                ? new File(ScratchPaths.path("od_charge_source_kinds.json"))
                 : new File(context.getFilesDir(), "od_charge_source_kinds.json");
         if (next.equals(stateFile)) return;
         stateFile = next;

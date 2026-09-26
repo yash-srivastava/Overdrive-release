@@ -30,9 +30,9 @@ object ProxyConfiguration {
     val PROXY_EXCLUSIONS: String get() = Enc.PROXY_EXCLUSIONS
     
     // Paths - use encrypted constants
-    val CONFIG_PATH: String get() = Enc.SINGBOX_CONFIG
-    val LOG_PATH: String get() = Enc.SINGBOX_LOG
-    val SINGBOX_PATH: String get() = Enc.SINGBOX_BIN
+    val CONFIG_PATH: String get() = Enc.SINGBOX_CONFIG()
+    val LOG_PATH: String get() = Enc.SINGBOX_LOG()
+    val SINGBOX_PATH: String get() = Enc.SINGBOX_BIN()
     
     /**
      * Default inbound bind address. Loopback keeps the proxy unreachable from

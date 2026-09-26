@@ -168,7 +168,7 @@ class DaemonKeepaliveService : Service() {
         // ever written by the onOnly park paths, and switching the mode to onAndOff
         // clears it daemon-side (SurveillanceApiHandler → CameraDaemon).
         try {
-            if (java.io.File(com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH).exists() &&
+            if (java.io.File(com.overdrive.app.ui.model.ParkedShutdown.markerPath()).exists() &&
                 !DaemonStartupManager.recoveryInProgress) {
                 // Marker present AND we're not in the middle of an ACC-on recovery → this
                 // is a START_STICKY respawn while genuinely parked; don't rebuild. The

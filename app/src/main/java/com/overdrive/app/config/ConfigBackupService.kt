@@ -1,4 +1,5 @@
 package com.overdrive.app.config
+import com.overdrive.app.util.ScratchPaths
 
 import android.system.ErrnoException
 import android.system.Os
@@ -49,12 +50,13 @@ object ConfigBackupService {
     // with a HIGHER schemaVersion than this is refused (forward-incompatible).
     const val SCHEMA_VERSION = 1
 
-    // CredentialCipher.DID_PATH — duplicated as a literal rather than exposing
+    // CredentialCipher.didPath() — duplicated as a literal rather than exposing
     // it, to keep this class free of a crypto dependency. Must match
     // CredentialCipher.java:29.
-    private const val DID_PATH = "/data/local/tmp/.byd_device_id"
-    private const val RESTORE_JOURNAL_PATH =
-        "/data/local/tmp/.overdrive_config_restore_txn.json"
+    private val didPath: String
+        get() = ScratchPaths.path(".byd_device_id")
+    private val RESTORE_JOURNAL_PATH: String
+        get() = ScratchPaths.path(".overdrive_config_restore_txn.json")
     private const val RESTORE_JOURNAL_VERSION = 1
     private val didTempSequence = AtomicLong(0)
     private val restoreJournalTempSequence = AtomicLong(0)
@@ -889,7 +891,7 @@ object ConfigBackupService {
     }
 
     private fun readDidSnapshotStrict(): DidSnapshot {
-        val f = File(DID_PATH)
+        val f = File(didPath)
         if (!f.exists()) return DidSnapshot(existed = false, bytes = ByteArray(0))
         if (!f.isFile) throw IOException("DID path is not a regular file")
         return try {
@@ -913,7 +915,7 @@ object ConfigBackupService {
             if (snapshot.existed) {
                 writeDidBytesAtomic(snapshot.bytes)
             } else {
-                val file = File(DID_PATH)
+                val file = File(didPath)
                 if (file.exists() && !file.delete()) {
                     throw IOException("Could not remove newly-created DID")
                 }
@@ -929,7 +931,7 @@ object ConfigBackupService {
     }
 
     private fun writeDidBytesAtomic(bytes: ByteArray) {
-        val f = File(DID_PATH)
+        val f = File(didPath)
         writeAtomicFile(
             f,
             bytes,

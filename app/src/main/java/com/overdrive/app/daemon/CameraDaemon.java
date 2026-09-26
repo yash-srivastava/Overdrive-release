@@ -41,14 +41,20 @@ public class CameraDaemon {
     // Decrypted at runtime via Safe.s() - AES-256-CBC with stack-based key reconstruction
     /** com.overdrive.app */
     private static String APP_PACKAGE_NAME() { return Safe.s("3Is1Ze/xWL6dkFvd9bF+deUGK/HqnInkSi6jinpc6s8="); }
-    /** /data/local/tmp/cam_stream */
-    private static String PATH_CAMERA_STREAM_DIR() { return Safe.s("ZHx6IP38aGV/Q7iMCCcxzxuq9ag7mKGoQaOvzuwMDqM="); }
+    /** /data/local/tmp/cam_stream (remapped via ScratchPaths when not legacy) */
+    private static String PATH_CAMERA_STREAM_DIR() {
+        return com.overdrive.app.util.ScratchPaths.path("cam_stream");
+    }
     /** /sdcard/DCIM/BYDCam */
     private static String PATH_CAMERA_OUTPUT_DIR() { return Safe.s("C6E+8XkzSNnhdgOIKBfVSXGyuhqY7qDiNp4pBP/hRuY="); }
     /** /data/local/tmp/stream_mode.txt */
-    private static String PATH_STREAM_MODE_FILE() { return Safe.s("ZHx6IP38aGV/Q7iMCCcxz4A79W/sQd0NkqiGs/MIZWo="); }
+    private static String PATH_STREAM_MODE_FILE() {
+        return com.overdrive.app.util.ScratchPaths.path("stream_mode.txt");
+    }
     /** /data/local/tmp/.byd_device_id */
-    private static String PATH_DEVICE_ID_FILE() { return Safe.s("ZHx6IP38aGV/Q7iMCCcxz8mvs/gQENVv3FEZ6OVKD54="); }
+    private static String PATH_DEVICE_ID_FILE() {
+        return com.overdrive.app.util.ScratchPaths.path(".byd_device_id");
+    }
 
     // ==================== CONFIGURATION ====================
     public static final int TCP_PORT = 19876;
@@ -108,6 +114,11 @@ public class CameraDaemon {
     private static Handler mainHandler;
     private static String outputDir = null; // Initialized in main()
     private static String nativeLibDir = null; // Initialized in parseArguments()
+
+    /** APK native lib dir from argv[1] (…/lib/arm64). Used by FastCam binary resolve. */
+    public static String getNativeLibDir() {
+        return nativeLibDir;
+    }
 
     // ==================== LOGGING ====================
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
@@ -559,12 +570,19 @@ public class CameraDaemon {
     // BUMP THIS on every code change you intend to deploy + verify.
     private static final String BUILD_TAG = "20260922-di5-mcupowerhold-frozenfeed-1";
 
-    // Lock file for singleton enforcement
-    private static final String LOCK_FILE = "/data/local/tmp/camera_daemon.lock";
+    // Lock file for singleton enforcement (legacy tmp when writable)
+    private static String lockFilePath() {
+        return com.overdrive.app.util.ScratchPaths.path("camera_daemon.lock");
+    }
     private static java.io.RandomAccessFile lockFile;
     private static java.nio.channels.FileLock fileLock;
 
     public static void main(String[] args) {
+        // Inherit OVERDRIVE_SCRATCH from the watchdog (legacy tmp when writable,
+        // else app-files fallback). Must run before any lock/log/config paths.
+        com.overdrive.app.util.ScratchPaths.syncFromEnv();
+        com.overdrive.app.util.ScratchPaths.ensureDir();
+
         initFileLogging();
 
         // CRITICAL: Acquire singleton lock FIRST - exit if another instance is running
@@ -2326,9 +2344,9 @@ public class CameraDaemon {
     // no parse, and no cross-subsystem cache invalidation. The reader
     // (AccSentryDaemon.isCameraPipelineActive) is a different process at the same
     // UID 2000, so a plain file in /data/local/tmp is the right cross-process channel.
-    private static final String CAMERA_ACTIVE_LEASE_PATH =
-        "/data/local/tmp/camera_active_lease";
-
+    private static String cameraActiveLeasePath() {
+        return com.overdrive.app.util.ScratchPaths.path("camera_active_lease");
+    }
     private static void publishCameraActiveLease() {
         writeCameraActiveLease(System.currentTimeMillis() + CAMERA_ACTIVE_LEASE_MS);
     }
@@ -2349,11 +2367,11 @@ public class CameraDaemon {
             // peer daemon is via the page cache (fsync isn't needed for that). An
             // fsync every 4s on the car-ON path would be a real disk-flush cost on
             // exactly the path this change exists to make cheap, so it's omitted.
-            java.io.File tmp = new java.io.File(CAMERA_ACTIVE_LEASE_PATH + ".tmp");
+            java.io.File tmp = new java.io.File(cameraActiveLeasePath() + ".tmp");
             try (java.io.FileOutputStream fos = new java.io.FileOutputStream(tmp)) {
                 fos.write(payload);
             }
-            java.io.File dest = new java.io.File(CAMERA_ACTIVE_LEASE_PATH);
+            java.io.File dest = new java.io.File(cameraActiveLeasePath());
             if (!tmp.renameTo(dest)) {
                 // Rename can fail across some FUSE quirks — fall back to a direct
                 // overwrite (the value is a single token, torn read fails safe).
@@ -2573,8 +2591,9 @@ public class CameraDaemon {
      * The watchdog script checks for this file before each restart attempt.
      * To re-enable, delete this file and start the watchdog script again.
      */
-    private static final String DISABLE_SENTINEL = "/data/local/tmp/camera_daemon.disabled";
-
+    private static String disableSentinelPath() {
+        return com.overdrive.app.util.ScratchPaths.path("camera_daemon.disabled");
+    }
     public static void shutdown() {
         shutdownInternal(true);
     }
@@ -2759,7 +2778,7 @@ public class CameraDaemon {
     private static boolean parkedShutdownMarkerExists() {
         try {
             return new java.io.File(
-                com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH).exists();
+                com.overdrive.app.ui.model.ParkedShutdown.markerPath()).exists();
         } catch (Throwable ignored) {
             return true;
         }
@@ -2854,7 +2873,7 @@ public class CameraDaemon {
     }
 
     private static boolean writeParkedShutdownMarker(long generation) {
-        String path = com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH;
+        String path = com.overdrive.app.ui.model.ParkedShutdown.markerPath();
         java.io.File marker = new java.io.File(path);
         java.io.File parent = marker.getParentFile();
         java.io.File temporary = new java.io.File(
@@ -2923,7 +2942,7 @@ public class CameraDaemon {
             return false;
         }
         String path =
-            com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH;
+            com.overdrive.app.ui.model.ParkedShutdown.markerPath();
         try (java.io.BufferedReader reader = new java.io.BufferedReader(
                 new java.io.FileReader(path))) {
             String value = reader.readLine();
@@ -2979,7 +2998,7 @@ public class CameraDaemon {
     }
 
     private static boolean clearParkedShutdownMarker() {
-        String path = com.overdrive.app.ui.model.ParkedShutdown.MARKER_PATH;
+        String path = com.overdrive.app.ui.model.ParkedShutdown.markerPath();
         try {
             java.io.File marker = new java.io.File(path);
             java.io.File parent = marker.getParentFile();
@@ -3422,12 +3441,12 @@ public class CameraDaemon {
      */
     private static void writeDisableSentinel() {
         try {
-            java.io.FileWriter fw = new java.io.FileWriter(DISABLE_SENTINEL);
+            java.io.FileWriter fw = new java.io.FileWriter(disableSentinelPath());
             fw.write("disabled at " + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",
                 java.util.Locale.US).format(new java.util.Date()) + "\n");
             fw.write("pid=" + android.os.Process.myPid() + "\n");
             fw.close();
-            log("Disable sentinel written: " + DISABLE_SENTINEL);
+            log("Disable sentinel written: " + disableSentinelPath());
         } catch (Exception e) {
             log("WARNING: Failed to write disable sentinel: " + e.getMessage());
         }
@@ -3440,7 +3459,7 @@ public class CameraDaemon {
     private static void killWatchdogWrapper() {
         try {
             // Try PID file first
-            java.io.File pidFile = new java.io.File("/data/local/tmp/cam_watchdog.pid");
+            java.io.File pidFile = new java.io.File(com.overdrive.app.util.ScratchPaths.path("cam_watchdog.pid"));
             if (pidFile.exists()) {
                 String pid = new java.util.Scanner(pidFile).useDelimiter("\\A").next().trim();
                 Runtime.getRuntime().exec(new String[]{"kill", "-9", pid});
@@ -3450,12 +3469,14 @@ public class CameraDaemon {
             // Also pkill as fallback
             Runtime.getRuntime().exec(new String[]{"pkill", "-9", "-f", "start_cam_daemon"});
             // Delete the script so it can't be accidentally re-run
-            new java.io.File("/data/local/tmp/start_cam_daemon.sh").delete();
+            new java.io.File(
+                    com.overdrive.app.util.ScratchPaths.path("start_cam_daemon.sh")).delete();
             // SIGKILL bypasses the watchdog EXIT trap. Remove the exact
             // directory-lock contents so a later start is not blocked by
             // stale ownership.
             java.io.File watchdogLock =
-                new java.io.File("/data/local/tmp/cam_watchdog.lock");
+                new java.io.File(
+                        com.overdrive.app.util.ScratchPaths.path("cam_watchdog.lock"));
             new java.io.File(watchdogLock, "pid").delete();
             watchdogLock.delete();
         } catch (Exception e) {
@@ -3469,7 +3490,7 @@ public class CameraDaemon {
      * Also callable from Java to check state.
      */
     public static boolean isDisabledBySentinel() {
-        return new java.io.File(DISABLE_SENTINEL).exists();
+        return new java.io.File(disableSentinelPath()).exists();
     }
 
     /**
@@ -3478,7 +3499,7 @@ public class CameraDaemon {
      */
     private static boolean acquireSingletonLock() {
         try {
-            File lockFileObj = new File(LOCK_FILE);
+            File lockFileObj = new File(lockFilePath());
             lockFile = new java.io.RandomAccessFile(lockFileObj, "rw");
             java.nio.channels.FileChannel channel = lockFile.getChannel();
 
@@ -4013,7 +4034,7 @@ public class CameraDaemon {
                 lockFile = null;
             }
             // Delete lock file
-            new File(LOCK_FILE).delete();
+            new File(lockFilePath()).delete();
             log("Released singleton lock");
         } catch (Exception e) {
             log("Error releasing singleton lock: " + e.getMessage());
@@ -4102,7 +4123,7 @@ public class CameraDaemon {
         // PHEV and the migration has not already completed.
         try {
             java.io.File marker = new java.io.File(
-                    "/data/local/tmp/overdrive_bucket_migration_done");
+                    com.overdrive.app.util.ScratchPaths.path("overdrive_bucket_migration_done"));
             if (sohEstimatorSnapshot == null
                     || sohEstimatorSnapshot.getNominalCapacityKwh() <= 0
                     || sohEstimatorSnapshot.getNominalCapacityKwh() >= 30.0
@@ -9909,7 +9930,12 @@ public class CameraDaemon {
     }
 
     private static void loadSurveillanceFromPath(String nativeLibDir) {
-        // Load surveillance library
+        // Same dependency order as NativeMotion / DiLink5QCarCamBackend.
+        tryLoadNativeFile(nativeLibDir + "/libc++_shared.so");
+        tryLoadNativeFile(nativeLibDir + "/libfast_cam_client.so");
+        tryLoadNativeFile(nativeLibDir.replace("/arm64", "/arm64-v8a") + "/libc++_shared.so");
+        tryLoadNativeFile(nativeLibDir.replace("/arm64", "/arm64-v8a") + "/libfast_cam_client.so");
+
         String[] surveillancePaths = {
             nativeLibDir + "/libsurveillance.so",
             nativeLibDir.replace("/arm64", "/arm64-v8a") + "/libsurveillance.so",
@@ -9926,6 +9952,18 @@ public class CameraDaemon {
                     log("ERROR: FAILED to load " + libPath + ": " + e.getMessage());
                 }
             }
+        }
+    }
+
+    private static void tryLoadNativeFile(String libPath) {
+        if (libPath == null) return;
+        File f = new File(libPath);
+        if (!f.exists()) return;
+        try {
+            System.load(libPath);
+            log("Loaded native dep: " + libPath);
+        } catch (Throwable t) {
+            log("WARN: optional native dep " + libPath + ": " + t.getMessage());
         }
     }
 
@@ -9992,7 +10030,8 @@ public class CameraDaemon {
      *         second camera stack in that state
      */
     private static boolean runImageReaderProbeIfRequested() {
-        File sentinel = new File("/data/local/tmp/run_imagereader_probe");
+        File sentinel = new File(
+                com.overdrive.app.util.ScratchPaths.path("run_imagereader_probe"));
         if (!sentinel.exists()) return true;
 
         // Consume before touching AVMCamera. If the process dies or the HAL
@@ -10008,7 +10047,8 @@ public class CameraDaemon {
         }
 
         log("=== ImageReader probe sentinel consumed — running bounded probe ===");
-        File probeDir = new File("/data/local/tmp/imagereader_probe");
+        File probeDir = new File(
+                com.overdrive.app.util.ScratchPaths.path("imagereader_probe"));
         Thread worker = new Thread(
             () -> new com.overdrive.app.camera.AvmImageReaderFpsProbe(
                 probeDir).run(),
@@ -10057,6 +10097,7 @@ public class CameraDaemon {
     private static void initFileLogging() {
         // Configure DaemonLogger for daemon context (enable stdout for app_process)
         DaemonLogger.Config cfg = DaemonLogger.Config.defaults()
+            .withLogDir(com.overdrive.app.util.ScratchPaths.getDir())
             .withStdoutLog(true)  // Enable stdout for daemon processes
             .withFileLog(true)
             .withConsoleLog(true);
@@ -10122,7 +10163,7 @@ public class CameraDaemon {
             return;
         }
 
-        java.io.File pushDir = new java.io.File("/data/local/tmp/.push");
+        java.io.File pushDir = new java.io.File(com.overdrive.app.util.ScratchPaths.path(".push"));
         if (!pushDir.exists()) pushDir.mkdirs();
 
         com.overdrive.app.notifications.push.VapidKeyStore keyStore =

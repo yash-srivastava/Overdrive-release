@@ -76,9 +76,9 @@ public class ZrokLauncherReliabilityContractTest {
                 "app/src/main/java/com/overdrive/app/ui/daemon/DaemonStartupManager.kt");
 
         assertTrue(launcher.contains(
-                "[ -f /data/local/tmp/zrok.disabled ] || "));
+                "ScratchPaths.path(\"zrok.disabled\")"));
         assertTrue(updater.contains(
-                "[ -f /data/local/tmp/zrok.disabled ] || "));
+                "ScratchPaths.path(\"zrok.disabled\")"));
         assertTrue(startup.contains(
                 "type == DaemonType.ZROK_TUNNEL"));
         assertTrue(startup.contains(
@@ -128,14 +128,15 @@ public class ZrokLauncherReliabilityContractTest {
 
         assertTrue(adb.contains("fun execute(command: String, callback: ShellCallback)"));
         assertTrue(adb.contains("fun executeSensitive("));
-        // The raw command must reach dadb unchanged (shellGuarded runs it on
-        // the generation-tagged connection); logs see only $commandForLog.
-        assertTrue(adb.contains("conn.dadb.shell(command)"));
+        // shellGuarded runs the remapped command on the generation-tagged
+        // connection; logs still see only the redacted $commandForLog.
+        assertTrue(adb.contains(
+                "conn.dadb.shell(ScratchPaths.prepareShellCommand(command))"));
         assertTrue(adb.contains("$commandForLog"));
 
         assertTrue(telegram.contains("ZrokRuntimeProbe.shellQuote(enableToken)"));
         assertTrue(telegram.contains("ZrokRuntimeProbe.extractErrorMessage(enableResult)"));
-        assertTrue(telegram.contains("environment.json && echo yes || echo no"));
+        assertTrue(telegram.contains("ScratchPaths.path(\".zrok/environment.json\")"));
         assertFalse(telegram.contains("Using reserved token:"));
         assertFalse(telegram.contains("Enable result:"));
     }

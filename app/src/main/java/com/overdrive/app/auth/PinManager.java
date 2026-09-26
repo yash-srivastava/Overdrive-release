@@ -1,4 +1,5 @@
 package com.overdrive.app.auth;
+import com.overdrive.app.util.ScratchPaths;
 
 import android.util.Base64;
 
@@ -54,7 +55,9 @@ public class PinManager {
     private static final String KEY_FAILED_ATTEMPTS = "failedAttempts";
     private static final String KEY_LOCKOUT_UNTIL = "lockoutUntilMs";
 
-    private static final String RESET_FLAG_FILE = "/data/local/tmp/.overdrive_pin_reset";
+    private static String resetFlagFile() {
+        return ScratchPaths.path(".overdrive_pin_reset");
+    }
     private static final String KEY_LAST_RECOVERY_APPLIED = "lastRecoveryAppliedMs";
 
     private static final int DEFAULT_ITERATIONS = 120_000;
@@ -377,7 +380,7 @@ public class PinManager {
      */
     private static void maybeApplyRecoveryFlag() {
         try {
-            File flag = new File(RESET_FLAG_FILE);
+            File flag = new File(resetFlagFile());
             if (!flag.exists()) return;
             long flagMtime = flag.lastModified();
             if (flagMtime <= 0L) {
@@ -408,7 +411,7 @@ public class PinManager {
             // here to keep the symmetry.
             volatileFailedAttempts = 0;
             volatileLockoutUntilMs = 0L;
-            log("PIN reset via recovery flag at " + RESET_FLAG_FILE + " (mtime=" + flagMtime + ")");
+            log("PIN reset via recovery flag at " + resetFlagFile() + " (mtime=" + flagMtime + ")");
         } catch (Exception e) {
             log("recovery flag handling failed: " + e.getMessage());
         }

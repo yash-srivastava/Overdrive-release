@@ -1,4 +1,5 @@
 package com.overdrive.app.ui.fragment
+import com.overdrive.app.util.ScratchPaths
 
 import android.content.Context
 import android.net.ConnectivityManager
@@ -72,7 +73,8 @@ class DiagnosticsFragment : Fragment() {
     // rewrites this file on reset → seedInitialEstimate, which the
     // observer surfaces as CLOSE_WRITE / DELETE / MOVED_TO events.
     private var sohFileObserver: android.os.FileObserver? = null
-    private val sohFilePath = "/data/local/tmp/abrp_soh_estimate.properties"
+    private val sohFilePath: String
+        get() = ScratchPaths.path("abrp_soh_estimate.properties")
 
     override fun onCreateView(
         inflater: LayoutInflater,

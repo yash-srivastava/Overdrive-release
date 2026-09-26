@@ -1,6 +1,7 @@
 package com.overdrive.app.camera.dilink5;
 
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.util.ScratchPaths;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -39,18 +40,17 @@ final class DiLink5CameraSafety {
     static final int SYSTEM_STABILITY_REQUIRED_SAMPLES = 3;
     private static final long COMMAND_TIMEOUT_MS = 750L;
 
-    private static final String SESSION_MARKER_PATH =
-            "/data/local/tmp/overdrive_dilink5_camera_session";
-    private static final String BLOCK_MARKER_PATH =
-            "/data/local/tmp/overdrive_dilink5_camera_blocked";
-    private static final String RELEASE_MARKER_PATH =
-            "/data/local/tmp/overdrive_dilink5_camera_release";
-    private static final File SESSION_MARKER =
-            new File(SESSION_MARKER_PATH);
-    private static final File BLOCK_MARKER =
-            new File(BLOCK_MARKER_PATH);
-    private static final File RELEASE_MARKER =
-            new File(RELEASE_MARKER_PATH);
+    private static File sessionMarker() {
+        return new File(ScratchPaths.path("overdrive_dilink5_camera_session"));
+    }
+
+    private static File blockMarker() {
+        return new File(ScratchPaths.path("overdrive_dilink5_camera_blocked"));
+    }
+
+    private static File releaseMarker() {
+        return new File(ScratchPaths.path("overdrive_dilink5_camera_release"));
+    }
     private static final String PROCESS_TOKEN =
             UUID.randomUUID().toString().replace("-", "");
 
@@ -114,7 +114,7 @@ final class DiLink5CameraSafety {
             leaseGeneration = 1L;
         }
         if (!writeMarker(
-                SESSION_MARKER,
+                sessionMarker(),
                 new Marker(
                         bootId,
                         PROCESS_TOKEN,
@@ -145,7 +145,7 @@ final class DiLink5CameraSafety {
         String bootId = currentBootId();
         if (bootId == null) return;
         if (!writeMarker(
-                SESSION_MARKER,
+                sessionMarker(),
                 new Marker(
                         bootId,
                         PROCESS_TOKEN,
@@ -175,7 +175,7 @@ final class DiLink5CameraSafety {
         }
         long now = android.os.SystemClock.elapsedRealtime();
         boolean releasePersisted = writeMarker(
-                RELEASE_MARKER,
+                releaseMarker(),
                 new Marker(
                         bootId,
                         PROCESS_TOKEN,
@@ -187,11 +187,12 @@ final class DiLink5CameraSafety {
                     "Unable to persist the QCarCam release fence");
             return false;
         }
-        Marker session = readMarker(SESSION_MARKER);
+        File sessionMarker = sessionMarker();
+        Marker session = readMarker(sessionMarker);
         if (session != null
                 && bootId.equals(session.bootId)
                 && PROCESS_TOKEN.equals(session.owner)) {
-            safeDelete(SESSION_MARKER);
+            safeDelete(sessionMarker);
         }
         acquisitionLeaseActive = false;
         activeAcquisitionLeaseGeneration = Long.MIN_VALUE;
@@ -220,7 +221,7 @@ final class DiLink5CameraSafety {
                 + UUID.randomUUID().toString()
                         .replace("-", "").substring(0, 8);
         if (!writeMarker(
-                RELEASE_MARKER,
+                releaseMarker(),
                 new Marker(
                         bootId,
                         owner,
@@ -256,9 +257,10 @@ final class DiLink5CameraSafety {
         // a misclassified intentional stop, and each wedged the camera until
         // the next vehicle boot (log_2MEH8B86, log_B26FJKKN, log_R6SPYGJ5).
         // A marker left behind by such a build is cleared, not honored.
-        if (BLOCK_MARKER.exists()) {
-            Marker blocked = readMarker(BLOCK_MARKER);
-            safeDelete(BLOCK_MARKER);
+        File blockMarker = blockMarker();
+        if (blockMarker.exists()) {
+            Marker blocked = readMarker(blockMarker);
+            safeDelete(blockMarker);
             logger.warn("Cleared a legacy boot-scoped camera block marker"
                     + (blocked != null
                             ? " (" + sanitize(blocked.reason) + ")"
@@ -266,15 +268,16 @@ final class DiLink5CameraSafety {
                     + "; camera admission continues.");
         }
 
-        Marker session = readMarker(SESSION_MARKER);
-        if (SESSION_MARKER.exists() && session == null) {
+        File sessionMarker = sessionMarker();
+        Marker session = readMarker(sessionMarker);
+        if (sessionMarker.exists() && session == null) {
             suppressForProcess(
                     "The QCarCam acquisition marker is unreadable");
             return false;
         }
         if (session != null) {
             if (!bootId.equals(session.bootId)) {
-                safeDelete(SESSION_MARKER);
+                safeDelete(sessionMarker);
             } else if (isForeignLiveSession(
                     bootId,
                     session.bootId,
@@ -297,20 +300,21 @@ final class DiLink5CameraSafety {
                         + " (state=" + sanitize(session.state)
                         + "); treating the stale lease as an unclean release"
                         + " and continuing after the reacquire cooldown.");
-                safeDelete(SESSION_MARKER);
+                safeDelete(sessionMarker);
                 recordForeignRelease(0);
                 if (processSuppressed) return false;
             }
         }
 
-        Marker release = readMarker(RELEASE_MARKER);
-        if (RELEASE_MARKER.exists() && release == null) {
+        File releaseMarker = releaseMarker();
+        Marker release = readMarker(releaseMarker);
+        if (releaseMarker.exists() && release == null) {
             suppressForProcess(
                     "The QCarCam release marker is unreadable");
             return false;
         }
         if (release != null && !bootId.equals(release.bootId)) {
-            safeDelete(RELEASE_MARKER);
+            safeDelete(releaseMarker);
         }
         return true;
     }
@@ -363,7 +367,7 @@ final class DiLink5CameraSafety {
     }
 
     private static synchronized long remainingReacquireCooldownMs(long now) {
-        Marker release = readMarker(RELEASE_MARKER);
+        Marker release = readMarker(releaseMarker());
         String bootId = currentBootId();
         if (release == null || bootId == null
                 || !bootId.equals(release.bootId)) {

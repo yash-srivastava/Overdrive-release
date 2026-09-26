@@ -1,4 +1,5 @@
 package com.overdrive.app.server;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.daemon.CameraDaemon;
 
@@ -430,7 +431,7 @@ public class TcpCommandServer {
                 String bitrate = "MEDIUM";
                 String codec = "H264";
                 try {
-                    java.io.File unifiedFile = new java.io.File("/data/local/tmp/overdrive_config.json");
+                    java.io.File unifiedFile = new java.io.File(ScratchPaths.path("overdrive_config.json"));
                     if (unifiedFile.exists()) {
                         java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader(unifiedFile));
                         StringBuilder sb = new StringBuilder();

@@ -1,4 +1,5 @@
 package com.overdrive.app.daemon.telegram;
+import com.overdrive.app.util.ScratchPaths;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -17,9 +18,12 @@ import java.util.Properties;
 public class DaemonCommandHandler implements TelegramCommandHandler {
     
     private static final String TAG = "DaemonCmd";
-    private static final String STATE_FILE = "/data/local/tmp/daemon_telegram_state.properties";
-    private static final String TAILSCALE_DASHBOARD_GUARD_SCRIPT =
-            "/data/local/tmp/.tailscale/secure_dashboard_serve.sh";
+    private static String stateFile() {
+        return ScratchPaths.path("daemon_telegram_state.properties");
+    }
+    private static String tailscaleDashboardGuardScript() {
+        return ScratchPaths.path(".tailscale/secure_dashboard_serve.sh");
+    }
     
     // Debounce duplicate commands
     private long lastCommandTime = 0;
@@ -194,14 +198,14 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
      */
     private static String sentinelForProcess(String processName) {
         switch (processName) {
-            case "byd_cam_daemon":     return "/data/local/tmp/camera_daemon.disabled";
-            case "sentry_daemon":      return "/data/local/tmp/sentry_daemon.disabled";
-            case "acc_sentry_daemon":  return "/data/local/tmp/acc_sentry_daemon.disabled";
-            case "sing-box":           return "/data/local/tmp/singbox.disabled";
-            case "cloudflared":        return "/data/local/tmp/cloudflared.disabled";
-            case "zrok":               return "/data/local/tmp/zrok.disabled";
-            case "tailscaled":         return "/data/local/tmp/tailscale.disabled";
-            case "telegram_bot_daemon": return "/data/local/tmp/telegram_bot_daemon.disabled";
+            case "byd_cam_daemon":     return ScratchPaths.path("camera_daemon.disabled");
+            case "sentry_daemon":      return ScratchPaths.path("sentry_daemon.disabled");
+            case "acc_sentry_daemon":  return ScratchPaths.path("acc_sentry_daemon.disabled");
+            case "sing-box":           return ScratchPaths.path("singbox.disabled");
+            case "cloudflared":        return ScratchPaths.path("cloudflared.disabled");
+            case "zrok":               return ScratchPaths.path("zrok.disabled");
+            case "tailscaled":         return ScratchPaths.path("tailscale.disabled");
+            case "telegram_bot_daemon": return ScratchPaths.path("telegram_bot_daemon.disabled");
             default:                   return null;
         }
     }
@@ -274,7 +278,8 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
     private boolean isZrokWatchdogRunning(CommandContext ctx) {
         String output = ctx.execShell(
                 "ps -A -o ARGS 2>/dev/null | "
-                        + "grep -F 'sh /data/local/tmp/start_zrok.sh' | grep -v grep | head -1");
+                        + "grep -F 'sh " + ScratchPaths.path("start_zrok.sh")
+                        + "' | grep -v grep | head -1");
         return output != null && output.contains("start_zrok.sh");
     }
 
@@ -342,13 +347,15 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 + "if [ \"$pid\" != \"$MY_PID\" ]; then kill -9 $pid 2>/dev/null; fi; done"
             );
             // Also kill via PID file
-            ctx.execShell("if [ -f /data/local/tmp/cam_watchdog.pid ]; then kill -9 $(cat /data/local/tmp/cam_watchdog.pid) 2>/dev/null; fi");
-            ctx.execShell("rm -f /data/local/tmp/start_cam_daemon.sh 2>/dev/null");
-            ctx.execShell("rm -f /data/local/tmp/cam_watchdog.pid 2>/dev/null");
+            ctx.execShell("if [ -f " + ScratchPaths.path("cam_watchdog.pid")
+                    + " ]; then kill -9 $(cat " + ScratchPaths.path("cam_watchdog.pid")
+                    + ") 2>/dev/null; fi");
+            ctx.execShell("rm -f " + ScratchPaths.path("start_cam_daemon.sh") + " 2>/dev/null");
+            ctx.execShell("rm -f " + ScratchPaths.path("cam_watchdog.pid") + " 2>/dev/null");
             // Wait for watchdog to fully die before killing daemon
             try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
-            ctx.execShell("rm -rf /data/local/tmp/cam_watchdog.lock 2>/dev/null");
-            ctx.execShell("rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null");
+            ctx.execShell("rm -f " + ScratchPaths.path("camera_daemon.lock") + " 2>/dev/null");
+            ctx.execShell("rm -rf " + ScratchPaths.path("cam_watchdog.lock") + " 2>/dev/null");
         }
 
         // For acc sentry daemon, also kill the watchdog script; the sentinel
@@ -361,9 +368,9 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 + "| grep -v grep | awk '{print $1}' | while read pid; do "
                 + "if [ \"$pid\" != \"$MY_PID\" ]; then kill -9 $pid 2>/dev/null; fi; done"
             );
-            ctx.execShell("rm -f /data/local/tmp/start_acc_sentry.sh 2>/dev/null");
-            ctx.execShell("rm -rf /data/local/tmp/acc_sentry_watchdog.lock 2>/dev/null");
-            ctx.execShell("rm -f /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null");
+            ctx.execShell("rm -f " + ScratchPaths.path("start_acc_sentry.sh") + " 2>/dev/null");
+            ctx.execShell("rm -f " + ScratchPaths.path("acc_sentry_daemon.lock") + " 2>/dev/null");
+            ctx.execShell("rm -rf " + ScratchPaths.path("acc_sentry_watchdog.lock") + " 2>/dev/null");
         }
 
         // Mirror SentryDaemonController: request a clean stop, then remove
@@ -371,9 +378,9 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         if ("sentry_daemon".equals(processName)) {
             ctx.execShell(
                 "echo 'STOP' | nc -w 1 127.0.0.1 19879 2>/dev/null; "
-                + "if [ -f /data/local/tmp/sentry_daemon.pid ]; then "
-                + "kill -9 $(cat /data/local/tmp/sentry_daemon.pid) 2>/dev/null; "
-                + "rm -f /data/local/tmp/sentry_daemon.pid; fi"
+                + "if [ -f " + ScratchPaths.path("sentry_daemon.pid") + " ]; then "
+                + "kill -9 $(cat " + ScratchPaths.path("sentry_daemon.pid") + ") 2>/dev/null; "
+                + "rm -f " + ScratchPaths.path("sentry_daemon.pid") + "; fi"
             );
         }
 
@@ -384,7 +391,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         // our pkill and the next health-check tick. Mirrors the cam_daemon
         // sentinel handshake.
         if ("zrok".equals(processName)) {
-            ctx.execShell("rm -f /data/local/tmp/start_zrok.sh 2>/dev/null");
+            ctx.execShell("rm -f " + ScratchPaths.path("start_zrok.sh") + " 2>/dev/null");
         }
 
         // Sing-box is launched by the sentry_proxy parent in the UI flow.
@@ -409,11 +416,11 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         if ("cloudflared".equals(processName)
                 || "zrok".equals(processName)
                 || "tailscaled".equals(processName)) {
-            ctx.execShell("rm -f /data/local/tmp/.tunnel_last_notified 2>/dev/null");
+            ctx.execShell("rm -f " + ScratchPaths.path(".tunnel_last_notified") + " 2>/dev/null");
         }
         if ("tailscaled".equals(processName)) {
             ctx.execShell(
-                    "rm -f " + TAILSCALE_DASHBOARD_GUARD_SCRIPT
+                    "rm -f " + tailscaleDashboardGuardScript()
                             + " 2>/dev/null");
         }
         
@@ -432,7 +439,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         
         // Clean up lock file for daemons that use processName-based lock files
         if (!"byd_cam_daemon".equals(processName) && !"acc_sentry_daemon".equals(processName)) {
-            ctx.execShell("rm -f /data/local/tmp/" + processName + ".lock 2>/dev/null");
+            ctx.execShell("rm -f " + ScratchPaths.path(processName + ".lock") + " 2>/dev/null");
         }
         
         // Wait and verify
@@ -479,8 +486,8 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
             // freeze the polling thread.
             String fullClass = "com.overdrive.app.daemon." + className;
             String cmd = String.format(
-                "CLASSPATH=%s app_process /system/bin --nice-name=%s %s >> /data/local/tmp/%s.log 2>&1",
-                apkPath, processName, fullClass, processName);
+                "CLASSPATH=%s app_process /system/bin --nice-name=%s %s >> %s 2>&1",
+                apkPath, processName, fullClass, ScratchPaths.path(processName + ".log"));
             ctx.spawnDetached(cmd);
             try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
             return isDaemonRunning(processName, ctx);
@@ -495,8 +502,8 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
      * Step 4: Verify daemon is running
      */
     private boolean startCameraDaemonWithWatchdog(String apkPath, CommandContext ctx) {
-        String scriptPath = "/data/local/tmp/start_cam_daemon.sh";
-        String logFile = "/data/local/tmp/cam_daemon.log";
+        String scriptPath = ScratchPaths.path("start_cam_daemon.sh");
+        String logFile = ScratchPaths.path("cam_daemon.log");
         String processName = "byd_cam_daemon";
         String outputDir = "/sdcard/DCIM/BYDCam";
         
@@ -556,9 +563,11 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         String cleanupScript =
             "#!/system/bin/sh\n" +
             "# Telegram-side cam_daemon stop sequence\n" +
-            "rm -f /data/local/tmp/camera_daemon.disabled 2>/dev/null\n" +
+            "rm -f " + ScratchPaths.path("camera_daemon.disabled") + " 2>/dev/null\n" +
             "rm -f " + scriptPath + " 2>/dev/null\n" +
-            "if [ -f /data/local/tmp/cam_watchdog.pid ]; then kill -9 $(cat /data/local/tmp/cam_watchdog.pid) 2>/dev/null; fi\n" +
+            "if [ -f " + ScratchPaths.path("cam_watchdog.pid")
+                + " ]; then kill -9 $(cat " + ScratchPaths.path("cam_watchdog.pid")
+                + ") 2>/dev/null; fi\n" +
             "MY_PID=$$; ps -A -o PID,ARGS | grep -F 'cam_daemon' | grep -v grep "
                 + "| awk '{print $1}' | while read pid; do "
                 + "if [ \"$pid\" != \"$MY_PID\" ]; then kill -9 $pid 2>/dev/null; fi; done\n" +
@@ -574,13 +583,13 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 + "if [ \"$pid\" != \"$MY_PID\" ]; then kill -9 $pid 2>/dev/null; fi; done\n" +
             "done\n" +
             // Now safe to rm the lock — daemon is gone.
-            "rm -f /data/local/tmp/camera_daemon.lock " +
-                "/data/local/tmp/cam_watchdog.pid 2>/dev/null\n" +
-            "rm -rf /data/local/tmp/cam_watchdog.lock 2>/dev/null\n" +
+            "rm -f " + ScratchPaths.path("camera_daemon.lock") + " "
+                + ScratchPaths.path("cam_watchdog.pid") + " 2>/dev/null\n" +
+            "rm -rf " + ScratchPaths.path("cam_watchdog.lock") + " 2>/dev/null\n" +
             "echo done\n";
         // Write via heredoc — body comes from stdin not argv, no
         // self-match. Then exec the file (argv = `sh <path>` only).
-        String cleanupTmpPath = "/data/local/tmp/.tg_cam_kill_" + System.nanoTime() + ".sh";
+        String cleanupTmpPath = ScratchPaths.path(".tg_cam_kill_") + System.nanoTime() + ".sh";
         ctx.execShell(
             "cat > " + cleanupTmpPath + " <<'__TG_CAM_KILL_EOF__'\n" +
             cleanupScript +
@@ -645,7 +654,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
      * Replicates DaemonLauncher.launchAccSentryDaemon() flow.
      */
     private boolean startAccSentryDaemonWithWatchdog(String apkPath, CommandContext ctx) {
-        String scriptPath = "/data/local/tmp/start_acc_sentry.sh";
+        String scriptPath = ScratchPaths.path("start_acc_sentry.sh");
         String processName = "acc_sentry_daemon";
 
         // Step 1: Kill old processes via tmpfile script (no self-match
@@ -655,7 +664,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         String accCleanupScript =
             "#!/system/bin/sh\n" +
             "# Telegram-side acc_sentry_daemon stop sequence\n" +
-            "rm -f /data/local/tmp/acc_sentry_daemon.disabled 2>/dev/null\n" +
+            "rm -f " + ScratchPaths.path("acc_sentry_daemon.disabled") + " 2>/dev/null\n" +
             "rm -f " + scriptPath + " 2>/dev/null\n" +
             "MY_PID=$$; ps -A -o PID,ARGS | grep -F 'acc_sentry' | grep -v grep "
                 + "| awk '{print $1}' | while read pid; do "
@@ -667,11 +676,11 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 + "| awk '{print $1}' | while read pid; do "
                 + "if [ \"$pid\" != \"$MY_PID\" ]; then kill -9 $pid 2>/dev/null; fi; done\n" +
             "done\n" +
-            "rm -f /data/local/tmp/acc_sentry_daemon.lock " +
-                "/data/local/tmp/acc_sentry_watchdog.pid 2>/dev/null\n" +
-            "rm -rf /data/local/tmp/acc_sentry_watchdog.lock 2>/dev/null\n" +
+            "rm -f " + ScratchPaths.path("acc_sentry_daemon.lock") + " "
+                + ScratchPaths.path("acc_sentry_watchdog.pid") + " 2>/dev/null\n" +
+            "rm -rf " + ScratchPaths.path("acc_sentry_watchdog.lock") + " 2>/dev/null\n" +
             "echo done\n";
-        String accCleanupTmpPath = "/data/local/tmp/.tg_acc_kill_" + System.nanoTime() + ".sh";
+        String accCleanupTmpPath = ScratchPaths.path(".tg_acc_kill_") + System.nanoTime() + ".sh";
         ctx.execShell(
             "cat > " + accCleanupTmpPath + " <<'__TG_ACC_KILL_EOF__'\n" +
             accCleanupScript +
@@ -714,11 +723,11 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         String reserved = ctx.execShell(
                 "if ps -A -o ARGS 2>/dev/null | grep -F 'zrok share reserved' | "
                         + "grep -v grep >/dev/null || "
-                        + "grep -q 'zrok share reserved' /data/local/tmp/start_zrok.sh 2>/dev/null; "
+                        + "grep -q 'zrok share reserved' " + ScratchPaths.path("start_zrok.sh") + " 2>/dev/null; "
                         + "then echo yes; else echo no; fi");
         if (reserved == null || !"yes".equals(reserved.trim())) return null;
 
-        String name = ctx.execShell("cat /data/local/tmp/.zrok/unique_name 2>/dev/null");
+        String name = ctx.execShell("cat " + ScratchPaths.path(".zrok/unique_name") + " 2>/dev/null");
         if (name == null || !name.trim().matches("[a-z0-9-]+")) return null;
         return "https://" + name.trim() + ".share.zrok.io";
     }
@@ -729,7 +738,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         ctx.log("Waiting for a healthy Zrok share...");
 
         while (System.nanoTime() < deadline) {
-            String logTail = ctx.execShell("tail -200 /data/local/tmp/zrok.log 2>/dev/null");
+            String logTail = ctx.execShell("tail -200 " + ScratchPaths.path("zrok.log") + " 2>/dev/null");
             if (url == null) {
                 String name = com.overdrive.app.launcher.ZrokRuntimeProbe
                         .extractLastShareName(logTail);
@@ -791,12 +800,12 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         }
 
         String writeResult = ctx.execShell(
-                "mkdir -p /data/local/tmp/.tailscale && "
-                        + "cat > " + TAILSCALE_DASHBOARD_GUARD_SCRIPT
+                "mkdir -p " + ScratchPaths.path(".tailscale") + " && "
+                        + "cat > " + tailscaleDashboardGuardScript()
                         + " <<'__TAILSCALE_DASHBOARD_GUARD_EOF__'\n"
                         + body
                         + "__TAILSCALE_DASHBOARD_GUARD_EOF__\n"
-                        + "chmod 700 " + TAILSCALE_DASHBOARD_GUARD_SCRIPT
+                        + "chmod 700 " + tailscaleDashboardGuardScript()
                         + " && echo ready");
         if (writeResult == null || !writeResult.trim().endsWith("ready")) {
             ctx.log("Failed to write the Tailscale dashboard security guard");
@@ -804,7 +813,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         }
 
         boolean spawned = ctx.spawnDetached(
-                "sh " + TAILSCALE_DASHBOARD_GUARD_SCRIPT);
+                "sh " + tailscaleDashboardGuardScript());
         if (!spawned) {
             ctx.log("Failed to launch the Tailscale dashboard security guard");
             return false;
@@ -844,8 +853,9 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 }
                 
                 // Same flags as UI version
-                cfCmd.append("/data/local/tmp/cloudflared ").append(com.overdrive.app.config.CloudflaredPaidConfig.getArgs());
-                cfCmd.append("' > /data/local/tmp/cloudflared.log 2>&1 &");
+                cfCmd.append(ScratchPaths.path("cloudflared")).append(" ")
+                        .append(com.overdrive.app.config.CloudflaredPaidConfig.getArgs());
+                cfCmd.append("' > " + ScratchPaths.path("cloudflared.log") + " 2>&1 &");
                 
                 cmd = cfCmd.toString();
                 processName = "cloudflared";
@@ -863,17 +873,18 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 // because the new watchdog would see the stale sentinel and exit.
                 // Clear the old log too so public-mode URL discovery cannot return
                 // a URL from the previous share session.
-                ctx.execShell("rm -f /data/local/tmp/zrok.disabled /data/local/tmp/zrok.log 2>/dev/null");
+                ctx.execShell("rm -f " + ScratchPaths.path("zrok.disabled") + " "
+                        + ScratchPaths.path("zrok.log") + " 2>/dev/null");
 
                 // Zrok tunnel — use RESERVED mode with saved token (same as app UI)
                 // Falls back to public mode only if no reserved token exists
-                String identityCheck = ctx.execShell("test -f /data/local/tmp/.zrok/environment.json && echo yes || echo no");
+                String identityCheck = ctx.execShell("test -f " + ScratchPaths.path(".zrok/environment.json") + " && echo yes || echo no");
                 if (identityCheck == null || !identityCheck.trim().equals("yes")) {
                     // Need to enable — read token from saved file (set via app UI).
                     // The file is encrypted at rest (CredentialCipher) since it's
                     // written by ZrokLauncher.saveEnableToken(); decrypt() passes
                     // plaintext through unchanged for tokens saved before that.
-                    String enableToken = ctx.execShell("cat /data/local/tmp/.zrok/enable_token 2>/dev/null");
+                    String enableToken = ctx.execShell("cat " + ScratchPaths.path(".zrok/enable_token") + " 2>/dev/null");
                     if (enableToken == null || enableToken.trim().isEmpty() || enableToken.contains("No such file")) {
                         ctx.log("❌ No zrok enable token found. Set it from the app UI first.");
                         return false;
@@ -893,9 +904,9 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                           "HTTPS_PROXY=socks5://127.0.0.1:8119 " +
                           "NO_PROXY=localhost,127.0.0.1 "
                         : "";
-                    String enableCmd = "HOME=/data/local/tmp " +
+                    String enableCmd = "HOME=" + ScratchPaths.getDir() + " " +
                         zrokProxyEnv +
-                        "/data/local/tmp/zrok enable " +
+                        ScratchPaths.path("zrok") + " enable " +
                         com.overdrive.app.launcher.ZrokRuntimeProbe.shellQuote(enableToken) +
                         " --headless 2>&1";
                     String enableResult = ctx.execShell(enableCmd);
@@ -911,7 +922,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                     }
                     try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
                     String enabledCheck = ctx.execShell(
-                        "test -f /data/local/tmp/.zrok/environment.json && echo yes || echo no");
+                        "test -f " + ScratchPaths.path(".zrok/environment.json") + " && echo yes || echo no");
                     if (enabledCheck == null || !"yes".equals(enabledCheck.trim())) {
                         ctx.log("❌ Zrok enable did not create an environment identity.");
                         return false;
@@ -925,7 +936,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 // Encrypted at rest by ZrokLauncher.saveReservedToken(); decrypt()
                 // passes plaintext through unchanged for pre-existing tokens.
                 String reservedToken = null;
-                String tokenRead = ctx.execShell("cat /data/local/tmp/.zrok/reserved_token 2>/dev/null");
+                String tokenRead = ctx.execShell("cat " + ScratchPaths.path(".zrok/reserved_token") + " 2>/dev/null");
                 if (tokenRead != null && !tokenRead.trim().isEmpty() && !tokenRead.contains("No such file")) {
                     String decrypted = com.overdrive.app.byd.cloud.crypto.CredentialCipher.decrypt(tokenRead.trim());
                     if (!decrypted.isEmpty()) {
@@ -935,7 +946,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 
                 // Also read saved unique name for logging
                 String savedName = null;
-                String nameRead = ctx.execShell("cat /data/local/tmp/.zrok/unique_name 2>/dev/null");
+                String nameRead = ctx.execShell("cat " + ScratchPaths.path(".zrok/unique_name") + " 2>/dev/null");
                 if (nameRead != null && !nameRead.trim().isEmpty() && !nameRead.contains("No such file")) {
                     savedName = nameRead.trim();
                 }
@@ -961,7 +972,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 java.util.List<String> watchdogLines =
                     com.overdrive.app.launcher.ZrokLauncher.Companion.buildZrokWatchdogScriptStatic(
                         reservedMode, tokenForScript, useProxy);
-                String zrokScriptPath = "/data/local/tmp/start_zrok.sh";
+                String zrokScriptPath = ScratchPaths.path("start_zrok.sh");
                 // Heredoc-based write: one fork instead of N (where N is the
                 // number of script lines). Heredoc body comes from stdin so
                 // the daemon-pattern in the body never enters argv → no
@@ -996,7 +1007,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 }
 
                 // Check if tailscale proxy should be enabled
-                String proxyEnabledCheck = ctx.execShell("cat /data/local/tmp/.tailscale/proxy_enabled");
+                String proxyEnabledCheck = ctx.execShell("cat " + ScratchPaths.path(".tailscale/proxy_enabled"));
                 boolean enableProxy = proxyEnabledCheck != null && proxyEnabledCheck.trim().equals("true");
 
                 StringBuilder tailscaleCmd = new StringBuilder();
@@ -1016,13 +1027,14 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 }
 
                 // Same flags as UI version
-                tailscaleCmd.append("/data/local/tmp/.tailscale/tailscaled --tun userspace-networking ");
-                tailscaleCmd.append("--statedir /data/local/tmp/.tailscale ");
+                tailscaleCmd.append(ScratchPaths.path(".tailscale/tailscaled"))
+                        .append(" --tun userspace-networking ");
+                tailscaleCmd.append("--statedir " + ScratchPaths.path(".tailscale") + " ");
                 if (enableProxy) {
                     tailscaleCmd.append("--socks5-server 127.0.0.1:8539 ");
                 }
                 tailscaleCmd.append("--socket 127.0.0.1:8532");
-                tailscaleCmd.append("' > /data/local/tmp/.tailscale/tailscaled.log 2>&1 &");
+                tailscaleCmd.append("' > " + ScratchPaths.path(".tailscale/tailscaled.log") + " 2>&1 &");
 
                 cmd = tailscaleCmd.toString();
                 processName = "tailscaled";
@@ -1030,8 +1042,9 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
 
             case "singbox":
                 // Sing-box proxy
-                cmd = "nohup /data/local/tmp/sing-box run -c /data/local/tmp/singbox_config.json " +
-                      "> /data/local/tmp/singbox.log 2>&1 &";
+                cmd = "nohup " + ScratchPaths.path("sing-box") + " run -c "
+                      + ScratchPaths.path("singbox_config.json") + " " +
+                      "> " + ScratchPaths.path("singbox.log") + " 2>&1 &";
                 processName = "sing-box";
                 break;
 
@@ -1087,7 +1100,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 String token = com.overdrive.app.config.CloudflaredPaidConfig.getToken();
 
                 if (isPaid && !token.isEmpty()) {
-                    String grepResult = ctx.execShell("grep -iE 'ingress|hostname' /data/local/tmp/cloudflared.log 2>/dev/null | grep -oE '[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}' | grep -vE '127\\.0\\.0\\.1' | tail -1");
+                    String grepResult = ctx.execShell("grep -iE 'ingress|hostname' " + ScratchPaths.path("cloudflared.log") + " 2>/dev/null | grep -oE '[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}' | grep -vE '127\\.0\\.0\\.1' | tail -1");
                     // execShell returns "" (not null) on no match — require a real host
                     // (non-empty + contains a dot) so we never persist a bare "https://".
                     if (grepResult != null && !grepResult.trim().isEmpty() && grepResult.contains(".")) {
@@ -1098,7 +1111,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                         break;
                     }
                 } else {
-                    String grepResult = ctx.execShell("grep -o 'https://[a-z0-9-]*\\.trycloudflare\\.com' /data/local/tmp/cloudflared.log 2>/dev/null | grep -v 'api\\.' | head -1");
+                    String grepResult = ctx.execShell("grep -o 'https://[a-z0-9-]*\\.trycloudflare\\.com' " + ScratchPaths.path("cloudflared.log") + " 2>/dev/null | grep -v 'api\\.' | head -1");
                     if (grepResult != null && grepResult.startsWith("https://") && grepResult.contains("-")) {
                         tunnelUrl = grepResult.trim();
                         ctx.log("Tunnel URL (Free): " + tunnelUrl);
@@ -1108,7 +1121,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                     }
                 }
                 // Check for errors (only read last few lines)
-                String tailLog = ctx.execShell("tail -5 /data/local/tmp/cloudflared.log 2>/dev/null");
+                String tailLog = ctx.execShell("tail -5 " + ScratchPaths.path("cloudflared.log") + " 2>/dev/null");
                 if (tailLog != null) {
                     if (tailLog.contains("proxyconnect") || 
                         (tailLog.contains("proxy") && tailLog.contains("refused"))) {
@@ -1120,16 +1133,16 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
             if (tunnelUrl == null) {
                 // Check if process is still running
                 if (!isDaemonRunning(processName, ctx)) {
-                    ctx.log("Cloudflared exited - check /data/local/tmp/cloudflared.log");
+                    ctx.log("Cloudflared exited - check " + ScratchPaths.path("cloudflared.log"));
                     return false;
                 }
                 ctx.log("Tunnel started but URL not yet available");
             }
         }
-
         // For tailscale get the URL
         if (started && "tailscale".equals(name)) {
-            String getIpResult = ctx.execShell("/data/local/tmp/.tailscale/tailscale --socket 127.0.0.1:8532 ip --1");
+            String getIpResult = ctx.execShell(ScratchPaths.path(".tailscale/tailscale")
+                    + " --socket 127.0.0.1:8532 ip --1");
             if (getIpResult != null) {
                 String tailscaleUrl = "http://" + getIpResult.trim() + ":8080";
                 ctx.log("Tailscale URL: " + tailscaleUrl);
@@ -1146,7 +1159,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
     private void saveTunnelUrl(String url, CommandContext ctx) {
         try {
             // Save to file for /url command
-            ctx.execShell("echo '" + url + "' > /data/local/tmp/tunnel_url.txt");
+            ctx.execShell("echo '" + url + "' > " + ScratchPaths.path("tunnel_url.txt"));
             ctx.log("Tunnel URL saved to file");
             
             // Send notification message to owner — read from the unified
@@ -1170,7 +1183,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
      */
     private void saveDaemonState(String daemonName, boolean running, CommandContext ctx) {
         try {
-            File stateFile = new File(STATE_FILE);
+            File stateFile = new File(stateFile());
             Properties props = new Properties();
             
             // Load existing state
@@ -1205,7 +1218,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
      */
     public static boolean isDaemonStoppedViaTelegram(String daemonName) {
         try {
-            File stateFile = new File(STATE_FILE);
+            File stateFile = new File(stateFile());
             if (!stateFile.exists()) return false;
             
             Properties props = new Properties();
@@ -1227,7 +1240,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
      */
     public static void clearDaemonStoppedState(String daemonName) {
         try {
-            File stateFile = new File(STATE_FILE);
+            File stateFile = new File(stateFile());
             if (!stateFile.exists()) return;
             
             Properties props = new Properties();

@@ -1,4 +1,5 @@
 package com.overdrive.app.telegram;
+import com.overdrive.app.util.ScratchPaths;
 
 import android.util.Log;
 
@@ -24,7 +25,7 @@ import java.util.List;
  *
  * <h3>Design</h3>
  * <ul>
- *   <li>One JSON file per spooled command under {@link #DIR} (owner-only perms;
+ *   <li>One JSON file per spooled command under {@link #dir()} (owner-only perms;
  *       every emitter and the drainer run as UID 2000, so it must NOT be
  *       world-writable — that would be a local command-injection surface).</li>
  *   <li>Only commands the emit site explicitly marks spoolable are written, and
@@ -54,7 +55,9 @@ public final class TelegramSpool {
      * no world bits are needed — and world-writable would be a local
      * command-injection surface (a crafted entry would be replayed verbatim).
      */
-    static final String DIR = "/data/local/tmp/.overdrive_tg_spool";
+    private static String dir() {
+        return ScratchPaths.path(".overdrive_tg_spool");
+    }
 
     /** Cap on spooled files. Oldest is evicted past this so the dir can't grow. */
     static final int MAX_ENTRIES = 50;
@@ -160,7 +163,7 @@ public final class TelegramSpool {
      */
     public static synchronized int drain(SpooledSender sender) {
         if (sender == null) return 0;
-        File dir = new File(DIR);
+        File dir = new File(dir());
         if (!dir.isDirectory()) return 0;
 
         // First, reap any orphaned .inflight markers from a PRIOR drain that was
@@ -281,7 +284,7 @@ public final class TelegramSpool {
     }
 
     private static File ensureDir() {
-        File dir = new File(DIR);
+        File dir = new File(dir());
         if (dir.isDirectory()) return dir;
         try {
             if (dir.mkdirs() || dir.isDirectory()) {

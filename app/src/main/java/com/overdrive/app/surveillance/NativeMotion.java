@@ -22,7 +22,11 @@ public class NativeMotion {
     private static String loadError = null;
     
     static {
+        // Same order as DiLink5QCarCamBackend: c++_shared → fast_cam_client → surveillance
+        // (libfast_cam_client.so DT_NEEDs libc++_shared.so).
         try {
+            tryLoadOptional("c++_shared");
+            tryLoadOptional("fast_cam_client");
             System.loadLibrary("surveillance");
             libraryLoaded = true;
         } catch (UnsatisfiedLinkError e) {
@@ -30,6 +34,12 @@ public class NativeMotion {
             // Library not found - will be loaded lazily when nativeLibDir is known
             System.err.println("NativeMotion: libsurveillance.so not found in default path, will try explicit path later");
         }
+    }
+
+    private static void tryLoadOptional(String name) {
+        try {
+            System.loadLibrary(name);
+        } catch (UnsatisfiedLinkError ignored) {}
     }
     
     /**
@@ -41,9 +51,12 @@ public class NativeMotion {
      */
     public static boolean tryLoadLibrary(String nativeLibDir) {
         if (libraryLoaded) return true;
+        if (nativeLibDir == null || nativeLibDir.isEmpty()) return false;
+
+        tryLoadOptionalFile(nativeLibDir + "/libc++_shared.so");
+        tryLoadOptionalFile(nativeLibDir + "/libfast_cam_client.so");
         
         try {
-            // Try explicit path
             String libPath = nativeLibDir + "/libsurveillance.so";
             System.load(libPath);
             libraryLoaded = true;
@@ -54,6 +67,13 @@ public class NativeMotion {
             System.err.println("NativeMotion: Failed to load from explicit path: " + e.getMessage());
             return false;
         }
+    }
+
+    private static void tryLoadOptionalFile(String path) {
+        try {
+            java.io.File f = new java.io.File(path);
+            if (f.isFile()) System.load(path);
+        } catch (UnsatisfiedLinkError ignored) {}
     }
     
     /**

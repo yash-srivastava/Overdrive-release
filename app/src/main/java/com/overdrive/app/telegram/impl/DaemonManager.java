@@ -1,4 +1,5 @@
 package com.overdrive.app.telegram.impl;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.telegram.IDaemonManager;
 import com.overdrive.app.telegram.model.DaemonInfo;
@@ -86,7 +87,7 @@ public class DaemonManager implements IDaemonManager {
                 + "if [ \"$pid\" != \"$MY_PID\" ]; then kill -9 $pid 2>/dev/null; fi; done"
             ) != null;
             stopped &= execShell(
-                    "rm -f /data/local/tmp/start_cam_daemon.sh 2>/dev/null") != null;
+                    "rm -f " + ScratchPaths.path("start_cam_daemon.sh") + " 2>/dev/null") != null;
             try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
             stopped &= execShell(
                 "MY_PID=$$; ps -A -o PID,ARGS | grep -F byd_cam_daemon | grep -v grep "
@@ -95,9 +96,9 @@ public class DaemonManager implements IDaemonManager {
             ) != null;
             stopped &= execShell("killall -9 byd_cam_daemon 2>/dev/null") != null;
             stopped &= execShell(
-                    "rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null") != null;
+                    "rm -f " + ScratchPaths.path("camera_daemon.lock") + " 2>/dev/null") != null;
             stopped &= execShell(
-                    "rm -rf /data/local/tmp/cam_watchdog.lock 2>/dev/null") != null;
+                    "rm -rf " + ScratchPaths.path("cam_watchdog.lock") + " 2>/dev/null") != null;
             if (!stopped) {
                 abortCameraRestart();
             }

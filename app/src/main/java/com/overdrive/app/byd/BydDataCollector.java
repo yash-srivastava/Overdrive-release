@@ -8,6 +8,7 @@ import com.overdrive.app.byd.bodywork.BodyworkConstants;
 import com.overdrive.app.byd.routing.DrivingSafetyGuard;
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.server.Messages;
+import com.overdrive.app.util.ScratchPaths;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -391,6 +392,70 @@ public class BydDataCollector {
             }
         }
         return instance;
+    }
+
+    public static String[] snapshotFilePaths() {
+        return new String[] {
+                "/storage/emulated/0/Android/data/com.overdrive.app/files/byd_telemetry_snap.json",
+                "/storage/emulated/0/Overdrive/byd_telemetry_snap.json",
+                ScratchPaths.path("byd_telemetry_snap.json")
+        };
+    }
+
+    public static void writeSnapshotDiskFile(BydVehicleData data) {
+        if (data == null) return;
+        byte[] bytes = data.toJson().toString()
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        for (String path : snapshotFilePaths()) {
+            try {
+                java.io.File file = new java.io.File(path);
+                java.io.File parent = file.getParentFile();
+                if (parent != null && !parent.exists()) parent.mkdirs();
+                java.io.File tmp = new java.io.File(path + ".tmp");
+                try (java.io.FileOutputStream fos =
+                             new java.io.FileOutputStream(tmp)) {
+                    fos.write(bytes);
+                    fos.flush();
+                }
+                if (!tmp.renameTo(file)) {
+                    try (java.io.FileOutputStream fos =
+                                 new java.io.FileOutputStream(file)) {
+                        fos.write(bytes);
+                    }
+                    tmp.delete();
+                }
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    public static BydVehicleData readSnapshotDiskFile() {
+        for (String path : snapshotFilePaths()) {
+            try {
+                java.io.File file = new java.io.File(path);
+                if (file.exists()
+                        && (System.currentTimeMillis() - file.lastModified())
+                                <= 60_000L) {
+                    byte[] bytes = new byte[(int) file.length()];
+                    try (java.io.FileInputStream fis =
+                                 new java.io.FileInputStream(file)) {
+                        int offset = 0;
+                        while (offset < bytes.length) {
+                            int read = fis.read(bytes, offset,
+                                    bytes.length - offset);
+                            if (read < 0) break;
+                            offset += read;
+                        }
+                        if (offset != bytes.length) continue;
+                    }
+                    String json = new String(bytes,
+                            java.nio.charset.StandardCharsets.UTF_8);
+                    BydVehicleData parsed = BydVehicleData.fromJson(
+                            new org.json.JSONObject(json));
+                    if (parsed != null) return parsed;
+                }
+            } catch (Throwable ignored) {}
+        }
+        return null;
     }
 
     private static final String APP_PROCESS = "com.overdrive.app";

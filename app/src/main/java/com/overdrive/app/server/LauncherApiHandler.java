@@ -1,4 +1,5 @@
 package com.overdrive.app.server;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -61,8 +62,12 @@ public final class LauncherApiHandler {
     /** Manifest locations, mirroring {@link ModelsApiHandler} (whose readers are
      *  private). Bundled ships in the APK; the remote cache is written by the
      *  updater. Higher {@code version} wins — same precedence as core. */
-    private static final String MANIFEST_BUNDLED_PATH = "/data/local/tmp/web/shared/models/manifest.json";
-    private static final String MANIFEST_REMOTE_CACHE = "/data/local/tmp/overdrive/models/manifest.json";
+    private static String manifestBundledPath() {
+        return ScratchPaths.path("web/shared/models/manifest.json");
+    }
+    private static String manifestRemoteCache() {
+        return ScratchPaths.path("overdrive/models/manifest.json");
+    }
 
     private LauncherApiHandler() {}
 
@@ -1063,8 +1068,8 @@ public final class LauncherApiHandler {
     }
 
     private static JSONObject readBestManifest() {
-        JSONObject bundled = readManifestFile(new File(MANIFEST_BUNDLED_PATH));
-        JSONObject cached = readManifestFile(new File(MANIFEST_REMOTE_CACHE));
+        JSONObject bundled = readManifestFile(new File(manifestBundledPath()));
+        JSONObject cached = readManifestFile(new File(manifestRemoteCache()));
         if (bundled == null) return cached;
         if (cached == null) return bundled;
         return cached.optInt("version", 0) > bundled.optInt("version", 0) ? cached : bundled;

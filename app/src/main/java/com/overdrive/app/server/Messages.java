@@ -1,4 +1,5 @@
 package com.overdrive.app.server;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.util.MessageFormatSafe;
@@ -22,7 +23,9 @@ import java.util.Map;
 public final class Messages {
 
     private static final Map<String, JSONObject> CATALOGS = new HashMap<>();
-    private static final String DIR = "/data/local/tmp/web/server-i18n";
+    private static String dir() {
+        return ScratchPaths.path("web/server-i18n");
+    }
     // Catalogs read from the running APK's assets, the fallback when the extracted copy on
     // disk is stale or absent. Separate cache so neither source can shadow the other.
     private static final Map<String, JSONObject> ASSET_CATALOGS = new HashMap<>();
@@ -148,7 +151,7 @@ public final class Messages {
 
     private static JSONObject load(String lang) {
         try {
-            File f = new File(DIR + "/" + lang + ".json");
+            File f = new File(dir() + "/" + lang + ".json");
             if (!f.exists() || !f.canRead()) return null;
             try (FileInputStream fis = new FileInputStream(f)) {
                 byte[] buf = new byte[(int) f.length()];

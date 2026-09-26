@@ -1,4 +1,5 @@
 package com.overdrive.app.daemon.telegram;
+import com.overdrive.app.util.ScratchPaths;
 
 import org.json.JSONObject;
 
@@ -76,7 +77,7 @@ public class BackupCommandHandler implements TelegramCommandHandler {
         // world-readable in the shared /data/local/tmp), and ALWAYS delete it
         // in a finally — even if sendDocument throws — so the secrets never
         // linger on disk.
-        File tmp = new File("/data/local/tmp/overdrive_backup_export.json");
+        File tmp = new File(ScratchPaths.path("overdrive_backup_export.json"));
         try {
             // Lock permissions to owner-only BEFORE any secret bytes land:
             // create the file empty, chmod it, THEN write. Setting permissions

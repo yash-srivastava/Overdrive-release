@@ -1,4 +1,5 @@
 package com.overdrive.app.surveillance;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.daemon.CameraDaemon;
 import com.overdrive.app.monitor.GpsMonitor;
@@ -34,7 +35,9 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public class SafeLocationManager {
 
     private static final String TAG = "SafeLocation";
-    private static final String CONFIG_FILE = "/data/local/tmp/safe_locations.json";
+    private static String configFile() {
+        return ScratchPaths.path("safe_locations.json");
+    }
     private static final int MAX_ZONES = 10;
     private static final double EARTH_RADIUS_M = 6_371_000.0;
     // Exit-hysteresis margin (m). Once inside a zone, the car must move beyond
@@ -419,11 +422,11 @@ public class SafeLocationManager {
             }
             root.put("zones", arr);
 
-            File tmp = new File(CONFIG_FILE + ".tmp");
+            File tmp = new File(configFile() + ".tmp");
             try (FileWriter w = new FileWriter(tmp)) {
                 w.write(root.toString(2));
             }
-            File target = new File(CONFIG_FILE);
+            File target = new File(configFile());
             if (!tmp.renameTo(target)) {
                 // Fallback: direct write
                 try (FileWriter w = new FileWriter(target)) {
@@ -440,7 +443,7 @@ public class SafeLocationManager {
 
     private void loadFromFile() {
         try {
-            File file = new File(CONFIG_FILE);
+            File file = new File(configFile());
             if (!file.exists()) return;
 
             StringBuilder sb = new StringBuilder();

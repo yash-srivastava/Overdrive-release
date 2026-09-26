@@ -238,7 +238,7 @@ class CameraManager(
      */
     fun createDirectories() {
         File(outputDir).mkdirs()
-        File(CameraConfiguration.STREAM_DIR).mkdirs()
+        File(CameraConfiguration.streamDir()).mkdirs()
         File(CameraConfiguration.APP_STREAM_DIR).mkdirs()
     }
 }

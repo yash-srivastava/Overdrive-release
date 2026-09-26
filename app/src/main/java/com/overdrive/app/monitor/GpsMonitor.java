@@ -1,4 +1,5 @@
 package com.overdrive.app.monitor;
+import com.overdrive.app.util.ScratchPaths;
 
 import android.os.SystemClock;
 
@@ -29,7 +30,9 @@ public class GpsMonitor {
     private static final Object lock = new Object();
 
     // Primary cache file (daemon uid 2000 can write to /data/local/tmp)
-    private static final String CACHE_FILE = "/data/local/tmp/gps_cache.json";
+    private static String cacheFile() {
+        return ScratchPaths.path("gps_cache.json");
+    }
     
     // Secondary cache file (app data directory - read-only for daemon, written by LocationSidecarService)
     private static final String CACHE_FILE_APP = "/data/data/com.overdrive.app/files/gps_cache.json";
@@ -253,7 +256,7 @@ public class GpsMonitor {
             String content = json.toString();
             
             // Save to primary cache (daemon tmp) - daemon UID 2000 can write here
-            saveToCacheFile(CACHE_FILE, content);
+            saveToCacheFile(cacheFile(), content);
             
             // Note: Cannot write to app data directory from daemon (different UID)
             // LocationSidecarService handles its own cache in app data directory
@@ -291,7 +294,7 @@ public class GpsMonitor {
 
     private void loadFromCache() {
         // Try primary cache first (daemon tmp)
-        if (loadFromCacheFile(CACHE_FILE)) {
+        if (loadFromCacheFile(cacheFile())) {
             GpsFixSnapshot fix = fixSnapshot;
             CameraDaemon.log(TAG + ": Loaded GPS from primary cache: "
                     + fix.latitude + ", " + fix.longitude);
@@ -306,7 +309,7 @@ public class GpsMonitor {
             return;
         }
         
-        CameraDaemon.log(TAG + ": No GPS cache found at " + CACHE_FILE + " or " + CACHE_FILE_APP);
+        CameraDaemon.log(TAG + ": No GPS cache found at " + cacheFile() + " or " + CACHE_FILE_APP);
     }
     
     private boolean loadFromCacheFile(String path) {

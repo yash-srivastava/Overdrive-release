@@ -1,4 +1,5 @@
 package com.overdrive.app.logging;
+import com.overdrive.app.util.ScratchPaths;
 
 import android.util.Log;
 
@@ -41,7 +42,8 @@ public class DaemonLogger {
      * Log configuration.
      */
     public static class Config {
-        public String logDir = "/data/local/tmp";
+        /** Null means resolve via {@link ScratchPaths#getDir()} at use time. */
+        public String logDir = null;
         public int retentionHours = 24;
         public int maxFileSizeMB = 10;
         public int rotationCount = 3;
@@ -57,6 +59,11 @@ public class DaemonLogger {
 
         public static Config defaults() {
             return new Config();
+        }
+
+        /** Scratch dir for file logs; never baked at Config construction. */
+        public String resolvedLogDir() {
+            return logDir != null ? logDir : ScratchPaths.getDir();
         }
 
         public Config withMinLevel(Level level) {
@@ -112,7 +119,8 @@ public class DaemonLogger {
     // ==================== INSTANCE MEMBERS ====================
     
     private final String tag;
-    private final String logFilePath;
+    /** Non-null when constructed via {@link #getInstance(String, String)}. */
+    private final String overrideLogDir;
     private PrintWriter writer;
     private final Object writeLock = new Object();
     // SimpleDateFormat is NOT thread-safe, and this logger is shared across daemon threads
@@ -129,14 +137,19 @@ public class DaemonLogger {
     
     private DaemonLogger(String tag) {
         this.tag = tag;
-        this.logFilePath = globalConfig.logDir + "/" + tag.toLowerCase() + ".log";
-        // Lazy init - don't create file until first write
+        this.overrideLogDir = null;
+        // Lazy path — don't bake ScratchPaths.getDir() until first write
     }
     
     private DaemonLogger(String tag, String logDir) {
         this.tag = tag;
-        this.logFilePath = logDir + "/" + tag.toLowerCase() + ".log";
+        this.overrideLogDir = logDir;
         // Lazy init - don't create file until first write
+    }
+
+    private String resolveLogFilePath() {
+        String dir = overrideLogDir != null ? overrideLogDir : globalConfig.resolvedLogDir();
+        return dir + "/" + tag.toLowerCase() + ".log";
     }
     
     // ==================== STATIC FACTORY METHODS ====================
@@ -302,7 +315,7 @@ public class DaemonLogger {
         if (writerInitialized) return;
         
         try {
-            File logFile = new File(logFilePath);
+            File logFile = new File(resolveLogFilePath());
             File parentDir = logFile.getParentFile();
             if (parentDir != null && !parentDir.exists()) {
                 parentDir.mkdirs();
@@ -369,7 +382,7 @@ public class DaemonLogger {
                 writerInitialized = false;
             }
             
-            File logFile = new File(logFilePath);
+            File logFile = new File(resolveLogFilePath());
             File parentDir = logFile.getParentFile();
             String baseName = logFile.getName();
             
@@ -420,7 +433,7 @@ public class DaemonLogger {
         long spaceFreeBytes = 0;
         
         try {
-            File logDir = new File(globalConfig.logDir);
+            File logDir = new File(globalConfig.resolvedLogDir());
             if (!logDir.exists() || !logDir.isDirectory()) {
                 return new CleanupStats(System.currentTimeMillis(), 0, 0);
             }
@@ -509,7 +522,7 @@ public class DaemonLogger {
      * Get the log file path for this logger.
      */
     public String getLogFilePath() {
-        return logFilePath;
+        return resolveLogFilePath();
     }
     
     /**

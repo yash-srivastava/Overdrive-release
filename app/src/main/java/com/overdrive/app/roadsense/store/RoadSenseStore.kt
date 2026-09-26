@@ -1,4 +1,5 @@
 package com.overdrive.app.roadsense.store
+import com.overdrive.app.util.ScratchPaths
 
 import com.overdrive.app.logging.DaemonLogger
 import com.overdrive.app.roadsense.detect.ALTITUDE_UNKNOWN
@@ -72,7 +73,8 @@ class RoadSenseStore private constructor() {
          * `/data/local/tmp` is the daemon-writable (UID 2000) location the
          * project already uses for its H2 stores.
          */
-        private const val DB_PATH = "/data/local/tmp/overdrive_roadsense_h2"
+        private val dbPath: String
+            get() = ScratchPaths.path("overdrive_roadsense_h2")
 
         /**
          * JDBC URL — identical flag set to SocHistoryDatabase:
@@ -87,8 +89,8 @@ class RoadSenseStore private constructor() {
          */
         // AUTO_COMPACT_FILL_RATE=50: idle-CPU tuning shared by all seven H2
         // stores (see SocHistoryDatabase.JDBC_URL for the rationale).
-        private const val JDBC_URL =
-            "jdbc:h2:file:$DB_PATH;FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
+        private val JDBC_URL: String
+            get() = "jdbc:h2:file:${dbPath};FILE_LOCK=SOCKET;TRACE_LEVEL_FILE=0;DB_CLOSE_ON_EXIT=FALSE" +
                 ";AUTO_COMPACT_FILL_RATE=50"
 
         private const val TABLE = "roadsense_hazards"
@@ -212,7 +214,7 @@ class RoadSenseStore private constructor() {
         synchronized(lock) {
             if (initialized) return
 
-            logger.info("Initializing RoadSense H2 store at: $DB_PATH")
+            logger.info("Initializing RoadSense H2 store at: $dbPath")
 
             val maxRetries = 3
             val retryDelayMs = 1000L
@@ -229,7 +231,7 @@ class RoadSenseStore private constructor() {
                     createSchema()
 
                     initialized = true
-                    logger.info("RoadSense store initialized via H2 (Pure Java): $DB_PATH")
+                    logger.info("RoadSense store initialized via H2 (Pure Java): $dbPath")
                     return
                 } catch (e: Exception) {
                     val msg = e.message
@@ -333,14 +335,14 @@ class RoadSenseStore private constructor() {
      */
     private fun cleanupStaleLocks() {
         try {
-            val lockFile = File("$DB_PATH.lock.db")
+            val lockFile = File("$dbPath.lock.db")
             if (lockFile.exists()) {
                 val ageMs = System.currentTimeMillis() - lockFile.lastModified()
                 if (ageMs > 5 * 60 * 1000) {
                     if (lockFile.delete()) logger.info("Deleted stale lock file (age ${ageMs / 1000}s)")
                 }
             }
-            val traceFile = File("$DB_PATH.trace.db")
+            val traceFile = File("$dbPath.trace.db")
             if (traceFile.exists()) traceFile.delete()
         } catch (e: Exception) {
             logger.debug("Lock cleanup failed: " + e.message)

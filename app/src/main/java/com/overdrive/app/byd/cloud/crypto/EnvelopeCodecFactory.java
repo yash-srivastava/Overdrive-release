@@ -37,8 +37,8 @@ public final class EnvelopeCodecFactory {
     /** Whether a valid cached table file already exists for the region. */
     public static boolean isCacheValid(boolean isChina) {
         return isChina
-                ? WbskTablesFile.isValid(new java.io.File(WbskTablesFile.CACHE_PATH))
-                : BangcleTablesFile.isValid(new java.io.File(BangcleTablesFile.CACHE_PATH));
+                ? WbskTablesFile.isValid(new java.io.File(WbskTablesFile.cachePath()))
+                : BangcleTablesFile.isValid(new java.io.File(BangcleTablesFile.cachePath()));
     }
 
     /** Human-readable cache description for logs. */

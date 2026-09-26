@@ -1,4 +1,5 @@
 package com.overdrive.app.byd.cloud.crypto;
+import com.overdrive.app.util.ScratchPaths;
 
 import android.content.Context;
 import android.content.res.AssetManager;
@@ -26,7 +27,9 @@ import java.util.Locale;
  */
 public final class WbskTablesFile {
 
-    public static final String CACHE_PATH = "/data/local/tmp/wbsk_tables.json";
+    public static String cachePath() {
+        return ScratchPaths.path("wbsk_tables.json");
+    }
     public static final String ASSET_PATH = "byd/wbsk_tables.json";
 
     // 8 byte tables (256B) + 8 u32 tables (1024B) = 10240 raw bytes;
@@ -43,7 +46,7 @@ public final class WbskTablesFile {
      * @param ctx app/daemon context (may be null — falls back to cache only)
      */
     public static InputStream openStream(Context ctx) {
-        File cache = new File(CACHE_PATH);
+        File cache = new File(cachePath());
         if (isValid(cache)) {
             try {
                 return new FileInputStream(cache);
@@ -142,9 +145,9 @@ public final class WbskTablesFile {
 
     /** Diagnostic string describing the cache state — useful in logs. */
     public static String describeCache() {
-        File f = new File(CACHE_PATH);
-        if (!f.exists()) return CACHE_PATH + " (missing)";
+        File f = new File(cachePath());
+        if (!f.exists()) return cachePath() + " (missing)";
         return String.format(Locale.US, "%s (size=%d, valid=%b)",
-                CACHE_PATH, f.length(), isValid(f));
+                cachePath(), f.length(), isValid(f));
     }
 }

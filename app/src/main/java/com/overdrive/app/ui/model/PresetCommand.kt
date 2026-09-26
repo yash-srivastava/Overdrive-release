@@ -1,4 +1,5 @@
 package com.overdrive.app.ui.model
+import com.overdrive.app.util.ScratchPaths
 
 /**
  * A preset ADB command for quick execution.
@@ -18,16 +19,17 @@ val PRESET_COMMANDS = PresetCommands.ALL
  * List of preset ADB commands organized by category.
  */
 object PresetCommands {
-    val ALL = listOf(
+    // Lazy so ScratchPaths.path(...) is not baked at class load before probe/sync.
+    val ALL: List<PresetCommand> by lazy { listOf(
         // Status commands
         PresetCommand("Process Status", "ps -ef | grep -E 'daemon|proxy|sing-box|cloudflared'", "Status"),
         PresetCommand("Port Status", "netstat -tlnp | grep -E '8080|8119|8554'", "Status"),
         
         // Log commands
-        PresetCommand("Proxy Logs", "cat /data/local/tmp/singbox.log | tail -50", "Logs"),
-        PresetCommand("Tunnel Logs", "cat /data/local/tmp/cloudflared.log | tail -50", "Logs"),
-        PresetCommand("Camera Logs", "cat /data/local/tmp/byd_cam_daemon.log | tail -50", "Logs"),
-        PresetCommand("Sentry Logs", "cat /data/local/tmp/sentry_daemon.log | tail -50", "Logs"),
+        PresetCommand("Proxy Logs", "cat ${ScratchPaths.path("singbox.log")} | tail -50", "Logs"),
+        PresetCommand("Tunnel Logs", "cat ${ScratchPaths.path("cloudflared.log")} | tail -50", "Logs"),
+        PresetCommand("Camera Logs", "cat ${ScratchPaths.path("byd_cam_daemon.log")} | tail -50", "Logs"),
+        PresetCommand("Sentry Logs", "cat ${ScratchPaths.path("sentry_daemon.log")} | tail -50", "Logs"),
         
         // Control commands.
         //
@@ -66,14 +68,14 @@ object PresetCommands {
                 "ps -A -o PID,ARGS | grep -F start_cam_daemon | grep -v grep " +
                 "| awk '{print \$1}' | while read pid; do " +
                 "if [ \"\$pid\" != \"\$MY_PID\" ]; then kill -9 \$pid 2>/dev/null; fi; done; " +
-                "rm -f /data/local/tmp/start_cam_daemon.sh; " +
+                "rm -f ${ScratchPaths.path("start_cam_daemon.sh")}; " +
                 "sleep 1; " +
                 "ps -A -o PID,ARGS | grep -F byd_cam_daemon | grep -v grep " +
                 "| awk '{print \$1}' | while read pid; do " +
                 "if [ \"\$pid\" != \"\$MY_PID\" ]; then kill -9 \$pid 2>/dev/null; fi; done; " +
                 "killall -9 byd_cam_daemon 2>/dev/null; " +
-                "rm -f /data/local/tmp/camera_daemon.lock; " +
-                "rm -rf /data/local/tmp/cam_watchdog.lock",
+                "rm -f ${ScratchPaths.path("camera_daemon.lock")}; " +
+                "rm -rf ${ScratchPaths.path("cam_watchdog.lock")}",
             "Control"
         ),
         PresetCommand(
@@ -94,7 +96,7 @@ object PresetCommands {
         PresetCommand("Proxy Settings", "settings get global http_proxy", "System"),
         PresetCommand("Reset Proxy", "settings put global http_proxy :0", "Control"),
         PresetCommand("ACC Props", "getprop | grep -i acc", "System")
-    )
+    ) }
     
-    val CATEGORIES = ALL.map { it.category }.distinct()
+    val CATEGORIES: List<String> by lazy { ALL.map { it.category }.distinct() }
 }

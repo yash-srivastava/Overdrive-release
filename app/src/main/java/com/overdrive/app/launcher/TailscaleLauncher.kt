@@ -1,4 +1,5 @@
 package com.overdrive.app.launcher
+import com.overdrive.app.util.ScratchPaths
 
 import android.content.Context
 import com.overdrive.app.BuildConfig
@@ -22,17 +23,29 @@ class TailscaleLauncher(
         private const val TAG = "TailscaleLauncher"
 
         // Tailscale paths
-        private const val TAILSCALE_HOME = "/data/local/tmp/.tailscale"
-        private const val TAILSCALE_LOG = "$TAILSCALE_HOME/tailscale.log"
-        private const val TAILSCALE_PATH = "$TAILSCALE_HOME/tailscale"
-        private const val TAILSCALED_PATH = "$TAILSCALE_HOME/tailscaled"
-        private const val TAILSCALE_VERSION_FILE = "$TAILSCALE_HOME/installed_version"
         private const val DEPLOYMENT_CURRENT = "current"
         private const val DEPLOYMENT_STALE = "stale"
 
+        private val tailscaleHome: String
+            get() = ScratchPaths.path(".tailscale")
+        private val TAILSCALE_LOG: String
+            get() = "${tailscaleHome}/tailscale.log"
+        private val TAILSCALE_PATH: String
+            get() = "${tailscaleHome}/tailscale"
+        private val TAILSCALED_PATH: String
+            get() = "${tailscaleHome}/tailscaled"
+        // Records the app versionCode the deployed binary was copied from, so an app
+        // update that ships a new libtailscale.so actually redeploys it. Without this,
+        // checkAndInstallTailscale only ever reinstalled when the binary was missing —
+        // so an existing install kept its old binary forever, and shipped fixes (e.g.
+        // the ACME-enabled rebuild) silently never reached updating users.
+        private val TAILSCALE_VERSION_FILE: String
+            get() = "${tailscaleHome}/installed_version"
         private const val TAILSCALE_COMMUNICATION_PORT = "8532"
 
-        private const val TAILSCALE_PROXY_FILE = "$TAILSCALE_HOME/proxy_enabled"
+        private val TAILSCALE_PROXY_FILE: String
+
+            get() = "${tailscaleHome}/proxy_enabled"
         private const val TAILSCALE_PROXY_PORT = "8539"
 
         // Dashboard ingress. Tailscale userspace networking forwards an
@@ -61,14 +74,16 @@ class TailscaleLauncher(
         // Remote-ADB opt-in sentinel + the adbd port we forward to. Same
         // sentinel-file pattern as TAILSCALE_PROXY_FILE so the UID-2000 shell
         // side and the app agree on state across restarts.
-        private const val TAILSCALE_ADB_FILE = "$TAILSCALE_HOME/adb_enabled"
+        private val TAILSCALE_ADB_FILE: String
+            get() = "${tailscaleHome}/adb_enabled"
         private const val ADB_PORT = "5555"
 
         // Tailnet HTTPS is opt-in. Standard HTTPS Serve terminates TLS and
         // injects X-Forwarded-* identity before proxying to HttpServer. The
         // server treats those headers as tunnel markers, so a remote request
         // cannot regain the direct-loopback authentication fallback.
-        private const val TAILSCALE_HTTPS_FILE = "$TAILSCALE_HOME/https_enabled"
+        private val TAILSCALE_HTTPS_FILE: String
+            get() = "${tailscaleHome}/https_enabled"
         private const val HTTPS_PORT = "443"
         private const val HTTPS_BACKEND = "http://127.0.0.1:$DASHBOARD_PORT"
         private const val LEGACY_HTTPS_BACKEND = "127.0.0.1:$DASHBOARD_PORT"
@@ -499,7 +514,7 @@ class TailscaleLauncher(
             // Userspace networking required for android
             append(" --tun userspace-networking")
             // Where to store tailscale data
-            append(" --statedir $TAILSCALE_HOME")
+            append(" --statedir $tailscaleHome")
             // Communication port to listen to for tailscale commands
             append(" --socket 127.0.0.1:$TAILSCALE_COMMUNICATION_PORT")
 
@@ -550,7 +565,7 @@ class TailscaleLauncher(
         callback.onLog("Installing tailscale...")
 
         adbShellExecutor.execute(
-            command = "test -f $srcPath && mkdir -p $TAILSCALE_HOME && " +
+            command = "test -f $srcPath && mkdir -p $tailscaleHome && " +
                 "cp -f $srcPath $TAILSCALE_PATH && " +
                 "ln -sf $TAILSCALE_PATH $TAILSCALED_PATH && " +
                 "chmod +x $TAILSCALE_PATH && " +
@@ -1055,7 +1070,7 @@ class TailscaleLauncher(
         isProxyEnabled { isEnabled ->
             if (enabled != isEnabled) {
                 adbShellExecutor.execute(
-                    command = "mkdir -p $TAILSCALE_HOME && echo $enabled > $TAILSCALE_PROXY_FILE && chmod 666 $TAILSCALE_PROXY_FILE",
+                    command = "mkdir -p $tailscaleHome && echo $enabled > $TAILSCALE_PROXY_FILE && chmod 666 $TAILSCALE_PROXY_FILE",
                     callback = object : AdbShellExecutor.ShellCallback {
                         override fun onSuccess(output: String) {
                             logManager.info(TAG, "Proxy settings saved to $TAILSCALE_PROXY_FILE")
@@ -1381,7 +1396,7 @@ class TailscaleLauncher(
 
     private fun writeHttpsSentinel(enabled: Boolean, callback: ((Boolean) -> Unit)?) {
         adbShellExecutor.execute(
-            command = "mkdir -p $TAILSCALE_HOME && echo $enabled > $TAILSCALE_HTTPS_FILE && chmod 600 $TAILSCALE_HTTPS_FILE",
+            command = "mkdir -p $tailscaleHome && echo $enabled > $TAILSCALE_HTTPS_FILE && chmod 600 $TAILSCALE_HTTPS_FILE",
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
                     callback?.invoke(true)
@@ -1537,7 +1552,7 @@ class TailscaleLauncher(
         // and any shell-UID process keeps write access via the owner bits, so a
         // local foothold can still arm this. The real gate is ADB key auth.
         adbShellExecutor.execute(
-            command = "mkdir -p $TAILSCALE_HOME && echo $enabled > $TAILSCALE_ADB_FILE && chmod 600 $TAILSCALE_ADB_FILE",
+            command = "mkdir -p $tailscaleHome && echo $enabled > $TAILSCALE_ADB_FILE && chmod 600 $TAILSCALE_ADB_FILE",
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
                     callback?.invoke(true)
@@ -1741,7 +1756,7 @@ class TailscaleLauncher(
         callback?.onLog("⚠️ Disabling environment (will need login again)...")
 
         adbShellExecutor.execute(
-            command = "pkill 'tailscaled' 2>/dev/null; rm -rf $TAILSCALE_HOME; echo done",
+            command = "pkill 'tailscaled' 2>/dev/null; rm -rf $tailscaleHome; echo done",
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
                     logManager.info(TAG, "Tailscale environment disabled")

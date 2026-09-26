@@ -1,4 +1,5 @@
 package com.overdrive.app.mqtt;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -25,7 +26,9 @@ public class MqttConnectionStore {
     private static final String TAG = "MqttConnectionStore";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
-    private static final String CONFIG_PATH = "/data/local/tmp/mqtt_connections.json";
+    private static String configPath() {
+        return ScratchPaths.path("mqtt_connections.json");
+    }
     public static final int MAX_CONNECTIONS = 5;
 
     private final List<MqttConnectionConfig> connections = new ArrayList<>();
@@ -39,9 +42,9 @@ public class MqttConnectionStore {
         synchronized (lock) {
             connections.clear();
             try {
-                File file = new File(CONFIG_PATH);
+                File file = new File(configPath());
                 if (!file.exists()) {
-                    logger.info("No MQTT config file found at " + CONFIG_PATH);
+                    logger.info("No MQTT config file found at " + configPath());
                     return 0;
                 }
 
@@ -82,11 +85,11 @@ public class MqttConnectionStore {
                 }
 
                 String content = array.toString(2);
-                try (FileOutputStream fos = new FileOutputStream(CONFIG_PATH)) {
+                try (FileOutputStream fos = new FileOutputStream(configPath())) {
                     fos.write(content.getBytes(StandardCharsets.UTF_8));
                 }
 
-                logger.info("Saved " + connections.size() + " MQTT connections to " + CONFIG_PATH);
+                logger.info("Saved " + connections.size() + " MQTT connections to " + configPath());
                 return true;
             } catch (Exception e) {
                 logger.error("Failed to save MQTT connections: " + e.getMessage());

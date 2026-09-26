@@ -1,4 +1,5 @@
 package com.overdrive.app.byd;
+import com.overdrive.app.util.ScratchPaths;
 
 import com.overdrive.app.logging.DaemonLogger;
 
@@ -66,10 +67,12 @@ public final class VehicleActuatorBridge {
             "overdrive_energy_request_v4_authority";
     private static final String ENERGY_AUTHORITY_EPOCH_SETTING =
             "overdrive_energy_request_v5_epoch";
-    private static final String ENERGY_STATE_LOCK_FILE =
-            "/data/local/tmp/overdrive_energy_request.lock";
-    private static final String ENERGY_STATE_COORDINATE_FILE =
-            "/data/local/tmp/overdrive_energy_request.state";
+    private static String energyStateLockFile() {
+        return ScratchPaths.path("overdrive_energy_request.lock");
+    }
+    private static String energyStateCoordinateFile() {
+        return ScratchPaths.path("overdrive_energy_request.state");
+    }
     private static final long ENERGY_STATE_LOCK_TIMEOUT_MS = 400L;
     private static final long ENERGY_MARKER_MAX_FUTURE_NANOS =
             TimeUnit.SECONDS.toNanos(30L);
@@ -1523,7 +1526,7 @@ public final class VehicleActuatorBridge {
     }
 
     private static RandomAccessFile openEnergyStateLockFile() throws Exception {
-        java.io.File file = new java.io.File(ENERGY_STATE_LOCK_FILE);
+        java.io.File file = new java.io.File(energyStateLockFile());
         RandomAccessFile lockFile = new RandomAccessFile(file, "rw");
         file.setReadable(true, false);
         file.setWritable(true, false);
@@ -1553,7 +1556,7 @@ public final class VehicleActuatorBridge {
     }
 
     private static CoordinateRead readCoordinateEnergyMarkerUnlocked(String boot) {
-        java.io.File stateFile = new java.io.File(ENERGY_STATE_COORDINATE_FILE);
+        java.io.File stateFile = new java.io.File(energyStateCoordinateFile());
         try {
             java.nio.file.Files.readAttributes(
                     stateFile.toPath(),
@@ -1584,7 +1587,7 @@ public final class VehicleActuatorBridge {
     private static void writeCoordinateEnergyMarkerAtomic(
             String boot, PublishedEnergyRequest marker) throws Exception {
         String encoded = encodeEnergyMarker(boot, marker);
-        java.io.File stateFile = new java.io.File(ENERGY_STATE_COORDINATE_FILE);
+        java.io.File stateFile = new java.io.File(energyStateCoordinateFile());
         java.io.File temporary = new java.io.File(
                 stateFile.getParentFile(),
                 stateFile.getName() + "." + android.os.Process.myPid() + "."

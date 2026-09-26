@@ -1,4 +1,5 @@
 package com.overdrive.app.surveillance;
+import com.overdrive.app.util.ScratchPaths;
 
 import android.content.Context;
 import android.graphics.Bitmap;
@@ -97,7 +98,9 @@ public final class ClusterMirrorController {
     // stays negligible. Capped, single-thread, torn down on stop.
     private static final long STILL_POLL_MS = 500;   // 2 Hz
     private static final long EXEC_KEEPALIVE_MS = 5000;
-    private static final String SCREENCAP_DIR = "/data/local/tmp/.overdrive/mirror";
+    private static String screencapDir() {
+        return ScratchPaths.path(".overdrive/mirror");
+    }
 
     /** Mode after {@link #startOnExec}. Reported to the UI so it can show the right state. */
     public static final int MODE_STOPPED       = 0;
@@ -372,7 +375,7 @@ public final class ClusterMirrorController {
 
     private String writeDiag(int w, int h, Rect target, String dump) {
         try {
-            java.io.File dir = new java.io.File(SCREENCAP_DIR);
+            java.io.File dir = new java.io.File(screencapDir());
             //noinspection ResultOfMethodCallIgnored
             dir.mkdirs();
             java.io.File f = new java.io.File(dir, "resize-diag.txt");
@@ -798,8 +801,8 @@ public final class ClusterMirrorController {
 
     /** {@code screencap -d <liveFissionId>} to a file, decode, return the bitmap or null. */
     private Bitmap captureStill() {
-        java.io.File f = new java.io.File(SCREENCAP_DIR, "m.png");
-        String cmd = "mkdir -p " + SCREENCAP_DIR + " && screencap -d " + fissionDisplayId
+        java.io.File f = new java.io.File(screencapDir(), "m.png");
+        String cmd = "mkdir -p " + screencapDir() + " && screencap -d " + fissionDisplayId
                 + " -p " + f.getAbsolutePath();
         Process p = null;
         try {

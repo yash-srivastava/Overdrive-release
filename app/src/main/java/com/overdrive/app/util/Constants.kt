@@ -1,4 +1,5 @@
 package com.overdrive.app.util
+import com.overdrive.app.util.ScratchPaths
 
 import com.overdrive.app.camera.CameraProfiles
 
@@ -15,10 +16,12 @@ object Constants {
     const val HTTP_PORT = 8080
     
     // Directories
-    const val STREAM_DIR = "/data/local/tmp/cam_stream"
+    private val streamDir: String
+        get() = ScratchPaths.path("cam_stream")
     const val APP_STREAM_DIR = "/storage/emulated/0/Android/data/com.overdrive.app/files/stream"
     const val DEFAULT_OUTPUT_DIR = "/sdcard/DCIM/BYDCam"
-    const val LOG_DIR = "/data/local/tmp"
+    private val logDir: String
+        get() = ScratchPaths.getDir()
     
     // Camera Configuration (legacy Seal/Atto defaults)
     val PANO_WIDTH  = CameraProfiles.getLegacyDefault().panoWidth

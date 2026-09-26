@@ -252,7 +252,7 @@ class ZrokController(
         // Use executeShellScript so toybox `pkill -f 'zrok'` can't
         // self-match the calling shell's argv and drop trailing commands.
         adbLauncher.executeShellScript(
-            "rm -f ${ZrokLauncher.ZROK_WATCHDOG_SCRIPT} 2>/dev/null\n" +
+            "rm -f ${ZrokLauncher.zrokWatchdogScript} 2>/dev/null\n" +
                     com.overdrive.app.launcher.DaemonLauncher.psAwkKillLine("zrok") +
                     "killall -9 zrok 2>/dev/null\n" +
                     "echo done\n",

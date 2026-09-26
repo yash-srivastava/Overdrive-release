@@ -1,4 +1,5 @@
 package com.overdrive.app.updater;
+import com.overdrive.app.util.ScratchPaths;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -59,7 +60,9 @@ public class AppUpdater {
     // the same failure; a NEW failure carries a different `ts` and re-arms.
     private static final String PREF_LAST_CONSUMED_FAILURE_TS = "last_consumed_failure_ts";
     // Also persist to filesystem (survives app reinstall, unlike SharedPreferences)
-    private static final String UPDATE_TIMESTAMP_FILE = "/data/local/tmp/overdrive_update_timestamp";
+    private static String updateTimestampFile() {
+        return ScratchPaths.path("overdrive_update_timestamp");
+    }
 
     /** Per-channel SharedPreferences baseline key. */
     private static String prefKeyForChannel(String channel) {
@@ -67,7 +70,7 @@ public class AppUpdater {
     }
     /** Per-channel filesystem baseline path (survives app reinstall). */
     private static String timestampFileForChannel(String channel) {
-        return UPDATE_TIMESTAMP_FILE + "_" + channel;
+        return updateTimestampFile() + "_" + channel;
     }
 
     /** Channels the app understands. Used to validate runtime selection. */
@@ -142,9 +145,13 @@ public class AppUpdater {
         installInFlight = false;
     }
     // Version file readable by daemon process (SharedPreferences are per-process)
-    public static final String VERSION_FILE = "/data/local/tmp/overdrive_version";
+    public static String versionFile() {
+        return ScratchPaths.path("overdrive_version");
+    }
     // Sentinels for the post-update handshake (see UpdateLifecycle).
-    private static final String UPDATE_IN_PROGRESS_FILE = UpdateLifecycle.UPDATE_IN_PROGRESS_FILE;
+    private static String updateInProgressFile() {
+        return UpdateLifecycle.updateInProgressFile();
+    }
 
     /**
      * Build a ps+awk+kill snippet that kills processes whose argv contains
@@ -160,7 +167,6 @@ public class AppUpdater {
             + "| awk '{print $1}' | while read pid; do "
             + "if [ \"$pid\" != \"$MY_PID\" ]; then kill -9 $pid 2>/dev/null; fi; done\n";
     }
-
     private static boolean isDiLink5ModeSelected() {
         try {
             com.overdrive.app.camera.dilink5.DiLink5Platform
@@ -189,7 +195,10 @@ public class AppUpdater {
                 + "echo \"camera capture child still running: $CAPTURE_PIDS\" >&2; "
                 + "exit 1; fi\n";
     }
-    private static final String POST_UPDATE_FILE = UpdateLifecycle.POST_UPDATE_FILE;
+
+    private static String postUpdateFile() {
+        return UpdateLifecycle.postUpdateFile();
+    }
 
     private final Context context;
     private volatile boolean cancelled = false;
@@ -242,7 +251,7 @@ public class AppUpdater {
     private static boolean canWriteLocalTmp() {
         Boolean cached = canWriteTmpCached;
         if (cached != null) return cached;
-        File probe = new File("/data/local/tmp/.overdrive_updater_probe");
+        File probe = new File(ScratchPaths.path(".overdrive_updater_probe"));
         boolean ok;
         try {
             try (FileOutputStream fos = new FileOutputStream(probe)) {
@@ -531,7 +540,7 @@ public class AppUpdater {
         try {
             String execCommand = command;
             if (deadlineMs > 0) {
-                pidFile = "/data/local/tmp/.appupdater_pid_" + System.nanoTime();
+                pidFile = ScratchPaths.path(".appupdater_pid_" + System.nanoTime());
                 execCommand = "echo $$ > " + pidFile + "; " + command;
             }
             final String pidFileForReaper = pidFile;
@@ -648,7 +657,7 @@ public class AppUpdater {
         // Direct path — write the script to a tmp file ourselves and exec it.
         // Same self-match defense as the ADB path: the running shell's argv
         // is just `sh <path>`, no daemon pattern visible to pkill.
-        String scriptPath = "/data/local/tmp/.appupdater_script_" + System.nanoTime() + ".sh";
+        String scriptPath = ScratchPaths.path(".appupdater_script_") + System.nanoTime() + ".sh";
         try {
             java.io.File scriptFile = new java.io.File(scriptPath);
             try (java.io.FileWriter fw = new java.io.FileWriter(scriptFile)) {
@@ -702,15 +711,18 @@ public class AppUpdater {
         }
     }
 
-    private static final String APK_PATH = "/data/local/tmp/overdrive_update.apk";
     private static final long MIB = 1024L * 1024L;
     private static final long MIN_UPDATE_FREE_BYTES = 350L * MIB;
     private static final long UPDATE_INSTALL_HEADROOM_BYTES = 128L * MIB;
     private static final String STORAGE_ERROR_MESSAGE =
             "Not enough storage to update Overdrive. Free space on the head unit and try again.";
 
+    private static String apkPath() {
+        return ScratchPaths.path("overdrive_update.apk");
+    }
+
     private String getApkPath() {
-        return APK_PATH;
+        return apkPath();
     }
 
     private void cleanupLeftoverApk() {
@@ -719,8 +731,8 @@ public class AppUpdater {
             // if Telegram never came back online to consume it, the user has
             // already noticed the URL change through other means and a "you
             // were just updated" message would be confusing days later.
-            String cmd = "rm -f " + APK_PATH + "; " +
-                    "find " + UpdateLifecycle.TELEGRAM_POST_UPDATE_HINT_FILE +
+            String cmd = "rm -f " + apkPath() + "; " +
+                    "find " + UpdateLifecycle.telegramPostUpdateHintFile() +
                     " -mmin +1440 -delete 2>/dev/null; echo done";
             runShell(cmd, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
                 @Override public void onLog(String m) {}
@@ -771,12 +783,12 @@ public class AppUpdater {
             // Reclaim a partial APK before measuring. This also leaves enough
             // room for callers to persist the error when a prior download filled
             // the partition.
-            File stagedApk = new File(APK_PATH);
+            File stagedApk = new File(apkPath());
             if (stagedApk.exists() && !stagedApk.delete()) {
                 Log.w(TAG, "Could not delete stale update APK before storage check");
             }
 
-            long available = new StatFs("/data/local/tmp").getAvailableBytes();
+            long available = new StatFs(ScratchPaths.getDir()).getAvailableBytes();
             long required = requiredUpdateFreeBytes(latestApkSizeBytes);
             if (available >= required) return null;
 
@@ -921,19 +933,19 @@ public class AppUpdater {
                     // (numericVersion returns "" for a bare/unknown label) and belong
                     // to THIS channel, or we skip the shortcut and defer to timestamp.
                     //
-                    // Compare against getDisplayVersion() — the VERSION_FILE-first
+                    // Compare against getDisplayVersion() — the versionFile()-first
                     // label — NOT getInstalledVersion() (raw BuildConfig). On a
                     // rolling tag the compiled versionName may stay pinned across
                     // re-uploads (it is pinned at 33.0 today), so BuildConfig would
                     // report a stale number and this shortcut would RE-OFFER the
-                    // just-installed build forever. VERSION_FILE is advanced ONLY on
+                    // just-installed build forever. versionFile() is advanced ONLY on
                     // pm-install success (persistVersionToFile on the rc==0 path) to
                     // the real filename-derived label, and restored on failure, so it
                     // faithfully tracks what actually landed. A fresh sideload (no
-                    // VERSION_FILE) falls back to the BuildConfig identity, which is
+                    // versionFile()) falls back to the BuildConfig identity, which is
                     // then the user's true flashed version — still correct for the
                     // strand case. getDisplayVersion always yields a label for the
-                    // running channel (VERSION_FILE is channel-guarded to "" on a
+                    // running channel (versionFile() is channel-guarded to "" on a
                     // cross-channel value, then it drops to BuildConfig), so the
                     // channel check below holds.
                     String remoteNumeric = numericVersion(remoteVersion);
@@ -1120,14 +1132,14 @@ public class AppUpdater {
                 if (canWriteLocalTmp()) {
                     // Direct OkHttp — runs synchronously on the executor thread.
                     try {
-                        downloadApkOkHttp(latestDownloadUrl, APK_PATH, callback);
+                        downloadApkOkHttp(latestDownloadUrl, apkPath(), callback);
                         dlResult[0] = "OK";
                     } catch (Exception e) {
                         dlResult[0] = "ERROR: " + (e.getMessage() == null ? "download failed" : e.getMessage());
                     }
                     dlDone[0] = true;
                 } else {
-                    String downloadCmd = buildDownloadCommand(latestDownloadUrl, APK_PATH);
+                    String downloadCmd = buildDownloadCommand(latestDownloadUrl, apkPath());
                     // Bulk lane: the command itself deadlines at 600s (timeout/
                     // --max-time inside buildDownloadCommand); 640s of margin.
                     runShellLong(downloadCmd, DOWNLOAD_DEADLINE_MS, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
@@ -1154,7 +1166,7 @@ public class AppUpdater {
                 }
 
                 if (cancelled) {
-                    runShell("rm -f " + APK_PATH, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
+                    runShell("rm -f " + apkPath(), new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
                         @Override public void onLog(String m) {}
                         @Override public void onLaunched() {}
                         @Override public void onError(String e) {}
@@ -1175,7 +1187,7 @@ public class AppUpdater {
                 postProgress(callback, "Verifying download...");
                 final boolean[] szDone = {false};
                 final String[] szResult = {null};
-                runShell("stat -c%s " + APK_PATH + " 2>/dev/null || echo 0",
+                runShell("stat -c%s " + apkPath() + " 2>/dev/null || echo 0",
                         new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
                     @Override public void onLog(String message) { szResult[0] = message.trim(); }
                     @Override public void onLaunched() {
@@ -1195,7 +1207,7 @@ public class AppUpdater {
                 long fileSize = 0;
                 try { fileSize = Long.parseLong(szResult[0].trim()); } catch (Exception ignored) {}
                 if (fileSize < 1_000_000) {
-                    runShell("rm -f " + APK_PATH, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
+                    runShell("rm -f " + apkPath(), new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
                         @Override public void onLog(String m) {}
                         @Override public void onLaunched() {}
                         @Override public void onError(String e) {}
@@ -1236,7 +1248,7 @@ public class AppUpdater {
                 final String channel = pendingChannel != null ? pendingChannel : resolveChannel();
                 final String priorUpdateTimestamp = getLastUpdateTimestamp(channel);
                 // Snapshot the prior display label too, so a failed install can
-                // restore VERSION_FILE / PREF_UPDATED_VERSION — otherwise the
+                // restore versionFile() / PREF_UPDATED_VERSION — otherwise the
                 // About/web "current version" shows the build that DIDN'T land.
                 final String priorDisplayVersion = getDisplayVersion(context);
                 preparedChannel = channel;
@@ -1318,8 +1330,8 @@ public class AppUpdater {
 
                 // Bulk lane: pm install of a ~60MB APK can run minutes on slow
                 // flash with no output; must not hold or sever the control lane.
-                String installCmd = "pm install -r -d " + APK_PATH +
-                    "; rm -f " + APK_PATH +
+                String installCmd = "pm install -r -d " + apkPath() +
+                    "; rm -f " + apkPath() +
                     "; sleep 2; am start -n com.overdrive.app/.ui.MainActivity" +
                     " --ez " + UpdateLifecycle.EXTRA_POST_UPDATE + " true" +
                     " --ez minimize_on_start true";
@@ -1391,7 +1403,7 @@ public class AppUpdater {
                                     @Override public void onError(String e) {}
                                 });
                     }
-                    // Restore VERSION_FILE to the prior display label so the
+                    // Restore versionFile() to the prior display label so the
                     // About/web "current version" doesn't show the build that
                     // failed to install. (persistVersionToFile skips empty.)
                     if (priorDisplayVersion != null && !DISPLAY_VERSION_FALLBACK.equals(priorDisplayVersion)) {
@@ -1401,7 +1413,7 @@ public class AppUpdater {
                     // never landed, so there's nothing for the next launch to
                     // recover from (rm APK mirrors the cancel/size-fail paths).
                     runShell(
-                            "rm -f " + UPDATE_IN_PROGRESS_FILE + " " + POST_UPDATE_FILE + " " + APK_PATH,
+                            "rm -f " + updateInProgressFile() + " " + postUpdateFile() + " " + apkPath(),
                             new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
                                 @Override public void onLog(String m) {}
                                 @Override public void onLaunched() {}
@@ -1411,7 +1423,7 @@ public class AppUpdater {
                 } else {
                     // Install succeeded — NOW advance the persisted display label
                     // (the pre-install write at step 3 was removed so a failed
-                    // install can never leave VERSION_FILE pointing at a build
+                    // install can never leave versionFile() pointing at a build
                     // that didn't land). Guarded out for the "unknown" sentinel
                     // by persistVersionToFile itself.
                     persistVersionToFile(remoteVersion);
@@ -1441,7 +1453,7 @@ public class AppUpdater {
     // NOT touch ANY of core's self-update bookkeeping:
     //   - no {@link #stopAllDaemons()} / kill cascade (we are NOT replacing
     //     OURSELVES, so no core process needs to die),
-    //   - no per-channel baseline / VERSION_FILE / PREF_JUST_UPDATED writes
+    //   - no per-channel baseline / versionFile() / PREF_JUST_UPDATED writes
     //     (those track CORE's version, not the companion's),
     //   - no `am start` relaunch of MainActivity.
     // `pm install -r` of a DIFFERENT package never kills core's process, so the
@@ -1450,8 +1462,9 @@ public class AppUpdater {
     // when the app UID can't write /data/local/tmp). The core self-update
     // methods ({@link #downloadAndInstall} / {@link #runDetachedInstall}) are
     // left BYTE-IDENTICAL by this addition.
-    private static final String COMPANION_APK_PATH =
-            "/data/local/tmp/overdrive_companion.apk";
+    private static String companionApkPath() {
+        return ScratchPaths.path("overdrive_companion.apk");
+    }
 
     /** No-op shell callback for fire-and-forget cleanup commands. */
     private static final com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback NOOP_SHELL =
@@ -1522,7 +1535,7 @@ public class AppUpdater {
                 }
 
                 // Step 2: download to a companion-specific path (NEVER the core
-                // APK_PATH, so a concurrent core update and this can't clobber
+                // apkPath(), so a concurrent core update and this can't clobber
                 // each other's staged bytes). Same two transfer paths as the
                 // core install: direct OkHttp when we can write /data/local/tmp
                 // (daemon UID), else the ADB-tunnelled shell download.
@@ -1531,14 +1544,14 @@ public class AppUpdater {
                 final String[] dlResult = {null};
                 if (canWriteLocalTmp()) {
                     try {
-                        downloadApkOkHttp(downloadUrl, COMPANION_APK_PATH, callback);
+                        downloadApkOkHttp(downloadUrl, companionApkPath(), callback);
                         dlResult[0] = "OK";
                     } catch (Exception e) {
                         dlResult[0] = "ERROR: " + (e.getMessage() == null ? "download failed" : e.getMessage());
                     }
                 } else {
                     final boolean[] dlDone = {false};
-                    String downloadCmd = buildDownloadCommand(downloadUrl, COMPANION_APK_PATH);
+                    String downloadCmd = buildDownloadCommand(downloadUrl, companionApkPath());
                     runShellLong(downloadCmd, DOWNLOAD_DEADLINE_MS, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
                         @Override public void onLog(String m) { dlResult[0] = m; }
                         @Override public void onLaunched() { dlDone[0] = true; synchronized (dlDone) { dlDone.notify(); } }
@@ -1549,7 +1562,7 @@ public class AppUpdater {
                 }
 
                 if (cancelled) {
-                    runShell("rm -f " + COMPANION_APK_PATH, NOOP_SHELL);
+                    runShell("rm -f " + companionApkPath(), NOOP_SHELL);
                     postInstallError(callback, "Cancelled");
                     return;
                 }
@@ -1563,7 +1576,7 @@ public class AppUpdater {
                 // Step 3: size sanity check (same >=1MB floor as the core path).
                 final boolean[] szDone = {false};
                 final String[] szResult = {null};
-                runShell("stat -c%s " + COMPANION_APK_PATH + " 2>/dev/null || echo 0",
+                runShell("stat -c%s " + companionApkPath() + " 2>/dev/null || echo 0",
                         new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
                     @Override public void onLog(String m) { szResult[0] = m.trim(); }
                     @Override public void onLaunched() { szDone[0] = true; synchronized (szDone) { szDone.notify(); } }
@@ -1573,7 +1586,7 @@ public class AppUpdater {
                 long fileSize = 0;
                 try { fileSize = Long.parseLong(szResult[0].trim()); } catch (Exception ignored) {}
                 if (fileSize < 1_000_000) {
-                    runShell("rm -f " + COMPANION_APK_PATH, NOOP_SHELL);
+                    runShell("rm -f " + companionApkPath(), NOOP_SHELL);
                     postInstallError(callback, "Invalid APK (size: " + fileSize + ")");
                     return;
                 }
@@ -1584,8 +1597,8 @@ public class AppUpdater {
                 postProgress(callback, "Installing launcher...");
                 final boolean[] done = {false};
                 final String[] result = {null};
-                String installCmd = "pm install -r " + COMPANION_APK_PATH
-                        + "; rm -f " + COMPANION_APK_PATH;
+                String installCmd = "pm install -r " + companionApkPath()
+                        + "; rm -f " + companionApkPath();
                 runShellLong(installCmd, INSTALL_DEADLINE_MS, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
                     @Override public void onLog(String m) { Log.i(TAG, "Companion install: " + m); result[0] = m; }
                     @Override public void onLaunched() { done[0] = true; synchronized (done) { done.notify(); } }
@@ -1599,7 +1612,7 @@ public class AppUpdater {
                     postProgress(callback, "Launcher installed.");
                     runCallback(callback::onSuccess);
                 } else {
-                    runShell("rm -f " + COMPANION_APK_PATH, NOOP_SHELL);
+                    runShell("rm -f " + companionApkPath(), NOOP_SHELL);
                     postInstallError(callback, "Install failed: " + output);
                 }
             } catch (Exception e) {
@@ -2040,12 +2053,12 @@ public class AppUpdater {
             } else {
                 cleanup(timestampFileForChannel(channel));
             }
-            cleanup(UPDATE_IN_PROGRESS_FILE + " " + POST_UPDATE_FILE + " "
-                    + APK_PATH + " /data/local/tmp/overdrive_install.sh "
-                    + "/data/local/tmp/overdrive_install.sh.tmp");
+            cleanup(updateInProgressFile() + " " + postUpdateFile() + " "
+                    + apkPath() + " " + ScratchPaths.path("overdrive_install.sh") + " "
+                    + ScratchPaths.path("overdrive_install.sh.tmp"));
             runShell(
-                    "for S in /data/local/tmp/camera_daemon.disabled "
-                            + "/data/local/tmp/acc_sentry_daemon.disabled; do "
+                    "for S in " + ScratchPaths.path("camera_daemon.disabled") + " "
+                            + ScratchPaths.path("acc_sentry_daemon.disabled") + "; do "
                             + "R=$(head -1 \"$S\" 2>/dev/null); "
                             + "case \"$R\" in 'disabled for update'*|"
                             + "'disabled by stopAllDaemons sweep'*|"
@@ -2083,8 +2096,8 @@ public class AppUpdater {
     private boolean runDetachedInstall(InstallCallback callback, String channel,
                                        String priorUpdateTimestamp,
                                        String priorDisplayVersion) {
-        String scriptPath = "/data/local/tmp/overdrive_install.sh";
-        String logPath = "/data/local/tmp/overdrive_install.log";
+        String scriptPath = ScratchPaths.path("overdrive_install.sh");
+        String logPath = ScratchPaths.path("overdrive_install.log");
         String diLink5CaptureCleanup = diLink5CaptureKillScript();
 
         StringBuilder script = new StringBuilder();
@@ -2093,17 +2106,17 @@ public class AppUpdater {
         script.append("exec >").append(logPath).append(" 2>&1\n");
         script.append("echo \"[install] starting at $(date)\"\n");
         // Step 1: plant sentinels so the new MainActivity recovers correctly.
-        script.append("echo 'update at '$(date) > ").append(UPDATE_IN_PROGRESS_FILE).append("\n");
-        script.append("echo 'update at '$(date) > ").append(POST_UPDATE_FILE).append("\n");
+        script.append("echo 'update at '$(date) > ").append(updateInProgressFile()).append("\n");
+        script.append("echo 'update at '$(date) > ").append(postUpdateFile()).append("\n");
         // Step 2: plant the camera disable sentinel so any watchdog we miss
         // exits on its next iteration, then kill everything in one syscall
         // per family. Single broad pkill on 'cam_daemon' / 'acc_sentry' takes
         // out watchdog + daemon together — no kill-order race, no sleep
         // window for one to respawn the other. Each `2>/dev/null` so a
         // "no such process" exit doesn't abort the script.
-        script.append("[ -f /data/local/tmp/camera_daemon.disabled ] || "
-                + "echo \"disabled for update at $(date)\" > /data/local/tmp/camera_daemon.disabled\n");
-        script.append("chmod 666 /data/local/tmp/camera_daemon.disabled 2>/dev/null\n");
+        script.append("[ -f " + ScratchPaths.path("camera_daemon.disabled") + " ] || "
+                + "echo \"disabled for update at $(date)\" > " + ScratchPaths.path("camera_daemon.disabled") + "\n");
+        script.append("chmod 666 " + ScratchPaths.path("camera_daemon.disabled") + " 2>/dev/null\n");
         // Plant the acc-sentry sentinel so its shell watchdog
         // (start_acc_sentry.sh) bails out on its next iteration if our pkill
         // misses a respawn race. Cleared below alongside camera_daemon.disabled.
@@ -2117,9 +2130,9 @@ public class AppUpdater {
         // destroy that record and resurrect a user-stopped tunnel/bot. The
         // pkill cascade below takes those daemons out regardless. Mirrors
         // UpdateLifecycle's core-only sentinel handling.
-        script.append("[ -f /data/local/tmp/acc_sentry_daemon.disabled ] || "
-                + "echo \"disabled for update at $(date)\" > /data/local/tmp/acc_sentry_daemon.disabled\n");
-        script.append("chmod 666 /data/local/tmp/acc_sentry_daemon.disabled 2>/dev/null\n");
+        script.append("[ -f " + ScratchPaths.path("acc_sentry_daemon.disabled") + " ] || "
+                + "echo \"disabled for update at $(date)\" > " + ScratchPaths.path("acc_sentry_daemon.disabled") + "\n");
+        script.append("chmod 666 " + ScratchPaths.path("acc_sentry_daemon.disabled") + " 2>/dev/null\n");
         script.append(psAwkKillLine("cam_daemon"));
         script.append(diLink5CaptureCleanup);
         script.append(psAwkKillLine("acc_sentry"));
@@ -2136,36 +2149,36 @@ public class AppUpdater {
         script.append("killall -9 sing-box 2>/dev/null\n");
         script.append(psAwkKillLine("tailscaled"));
         script.append("killall -9 tailscaled 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/start_cam_daemon.sh "
-                + "/data/local/tmp/cam_watchdog.pid 2>/dev/null\n");
-        script.append("rm -rf /data/local/tmp/cam_watchdog.lock 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/start_acc_sentry.sh "
-                + "/data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n");
-        script.append("rm -rf /data/local/tmp/acc_sentry_watchdog.lock 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/start_zrok.sh 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/start_telegram.sh 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.path("start_cam_daemon.sh") + " "
+                + ScratchPaths.path("cam_watchdog.pid") + " 2>/dev/null\n");
+        script.append("rm -rf " + ScratchPaths.path("cam_watchdog.lock") + " 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.path("start_acc_sentry.sh") + " "
+                + ScratchPaths.path("acc_sentry_daemon.lock") + " 2>/dev/null\n");
+        script.append("rm -rf " + ScratchPaths.path("acc_sentry_watchdog.lock") + " 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.path("start_zrok.sh") + " 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.path("start_telegram.sh") + " 2>/dev/null\n");
 
         // Per-daemon lock files (mirrors DaemonLauncher's killDaemonViaAdb
         // cleanup) so the relaunched MainActivity's daemon supervisor doesn't
         // refuse to start because a stale lock looks alive.
-        script.append("rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/telegram_bot_daemon.lock 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/*_daemon.lock 2>/dev/null\n");
-        script.append("rm -f /data/local/tmp/cam_watchdog.pid 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.path("camera_daemon.lock") + " 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.path("acc_sentry_daemon.lock") + " 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.path("telegram_bot_daemon.lock") + " 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.getDir() + "/*_daemon.lock 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.path("cam_watchdog.pid") + " 2>/dev/null\n");
         // Sweep ONLY the transient config staging siblings a daemon killed
         // mid-write may orphan (overdrive_config.json.tmp.<pid> from the atomic
         // write, and the .bak.tmp staging file). MUST NOT touch the live config,
         // its .bak, or .bad — those are the recovery copies. Explicit suffixes,
         // never a broad overdrive_config* / *.json glob.
-        script.append("rm -f /data/local/tmp/overdrive_config.json.tmp.* "
-                + "/data/local/tmp/overdrive_config.json.bak.tmp 2>/dev/null\n");
+        script.append("rm -f " + ScratchPaths.path("overdrive_config.json.tmp.") + "* "
+                + ScratchPaths.path("overdrive_config.json.bak.tmp") + " 2>/dev/null\n");
         // Clear only machine-written CORE markers. Pre-existing UI/Telegram
         // markers are durable manual stop intent and survive the update.
-        // POST_UPDATE_FILE / UPDATE_IN_PROGRESS_FILE stay in place; the new
+        // postUpdateFile() / updateInProgressFile() stay in place; the new
         // process consumes them via UpdateLifecycle.
-        script.append("for S in /data/local/tmp/camera_daemon.disabled "
-                + "/data/local/tmp/acc_sentry_daemon.disabled; do\n");
+        script.append("for S in " + ScratchPaths.path("camera_daemon.disabled") + " "
+                + ScratchPaths.path("acc_sentry_daemon.disabled") + "; do\n");
         script.append("  R=$(head -1 \"$S\" 2>/dev/null)\n");
         script.append("  case \"$R\" in 'disabled for update'*|"
                 + "'disabled by stopAllDaemons sweep'*|'disabled by killDaemon'*) "
@@ -2177,10 +2190,10 @@ public class AppUpdater {
         // (-r). Stdout is captured into PM_OUT so step 4b can include the
         // failure reason in the progress JSON if `pm install` exits non-zero.
         script.append("echo \"[install] running pm install\"\n");
-        script.append("PM_OUT=$(pm install -r -d ").append(APK_PATH).append(" 2>&1)\n");
+        script.append("PM_OUT=$(pm install -r -d ").append(apkPath()).append(" 2>&1)\n");
         script.append("INSTALL_RC=$?\n");
         script.append("echo \"$PM_OUT\"\n");
-        script.append("rm -f ").append(APK_PATH).append("\n");
+        script.append("rm -f ").append(apkPath()).append("\n");
         // Step 4b: on `pm install` failure, write phase=error to the progress
         // JSON so the webapp's poller surfaces the failure instead of sitting
         // in reconnect-mode forever waiting for an upgraded daemon that will
@@ -2233,13 +2246,13 @@ public class AppUpdater {
               .append("\",\"priorDisplayVersion\":\"")
               .append(shellSafe(priorDisplayVersion))
               .append("\",\"ts\":%s}' ");
-        script.append("\"$PM_ESC\" \"$TS\" > /data/local/tmp/overdrive_update_progress.json\n");
+        script.append("\"$PM_ESC\" \"$TS\" > " + ScratchPaths.path("overdrive_update_progress.json") + "\n");
         script.append("  echo \"[install] FAILED rc=$INSTALL_RC\"\n");
         // Roll back the on-disk baseline + display files the daemon advanced
         // before pm install (the app-process consumeFailedUpdateError only
         // fixes the SharedPreferences half — these /data/local/tmp files need a
         // UID-2000 write, which we have right here). Restore the per-channel
-        // timestamp file and VERSION_FILE to their pre-attempt values so a
+        // timestamp file and versionFile() to their pre-attempt values so a
         // later reinstall-read or daemon-side display doesn't surface the build
         // that didn't land. Empty prior → remove the file (the legitimate
         // "no prior install" / sentinel state).
@@ -2256,7 +2269,7 @@ public class AppUpdater {
                   .append(timestampFileForChannel(safeChannel)).append("\n");
             // World-readable so the app process (UID 10xxx) reads the same
             // restored baseline the daemon (UID 2000) just wrote — matches the
-            // saveLastUpdateTimestamp / VERSION_FILE chmod contract.
+            // saveLastUpdateTimestamp / versionFile() chmod contract.
             script.append("  chmod 644 ").append(timestampFileForChannel(safeChannel)).append(" 2>/dev/null\n");
         } else {
             script.append("  rm -f ").append(timestampFileForChannel(safeChannel)).append("\n");
@@ -2264,17 +2277,17 @@ public class AppUpdater {
         if (priorDisplayVersion != null && !priorDisplayVersion.isEmpty()
                 && !DISPLAY_VERSION_FALLBACK.equals(priorDisplayVersion)) {
             script.append("  echo '").append(shellSafe(priorDisplayVersion)).append("' > ")
-                  .append(VERSION_FILE).append("\n");
+                  .append(versionFile()).append("\n");
             // World-readable so the app process can read it (cross-UID).
-            script.append("  chmod 644 ").append(VERSION_FILE).append(" 2>/dev/null\n");
+            script.append("  chmod 644 ").append(versionFile()).append(" 2>/dev/null\n");
         } else {
-            script.append("  rm -f ").append(VERSION_FILE).append("\n");
+            script.append("  rm -f ").append(versionFile()).append("\n");
         }
         // Clear the in-progress sentinel so the new MainActivity doesn't run a
         // post-update hard-reset for an install that never landed. Keep
-        // POST_UPDATE_FILE — its presence on a still-old-version app is the
+        // postUpdateFile() — its presence on a still-old-version app is the
         // signal MainActivity uses to read PROGRESS_FILE and show the error.
-        script.append("  rm -f ").append(UPDATE_IN_PROGRESS_FILE).append("\n");
+        script.append("  rm -f ").append(updateInProgressFile()).append("\n");
         // Telegram failure surfacing: if this was an IPC-triggered install
         // (handleInstallUpdate plants TELEGRAM_POST_UPDATE_HINT_FILE before pm
         // install — the web path does NOT), then on FAILURE we hand the reborn
@@ -2290,9 +2303,9 @@ public class AppUpdater {
         // failure hint BEFORE deleting the success hint (mutually exclusive:
         // the success "updated to X" message is then impossible for this run).
         script.append("  if [ -f ")
-              .append(UpdateLifecycle.TELEGRAM_POST_UPDATE_HINT_FILE)
+              .append(UpdateLifecycle.telegramPostUpdateHintFile())
               .append(" ]; then printf %s \"$PM_ESC\" > ")
-              .append(UpdateLifecycle.TELEGRAM_INSTALL_FAILED_HINT_FILE)
+              .append(UpdateLifecycle.telegramInstallFailedHintFile())
               .append("; fi\n");
         // Delete the Telegram post-update hint planted at install-time (it's
         // written unconditionally BEFORE pm install in handleInstallUpdate).
@@ -2302,7 +2315,7 @@ public class AppUpdater {
         // Telegram-triggered install stays silent on the SUCCESS channel (the
         // failure is instead surfaced via the FAILURE hint planted just above,
         // plus the app's PROGRESS_FILE path).
-        script.append("  rm -f ").append(UpdateLifecycle.TELEGRAM_POST_UPDATE_HINT_FILE).append("\n");
+        script.append("  rm -f ").append(UpdateLifecycle.telegramPostUpdateHintFile()).append("\n");
         script.append("else\n");
         // SUCCESS path: on the detached (daemon UID-2000) flow AppUpdater never
         // calls onSuccess (it returns right after spawning this script — see
@@ -2313,9 +2326,9 @@ public class AppUpdater {
         // onSuccess path, never reached here). Nothing else overwrites it until
         // the NEXT install's "queued" write, so delete it now — pure hygiene so
         // a fresh poll doesn't see a stale terminal record.
-        script.append("  rm -f /data/local/tmp/overdrive_update_progress.json\n");
+        script.append("  rm -f " + ScratchPaths.path("overdrive_update_progress.json") + "\n");
         // Advance the persisted display label NOW — and ONLY here, on pm-install
-        // success. VERSION_FILE drives the user-visible "current version" on every
+        // success. versionFile() drives the user-visible "current version" on every
         // surface (About / status / toast), so it must move only after the new
         // bytes actually landed; the pre-install write was removed for exactly
         // this reason. Mirror the failure-branch restore shape: echo the canonical
@@ -2325,14 +2338,14 @@ public class AppUpdater {
         if (remoteVersion != null && !remoteVersion.isEmpty()
                 && !"unknown".equals(remoteVersion)) {
             script.append("  echo '").append(shellSafe(remoteVersion)).append("' > ")
-                  .append(VERSION_FILE).append("\n");
-            script.append("  chmod 644 ").append(VERSION_FILE).append(" 2>/dev/null\n");
+                  .append(versionFile()).append("\n");
+            script.append("  chmod 644 ").append(versionFile()).append(" 2>/dev/null\n");
         }
         // Clear any stale FAILURE hint from a PRIOR failed install so the reborn
         // bot doesn't send a failure message on top of this success. (The
         // success hint is intentionally KEPT here so notifyTunnel frames the
         // "Overdrive updated to X" message.)
-        script.append("  rm -f ").append(UpdateLifecycle.TELEGRAM_INSTALL_FAILED_HINT_FILE).append("\n");
+        script.append("  rm -f ").append(UpdateLifecycle.telegramInstallFailedHintFile()).append("\n");
         script.append("fi\n");
         // Step 5: relaunch. Runs in both success and failure cases so the user
         // gets the app back either way (with the new APK on success, or with
@@ -2430,8 +2443,8 @@ public class AppUpdater {
         // the new MainActivity is the sole daemon orchestrator after install.
         final boolean[] markerDone = {false};
         String markerCmd =
-                "echo 'update at $(date)' > " + UPDATE_IN_PROGRESS_FILE + "; " +
-                "echo 'update at $(date)' > " + POST_UPDATE_FILE + "; " +
+                "echo 'update at $(date)' > " + updateInProgressFile() + "; " +
+                "echo 'update at $(date)' > " + postUpdateFile() + "; " +
                 "echo done";
         runShell(markerCmd, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
             @Override public void onLog(String m) {}
@@ -2468,15 +2481,18 @@ public class AppUpdater {
         // bugs.
         Log.i(TAG, "Killing daemons and watchdogs...");
         String killWatchdogsCmd =
-                "[ -f /data/local/tmp/camera_daemon.disabled ] || " +
-                "echo 'disabled for update at $(date)' > /data/local/tmp/camera_daemon.disabled\n" +
+                "[ -f " + ScratchPaths.path("camera_daemon.disabled") + " ] || " +
+                "echo 'disabled for update at $(date)' > " + ScratchPaths.path("camera_daemon.disabled") + "\n" +
                 psAwkKillLine("cam_daemon") +
                 diLink5CaptureCleanup +
                 psAwkKillLine("acc_sentry") +
-                "rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/cam_watchdog.pid /data/local/tmp/camera_daemon.lock 2>/dev/null\n" +
-                "rm -rf /data/local/tmp/cam_watchdog.lock 2>/dev/null\n" +
-                "rm -f /data/local/tmp/start_acc_sentry.sh /data/local/tmp/acc_sentry_daemon.lock 2>/dev/null\n" +
-                "rm -rf /data/local/tmp/acc_sentry_watchdog.lock 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.path("start_cam_daemon.sh") + " "
+                + ScratchPaths.path("cam_watchdog.pid") + " "
+                + ScratchPaths.path("camera_daemon.lock") + " 2>/dev/null\n" +
+                "rm -rf " + ScratchPaths.path("cam_watchdog.lock") + " 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.path("start_acc_sentry.sh") + " "
+                + ScratchPaths.path("acc_sentry_daemon.lock") + " 2>/dev/null\n" +
+                "rm -rf " + ScratchPaths.path("acc_sentry_watchdog.lock") + " 2>/dev/null\n" +
                 "echo done\n";
 
         final boolean[] wdDone = {false};
@@ -2534,7 +2550,7 @@ public class AppUpdater {
         // any stragglers (orphaned shells, late-respawn races). One syscall
         // per family is enough; no need to re-list watchdog vs daemon
         // separately because the broad pattern covers both.
-        // NOTE: we keep UPDATE_IN_PROGRESS_FILE / POST_UPDATE_FILE in place;
+        // NOTE: we keep updateInProgressFile() / postUpdateFile() in place;
         // the new process clears them after its own hard-reset pass.
         Log.i(TAG, "Final sweep for remaining processes...");
         // Single script-via-tmp-file invocation — `executeShellScript` writes
@@ -2562,17 +2578,20 @@ public class AppUpdater {
         // from our own. Preserving the original text keeps both readings correct
         // with no ambiguity to resolve downstream.
         String sweepScript =
-                "[ -f /data/local/tmp/zrok.disabled ] || "
-                + "echo \"disabled by stopAllDaemons sweep at $(date)\" > /data/local/tmp/zrok.disabled\n" +
-                "chmod 666 /data/local/tmp/zrok.disabled 2>/dev/null\n" +
-                "[ -f /data/local/tmp/acc_sentry_daemon.disabled ] || "
-                + "echo \"disabled by stopAllDaemons sweep at $(date)\" > /data/local/tmp/acc_sentry_daemon.disabled\n" +
-                "chmod 666 /data/local/tmp/acc_sentry_daemon.disabled 2>/dev/null\n" +
-                "[ -f /data/local/tmp/telegram_bot_daemon.disabled ] || "
-                + "echo \"disabled by stopAllDaemons sweep at $(date)\" > /data/local/tmp/telegram_bot_daemon.disabled\n" +
-                "chmod 666 /data/local/tmp/telegram_bot_daemon.disabled 2>/dev/null\n" +
-                "rm -f /data/local/tmp/cam_watchdog.pid 2>/dev/null\n" +
-                "rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/start_acc_sentry.sh /data/local/tmp/start_zrok.sh /data/local/tmp/start_telegram.sh 2>/dev/null\n" +
+                "[ -f " + ScratchPaths.path("zrok.disabled") + " ] || "
+                + "echo \"disabled by stopAllDaemons sweep at $(date)\" > " + ScratchPaths.path("zrok.disabled") + "\n" +
+                "chmod 666 " + ScratchPaths.path("zrok.disabled") + " 2>/dev/null\n" +
+                "[ -f " + ScratchPaths.path("acc_sentry_daemon.disabled") + " ] || "
+                + "echo \"disabled by stopAllDaemons sweep at $(date)\" > " + ScratchPaths.path("acc_sentry_daemon.disabled") + "\n" +
+                "chmod 666 " + ScratchPaths.path("acc_sentry_daemon.disabled") + " 2>/dev/null\n" +
+                "[ -f " + ScratchPaths.path("telegram_bot_daemon.disabled") + " ] || "
+                + "echo \"disabled by stopAllDaemons sweep at $(date)\" > " + ScratchPaths.path("telegram_bot_daemon.disabled") + "\n" +
+                "chmod 666 " + ScratchPaths.path("telegram_bot_daemon.disabled") + " 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.path("cam_watchdog.pid") + " 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.path("start_cam_daemon.sh") + " "
+                + ScratchPaths.path("start_acc_sentry.sh") + " "
+                + ScratchPaths.path("start_zrok.sh") + " "
+                + ScratchPaths.path("start_telegram.sh") + " 2>/dev/null\n" +
                 psAwkKillLine("cam_daemon") +
                 diLink5CaptureCleanup +
                 psAwkKillLine("acc_sentry") +
@@ -2588,8 +2607,9 @@ public class AppUpdater {
                 "killall -9 tailscaled 2>/dev/null\n" +
                 "killall -9 sing-box 2>/dev/null\n" +
                 "sleep 1\n" +
-                "rm -rf /data/local/tmp/cam_watchdog.lock /data/local/tmp/acc_sentry_watchdog.lock 2>/dev/null\n" +
-                "rm -f /data/local/tmp/*_daemon.lock 2>/dev/null\n" +
+                "rm -rf " + ScratchPaths.path("cam_watchdog.lock") + " "
+                + ScratchPaths.path("acc_sentry_watchdog.lock") + " 2>/dev/null\n" +
+                "rm -f " + ScratchPaths.getDir() + "/*_daemon.lock 2>/dev/null\n" +
                 "CAMERA_PIDS=$(ps -A -o PID,ARGS | grep -F 'cam_daemon' "
                 + "| grep -v grep | awk -v self=$$ '$1 != self {print $1}')\n" +
                 "if [ -n \"$CAMERA_PIDS\" ]; then "
@@ -2823,7 +2843,7 @@ public class AppUpdater {
             if (!legacy.isEmpty()) {
                 prefs.edit().putString(perChannelKey, legacy).commit();
             }
-            final String src = UPDATE_TIMESTAMP_FILE;
+            final String src = updateTimestampFile();
             final String dst = timestampFileForChannel(channel);
             runShell("[ -f " + src + " ] && [ ! -f " + dst + " ] && cp " + src + " " + dst
                             + " && chmod 644 " + dst + " 2>/dev/null; echo done",
@@ -2930,7 +2950,7 @@ public class AppUpdater {
             // lands mode 0600 (unreadable by the app UID), so the app keeps
             // reading its own stale per-UID SharedPreferences baseline and
             // re-offers the just-installed version forever. Mirrors the
-            // VERSION_FILE writes, which chmod 644 for the same reason.
+            // versionFile() writes, which chmod 644 for the same reason.
             runShell("echo '" + safeTs + "' > " + tsFile
                             + "; chmod 644 " + tsFile + " 2>/dev/null",
                     new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
@@ -2965,8 +2985,8 @@ public class AppUpdater {
             // "", and getDisplayVersion falls back to the BuildConfig identity
             // (correct, but loses the persisted GitHub label for same-tag
             // republishes). Same chmod precedent as the .byd_device_id file.
-            runShell("echo '" + shellSafe(version) + "' > " + VERSION_FILE
-                            + "; chmod 644 " + VERSION_FILE + " 2>/dev/null",
+            runShell("echo '" + shellSafe(version) + "' > " + versionFile()
+                            + "; chmod 644 " + versionFile() + " 2>/dev/null",
                     new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
                 @Override public void onLog(String m) {}
                 @Override public void onLaunched() {}
@@ -3052,7 +3072,7 @@ public class AppUpdater {
         String priorDisplayVersion = null;
         long recordTs = 0;
         try {
-            java.io.File f = new java.io.File("/data/local/tmp/overdrive_update_progress.json");
+            java.io.File f = new java.io.File(ScratchPaths.path("overdrive_update_progress.json"));
             StringBuilder sb = new StringBuilder();
             try (java.io.BufferedReader r = new java.io.BufferedReader(
                     new java.io.InputStreamReader(new java.io.FileInputStream(f)))) {
@@ -3114,7 +3134,7 @@ public class AppUpdater {
             // (priorDisplayVersion key present == the detached daemon path,
             // which advanced the label before pm install). A sync-path failure
             // record has NO prior* fields because the sync path already rolled
-            // back PREF_UPDATED_VERSION + VERSION_FILE inline — so a null here
+            // back PREF_UPDATED_VERSION + versionFile() inline — so a null here
             // means "already handled", and we must NOT remove() (that would wipe
             // the label the sync path just restored). Within a carrying record:
             // a real prior label is restored; the fallback/empty sentinel means
@@ -3153,7 +3173,7 @@ public class AppUpdater {
         // overwrites it. (This app-process unlink was also a no-op in practice
         // — the file is a UID-2000 0644 entry in a sticky shell-owned dir the
         // app UID can neither truncate nor unlink.)
-        try { new java.io.File(POST_UPDATE_FILE).delete(); } catch (Exception ignored) {}
+        try { new java.io.File(postUpdateFile()).delete(); } catch (Exception ignored) {}
         return err;
     }
 
@@ -3164,7 +3184,7 @@ public class AppUpdater {
      */
     private static boolean hasFailedUpdateMarker() {
         try {
-            java.io.File f = new java.io.File("/data/local/tmp/overdrive_update_progress.json");
+            java.io.File f = new java.io.File(ScratchPaths.path("overdrive_update_progress.json"));
             if (!f.exists()) return false;
             StringBuilder sb = new StringBuilder();
             try (java.io.BufferedReader r = new java.io.BufferedReader(
@@ -3526,7 +3546,7 @@ public class AppUpdater {
      * running binary: "<channel>-v<versionName>" (e.g. "alpha-v26.0",
      * "braveheart-v26.0"). This is the only version string that is ALWAYS
      * correct for the build actually running — unlike the persisted
-     * VERSION_FILE / PREF_UPDATED_VERSION, which are written only by the
+     * versionFile() / PREF_UPDATED_VERSION, which are written only by the
      * in-app updater and survive reinstall/sideload/cross-channel flashes, so
      * they go STALE (the "About shows alpha-v26 on a braveheart build" +
      * "check says already-updated" bugs). versionName must be bumped per
@@ -3543,14 +3563,14 @@ public class AppUpdater {
     /**
      * The GitHub release label that was actually downloaded+installed, as the
      * update flow recorded it (PREF_UPDATED_VERSION for the app process,
-     * VERSION_FILE for the daemon — both written from {@link #extractVersion}
+     * versionFile() for the daemon — both written from {@link #extractVersion}
      * of the installed APK's filename, e.g. "alpha-v26.1"). This is the version
      * the USER cares about: when an APK is re-published on the same release tag
      * without bumping gradle's versionName, BuildConfig.VERSION_NAME goes stale
      * but this label tracks the real GitHub build. Returns "" when nothing has
      * been installed via the in-app updater yet (fresh sideload / Studio run).
      *
-     * Staleness guard: VERSION_FILE / PREF_UPDATED_VERSION survive a
+     * Staleness guard: versionFile() / PREF_UPDATED_VERSION survive a
      * cross-channel flash, so we ONLY trust the persisted label when its channel
      * prefix matches the running build's channel (BuildConfig.UPDATE_CHANNEL).
      * On a mismatch (ran alpha, persisted label is braveheart, or vice-versa)
@@ -3599,7 +3619,7 @@ public class AppUpdater {
     /** Read VERSION_FILE (the daemon-readable persisted GitHub version). "" if absent. */
     private static String readVersionFile() {
         try {
-            File f = new File(VERSION_FILE);
+            File f = new File(versionFile());
             if (!f.exists()) return "";
             java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f));
             String line = r.readLine();
@@ -3627,7 +3647,7 @@ public class AppUpdater {
     /**
      * Context-free display version (daemon process). Same resolution as
      * {@link #getDisplayVersion}: prefer the persisted GitHub label (read from
-     * VERSION_FILE since the daemon has no SharedPreferences), else BuildConfig.
+     * versionFile() since the daemon has no SharedPreferences), else BuildConfig.
      */
     public static String getDisplayVersionFromFile() {
         return getDisplayVersion(null);

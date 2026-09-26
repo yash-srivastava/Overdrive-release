@@ -1,4 +1,5 @@
 package com.overdrive.app.launcher;
+import com.overdrive.app.util.ScratchPaths;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -91,17 +92,17 @@ public class ZrokRuntimeProbeTest {
     @Test
     public void commandRedactionDoesNotAlterNonZrokCommands() {
         String enable =
-                "HOME=/data/local/tmp /data/local/tmp/zrok enable 'secret token' "
+                "HOME=/data/local/tmp " + ScratchPaths.path("zrok") + " enable 'secret token' "
                         + "--headless 2>&1";
         String reserved =
-                "/data/local/tmp/zrok share reserved token-123 $ZROK_OVERRIDE --headless";
+                ScratchPaths.path("zrok") + " share reserved token-123 $ZROK_OVERRIDE --headless";
 
         assertEquals(
-                "HOME=/data/local/tmp /data/local/tmp/zrok enable [REDACTED] "
+                "HOME=/data/local/tmp " + ScratchPaths.path("zrok") + " enable [REDACTED] "
                         + "--headless 2>&1",
                 ZrokRuntimeProbe.redactCommand(enable));
         assertEquals(
-                "/data/local/tmp/zrok share reserved [REDACTED] "
+                ScratchPaths.path("zrok") + " share reserved [REDACTED] "
                         + "$ZROK_OVERRIDE --headless",
                 ZrokRuntimeProbe.redactCommand(reserved));
         assertEquals("echo harmless", ZrokRuntimeProbe.redactCommand("echo harmless"));

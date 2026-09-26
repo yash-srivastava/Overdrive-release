@@ -1,5 +1,7 @@
 package com.overdrive.app.config
 
+import com.overdrive.app.util.ScratchPaths
+
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
@@ -45,8 +47,10 @@ import java.util.concurrent.atomic.AtomicLong
 object UnifiedConfigManager {
     private const val TAG = "UnifiedConfig"
     
-    // Single source of truth - world-readable location
-    private const val CONFIG_PATH = "/data/local/tmp/overdrive_config.json"
+    // Resolve at call time because the shell probe can switch from the legacy
+    // directory to Shark's shared, non-executable app-files scratch directory.
+    private fun configPath(): String = ScratchPaths.path("overdrive_config.json")
+    private fun lockPath(): String = configPath() + ".lock"
     private const val LIFECYCLE_SNAPSHOT_MAX_BYTES = 2L * 1024L * 1024L
 
     // ==================== DOUBLE-BUFFERED, SEQ-STAMPED DURABILITY ====================
@@ -258,7 +262,7 @@ object UnifiedConfigManager {
             ConfigBackupService.recoverInterruptedRestoreUnderConfigLock()
         }
 
-        val configFile = File(CONFIG_PATH)
+        val configFile = File(configPath())
 
         if (!configFile.exists()) {
             Log.i(TAG, "Unified config not found, migrating from legacy configs...")
@@ -275,7 +279,7 @@ object UnifiedConfigManager {
                     Log.w(TAG, "Failed to re-assert permissions: ${e.message}")
                 }
             }
-            Log.i(TAG, "Unified config exists at $CONFIG_PATH")
+            Log.i(TAG, "Unified config exists at ${configPath()}")
             loadConfig()
         }
     }
@@ -283,7 +287,7 @@ object UnifiedConfigManager {
     /** Create the lock file 0666 (daemon UID) so the app UID can later open it. */
     private fun provisionLockFile() {
         try {
-            val lf = File(LOCK_PATH)
+            val lf = File(lockPath())
             if (!lf.exists()) {
                 lf.parentFile?.mkdirs()
                 lf.createNewFile()
@@ -408,7 +412,7 @@ object UnifiedConfigManager {
         val migrationPersisted = withConfigFileLockOrNull(
             "Legacy config migration"
         ) {
-            val cf = File(CONFIG_PATH)
+            val cf = File(configPath())
             val toPersist: JSONObject? = if (cf.exists() && cf.length() > 0L) {
                 try {
                     val onDisk = JSONObject(readLiveConfigText(cf))
@@ -438,7 +442,7 @@ object UnifiedConfigManager {
             if (writeResult.committed) {
                 val committed = writeResult.committedConfig ?: toPersist
                 cachedConfig = committed
-                stampFreshness(File(CONFIG_PATH).lastModified())
+                stampFreshness(File(configPath()).lastModified())
                 // Seed the last-known-good copies AT CREATION so there is never
                 // a "live file exists but no .bak" window for an app-UID torn
                 // write to fall into. The daemon (which runs init/migrate) can
@@ -458,7 +462,7 @@ object UnifiedConfigManager {
         } ?: false
 
         if (migrationPersisted) {
-            Log.i(TAG, "Migration complete. Unified config saved to $CONFIG_PATH")
+            Log.i(TAG, "Migration complete. Unified config saved to ${configPath()}")
         } else {
             Log.w(TAG, "Migration persistence deferred until the stable config lock is available")
         }
@@ -507,7 +511,7 @@ object UnifiedConfigManager {
      */
     @JvmStatic
     fun readDurableConfigForRestore(): JSONObject = withConfigFileLock {
-        val file = File(CONFIG_PATH)
+        val file = File(configPath())
         if (!file.exists()) return@withConfigFileLock createDefaultConfig()
         val encoded = readLiveConfigText(file)
         if (encoded.isBlank()) return@withConfigFileLock createDefaultConfig()
@@ -1219,30 +1223,30 @@ object UnifiedConfigManager {
 
     /** Caller must hold [withConfigFileLock], directly or through a public wrapper. */
     private fun readDurableConfigLockedStrict(): JSONObject {
-        val file = File(CONFIG_PATH)
+        val file = File(configPath())
         if (!file.isFile) {
             throw ConfigReadUnavailableException(
-                "Durable config is absent at $CONFIG_PATH"
+                "Durable config is absent at ${configPath()}"
             )
         }
         val encoded = readLiveConfigText(file)
         if (encoded.isBlank()) {
             throw ConfigReadUnavailableException(
-                "Durable config is empty at $CONFIG_PATH"
+                "Durable config is empty at ${configPath()}"
             )
         }
         return try {
             JSONObject(encoded)
         } catch (e: Exception) {
             throw IllegalStateException(
-                "Durable config is malformed at $CONFIG_PATH", e
+                "Durable config is malformed at ${configPath()}", e
             )
         }
     }
 
     @JvmStatic
     fun loadConfig(): JSONObject {
-        val configFile = File(CONFIG_PATH)
+        val configFile = File(configPath())
         
         // Check if file changed since last load
         // Cheap fast-path: serve the cache only when isCacheFresh proves the
@@ -1353,7 +1357,7 @@ object UnifiedConfigManager {
                     // makes it the dominant logcat line. Each Log.d is a synchronous
                     // write; gate it out of release builds.
                     if (com.overdrive.app.BuildConfig.DEBUG) {
-                        Log.d(TAG, "Config loaded from $CONFIG_PATH")
+                        Log.d(TAG, "Config loaded from ${configPath()}")
                     }
                     config
                 } else {
@@ -1465,7 +1469,7 @@ object UnifiedConfigManager {
                     val repaired = withConfigFileLockOrNull(
                         "Unrecoverable config repair"
                     ) {
-                        val cf = File(CONFIG_PATH)
+                        val cf = File(configPath())
                         var peerReadUnavailable = false
                         val peerGood = try {
                             if (cf.exists() && cf.length() > 0L) {
@@ -1706,7 +1710,7 @@ object UnifiedConfigManager {
             // (almost always) be greater than the file's mtime, so the
             // fileModified <= lastModified check would never trip and
             // a cross-UID write would never invalidate the cache.
-            stampFreshness(File(CONFIG_PATH).lastModified())
+            stampFreshness(File(configPath()).lastModified())
             // Mirror a last-known-good copy. loadConfig() restores from this
             // when the live file is found corrupt (including damage left by
             // legacy builds or external writers). Best-effort: a
@@ -1907,7 +1911,7 @@ object UnifiedConfigManager {
      */
     private fun writeBackupCopy(config: JSONObject) {
         try {
-            val configFile = File(CONFIG_PATH)
+            val configFile = File(configPath())
             val bakFile = File(configFile.parentFile, configFile.name + ".bak")
             val bakTmp = File(configFile.parentFile, configFile.name + ".bak.tmp")
             writeFileAndSync(bakTmp, config.toString(2), worldAccessible = true)
@@ -1958,7 +1962,7 @@ object UnifiedConfigManager {
     private fun nextConfigSeq(config: JSONObject): Long {
         val inMem = seqOf(config)
         val onDisk = try {
-            val cf = File(CONFIG_PATH)
+            val cf = File(configPath())
             if (cf.exists() && cf.length() > 0L) seqOf(JSONObject(cf.readText())) else 0L
         } catch (_: Exception) { 0L }
         val base = maxOf(inMem, onDisk)
@@ -2080,7 +2084,7 @@ object UnifiedConfigManager {
 
         val appBackup = readAppPrivateBackup() ?: return loaded
         val live = try {
-            val file = File(CONFIG_PATH)
+            val file = File(configPath())
             if (!file.exists() || file.length() <= 0L) return loaded
             JSONObject(readLiveConfigText(file))
         } catch (_: Exception) {
@@ -2111,7 +2115,7 @@ object UnifiedConfigManager {
     }
     
     private fun saveConfigInternal(config: JSONObject): ConfigWriteResult {
-        val configFile = File(CONFIG_PATH)
+        val configFile = File(configPath())
         configFile.parentFile?.mkdirs()
         val payload = config.toString(2)
 
@@ -2122,9 +2126,9 @@ object UnifiedConfigManager {
         //
         // When the app UID (10xxx) cannot create this sibling in sticky
         // /data/local/tmp, the write is deferred/rejected. It must never fall
-        // back to opening CONFIG_PATH with truncate semantics: a process kill
+        // back to opening configPath() with truncate semantics: a process kill
         // during that write can destroy the only live config.
-        // Per-PROCESS-unique tmp name (.tmp.<pid>): the rename onto CONFIG_PATH
+        // Per-PROCESS-unique tmp name (.tmp.<pid>): the rename onto configPath()
         // is atomic, but the sibling tmp itself must not be shared — two
         // writers (e.g. two daemon JVMs both running migrateFromLegacy on first
         // boot) using a fixed "${name}.tmp" could interleave write/rename on the
@@ -2136,7 +2140,7 @@ object UnifiedConfigManager {
             writeFileAndSync(tmpFile, payload, worldAccessible = true)
             if (tmpFile.renameTo(configFile)) {
                 if (syncDirectoryAfterRenameWithRetry(configFile.parentFile)) {
-                    Log.i(TAG, "Config saved to $CONFIG_PATH (atomic)")
+                    Log.i(TAG, "Config saved to ${configPath()} (atomic)")
                     return ConfigWriteResult(
                         ConfigWriteState.COMMITTED_DURABLE,
                         config
@@ -2147,7 +2151,7 @@ object UnifiedConfigManager {
                     payload,
                     config
                 )
-                Log.w(TAG, "Config saved to $CONFIG_PATH (committed; " +
+                Log.w(TAG, "Config saved to ${configPath()} (committed; " +
                     "directory durability uncertain)")
                 return ConfigWriteResult(
                     ConfigWriteState.COMMITTED_UNCERTAIN,
@@ -3230,7 +3234,7 @@ object UnifiedConfigManager {
     fun readVehicleNominalKwhStrict(): Double {
         val config = try {
             withConfigFileLock {
-                val file = File(CONFIG_PATH)
+                val file = File(configPath())
                 if (!file.exists()) {
                     null
                 } else {
@@ -3882,7 +3886,7 @@ object UnifiedConfigManager {
      */
     private fun deltaPresentOnDisk(section: String, payload: JSONObject): Boolean {
         return try {
-            val cf = File(CONFIG_PATH)
+            val cf = File(configPath())
             if (!cf.exists() || cf.length() == 0L) return false
             val onDisk = JSONObject(cf.readText())
             val stamp = mutationStamp(payload)
@@ -4205,7 +4209,7 @@ object UnifiedConfigManager {
     @JvmStatic
     fun isVehicleOnOnlyModeSnapshot(): Boolean {
         return try {
-            val file = File(CONFIG_PATH)
+            val file = File(configPath())
             val length = file.length()
             if (!file.isFile ||
                 length <= 0L ||
@@ -4286,15 +4290,13 @@ object UnifiedConfigManager {
     // peer's just-committed section (stale-snapshot lost update). An OS flock
     // held across the whole critical section makes those writers mutually
     // exclude. World-RW so any daemon UID can acquire it.
-    private const val LOCK_PATH = "$CONFIG_PATH.lock"
-
     /**
      * Every writer must lock this one stable inode. The live config inode is
      * replaceable by the daemon's atomic rename and can therefore never be a
      * lock fallback: an app locking the old live inode would not exclude a
-     * daemon locking [LOCK_PATH].
+     * daemon locking [lockPath()].
      */
-    private fun lockTargetFor(): File = File(LOCK_PATH)
+    private fun lockTargetFor(): File = File(lockPath())
 
     private class ConfigLockUnavailableException(
         message: String,
@@ -4303,7 +4305,7 @@ object UnifiedConfigManager {
 
     /**
      * Run [body] while holding BOTH the in-JVM monitor AND an exclusive OS
-     * advisory lock on [LOCK_PATH], so the enclosed read-modify-write is
+     * advisory lock on [lockPath()], so the enclosed read-modify-write is
      * atomic across processes. The body never runs unless the OS lock was
      * acquired. A daemon may create a missing lock file; an app process must
      * defer until the daemon provisions it because the app cannot safely choose
@@ -4329,7 +4331,7 @@ object UnifiedConfigManager {
             val lockFile = lockTargetFor()
             if (android.os.Process.myUid() != SHELL_DAEMON_UID && !lockFile.isFile) {
                 throw ConfigLockUnavailableException(
-                    "Stable config lock $LOCK_PATH is absent; " +
+                    "Stable config lock ${lockPath()} is absent; " +
                         "local mutation must retry after daemon initialization"
                 )
             }
@@ -4351,7 +4353,7 @@ object UnifiedConfigManager {
                     } catch (_: Exception) {}
                 } catch (e: Exception) {
                     throw ConfigLockUnavailableException(
-                        "Stable config lock $LOCK_PATH could not be acquired: " +
+                        "Stable config lock ${lockPath()} could not be acquired: " +
                             (e.message ?: e.javaClass.simpleName),
                         e
                     )
@@ -4436,7 +4438,7 @@ object UnifiedConfigManager {
         if (android.os.Process.myUid() != SHELL_DAEMON_UID) return null
         return withConfigFileLockOrNull("Config schema migration") {
             try {
-                val cf = File(CONFIG_PATH)
+                val cf = File(configPath())
                 if (cf.exists()) {
                     val fresh = JSONObject(cf.readText())
                     applyDefaults(fresh)        // idempotent; folds legacy geocoding keys
@@ -4485,19 +4487,19 @@ object UnifiedConfigManager {
      * Get the config file path (for debugging).
      */
     @JvmStatic
-    fun getConfigPath(): String = CONFIG_PATH
+    fun getConfigPath(): String = configPath()
     
     /**
      * Check if config file exists.
      */
     @JvmStatic
-    fun configExists(): Boolean = File(CONFIG_PATH).exists()
+    fun configExists(): Boolean = File(configPath()).exists()
     
     /**
      * Get last modified timestamp.
      */
     @JvmStatic
     fun getLastModified(): Long {
-        return File(CONFIG_PATH).let { if (it.exists()) it.lastModified() else 0L }
+        return File(configPath()).let { if (it.exists()) it.lastModified() else 0L }
     }
 }

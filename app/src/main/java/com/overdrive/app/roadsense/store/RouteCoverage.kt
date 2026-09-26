@@ -1,4 +1,5 @@
 package com.overdrive.app.roadsense.store
+import com.overdrive.app.util.ScratchPaths
 
 import org.json.JSONObject
 import java.io.File
@@ -27,7 +28,7 @@ import java.io.File
  * reading); 1..<CONFIRMED is "seen once"; 0 is "new".
  *
  * ## Cost / persistence
- * Persisted in its OWN file [COVERAGE_PATH], NOT in the shared overdrive_config.json
+ * Persisted in its OWN file [coveragePath], NOT in the shared overdrive_config.json
  * (audit storage HIGH-2): the tile→count map can reach ~240 KB at the cap, and the
  * shared config is rewritten in full on EVERY updateSection by ANY subsystem — so
  * keeping coverage there would make every unrelated config write drag the whole map,
@@ -59,7 +60,7 @@ class RouteCoverage {
         if (loaded) return
         loaded = true
         try {
-            val f = File(COVERAGE_PATH)
+            val f = File(coveragePath)
             if (!f.exists()) return
             val obj = JSONObject(f.readText())
             val it = obj.keys()
@@ -122,9 +123,9 @@ class RouteCoverage {
             val obj = JSONObject()
             for ((tile, e) in passes) obj.put(tile.toString(), "${e.count}:${e.lastSeenMs}")
             // Atomic-ish write: tmp + rename so a crash mid-write can't truncate the file.
-            val tmp = File("$COVERAGE_PATH.tmp")
+            val tmp = File("$coveragePath.tmp")
             tmp.writeText(obj.toString())
-            tmp.renameTo(File(COVERAGE_PATH))
+            tmp.renameTo(File(coveragePath))
         } catch (_: Throwable) { /* best-effort */ }
     }
 
@@ -142,7 +143,8 @@ class RouteCoverage {
     companion object {
         /** Own file (NOT the shared overdrive_config.json) — see class doc. Sits in
          *  the same daemon-writable dir as the H2 stores. */
-        private const val COVERAGE_PATH = "/data/local/tmp/overdrive_roadsense_coverage.json"
+        private val coveragePath: String
+            get() = ScratchPaths.path("overdrive_roadsense_coverage.json")
         /** Tiles to remember for the boundary-bounce guard (audit S5). ~3 covers a
          *  GPS jitter ping-pong across one boundary without blocking a genuine
          *  re-entry after driving away and coming back later in the trip. */
