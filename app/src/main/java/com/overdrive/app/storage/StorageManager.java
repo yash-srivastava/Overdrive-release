@@ -1619,19 +1619,12 @@ public class StorageManager {
                 line = line.trim();
                 rawSmOutput.append(line).append('\n');
                 logDebug("sm list-volumes: " + line);
-                if (!line.startsWith("public:")) continue;
-                publicRowCount++;
                 String[] parts = line.split("\\s+");
+                int[] dev = parsePublicVolumeId(parts[0]);
+                if (dev == null) continue;
+                publicRowCount++;
                 if (parts.length < 3) continue;
-
-                String[] dev = parts[0].substring("public:".length()).split(",");
-                int major, minor;
-                try {
-                    major = Integer.parseInt(dev[0]);
-                    minor = Integer.parseInt(dev[1]);
-                } catch (Exception e) {
-                    continue;
-                }
+                int major = dev[0], minor = dev[1];
                 String state = parts[1];
                 String thisUuid = parts[2];
                 String klass = classifyPublicVolume(major, minor, thisUuid);
@@ -2306,6 +2299,22 @@ public class StorageManager {
     }
 
     /**
+     * Parse an {@code sm list-volumes} public volume ID into {major, minor}.
+     * Accepts AOSP {@code public:8,97} and BYD DiLink {@code 8:1} (no prefix,
+     * colon separator). Returns null for private/emulated/stub/adopted IDs.
+     */
+    private static int[] parsePublicVolumeId(String id) {
+        String s = id.startsWith("public:") ? id.substring("public:".length()) : id;
+        String[] dev = s.split("[,:]");
+        if (dev.length != 2) return null;
+        try {
+            return new int[]{Integer.parseInt(dev[0]), Integer.parseInt(dev[1])};
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
      * Classify a public volume as SD or USB.
      *
      * Three signals, in order of authority:
@@ -2509,19 +2518,14 @@ public class StorageManager {
             for (String line : smList.lines) {
                 // Parse lines like: "public:8,97 mounted 3661-3064"
                 line = line.trim();
-                if (!line.startsWith("public:") || !line.contains("mounted")) continue;
+                if (!line.contains("mounted")) continue;
                 String[] parts = line.split("\\s+");
                 if (parts.length < 3) continue;
 
-                // parts[0] = "public:8,97" → major=8, minor=97
-                String[] dev = parts[0].substring("public:".length()).split(",");
-                int major, minor;
-                try {
-                    major = Integer.parseInt(dev[0]);
-                    minor = Integer.parseInt(dev[1]);
-                } catch (Exception e) {
-                    continue;
-                }
+                // parts[0] = "public:8,97" (AOSP) or "8:1" (BYD DiLink)
+                int[] dev = parsePublicVolumeId(parts[0]);
+                if (dev == null) continue;
+                int major = dev[0], minor = dev[1];
                 String volumeUuid = parts[2];
                 String mountPath = "/storage/" + volumeUuid;
                 // Use the cheap layered check — the expensive touch+rm probe
