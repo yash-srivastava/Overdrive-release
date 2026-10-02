@@ -15815,14 +15815,19 @@ public class BydDataCollector {
                     logger.debug("saveChargingScheduleLocal: setCarPlan rejected");
                     return false;
                 }
-                // Step 2: write the appointment window (OD Charge writes appointment first,
-                // then the schedule family as a fallback for trims that use it).
-                boolean wrote = chargingGroupedSet(APPOINTMENT_START_IDS, sf)
-                        & chargingGroupedSet(APPOINTMENT_END_IDS, ef);
-                if (!wrote) {
-                    chargingGroupedSet(SCHEDULE_START_IDS, sf);
-                    chargingGroupedSet(SCHEDULE_END_IDS, ef);
-                }
+                // Step 2: write BOTH the appointment and schedule time families. Which one the
+                // firmware honours is trim-dependent: on the Sealion 6 DM-i (Di 3.0) the
+                // APPOINTMENT family is accepted (returns 0) but INEFFECTIVE, while the SCHEDULE
+                // family is the one that actually defers the pack — so gating the schedule write
+                // behind "appointment failed" (the old `if (!wrote)`) meant it was never written
+                // and BMS never moved to SCHEDULED(9). Writing both unconditionally arms reliably
+                // and stays correct on trims where appointment is the effective family.
+                // Verified on-car via the side-build apptest: appointment-only left BMS=1; adding
+                // the schedule family armed BMS->9.
+                chargingGroupedSet(APPOINTMENT_START_IDS, sf);
+                chargingGroupedSet(APPOINTMENT_END_IDS, ef);
+                chargingGroupedSet(SCHEDULE_START_IDS, sf);
+                chargingGroupedSet(SCHEDULE_END_IDS, ef);
                 // Step 3: arm.
                 if (!setTimingStateLocal(true)) return false;
                 // Verify by the only honest signal on this trim: BMS -> SCHEDULED (9).
@@ -15863,6 +15868,26 @@ public class BydDataCollector {
         // Success = the pack is no longer deferring (BMS != SCHEDULED). Allow a few seconds —
         // the pack can take ~several s to release the defer and spin charging back up.
         boolean cleared = awaitBmsState(9, false, 8);
+        if (!cleared) {
+            // On the Sealion 6 DM-i (Di 3.0) the mode-0 cancel does NOT release the deferral —
+            // BMS stays SCHEDULED(9) and the pack never resumes (on-car verified). Fall back to
+            // arming a window that is ACTIVE NOW (started a few minutes ago), which forces the
+            // pack to start charging immediately. It's a one-time window that simply elapses.
+            java.util.Calendar startCal = java.util.Calendar.getInstance();
+            startCal.add(java.util.Calendar.MINUTE, -10);
+            java.util.Calendar endCal = java.util.Calendar.getInstance();
+            endCal.add(java.util.Calendar.HOUR_OF_DAY, 12);
+            int[] nowStart = dateTimeFields(startCal);
+            int[] nowEnd = dateTimeFields(endCal);
+            setCarPlanLocal(1, 100);
+            chargingGroupedSet(APPOINTMENT_START_IDS, nowStart);
+            chargingGroupedSet(APPOINTMENT_END_IDS, nowEnd);
+            chargingGroupedSet(SCHEDULE_START_IDS, nowStart);
+            chargingGroupedSet(SCHEDULE_END_IDS, nowEnd);
+            setTimingStateLocal(true);
+            cleared = awaitBmsState(9, false, 8);
+            logScheduleState("clearChargingScheduleLocal now-window fallback cleared(BMS!=9)=" + cleared);
+        }
         logScheduleState("clearChargingScheduleLocal cleared(BMS!=9)=" + cleared);
         return cleared;
     }
