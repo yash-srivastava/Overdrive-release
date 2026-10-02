@@ -36,7 +36,7 @@ import java.util.UUID;
 public final class ActionGroups {
     private static final DaemonLogger logger = DaemonLogger.getInstance("Automations");
 
-    private static final File HOME = new File("/data/local/tmp/.automations");
+    private static final File HOME = new File(com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.automations"));
     private static final File CONFIG = new File(HOME, "action_groups.json");
     private static final File BACKUP = new File(HOME, "action_groups.json.bak");
     private static final File TMP = new File(HOME, "action_groups.json.tmp");

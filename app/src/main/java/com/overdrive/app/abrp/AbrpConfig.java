@@ -19,7 +19,7 @@ public class AbrpConfig {
     private static final String TAG = "AbrpConfig";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
-    private static final String CONFIG_PATH = "/data/local/tmp/abrp_config.properties";
+    private static final String CONFIG_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/abrp_config.properties");
     private static final String PROP_USER_TOKEN = "user_token";
     private static final String PROP_ENABLED = "enabled";
     private static final String PROP_CAR_MODEL = "car_model";

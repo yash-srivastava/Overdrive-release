@@ -756,7 +756,7 @@ public final class GenAiRoutineLearner {
     private static File home() {
         return new File(System.getProperty(
                 GenAiInsights.HOME_PROPERTY,
-                "/data/local/tmp/.genai"));
+                com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.genai")));
     }
 
     private static File storeFile() {

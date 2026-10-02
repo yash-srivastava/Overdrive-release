@@ -61,9 +61,9 @@ public class AccSentryDaemon {
     /** settings get global mobile_data */
     private static String CMD_DATA_GET() { return Safe.s("4/qqmGNE2vhiGGggG70n0sRfHtz6gZempQZl+6FiiZk="); }
     /** /data/local/tmp */
-    private static String PATH_DATA_LOCAL_TMP() { return Safe.s("vuaMjrmBGBFh07qqnUuL8w=="); }
+    private static String PATH_DATA_LOCAL_TMP() { return com.overdrive.app.util.DaemonStorage.rebase(Safe.s("vuaMjrmBGBFh07qqnUuL8w==")); }
     /** /data/local/tmp/telegram_config.properties */
-    private static String PATH_TELEGRAM_CONFIG() { return Safe.s("ZHx6IP38aGV/Q7iMCCcxzwQSn0P1N0jxHygc8N+4Ft+9mlR8XQ+WvEw0ktanrtNx"); }
+    private static String PATH_TELEGRAM_CONFIG() { return com.overdrive.app.util.DaemonStorage.rebase(Safe.s("ZHx6IP38aGV/Q7iMCCcxzwQSn0P1N0jxHygc8N+4Ft+9mlR8XQ+WvEw0ktanrtNx")); }
 
     // Power levels from BYDAutoBodyworkDevice
     private static final int POWER_LEVEL_OFF = 0;
@@ -204,23 +204,23 @@ public class AccSentryDaemon {
     private static final String PROCESS_INSTANCE_NONCE =
             createProcessInstanceNonce();
     private static final String PARK_REAPER_PATH =
-            "/data/local/tmp/overdrive_park_reaper.sh";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_park_reaper.sh");
     private static final String PARK_REAPER_CONTROL_PATH =
-            "/data/local/tmp/overdrive_park_reaper.control";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_park_reaper.control");
     private static final String PARK_REAPER_STATE_PATH =
-            "/data/local/tmp/overdrive_park_reaper.state";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_park_reaper.state");
     private static final String PARK_REAPER_LEASE_PATH =
-            "/data/local/tmp/overdrive_park_reaper.lease";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_park_reaper.lease");
     private static final String PARK_REAPER_LEASE_OWNER_PATH =
             PARK_REAPER_LEASE_PATH + "/owner";
     private static final String PARK_REAPER_RUN_PATH =
-            "/data/local/tmp/overdrive_park_reaper.running";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_park_reaper.running");
     private static final String PARK_REAPER_RUN_OWNER_PATH =
             PARK_REAPER_RUN_PATH + "/owner";
     private static final String PARK_REAPER_ACK_PREFIX =
-            "/data/local/tmp/overdrive_park_reaper.ack.";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_park_reaper.ack.");
     private static final String PARK_REAPER_DONE_PREFIX =
-            "/data/local/tmp/overdrive_park_reaper.done.";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_park_reaper.done.");
 
     /** Process-local app context. Returns null before main() initialises it. */
     public static Context getAppContext() { return appContext; }
@@ -1424,7 +1424,7 @@ public class AccSentryDaemon {
     }
     
     // Lock file for singleton enforcement
-    private static final String LOCK_FILE = "/data/local/tmp/acc_sentry_daemon.lock";
+    private static final String LOCK_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/acc_sentry_daemon.lock");
     private static java.io.RandomAccessFile lockFileHandle;
     private static java.nio.channels.FileLock fileLock;
 
@@ -5500,6 +5500,10 @@ public class AccSentryDaemon {
                     // off the user's master toggle, never off the camera-mode
                     // selection. Inert (one config read) while the toggle is off.
                     di5KeepAliveTick(transitionGeneration);
+                    // DiLink 5 (Desay) QNX common-network keep-alive: asks the
+                    // firmware OTA service to keep the vehicle network awake.
+                    // Inert unless surveillance.di5QnxNetworkKeepAlive is on.
+                    di5QnxNetworkTick(transitionGeneration);
                     // 1. Maintain Network Interface Stability
                     if (!isKeepAliveCommitCurrent(transitionGeneration)) break;
                     ensureWifiEnabled(transitionGeneration);
@@ -5861,6 +5865,7 @@ public class AccSentryDaemon {
             }
 
             log("System Persistence Service stopped");
+            di5QnxNetworkRelease("keep-alive loop stopped");
             boolean requestReplacement = false;
             synchronized (systemKeepAliveLock) {
                 if (systemKeepAliveThread == Thread.currentThread()) {
@@ -6236,6 +6241,124 @@ public class AccSentryDaemon {
     }
 
     /** 10 s keep-alive tick for the lease. No-op when not installed. */
+    // ==================== DI5 QNX COMMON-NETWORK KEEP-ALIVE ====================
+    // On the Desay SV DiLink 5 the head unit's sleep is decided on the QNX side;
+    // the one keep-awake lever open to the shell is the QNX common-network
+    // control relayed by the QnxMessage service (see QnxMessageBus). Driven
+    // from this daemon so it does not depend
+    // on the app process, which the OS may kill while parked.
+    private static final long DI5_QNX_REASSERT_MS = 30_000L;
+    private static final int DI5_QNX_DEFAULT_MAX_MINUTES = 60;
+    private static final int DI5_QNX_LOW_VOLTS = 11;
+    private static final int DI5_QNX_LOW_SAMPLES = 3;
+    /** VHAL BATTERY_VOLTAGE_SECOND: the 12 V battery, whole volts on this platform. */
+    private static final String VHAL_12V_PROPERTY = "0x2140461e";
+    private static final Object di5QnxLock = new Object();
+    private static int di5QnxLowSamples;
+    private static long di5QnxGeneration = -1L;
+    private static long di5QnxStartedAtMs;
+    private static long di5QnxLastSentMs;
+    private static boolean di5QnxStarted;
+    private static boolean di5QnxExpired;
+
+    private static void di5QnxNetworkTick(long transitionGeneration) {
+        org.json.JSONObject surveillance = null;
+        try {
+            surveillance = com.overdrive.app.config.UnifiedConfigManager.getSurveillance();
+        } catch (Throwable ignored) {
+        }
+        boolean enabled = surveillance != null
+                && surveillance.optBoolean("di5QnxNetworkKeepAlive", false);
+        // Safety cap: the platform's 12 V reading is whole volts only, so also
+        // hold the network for at most N minutes per park, then let the car sleep.
+        int maxMinutes = surveillance != null
+                ? surveillance.optInt("di5QnxNetworkKeepAliveMaxMinutes",
+                        DI5_QNX_DEFAULT_MAX_MINUTES)
+                : DI5_QNX_DEFAULT_MAX_MINUTES;
+        if (!enabled) {
+            di5QnxNetworkRelease("setting off");
+            return;
+        }
+        long now = System.currentTimeMillis();
+        synchronized (di5QnxLock) {
+            if (di5QnxGeneration != transitionGeneration) {
+                di5QnxGeneration = transitionGeneration;
+                di5QnxStartedAtMs = now;
+                di5QnxLastSentMs = 0L;
+                di5QnxExpired = false;
+                di5QnxLowSamples = 0;
+            }
+            if (di5QnxExpired) return;
+            if (maxMinutes > 0 && now - di5QnxStartedAtMs >= maxMinutes * 60_000L) {
+                di5QnxExpired = true;
+            } else if (now - di5QnxLastSentMs < DI5_QNX_REASSERT_MS) {
+                return;
+            } else {
+                di5QnxLastSentMs = now;
+            }
+        }
+        boolean expired;
+        synchronized (di5QnxLock) {
+            expired = di5QnxExpired;
+        }
+        if (expired) {
+            di5QnxNetworkRelease("max " + maxMinutes + " min reached");
+            return;
+        }
+        // Coarse 12 V guard: the VHAL only reports whole volts here, so <= 11
+        // means below ~12.0 V. Three consecutive low samples (one per re-assert)
+        // end the hold for this park.
+        int volts = readVhal12vWholeVolts();
+        boolean lowVoltage;
+        synchronized (di5QnxLock) {
+            di5QnxLowSamples = volts > 0 && volts <= DI5_QNX_LOW_VOLTS
+                    ? di5QnxLowSamples + 1 : 0;
+            lowVoltage = di5QnxLowSamples >= DI5_QNX_LOW_SAMPLES;
+            if (lowVoltage) di5QnxExpired = true;
+        }
+        if (lowVoltage) {
+            di5QnxNetworkRelease("12V reading " + volts + " V");
+            return;
+        }
+        int result = di5QnxNetworkSend(true);
+        synchronized (di5QnxLock) {
+            di5QnxStarted = true;
+        }
+        log("Di5 QNX network START result=" + result + " 12V=" + volts
+                + " (parked " + ((now - di5QnxStartedAtMs) / 1000) + "s, gen="
+                + transitionGeneration + ")");
+    }
+
+    private static void di5QnxNetworkRelease(String reason) {
+        synchronized (di5QnxLock) {
+            if (!di5QnxStarted) return;
+            di5QnxStarted = false;
+        }
+        int result = di5QnxNetworkSend(false);
+        log("Di5 QNX network STOP result=" + result + " (" + reason + ")");
+    }
+
+    /** Last VHAL 12 V value in whole volts, or -1 when unavailable. */
+    private static int readVhal12vWholeVolts() {
+        ShellResult r = execShellResult(
+                "dumpsys car_service --hal 2>/dev/null | grep -m1 'lastEvent:Property:"
+                        + VHAL_12V_PROPERTY + ",'", 8_000L, null);
+        String out = r.output == null ? "" : r.output;
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("int32Values: \\[(-?\\d+)").matcher(out);
+        if (!m.find()) return -1;
+        try {
+            return Integer.parseInt(m.group(1));
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    /** @return a {@code QnxMessageBus.RESULT_*} code. */
+    private static int di5QnxNetworkSend(boolean hold) {
+        return com.overdrive.app.byd.dilink5.QnxMessageBus.get().setVehicleNetworkHold(hold);
+    }
+
     private static void di5KeepAliveTick(long transitionGeneration) {
         com.overdrive.app.power.Di5ParkedPowerHold hold =
                 com.overdrive.app.power.Di5ParkedPowerHold.installedInstance();
@@ -6534,7 +6657,7 @@ public class AccSentryDaemon {
     }
 
     private static final String SD_MOUNTED_LEASE_PATH =
-            "/data/local/tmp/overdrive_sd_mounted_lease";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_sd_mounted_lease");
     private static final long SD_MOUNTED_LEASE_MAX_HORIZON_MS =
             5 * 60_000L;
 
@@ -6630,7 +6753,7 @@ public class AccSentryDaemon {
      * keep the existing power-save behaviour bit-exact.
      */
     private static final String CAMERA_ACTIVE_LEASE_PATH =
-        "/data/local/tmp/camera_active_lease";
+        com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/camera_active_lease");
 
     // Upper bound on how far ahead of "now" a lease deadline may legitimately be.
     // CameraDaemon only ever writes now + 8s, so any live lease is <=8s out; we
@@ -8435,7 +8558,7 @@ public class AccSentryDaemon {
         //
         // A missing file falls through to auto-start; an unreadable one retries.
         java.io.File telegramSentinel =
-            new java.io.File("/data/local/tmp/telegram_bot_daemon.disabled");
+            new java.io.File(com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/telegram_bot_daemon.disabled"));
         if (telegramSentinel.exists()) {
             String reason = readSentinelReason(telegramSentinel);
             if (reason == null) {
@@ -8688,7 +8811,7 @@ public class AccSentryDaemon {
         // next ACC cycle or the next 30s in-process health-check tick
         // (only fires when MainActivity is alive). The watchdog respawns
         // on any non-zero exit, sentinel-gated for legitimate stops.
-        String scriptPath = "/data/local/tmp/start_telegram.sh";
+        String scriptPath = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/start_telegram.sh");
         try {
             // proxyArgs="" because AccSentry-launched daemon doesn't have
             // visibility into Android global HTTP proxy from this context.
@@ -10065,7 +10188,7 @@ public class AccSentryDaemon {
         // Also drop the previous park-END breadcrumb: a new park has begun, and the
         // app must not mistake the old stamp for this park's end.
         sb.append("run_bounded 20 rm -f /data/local/tmp/camera_daemon.lock ")
-          .append("/data/local/tmp/telegram_bot_daemon.lock ")
+          .append(com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/telegram_bot_daemon.lock "))
           .append(com.overdrive.app.ui.model.ParkedShutdown.ENDED_PATH)
           .append(" || true\n");
         sb.append("owns_state || { release_lease; stale_exit; }\n");

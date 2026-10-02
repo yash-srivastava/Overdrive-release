@@ -130,7 +130,7 @@ public class ExternalStorageCleaner {
     };
     
     // Config file location (shared with StorageManager)
-    private static final String CONFIG_FILE = "/data/local/tmp/overdrive_config.json";
+    private static final String CONFIG_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_config.json");
     
     // Default configuration
     private static final long DEFAULT_RESERVED_SPACE_MB = 2048;  // 2GB

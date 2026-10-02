@@ -22,7 +22,7 @@ import java.util.Map;
 public final class Messages {
 
     private static final Map<String, JSONObject> CATALOGS = new HashMap<>();
-    private static final String DIR = "/data/local/tmp/web/server-i18n";
+    private static final String DIR = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/web/server-i18n");
     // Catalogs read from the running APK's assets, the fallback when the extracted copy on
     // disk is stale or absent. Separate cache so neither source can shadow the other.
     private static final Map<String, JSONObject> ASSET_CATALOGS = new HashMap<>();

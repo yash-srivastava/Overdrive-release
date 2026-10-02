@@ -53,7 +53,7 @@ import java.nio.file.Files;
 public final class PositionStore {
 
     private static final String TAG = "PositionStore";
-    public static final String STORE_FILE = "/data/local/tmp/seat_positions.json";
+    public static final String STORE_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/seat_positions.json");
     private static final int VERSION = 1;
 
     private static final Object LOCK = new Object();

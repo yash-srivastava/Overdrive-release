@@ -41,7 +41,7 @@ public class DaemonLogger {
      * Log configuration.
      */
     public static class Config {
-        public String logDir = "/data/local/tmp";
+        public String logDir = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp");
         public int retentionHours = 24;
         public int maxFileSizeMB = 10;
         public int rotationCount = 3;

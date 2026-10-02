@@ -27,7 +27,7 @@ import java.util.Locale;
  */
 public final class BangcleTablesFile {
 
-    public static final String CACHE_PATH = "/data/local/tmp/bangcle_tables.bin";
+    public static final String CACHE_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/bangcle_tables.bin");
     public static final String ASSET_PATH = "byd/bangcle_tables.bin";
 
     private static final byte[] MAGIC = { 'B', 'G', 'T', 'B' };

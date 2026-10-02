@@ -2794,7 +2794,7 @@ public class VehicleControlApiHandler {
 
     // Audio library dir (mirror of AudioApiHandler.AUDIO_DIR) — where uploaded
     // sounds picked by the "Play Audio" action live. A "name" payload resolves here.
-    private static final String AUDIO_LIBRARY_DIR = "/data/local/tmp/.overdrive/audio";
+    private static final String AUDIO_LIBRARY_DIR = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.overdrive/audio");
 
     /**
      * Play an uploaded sound (by library {@code name}) or an explicit {@code path} on

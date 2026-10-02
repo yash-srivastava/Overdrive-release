@@ -44,11 +44,11 @@ public class SentryDaemon {
     /** bg_datacache */
     private static String SERVICE_BG_DATACACHE() { return Safe.s("m84QJmAGTQpH+XP36MaDpA=="); }
     /** /data/local/tmp */
-    private static String PATH_DATA_LOCAL_TMP() { return Safe.s("vuaMjrmBGBFh07qqnUuL8w=="); }
+    private static String PATH_DATA_LOCAL_TMP() { return com.overdrive.app.util.DaemonStorage.rebase(Safe.s("vuaMjrmBGBFh07qqnUuL8w==")); }
     /** /data/data/com.android.providers.settings */
     private static String PATH_DATA_SYSTEM_SETTINGS() { return Safe.s("4FWGV7tPhe9614nkUCor4bnqFPfssDPoiHYPJxgenGAPG3xCP+0Cb2Hm04LZxNNJ"); }
     /** /data/local/tmp/sentry_daemon.pid */
-    private static String PATH_SENTRY_PID() { return Safe.s("ZHx6IP38aGV/Q7iMCCcxzy1lsQShZtcRseW7dNE1si25na89IOT5cRwBuRuJBcXS"); }
+    private static String PATH_SENTRY_PID() { return com.overdrive.app.util.DaemonStorage.rebase(Safe.s("ZHx6IP38aGV/Q7iMCCcxzy1lsQShZtcRseW7dNE1si25na89IOT5cRwBuRuJBcXS")); }
     /** svc wifi enable */
     private static String CMD_WIFI_ENABLE() { return Safe.s("GzzLDvODRsKARkPOXEZeIA=="); }
     /** cmd wifi set-wifi-enabled enabled */

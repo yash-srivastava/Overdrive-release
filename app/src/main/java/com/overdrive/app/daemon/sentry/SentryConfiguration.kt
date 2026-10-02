@@ -14,8 +14,8 @@ object SentryConfiguration {
     const val POWER_LEVEL_OK = 3
     
     // Log file paths
-    const val LOG_FILE_SYSTEM = "/data/system/sentry_daemon.log"
-    const val LOG_FILE_SHELL = "/data/local/tmp/sentry_daemon.log"
+    @JvmField val LOG_FILE_SYSTEM = "/data/system/sentry_daemon.log"
+    @JvmField val LOG_FILE_SHELL = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/sentry_daemon.log")
     
     // Package name
     const val PACKAGE_NAME = "com.overdrive.app"

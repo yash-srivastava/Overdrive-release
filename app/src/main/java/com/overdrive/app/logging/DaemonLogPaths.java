@@ -19,14 +19,14 @@ public final class DaemonLogPaths {
     // LinkedHashMap so the order is stable for "list available daemons" UIs.
     private static final Map<String, String> PATHS = new LinkedHashMap<>();
     static {
-        PATHS.put("camera",     "/data/local/tmp/cam_daemon.log");
-        PATHS.put("accsentry",  "/data/local/tmp/acc_sentry_daemon.log");
-        PATHS.put("sentry",     "/data/local/tmp/sentry_daemon.log");
-        PATHS.put("telegram",   "/data/local/tmp/telegrambotdaemon.log");
-        PATHS.put("cloudflared","/data/local/tmp/cloudflared.log");
-        PATHS.put("zrok",       "/data/local/tmp/zrok.log");
-        PATHS.put("tailscale",  "/data/local/tmp/.tailscale/tailscale.log");
-        PATHS.put("singbox",    "/data/local/tmp/singbox.log");
+        PATHS.put("camera",     com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/cam_daemon.log"));
+        PATHS.put("accsentry",  com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/acc_sentry_daemon.log"));
+        PATHS.put("sentry",     com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/sentry_daemon.log"));
+        PATHS.put("telegram",   com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/telegrambotdaemon.log"));
+        PATHS.put("cloudflared",com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/cloudflared.log"));
+        PATHS.put("zrok",       com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/zrok.log"));
+        PATHS.put("tailscale",  com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.tailscale/tailscale.log"));
+        PATHS.put("singbox",    com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/singbox.log"));
     }
 
     /** @return the log path for a daemon key, or null if unknown. */

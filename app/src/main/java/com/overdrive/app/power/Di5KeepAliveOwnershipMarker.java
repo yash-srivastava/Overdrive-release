@@ -32,7 +32,7 @@ import org.json.JSONObject;
  */
 public final class Di5KeepAliveOwnershipMarker {
 
-    public static final String DEFAULT_PATH = "/data/local/tmp/overdrive_di5_keepalive.owner";
+    public static final String DEFAULT_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_di5_keepalive.owner");
 
     public static final String LEVER_MCU = "mcu";
     /** BYDAutoPowerDevice MCU power hold (-1442840502←1); released with 0 only when recorded. */

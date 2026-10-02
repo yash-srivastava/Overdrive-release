@@ -42,7 +42,7 @@ class CameraDaemonController(
     override fun start(callback: DaemonCallback) {
         callback.onStatusChanged(DaemonStatus.STARTING, "Starting camera daemon...")
         
-        val outputDir = context.getExternalFilesDir(null)?.absolutePath ?: "/data/local/tmp/overdrive"
+        val outputDir = context.getExternalFilesDir(null)?.absolutePath ?: com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive")
         val nativeLibDir = context.applicationInfo.nativeLibraryDir
         
         adbLauncher.launchDaemon(

@@ -98,6 +98,11 @@ BYD.surveillance = {
         di5CloudKeepAlive: false,
         di5CloudKeepAliveSupported: false,
         di5CloudKeepAliveCloudReady: false,
+        // DiLink 5 QNX common-network keep-alive. Row shown only when the
+        // firmware exposes the QnxMessage service.
+        di5QnxNetworkKeepAlive: false,
+        di5QnxNetworkKeepAliveMaxMinutes: 60,
+        di5QnxNetworkKeepAliveSupported: false,
         // Opt-in DiLink 5 parked keep-alive lease (Experimental). Master switch
         // only — the levers are config-only diagnostics. Deliberately has NO
         // capability flag: DiLink 5 head units exist with and without the
@@ -1993,6 +1998,7 @@ BYD.surveillance = {
             });
         this.applyDi5CloudKeepAliveUI();
         this.applyDi5ParkedKeepAliveUI();
+        this.applyDi5QnxNetworkKeepAliveUI();
         // Explanatory note (shown only when inert).
         const note = document.getElementById('postOffDisabledNotice');
         if (note) note.style.display = inert ? '' : 'none';
@@ -2402,6 +2408,75 @@ BYD.surveillance = {
                       fallback), 'error');
               }
           });
+    },
+
+    /**
+     * Experimental DiLink 5 QNX common-network keep-alive. Same immediate-save
+     * contract as the cloud toggle; the daemon picks it up on its next parked tick.
+     */
+    toggleDi5QnxNetworkKeepAlive() {
+        const el = document.getElementById('survDi5QnxNetworkKeepAlive');
+        if (!el) return;
+        this._saveDi5QnxNetworkKeepAlive({ di5QnxNetworkKeepAlive: el.checked });
+    },
+
+    setDi5QnxNetworkKeepAliveMinutes() {
+        const el = document.getElementById('survDi5QnxNetworkKeepAliveMinutes');
+        if (!el) return;
+        const minutes = Math.max(5, Math.min(480, parseInt(el.value, 10) || 60));
+        this._saveDi5QnxNetworkKeepAlive({ di5QnxNetworkKeepAliveMaxMinutes: minutes });
+    },
+
+    _saveDi5QnxNetworkKeepAlive(change) {
+        const key = Object.keys(change)[0];
+        const previous = this.config[key];
+        const writeVersion = this._nextImmediateWrite(key);
+        const self = this;
+        const t = (k, fb) => (BYD.i18n && BYD.i18n.t
+            ? (BYD.i18n.t(k) || fb) : fb);
+
+        this.config[key] = change[key];
+        this.applyDi5QnxNetworkKeepAliveUI();
+
+        this._writeJson('/api/surveillance/config', change)
+          .then(function () {
+              if (self.savedConfig) self.savedConfig[key] = change[key];
+              if (!self._isLatestImmediateWrite(key, writeVersion)) return;
+              if (BYD.utils && BYD.utils.toast) {
+                  BYD.utils.toast(t('surveillance.di5_qnx_keepalive_saved',
+                      'DI5 QNX keep-alive saved (applies on the next parked tick)'), 'success');
+              }
+          }).catch(function (error) {
+              if (!self._isLatestImmediateWrite(key, writeVersion)) return;
+              self.config[key] = self.savedConfig && key in self.savedConfig
+                  ? self.savedConfig[key] : previous;
+              self.applyDi5QnxNetworkKeepAliveUI();
+              if (BYD.utils && BYD.utils.toast) {
+                  BYD.utils.toast(t('surveillance.di5_qnx_keepalive_save_failed',
+                      error && error.message ? error.message
+                          : 'Could not save DI5 QNX keep-alive'), 'error');
+              }
+          });
+    },
+
+    applyDi5QnxNetworkKeepAliveUI() {
+        const supported = this.config.di5QnxNetworkKeepAliveSupported === true;
+        const enabled = this.config.di5QnxNetworkKeepAlive === true;
+        const inert = (this.config.operatingMode || 'onAndOff') === 'onOnly';
+        const row = document.getElementById('survDi5QnxNetworkKeepAliveRow');
+        const minutesRow = document.getElementById('survDi5QnxNetworkKeepAliveMinutesRow');
+        const toggle = document.getElementById('survDi5QnxNetworkKeepAlive');
+        const minutes = document.getElementById('survDi5QnxNetworkKeepAliveMinutes');
+        if (row) row.style.display = supported ? '' : 'none';
+        if (minutesRow) minutesRow.style.display = supported && enabled ? '' : 'none';
+        if (toggle) {
+            toggle.checked = enabled;
+            toggle.disabled = !supported || inert;
+        }
+        if (minutes) {
+            minutes.value = this.config.di5QnxNetworkKeepAliveMaxMinutes || 60;
+            minutes.disabled = !supported || inert || !enabled;
+        }
     },
 
     /**

@@ -114,7 +114,7 @@ public final class CounterScaleCalibrator {
     /** Rises below this are quantisation noise on either series, kWh. */
     private static final double MIN_STEP_KWH = 0.005;
 
-    private static final String STATE_FILE = "/data/local/tmp/od_counter_scale.json";
+    private static final String STATE_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/od_counter_scale.json");
     private static final String IDENTITY_KEY = "__identity";
 
     private static final ConcurrentHashMap<String, Calibration> calibrations =

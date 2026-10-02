@@ -49,7 +49,7 @@ public class OverlayBitmapRenderer {
 
     private static final int WIDTH = 1280;
     private static final int HEIGHT = 80;
-    private static final String ICON_DIR = "/data/local/tmp/overlay/";
+    private static final String ICON_DIR = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overlay/");
     private static final int ICON_SIZE = 40;
     private static final double KM_TO_MI = 0.621371;
 

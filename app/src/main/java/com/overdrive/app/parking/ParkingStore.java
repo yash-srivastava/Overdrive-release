@@ -29,7 +29,7 @@ public final class ParkingStore {
 
     private static final DaemonLogger logger = DaemonLogger.getInstance("ParkingStore");
 
-    public static final String DEFAULT_DB_PATH = "/data/local/tmp/overdrive_parking_h2";
+    public static final String DEFAULT_DB_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_parking_h2");
 
     public static String defaultJdbcUrl() {
         return "jdbc:h2:file:" + DEFAULT_DB_PATH

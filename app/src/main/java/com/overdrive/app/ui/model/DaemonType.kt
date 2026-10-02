@@ -33,14 +33,14 @@ enum class DaemonType(
      */
     val sentinelPath: String
 ) {
-    CAMERA_DAEMON("Camera Daemon", "byd_cam_daemon", "/data/local/tmp/camera_daemon.disabled"),
-    SENTRY_DAEMON("Sentry Daemon", "sentry_daemon", "/data/local/tmp/sentry_daemon.disabled"),
-    ACC_SENTRY_DAEMON("ACC Sentry", "acc_sentry_daemon", "/data/local/tmp/acc_sentry_daemon.disabled"),
-    SINGBOX_PROXY("Sing-box Proxy", "sing-box", "/data/local/tmp/singbox.disabled"),
-    CLOUDFLARED_TUNNEL("Cloudflared Tunnel", "cloudflared", "/data/local/tmp/cloudflared.disabled"),
-    ZROK_TUNNEL("Zrok Tunnel", "zrok", "/data/local/tmp/zrok.disabled"),
-    TAILSCALE_TUNNEL("Tailscale Tunnel", "tailscaled", "/data/local/tmp/tailscale.disabled"),
-    TELEGRAM_DAEMON("Telegram Bot", "telegram_bot_daemon", "/data/local/tmp/telegram_bot_daemon.disabled")
+    CAMERA_DAEMON("Camera Daemon", "byd_cam_daemon", com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/camera_daemon.disabled")),
+    SENTRY_DAEMON("Sentry Daemon", "sentry_daemon", com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/sentry_daemon.disabled")),
+    ACC_SENTRY_DAEMON("ACC Sentry", "acc_sentry_daemon", com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/acc_sentry_daemon.disabled")),
+    SINGBOX_PROXY("Sing-box Proxy", "sing-box", com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/singbox.disabled")),
+    CLOUDFLARED_TUNNEL("Cloudflared Tunnel", "cloudflared", com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/cloudflared.disabled")),
+    ZROK_TUNNEL("Zrok Tunnel", "zrok", com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/zrok.disabled")),
+    TAILSCALE_TUNNEL("Tailscale Tunnel", "tailscaled", com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/tailscale.disabled")),
+    TELEGRAM_DAEMON("Telegram Bot", "telegram_bot_daemon", com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/telegram_bot_daemon.disabled"))
 }
 
 /**
@@ -68,7 +68,7 @@ enum class DaemonType(
  * can both read it; contents = epoch millis of park (diagnostic only).
  */
 object ParkedShutdown {
-    const val MARKER_PATH = "/data/local/tmp/overdrive_parked_shutdown"
+    @JvmField val MARKER_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_parked_shutdown")
 
     /**
      * Park-END breadcrumb, written (epoch millis, `chmod 666`) by acc_sentry_daemon at
@@ -80,7 +80,7 @@ object ParkedShutdown {
      * due. Consumed by epoch value, so a stale breadcrumb can never trigger twice; the
      * park reaper removes it when it plants the next marker.
      */
-    const val ENDED_PATH = "/data/local/tmp/overdrive_parked_shutdown.ended"
+    @JvmField val ENDED_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_parked_shutdown.ended")
 }
 
 fun DaemonType.localizedName(context: Context): String = context.getString(when (this) {

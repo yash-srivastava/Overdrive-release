@@ -20,9 +20,9 @@ public class DiLink5QCarCamBackend {
     private static final String FAST_CAM_ASSET =
             "dilink5/fast_cam_capture";
     private static final String FAST_CAM_PATH =
-            "/data/local/tmp/fast_cam_capture";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/fast_cam_capture");
     private static final String LEGACY_QCARCAM_PATH =
-            "/data/local/tmp/qcarcam_test";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/qcarcam_test");
     private static final String CAPTURE_FPS_PROPERTY =
             "persist.overdrive.fast_cam_fps";
     public static final String CONFIG_CAMERA_MAPPING_KEY =
@@ -711,12 +711,23 @@ public class DiLink5QCarCamBackend {
                 return false;
             }
 
-            java.io.File binary = new java.io.File(FAST_CAM_PATH);
-            if (!deployVerifiedAsset(
-                    context, FAST_CAM_ASSET, binary, 0700)) {
-                logger.error("fast_cam_capture is unavailable at "
-                        + FAST_CAM_PATH);
-                return false;
+            // The sidecar is a standalone ELF. When the daemon storage is
+            // relocated (DiLink 5: /sdcard, mounted noexec) prefer the copy
+            // bundled as a jniLib in the app's nativeLibraryDir, which is always
+            // executable. Fall back to deploying from assets on platforms whose
+            // storage still permits execution (DiLink 3/4), so upstream
+            // behaviour is unchanged when the jniLib is absent.
+            java.io.File binary = new java.io.File(
+                    context.getApplicationInfo().nativeLibraryDir,
+                    System.mapLibraryName("fast_cam_capture"));
+            if (!binary.isFile()) {
+                binary = new java.io.File(FAST_CAM_PATH);
+                if (!deployVerifiedAsset(
+                        context, FAST_CAM_ASSET, binary, 0700)) {
+                    logger.error("fast_cam_capture is unavailable at "
+                            + binary.getPath());
+                    return false;
+                }
             }
             int[] cameraMapping = resolveCameraMapping();
             String cameraIds = DiLink5CameraMapping.toCsv(cameraMapping);
@@ -1629,7 +1640,7 @@ public class DiLink5QCarCamBackend {
             java.io.File parent =
                     destination.getParentFile().getCanonicalFile();
             if (!FAST_CAM_ASSET.equals(asset)
-                    || !"/data/local/tmp".equals(parent.getPath())
+                    || !com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp").equals(parent.getPath())
                     || !FAST_CAM_PATH.equals(destination.getPath())) {
                 return false;
             }
@@ -2680,7 +2691,7 @@ public class DiLink5QCarCamBackend {
      * errno, frame ids) right before {@code _exit(125)}.
      */
     private static final String RELEASE_GUARD_REASON_PATH =
-            "/data/local/tmp/overdrive_dilink5_release_guard_reason";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_dilink5_release_guard_reason");
 
     /**
      * Read-and-consume the release guard's fail-closed reason as a log

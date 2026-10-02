@@ -54,7 +54,7 @@ public class PinManager {
     private static final String KEY_FAILED_ATTEMPTS = "failedAttempts";
     private static final String KEY_LOCKOUT_UNTIL = "lockoutUntilMs";
 
-    private static final String RESET_FLAG_FILE = "/data/local/tmp/.overdrive_pin_reset";
+    private static final String RESET_FLAG_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.overdrive_pin_reset");
     private static final String KEY_LAST_RECOVERY_APPLIED = "lastRecoveryAppliedMs";
 
     private static final int DEFAULT_ITERATIONS = 120_000;

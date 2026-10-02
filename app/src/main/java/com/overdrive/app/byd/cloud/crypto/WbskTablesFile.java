@@ -26,7 +26,7 @@ import java.util.Locale;
  */
 public final class WbskTablesFile {
 
-    public static final String CACHE_PATH = "/data/local/tmp/wbsk_tables.json";
+    public static final String CACHE_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/wbsk_tables.json");
     public static final String ASSET_PATH = "byd/wbsk_tables.json";
 
     // 8 byte tables (256B) + 8 u32 tables (1024B) = 10240 raw bytes;

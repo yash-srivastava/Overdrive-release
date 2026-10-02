@@ -26,7 +26,7 @@ public final class TelegramDaemonLauncher {
     private static final String DAEMON_CLASS =
             "com.overdrive.app.daemon.TelegramBotDaemon";
     private static final String DAEMON_LOG =
-            "/data/local/tmp/telegrambotdaemon.log";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/telegrambotdaemon.log");
 
     private TelegramDaemonLauncher() {}
 

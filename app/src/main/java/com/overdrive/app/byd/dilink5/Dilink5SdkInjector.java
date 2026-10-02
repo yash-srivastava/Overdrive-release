@@ -160,7 +160,7 @@ public final class Dilink5SdkInjector {
             List<IOException> suppressed = new ArrayList<>();
             Object[] newElements = makeInMemoryElements(dexListCls, dexPaths, suppressed);
             if (newElements == null || newElements.length == 0) {
-                File optDir = context != null ? new File(context.getCodeCacheDir(), "bydauto-inj") : new File("/data/local/tmp/bydauto-inj");
+                File optDir = context != null ? new File(context.getCodeCacheDir(), "bydauto-inj") : new File(com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/bydauto-inj"));
                 optDir.mkdirs();
                 List<File> files = new ArrayList<>();
                 for (String p : dexPaths) {

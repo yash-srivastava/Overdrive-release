@@ -67,9 +67,9 @@ public final class VehicleActuatorBridge {
     private static final String ENERGY_AUTHORITY_EPOCH_SETTING =
             "overdrive_energy_request_v5_epoch";
     private static final String ENERGY_STATE_LOCK_FILE =
-            "/data/local/tmp/overdrive_energy_request.lock";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_energy_request.lock");
     private static final String ENERGY_STATE_COORDINATE_FILE =
-            "/data/local/tmp/overdrive_energy_request.state";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_energy_request.state");
     private static final long ENERGY_STATE_LOCK_TIMEOUT_MS = 400L;
     private static final long ENERGY_MARKER_MAX_FUTURE_NANOS =
             TimeUnit.SECONDS.toNanos(30L);

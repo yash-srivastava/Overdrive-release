@@ -81,7 +81,7 @@ public final class RecordingsIndex {
     private static final String TAG = "RecordingsIndex";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
-    private static final String DB_PATH = "/data/local/tmp/overdrive_recordings_h2";
+    private static final String DB_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_recordings_h2");
     // DB_CLOSE_ON_EXIT=FALSE to avoid H2's JVM shutdown hook racing the
     // daemon close path. Same justification as TripDatabase — the orphaned
     // lock file would otherwise block the next CameraDaemon boot with

@@ -52,9 +52,9 @@ object ConfigBackupService {
     // CredentialCipher.DID_PATH — duplicated as a literal rather than exposing
     // it, to keep this class free of a crypto dependency. Must match
     // CredentialCipher.java:29.
-    private const val DID_PATH = "/data/local/tmp/.byd_device_id"
-    private const val RESTORE_JOURNAL_PATH =
-        "/data/local/tmp/.overdrive_config_restore_txn.json"
+    private val DID_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.byd_device_id")
+    private val RESTORE_JOURNAL_PATH =
+        com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.overdrive_config_restore_txn.json")
     private const val RESTORE_JOURNAL_VERSION = 1
     private val didTempSequence = AtomicLong(0)
     private val restoreJournalTempSequence = AtomicLong(0)

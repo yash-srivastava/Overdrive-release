@@ -18,9 +18,9 @@ public final class DiLink5Platform {
     private static final String MODE_DEFAULT = "default";
     private static final String MODE_DILINK4 = "dilink4";
     private static final String ACTIVE_MODE_PATH =
-            "/data/local/tmp/overdrive_active_vehicle_mode";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_active_vehicle_mode");
     private static final String PENDING_MODE_PATH =
-            "/data/local/tmp/overdrive_pending_vehicle_mode";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_pending_vehicle_mode");
     private static final long MODE_MARKER_MAX_BYTES = 1_024L;
     private static final String CAMERA_UTILITY_PATH =
             "/system/lib64/libais_test_util.so";

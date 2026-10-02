@@ -15,10 +15,10 @@ object CameraConfiguration {
 
     // Server ports
     const val TCP_PORT = 19876
-    const val HTTP_PORT = 8080
+    @JvmField val HTTP_PORT = 8080
 
     // Directories
-    const val STREAM_DIR = "/data/local/tmp/cam_stream"
+    @JvmField val STREAM_DIR = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/cam_stream")
     const val APP_STREAM_DIR = "/storage/emulated/0/Android/data/com.overdrive.app/files/stream"
     const val DEFAULT_OUTPUT_DIR = "/sdcard/DCIM/BYDCam"
 

@@ -59,7 +59,7 @@ public class AppUpdater {
     // the same failure; a NEW failure carries a different `ts` and re-arms.
     private static final String PREF_LAST_CONSUMED_FAILURE_TS = "last_consumed_failure_ts";
     // Also persist to filesystem (survives app reinstall, unlike SharedPreferences)
-    private static final String UPDATE_TIMESTAMP_FILE = "/data/local/tmp/overdrive_update_timestamp";
+    private static final String UPDATE_TIMESTAMP_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_update_timestamp");
 
     /** Per-channel SharedPreferences baseline key. */
     private static String prefKeyForChannel(String channel) {
@@ -142,7 +142,7 @@ public class AppUpdater {
         installInFlight = false;
     }
     // Version file readable by daemon process (SharedPreferences are per-process)
-    public static final String VERSION_FILE = "/data/local/tmp/overdrive_version";
+    public static final String VERSION_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_version");
     // Sentinels for the post-update handshake (see UpdateLifecycle).
     private static final String UPDATE_IN_PROGRESS_FILE = UpdateLifecycle.UPDATE_IN_PROGRESS_FILE;
 
@@ -242,7 +242,7 @@ public class AppUpdater {
     private static boolean canWriteLocalTmp() {
         Boolean cached = canWriteTmpCached;
         if (cached != null) return cached;
-        File probe = new File("/data/local/tmp/.overdrive_updater_probe");
+        File probe = new File(com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.overdrive_updater_probe"));
         boolean ok;
         try {
             try (FileOutputStream fos = new FileOutputStream(probe)) {
@@ -531,7 +531,7 @@ public class AppUpdater {
         try {
             String execCommand = command;
             if (deadlineMs > 0) {
-                pidFile = "/data/local/tmp/.appupdater_pid_" + System.nanoTime();
+                pidFile = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.appupdater_pid_") + System.nanoTime();
                 execCommand = "echo $$ > " + pidFile + "; " + command;
             }
             final String pidFileForReaper = pidFile;
@@ -648,7 +648,7 @@ public class AppUpdater {
         // Direct path — write the script to a tmp file ourselves and exec it.
         // Same self-match defense as the ADB path: the running shell's argv
         // is just `sh <path>`, no daemon pattern visible to pkill.
-        String scriptPath = "/data/local/tmp/.appupdater_script_" + System.nanoTime() + ".sh";
+        String scriptPath = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.appupdater_script_") + System.nanoTime() + ".sh";
         try {
             java.io.File scriptFile = new java.io.File(scriptPath);
             try (java.io.FileWriter fw = new java.io.FileWriter(scriptFile)) {
@@ -702,7 +702,7 @@ public class AppUpdater {
         }
     }
 
-    private static final String APK_PATH = "/data/local/tmp/overdrive_update.apk";
+    private static final String APK_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_update.apk");
     private static final long MIB = 1024L * 1024L;
     private static final long MIN_UPDATE_FREE_BYTES = 350L * MIB;
     private static final long UPDATE_INSTALL_HEADROOM_BYTES = 128L * MIB;
@@ -776,7 +776,7 @@ public class AppUpdater {
                 Log.w(TAG, "Could not delete stale update APK before storage check");
             }
 
-            long available = new StatFs("/data/local/tmp").getAvailableBytes();
+            long available = new StatFs(com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp")).getAvailableBytes();
             long required = requiredUpdateFreeBytes(latestApkSizeBytes);
             if (available >= required) return null;
 
@@ -1451,7 +1451,7 @@ public class AppUpdater {
     // methods ({@link #downloadAndInstall} / {@link #runDetachedInstall}) are
     // left BYTE-IDENTICAL by this addition.
     private static final String COMPANION_APK_PATH =
-            "/data/local/tmp/overdrive_companion.apk";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_companion.apk");
 
     /** No-op shell callback for fire-and-forget cleanup commands. */
     private static final com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback NOOP_SHELL =
@@ -2042,10 +2042,10 @@ public class AppUpdater {
             }
             cleanup(UPDATE_IN_PROGRESS_FILE + " " + POST_UPDATE_FILE + " "
                     + APK_PATH + " /data/local/tmp/overdrive_install.sh "
-                    + "/data/local/tmp/overdrive_install.sh.tmp");
+                    + com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_install.sh.tmp"));
             runShell(
                     "for S in /data/local/tmp/camera_daemon.disabled "
-                            + "/data/local/tmp/acc_sentry_daemon.disabled; do "
+                            + com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/acc_sentry_daemon.disabled; do ")
                             + "R=$(head -1 \"$S\" 2>/dev/null); "
                             + "case \"$R\" in 'disabled for update'*|"
                             + "'disabled by stopAllDaemons sweep'*|"
@@ -2083,8 +2083,8 @@ public class AppUpdater {
     private boolean runDetachedInstall(InstallCallback callback, String channel,
                                        String priorUpdateTimestamp,
                                        String priorDisplayVersion) {
-        String scriptPath = "/data/local/tmp/overdrive_install.sh";
-        String logPath = "/data/local/tmp/overdrive_install.log";
+        String scriptPath = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_install.sh");
+        String logPath = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_install.log");
         String diLink5CaptureCleanup = diLink5CaptureKillScript();
 
         StringBuilder script = new StringBuilder();
@@ -3052,7 +3052,7 @@ public class AppUpdater {
         String priorDisplayVersion = null;
         long recordTs = 0;
         try {
-            java.io.File f = new java.io.File("/data/local/tmp/overdrive_update_progress.json");
+            java.io.File f = new java.io.File(com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_update_progress.json"));
             StringBuilder sb = new StringBuilder();
             try (java.io.BufferedReader r = new java.io.BufferedReader(
                     new java.io.InputStreamReader(new java.io.FileInputStream(f)))) {
@@ -3164,7 +3164,7 @@ public class AppUpdater {
      */
     private static boolean hasFailedUpdateMarker() {
         try {
-            java.io.File f = new java.io.File("/data/local/tmp/overdrive_update_progress.json");
+            java.io.File f = new java.io.File(com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_update_progress.json"));
             if (!f.exists()) return false;
             StringBuilder sb = new StringBuilder();
             try (java.io.BufferedReader r = new java.io.BufferedReader(

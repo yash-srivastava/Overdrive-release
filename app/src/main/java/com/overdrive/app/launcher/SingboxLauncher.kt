@@ -15,12 +15,12 @@ class SingboxLauncher(
     private val logManager: LogManager
 ) {
     companion object {
-        private const val TAG = "SingboxLauncher"
+        private val TAG = "SingboxLauncher"
         
         // Paths
-        private const val SINGBOX_TMP_PATH = "/data/local/tmp/sing-box"
-        private const val SINGBOX_CONFIG_PATH = "/data/local/tmp/singbox_config.json"
-        private const val SINGBOX_LOG = "/data/local/tmp/singbox.log"
+        private val SINGBOX_TMP_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/sing-box")
+        private val SINGBOX_CONFIG_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/singbox_config.json")
+        private val SINGBOX_LOG = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/singbox.log")
         
         // Default proxy port
         private const val PROXY_PORT = 8119

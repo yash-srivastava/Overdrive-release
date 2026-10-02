@@ -42,7 +42,7 @@ public class SohEstimator {
     private double nominalCapacityKwh = 0;
     private String nominalSource = "unset"; // "user" | "auto" | "unset"
 
-    private static final String SOH_FILE = "/data/local/tmp/abrp_soh_estimate.properties";
+    private static final String SOH_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/abrp_soh_estimate.properties");
     private final File sohFile;
     private final PersistenceWriter persistenceWriter;
     private final UserNominalConfig userNominalConfig;

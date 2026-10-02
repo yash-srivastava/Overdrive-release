@@ -22,7 +22,7 @@ import java.net.URL
  */
 object DaemonHttpClient {
 
-    private const val BASE_URL = "http://127.0.0.1:${CameraDaemon.HTTP_PORT}"
+    private val BASE_URL = "http://127.0.0.1:${CameraDaemon.HTTP_PORT}"
 
     // Cache JWT for ~4 minutes. JWT real expiry is 1 year, so this is a comfort
     // window for performance. We regenerate before this if AuthManager state was

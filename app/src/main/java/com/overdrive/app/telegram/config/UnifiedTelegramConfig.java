@@ -104,7 +104,7 @@ public final class UnifiedTelegramConfig {
      */
     private static final String K_TIER_MIGRATED = "_tierMigrated";
     private static final String LEGACY_PROPS_PATH =
-            "/data/local/tmp/telegram_config.properties";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/telegram_config.properties");
 
     /**
      * Per-process latch that suppresses repeated migration attempts within

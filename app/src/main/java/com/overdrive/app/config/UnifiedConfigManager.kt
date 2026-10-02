@@ -43,10 +43,10 @@ import java.util.concurrent.atomic.AtomicLong
  * - telegram: Telegram bot settings
  */
 object UnifiedConfigManager {
-    private const val TAG = "UnifiedConfig"
+    private val TAG = "UnifiedConfig"
     
     // Single source of truth - world-readable location
-    private const val CONFIG_PATH = "/data/local/tmp/overdrive_config.json"
+    private val CONFIG_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_config.json")
     private const val LIFECYCLE_SNAPSHOT_MAX_BYTES = 2L * 1024L * 1024L
 
     // ==================== DOUBLE-BUFFERED, SEQ-STAMPED DURABILITY ====================
@@ -77,9 +77,9 @@ object UnifiedConfigManager {
     // Hardcoded app-private path (UCM is a Context-free singleton object). Must
     // match the application's package — Context.filesDir resolves here.
     private const val APP_PACKAGE = "com.overdrive.app"
-    private const val APP_PRIVATE_DIR = "/data/data/$APP_PACKAGE/files"
-    private const val APP_PRIVATE_BAK_PATH = "$APP_PRIVATE_DIR/overdrive_config.json.bak"
-    private const val APP_PRIVATE_BAK_LOCK_PATH = "$APP_PRIVATE_BAK_PATH.lock"
+    private val APP_PRIVATE_DIR = "/data/data/$APP_PACKAGE/files"
+    private val APP_PRIVATE_BAK_PATH = "$APP_PRIVATE_DIR/overdrive_config.json.bak"
+    private val APP_PRIVATE_BAK_LOCK_PATH = "$APP_PRIVATE_BAK_PATH.lock"
     private const val DIRECTORY_SYNC_ATTEMPTS = 3
     // Monotonic write sequence. Absent (legacy configs) reads as 0; saveConfig
     // bumps it. Stripped from backup bundles (see ConfigBackupService) so an
@@ -119,11 +119,11 @@ object UnifiedConfigManager {
     private const val IPC_READ_TIMEOUT_MS = 5000
     private const val IPC_RECONCILE_ATTEMPTS = 4
     private const val IPC_RECONCILE_DELAY_MS = 75L
-    private const val CACHE_REVALIDATE_MS = 1000L
+    private val CACHE_REVALIDATE_MS = 1000L
     
     // Legacy paths for migration
-    private const val LEGACY_SENTRY_CONFIG = "/data/local/tmp/sentry_config.json"
-    private const val LEGACY_CAMERA_SETTINGS = "/data/local/tmp/camera_settings.json"
+    private val LEGACY_SENTRY_CONFIG = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/sentry_config.json")
+    private val LEGACY_CAMERA_SETTINGS = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/camera_settings.json")
     private const val LEGACY_SYSTEM_CONFIG = "/data/data/com.android.providers.settings/sentry_config.json"
     private const val ROOT_PROMOTION_SECTION = "__overdriveRootPromotion"
     private const val ROOT_PROMOTION_MARKER = "__overdrivePromoteRoot"
@@ -633,6 +633,10 @@ object UnifiedConfigManager {
         // entering the deep-sleep state that drops ADB/camera access, but it uses
         // internet data and additional parked energy. Read by BydCloudDataProvider.
         if (!surveillance.has("di5CloudKeepAlive")) surveillance.put("di5CloudKeepAlive", false)
+        // DiLink 5 QNX common-network keep-alive (Experimental, opt-in). The hold
+        // is capped per park because the platform exposes no 12 V reading.
+        if (!surveillance.has("di5QnxNetworkKeepAlive")) surveillance.put("di5QnxNetworkKeepAlive", false)
+        if (!surveillance.has("di5QnxNetworkKeepAliveMaxMinutes")) surveillance.put("di5QnxNetworkKeepAliveMaxMinutes", 60)
         // DiLink 5 parked keep-alive (Experimental). DEFAULT FALSE (opt-in). The
         // single user-visible master switch; while it is OFF every lever below is
         // inert and the parked path is byte-identical to the prior build. The
@@ -4286,7 +4290,7 @@ object UnifiedConfigManager {
     // peer's just-committed section (stale-snapshot lost update). An OS flock
     // held across the whole critical section makes those writers mutually
     // exclude. World-RW so any daemon UID can acquire it.
-    private const val LOCK_PATH = "$CONFIG_PATH.lock"
+    private val LOCK_PATH = "$CONFIG_PATH.lock"
 
     /**
      * Every writer must lock this one stable inode. The live config inode is

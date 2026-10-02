@@ -57,7 +57,7 @@ public final class Di5ParkedPowerHold {
 
     /** Cross-process status snapshot consumed by {@code /api/vehicle/di5-keepalive}. */
     public static final String DEFAULT_STATUS_PATH =
-            "/data/local/tmp/overdrive_di5_keepalive.status";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_di5_keepalive.status");
 
     /**
      * Token registered in {@code vendor.peripheral.shutdown_critical_list}.

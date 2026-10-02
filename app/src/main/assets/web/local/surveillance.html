@@ -224,6 +224,30 @@
                         </div>
                         <div class="setting-hint" id="survDi5CloudKeepAliveCloudNote" style="display:none;" data-i18n="surveillance.di5_cloud_keepalive_requires_cloud">Connect and verify your BYD Cloud account before enabling this option.</div>
 
+                        <!-- DiLink 5 (Desay SV) QNX common-network keep-alive. Shown only
+                             when the firmware exposes the QnxMessage service. The ACC
+                             sentry daemon re-reads both values on its next parked tick. -->
+                        <div class="setting-row" id="survDi5QnxNetworkKeepAliveRow" style="display:none;">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="surveillance.di5_qnx_keepalive">Experimental: Keep DI5 awake via the QNX vehicle network</div>
+                                <div class="setting-desc" data-i18n="surveillance.di5_qnx_keepalive_desc">While the car is off, asks the head unit's QNX system every 30 seconds to keep the vehicle network awake (the same request the firmware uses during over-the-air updates). No cloud or internet needed. Uses more 12V battery: it stops after the time limit below, or when the 12V reading drops below 12 V.</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="survDi5QnxNetworkKeepAlive" disabled onchange="SurvSettings.toggleDi5QnxNetworkKeepAlive()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="setting-row" id="survDi5QnxNetworkKeepAliveMinutesRow" style="display:none;">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="surveillance.di5_qnx_keepalive_minutes">Keep awake for at most (minutes)</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="number" id="survDi5QnxNetworkKeepAliveMinutes" min="5" max="480" step="5" style="width:5em;" disabled onchange="SurvSettings.setDi5QnxNetworkKeepAliveMinutes()">
+                            </div>
+                        </div>
+
                         <!-- Opt-in DiLink 5 parked keep-alive (Experimental). ONE master
                              switch; the individual levers (MCU/sentry hold, panorama
                              heartbeat, AP hold) are config-only diagnostics and never

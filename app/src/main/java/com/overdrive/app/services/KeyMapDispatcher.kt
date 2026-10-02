@@ -103,9 +103,9 @@ object KeyMapDispatcher {
     // so it can be rare. A disabled dispatcher therefore does at most one config
     // reparse per this interval (and only while hardware buttons are being pressed)
     // instead of one per REFRESH_THROTTLE_MS — the zero-overhead-when-disabled bar.
-    private const val REENABLE_POLL_MS = 30_000L
+    private val REENABLE_POLL_MS = 30_000L
     // Unified config file — watched for instant propagation of settings edits.
-    private const val CONFIG_PATH = "/data/local/tmp/overdrive_config.json"
+    private val CONFIG_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_config.json")
 
     // Pooled I/O executor for daemon POSTs and config refreshes. Cached (not
     // single-thread) so one slow/hung POST never blocks either the timing

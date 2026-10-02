@@ -6,7 +6,7 @@ import java.util.Locale;
 /** Shared trust boundary for uploaded screen-deterrent assets. */
 public final class ScreenDeterrentAsset {
 
-    public static final String DIRECTORY = "/data/local/tmp/.overdrive";
+    public static final String DIRECTORY = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.overdrive");
     public static final String PREFIX = "screen_deterrent_asset.";
 
     private ScreenDeterrentAsset() {}

@@ -52,11 +52,11 @@ public class TelegramBotDaemon {
     // ==================== ENCRYPTED CONSTANTS (SOTA Java obfuscation) ====================
     // Decrypted at runtime via Safe.s() - AES-256-CBC with stack-based key reconstruction
     /** /data/local/tmp */
-    private static String PATH_DATA_LOCAL_TMP() { return Safe.s("vuaMjrmBGBFh07qqnUuL8w=="); }
+    private static String PATH_DATA_LOCAL_TMP() { return com.overdrive.app.util.DaemonStorage.rebase(Safe.s("vuaMjrmBGBFh07qqnUuL8w==")); }
     /** /data/local/tmp/telegram_config.properties */
-    private static String PATH_TELEGRAM_CONFIG() { return Safe.s("ZHx6IP38aGV/Q7iMCCcxzwQSn0P1N0jxHygc8N+4Ft+9mlR8XQ+WvEw0ktanrtNx"); }
+    private static String PATH_TELEGRAM_CONFIG() { return com.overdrive.app.util.DaemonStorage.rebase(Safe.s("ZHx6IP38aGV/Q7iMCCcxzwQSn0P1N0jxHygc8N+4Ft+9mlR8XQ+WvEw0ktanrtNx")); }
     /** /data/local/tmp/tunnel_url.txt */
-    private static String PATH_TELEGRAM_URL_FILE() { return Safe.s("ZHx6IP38aGV/Q7iMCCcxz/kVx51CDNRiQ/Mc5+npiPo="); }
+    private static String PATH_TELEGRAM_URL_FILE() { return com.overdrive.app.util.DaemonStorage.rebase(Safe.s("ZHx6IP38aGV/Q7iMCCcxz/kVx51CDNRiQ/Mc5+npiPo=")); }
     /** https://api.telegram.org/bot */
     private static String TELEGRAM_API_BASE() { return Safe.s("FS7R/5I0wopp0qBqyJXzvDKg6eI9UXmD/Oei3NbaaGQ="); }
     
@@ -71,7 +71,7 @@ public class TelegramBotDaemon {
     private static final int IPC_PORT = 19880;
     
     // Singleton lock (same pattern as CameraDaemon / AccSentryDaemon)
-    private static final String LOCK_FILE = "/data/local/tmp/telegram_bot_daemon.lock";
+    private static final String LOCK_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/telegram_bot_daemon.lock");
     private static java.io.RandomAccessFile lockFileHandle;
     private static java.nio.channels.FileLock fileLock;
     
@@ -580,7 +580,7 @@ public class TelegramBotDaemon {
                 if (com.overdrive.app.telegram.config.UnifiedTelegramConfig.botTokenPresentButUndecryptable()) {
                     log("ERROR: bot token is stored but could NOT be decrypted "
                             + "(firmware/OTA changed the key, or "
-                            + "/data/local/tmp/.byd_device_id is missing/unreadable). "
+                            + com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.byd_device_id is missing/unreadable). ")
                             + "Re-enter the token in the Telegram settings to recover.");
                 } else {
                     log("bot_token not set in unified config");
@@ -1356,7 +1356,7 @@ public class TelegramBotDaemon {
                             // the hint and deny the next legit notify its
                             // post-update framing.
                             boolean postUpdatePresent = new File(
-                                    "/data/local/tmp/overdrive_post_update_pending_telegram"
+                                    com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_post_update_pending_telegram")
                                 ).exists();
                             // A FAILED install (Telegram-triggered) leaves the
                             // failure hint instead of the success hint — bypass
@@ -1364,7 +1364,7 @@ public class TelegramBotDaemon {
                             // install failed NOW, not 10 min later (symmetric
                             // with the post-update success bypass above).
                             boolean installFailedPresent = new File(
-                                    "/data/local/tmp/overdrive_install_failed_pending_telegram"
+                                    com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_install_failed_pending_telegram")
                                 ).exists();
                             if (!postUpdatePresent
                                     && !installFailedPresent
@@ -1839,7 +1839,7 @@ public class TelegramBotDaemon {
      * generous for actual uptime feedback while collapsing crash-loop noise
      * to a single message.
      */
-    private static final String GREETING_STAMP_FILE = "/data/local/tmp/.tg_last_greeted";
+    private static final String GREETING_STAMP_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.tg_last_greeted");
     private static final long GREETING_THROTTLE_MS = 60L * 60L * 1000L; // 1 hour
 
     /**
@@ -1874,7 +1874,7 @@ public class TelegramBotDaemon {
     // health-check restart loop produces a "URL changed" Telegram message
     // unless throttled. 10 min window matches "user-meaningful URL
     // change" — anything more frequent IS the loop, not real change.
-    private static final String TUNNEL_NOTIFY_STAMP_FILE = "/data/local/tmp/.tunnel_last_notified";
+    private static final String TUNNEL_NOTIFY_STAMP_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.tunnel_last_notified");
     private static final long TUNNEL_NOTIFY_THROTTLE_MS = 10L * 60L * 1000L; // 10 min
 
     // Serializes the notifyTunnel IPC critical section. IPC_WORKERS is a
@@ -3313,7 +3313,7 @@ public class TelegramBotDaemon {
      * avoid pulling the whole updater package transitively.
      */
     private static String consumePostUpdateHint() {
-        File hint = new File("/data/local/tmp/overdrive_post_update_pending_telegram");
+        File hint = new File(com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_post_update_pending_telegram"));
         if (!hint.exists()) return null;
         String version = null;
         try (BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(hint)))) {
@@ -3344,7 +3344,7 @@ public class TelegramBotDaemon {
      * process and we avoid pulling the whole updater package transitively.
      */
     private static String consumeInstallFailedHint() {
-        File hint = new File("/data/local/tmp/overdrive_install_failed_pending_telegram");
+        File hint = new File(com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_install_failed_pending_telegram"));
         if (!hint.exists()) return null;
         String reason = null;
         try (BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(hint)))) {

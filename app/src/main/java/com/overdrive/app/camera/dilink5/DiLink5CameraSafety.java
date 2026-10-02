@@ -40,11 +40,11 @@ final class DiLink5CameraSafety {
     private static final long COMMAND_TIMEOUT_MS = 750L;
 
     private static final String SESSION_MARKER_PATH =
-            "/data/local/tmp/overdrive_dilink5_camera_session";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_dilink5_camera_session");
     private static final String BLOCK_MARKER_PATH =
-            "/data/local/tmp/overdrive_dilink5_camera_blocked";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_dilink5_camera_blocked");
     private static final String RELEASE_MARKER_PATH =
-            "/data/local/tmp/overdrive_dilink5_camera_release";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_dilink5_camera_release");
     private static final File SESSION_MARKER =
             new File(SESSION_MARKER_PATH);
     private static final File BLOCK_MARKER =

@@ -50,7 +50,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class GeoCache {
 
     private static final String TAG = "GeoCache";
-    private static final String CACHE_PATH = "/data/local/tmp/geocache.json";
+    private static final String CACHE_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/geocache.json");
     private static final long TTL_MS = 365L * 24L * 60L * 60L * 1000L; // 1 year
     private static final int SOFT_CAP_ENTRIES = 10_000;
     private static final int CACHE_VERSION = 1;

@@ -39,7 +39,7 @@ import java.util.zip.ZipOutputStream;
 public final class GenAiIncidentPacks {
 
     static final String HOME_PROPERTY = "overdrive.genai.home";
-    private static final String DEFAULT_HOME = "/data/local/tmp/.genai";
+    private static final String DEFAULT_HOME = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.genai");
     private static final String PACKS_DIR = "incident-packs";
     private static final int SCHEMA_VERSION = 1;
     private static final int MAX_SIDECAR_BYTES = 4 * 1024 * 1024;

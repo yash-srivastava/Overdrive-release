@@ -366,7 +366,7 @@ class AdbShellExecutor(private val context: Context) {
             // (any future script body containing the literal delimiter on
             // its own line would terminate the heredoc early).
             val nonce = "${System.nanoTime()}_${scriptSeq.incrementAndGet()}"
-            val scriptPath = "/data/local/tmp/.adb_script_${nonce}.sh"
+            val scriptPath = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.adb_script_${nonce}.sh")
             val eofMarker = "__ADB_SCRIPT_EOF_${nonce}__"
             try {
                 logger.debug(TAG, "Executing script via $scriptPath (${scriptBody.length} bytes)")
@@ -517,7 +517,8 @@ class AdbShellExecutor(private val context: Context) {
                     }
                 }, remaining, TimeUnit.MILLISECONDS)
                 try {
-                    val result = conn.adb.shell(command)
+                    val result = conn.adb.shell(
+                        com.overdrive.app.util.DaemonStorage.rebaseCommand(command))
                     if (settled.compareAndSet(false, true)) {
                         cmdWatchdog.cancel(false)
                         logger.debug(TAG, "adb#$seq DONE-BULK total=${System.currentTimeMillis() - t0}ms exit=${result.exitCode}")
@@ -770,10 +771,14 @@ class AdbShellExecutor(private val context: Context) {
      */
     private fun shellGuarded(
         conn: SharedConn,
-        command: String,
+        commandRaw: String,
         deadlineMs: Long,
         seq: Int
     ): dadb.AdbShellResponse {
+        // Relocate the daemon working dir inside the command on platforms whose
+        // storage is locked (DiLink 5); no-op elsewhere. Single chokepoint so
+        // every embedded /data/local/tmp path in launch/watchdog scripts follows.
+        val command = com.overdrive.app.util.DaemonStorage.rebaseCommand(commandRaw)
         val settled = AtomicBoolean(false)
         val timedOut = AtomicBoolean(false)
         val watchdog = deadlineScheduler.schedule({

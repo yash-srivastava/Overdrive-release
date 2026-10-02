@@ -624,7 +624,7 @@ public final class GenAiInsights {
 
     private static File home() {
         return new File(System.getProperty(
-                HOME_PROPERTY, "/data/local/tmp/.genai"));
+                HOME_PROPERTY, com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.genai")));
     }
 
     private static File storeFile() {

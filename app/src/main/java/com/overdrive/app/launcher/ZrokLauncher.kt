@@ -31,12 +31,12 @@ class ZrokLauncher(
     private val logManager: LogManager
 ) {
     companion object {
-        private const val TAG = "ZrokLauncher"
+        private val TAG = "ZrokLauncher"
         
         // Zrok paths
-        private const val ZROK_TMP_PATH = "/data/local/tmp/zrok"
-        private const val ZROK_LOG = "/data/local/tmp/zrok.log"
-        private const val ZROK_HOME = "/data/local/tmp"
+        private val ZROK_TMP_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/zrok")
+        private val ZROK_LOG = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/zrok.log")
+        private val ZROK_HOME = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp")
         private const val ZROK_BACKEND_PORT = 8080
         private const val ZROK_BACKEND_URL = "http://127.0.0.1:8080"
         private const val ZROK_RUNTIME_PROBE_CLASS = "com.overdrive.app.launcher.ZrokRuntimeProbe"
@@ -50,20 +50,20 @@ class ZrokLauncher(
         // zrok unsupervised — if the share process then drops its session
         // the public URL stays registered at the edge but routes to
         // nothing, and the user sees 502 until the next manual restart.
-        const val ZROK_WATCHDOG_SCRIPT = "/data/local/tmp/start_zrok.sh"
-        const val ZROK_DISABLED_SENTINEL = "/data/local/tmp/zrok.disabled"
+        @JvmField val ZROK_WATCHDOG_SCRIPT = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/start_zrok.sh")
+        @JvmField val ZROK_DISABLED_SENTINEL = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/zrok.disabled")
         
         // Identity file - THIS IS THE KEY FILE that proves device is enabled
-        private const val ZROK_IDENTITY_FILE = "/data/local/tmp/.zrok/environment.json"
+        private val ZROK_IDENTITY_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.zrok/environment.json")
         
         // Reserved token file - stores the reserved share token
-        private const val ZROK_RESERVED_TOKEN_FILE = "/data/local/tmp/.zrok/reserved_token"
+        private val ZROK_RESERVED_TOKEN_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.zrok/reserved_token")
         
         // Enable token file - stores the enable token for cross-UID access
-        private const val ZROK_ENABLE_TOKEN_FILE = "/data/local/tmp/.zrok/enable_token"
+        private val ZROK_ENABLE_TOKEN_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.zrok/enable_token")
         
         // Unique name file - stores the generated unique name
-        private const val ZROK_UNIQUE_NAME_FILE = "/data/local/tmp/.zrok/unique_name"
+        private val ZROK_UNIQUE_NAME_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.zrok/unique_name")
         
         // Process name for identification
         private const val ZROK_PROCESS = "zrok"

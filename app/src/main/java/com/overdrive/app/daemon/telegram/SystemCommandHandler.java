@@ -158,7 +158,7 @@ public class SystemCommandHandler implements TelegramCommandHandler {
 
             if (tailscaleUp) {
                 String url = null;
-                String getIpResult = ctx.execShell("/data/local/tmp/.tailscale/tailscale --socket 127.0.0.1:8532 ip --1");
+                String getIpResult = ctx.execShell(com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.tailscale/tailscale --socket 127.0.0.1:8532 ip --1"));
                 if (getIpResult != null && !getIpResult.trim().isEmpty()) {
                     url = "http://" + getIpResult.trim() + ":8080";
                 }
@@ -175,7 +175,7 @@ public class SystemCommandHandler implements TelegramCommandHandler {
 
             // Last-resort fallback: if nothing resolved from logs, try the saved URL file.
             if (resolved == 0) {
-                File urlFile = new File("/data/local/tmp/tunnel_url.txt");
+                File urlFile = new File(com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/tunnel_url.txt"));
                 if (urlFile.exists()) {
                     BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(urlFile)));
                     String saved = reader.readLine();

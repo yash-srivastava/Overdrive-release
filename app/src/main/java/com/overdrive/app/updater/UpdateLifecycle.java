@@ -53,8 +53,8 @@ public final class UpdateLifecycle {
                 + "killall -9 qcarcam_test 2>/dev/null\n";
     }
 
-    public static final String UPDATE_IN_PROGRESS_FILE = "/data/local/tmp/overdrive_update_in_progress";
-    public static final String POST_UPDATE_FILE = "/data/local/tmp/overdrive_post_update";
+    public static final String UPDATE_IN_PROGRESS_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_update_in_progress");
+    public static final String POST_UPDATE_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_post_update");
     /**
      * One-shot marker read by TelegramBotDaemon's notifyTunnel handler so the
      * first post-update tunnel-URL message can include the new version (and a
@@ -63,7 +63,7 @@ public final class UpdateLifecycle {
      * daemon after consuming.
      */
     public static final String TELEGRAM_POST_UPDATE_HINT_FILE =
-            "/data/local/tmp/overdrive_post_update_pending_telegram";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_post_update_pending_telegram");
     /**
      * Failure twin of {@link #TELEGRAM_POST_UPDATE_HINT_FILE}. Planted by the
      * detached install script's FAILURE branch (only for an IPC-triggered
@@ -77,7 +77,7 @@ public final class UpdateLifecycle {
      * this one, so the bot never sends both a success and a failure message.
      */
     public static final String TELEGRAM_INSTALL_FAILED_HINT_FILE =
-            "/data/local/tmp/overdrive_install_failed_pending_telegram";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_install_failed_pending_telegram");
 
     public static final String EXTRA_POST_UPDATE = "post_update";
 
@@ -205,7 +205,7 @@ public final class UpdateLifecycle {
                 // The post-update markers (UPDATE_IN_PROGRESS_FILE /
                 // POST_UPDATE_FILE) survive — new process owns them.
                 "for S in /data/local/tmp/camera_daemon.disabled " +
-                "/data/local/tmp/sentry_daemon.disabled " +
+                com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/sentry_daemon.disabled ") +
                 "/data/local/tmp/acc_sentry_daemon.disabled; do\n" +
                 "  R=$(head -1 \"$S\" 2>/dev/null)\n" +
                 "  case \"$R\" in " +

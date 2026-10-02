@@ -40,8 +40,8 @@ public class QualitySettingsApiHandler {
     private static String recordingBitrate = "STANDARD";
     private static String recordingCodec = "H264";      // H264 or H265
     
-    private static final String UNIFIED_CONFIG_FILE = "/data/local/tmp/overdrive_config.json";
-    private static final String LEGACY_SETTINGS_FILE = "/data/local/tmp/camera_settings.json";
+    private static final String UNIFIED_CONFIG_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_config.json");
+    private static final String LEGACY_SETTINGS_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/camera_settings.json");
     
     /**
      * Handle quality settings API requests.

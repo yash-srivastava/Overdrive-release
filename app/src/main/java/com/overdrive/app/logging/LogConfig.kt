@@ -89,7 +89,7 @@ data class LogConfig(
          * Daemon log directory (for processes running via ADB shell).
          * These have shell permissions and can write to /data/local/tmp.
          */
-        const val DAEMON_LOG_DIR = "/data/local/tmp"
+        @JvmField val DAEMON_LOG_DIR = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp")
     }
 
     /**

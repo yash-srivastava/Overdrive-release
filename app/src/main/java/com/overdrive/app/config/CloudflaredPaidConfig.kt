@@ -64,8 +64,11 @@ object CloudflaredPaidConfig {
         return if (isPaid && token.isNotEmpty()) {
             // Paid named tunnel. Keep the same resilience flags as the free
             // path so a paid tunnel survives the ~24s ACC-OFF data-interface
-            // blackout instead of panicking/restarting faster.
-            "tunnel --no-autoupdate --retries 20 --grace-period 45s run --token $token"
+            // blackout instead of panicking/restarting faster. Force HTTP/2 over
+            // TCP like the free path: vehicle cellular links can drop UDP, and
+            // a QUIC-first tunnel was seen stuck without reconnecting after a
+            // network switch.
+            "tunnel --protocol http2 --no-autoupdate --retries 20 --grace-period 45s run --token $token"
         } else {
             "tunnel --url http://127.0.0.1:8080 --edge-ip-version 4 --protocol http2 --no-autoupdate --retries 20 --grace-period 45s"
         }

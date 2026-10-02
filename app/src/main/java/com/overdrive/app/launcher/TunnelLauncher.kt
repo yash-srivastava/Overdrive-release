@@ -16,11 +16,11 @@ class TunnelLauncher(
 ) {
     companion object {
         private const val TAG = "TunnelLauncher"
-        private const val LAUNCH_GUARD_TIMEOUT_SECONDS = 90L
+        private val LAUNCH_GUARD_TIMEOUT_SECONDS = 90L
         
         // Cloudflared paths
-        private const val CLOUDFLARED_TMP_PATH = "/data/local/tmp/cloudflared"
-        private const val CLOUDFLARED_LOG = "/data/local/tmp/cloudflared.log"
+        private val CLOUDFLARED_TMP_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/cloudflared")
+        private val CLOUDFLARED_LOG = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/cloudflared.log")
         
         // Process name for identification
         private const val CLOUDFLARED_PROCESS = "cloudflared"
@@ -189,24 +189,12 @@ class TunnelLauncher(
                         }
                     }
                 } else {
-                    // Not running, check if binary is installed
+                    // Not running — run straight from the bundled, executable
+                    // jniLib in nativeLibraryDir. The old path copied the binary
+                    // to the daemon storage and chmod +x'd it, which fails when
+                    // that storage is relocated to /sdcard (noexec) on DiLink 5.
                     callback.onLog("Setting up cloudflared...")
-                    adbShellExecutor.execute(
-                        command = "test -x $CLOUDFLARED_TMP_PATH && echo yes || echo no",
-                        callback = object : AdbShellExecutor.ShellCallback {
-                            override fun onSuccess(output: String) {
-                                if (output.trim() == "yes") {
-                                    launchCloudflaredInternal(callback)
-                                } else {
-                                    installCloudflared(callback)
-                                }
-                            }
-                            
-                            override fun onError(error: String) {
-                                installCloudflared(callback)
-                            }
-                        }
-                    )
+                    launchCloudflaredInternal(callback)
                 }
             }
         }
@@ -301,13 +289,16 @@ class TunnelLauncher(
     private fun launchCloudflaredInternal(callback: TunnelCallback) {
         callback.onLog("Starting cloudflared tunnel...")
         
-        // Check if sing-box proxy is running
+        // Use the sing-box proxy only if its port (8119 = 0x1FB7) is actually
+        // listening. `pgrep -f sing-box` matched its own `sh -c` wrapper, so it
+        // always reported the proxy as up; QUIC ignores proxy env vars, which hid
+        // that, but an HTTP/2 tunnel then dialed a dead 127.0.0.1:8119 forever.
         adbShellExecutor.execute(
-            command = "pgrep -f sing-box",
+            command = "grep -qiE ':1FB7 [0-9A-F:]+ 0A ' /proc/net/tcp /proc/net/tcp6 && echo up",
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
-                    // Sing-box is running, use proxy
-                    val useProxy = output.trim().isNotEmpty()
+                    // Sing-box proxy is listening, use it
+                    val useProxy = output.trim() == "up"
                     launchCloudflaredWithConfig(callback, useProxy)
                 }
                 
@@ -340,7 +331,7 @@ class TunnelLauncher(
 // FIX: Removed invalid flags. Added 'retries' and 'grace-period'.
 // --grace-period 45s: Waits 45s before panicking (Covers the 24s blackout)
 // --retries 20: Keeps trying to reconnect for a long time
-            append("$CLOUDFLARED_TMP_PATH ${com.overdrive.app.config.CloudflaredPaidConfig.getArgs()}")
+            append("${context.applicationInfo.nativeLibraryDir}/libcloudflared.so ${com.overdrive.app.config.CloudflaredPaidConfig.getArgs()}")
             append("' > $CLOUDFLARED_LOG 2>&1 &")
         }
         

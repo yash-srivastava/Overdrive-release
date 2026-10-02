@@ -46,15 +46,15 @@ public class ModelsApiHandler {
     private static final String TAG = "ModelsApiHandler";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
-    public static final String MODELS_DIR = "/data/local/tmp/overdrive/models";
+    public static final String MODELS_DIR = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive/models");
 
     // Manifest path inside the extracted web assets — bundled copy ships with the APK
     // and is the offline-safe baseline.
-    private static final String MANIFEST_BUNDLED_PATH = "/data/local/tmp/web/shared/models/manifest.json";
+    private static final String MANIFEST_BUNDLED_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/web/shared/models/manifest.json");
     // Cached remote manifest. Persisted across app updates so an offline boot still
     // shows the most recently-seen model list. Promoted in front of the bundled copy
     // by readManifest() whenever its top-level "version" is newer.
-    private static final String MANIFEST_REMOTE_CACHE = "/data/local/tmp/overdrive/models/manifest.json";
+    private static final String MANIFEST_REMOTE_CACHE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive/models/manifest.json");
     // GitHub release manifest URL — same baseUrl convention as the GLBs themselves.
     private static final String MANIFEST_REMOTE_URL =
             "https://github.com/yash-srivastava/Overdrive-release/releases/download/models-v1/manifest.json";

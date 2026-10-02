@@ -2633,7 +2633,7 @@ public class SurveillanceIpcServer implements Runnable {
             r.put("ts", System.currentTimeMillis());
         } catch (Exception ignored) {}
         try (java.io.FileWriter fw = new java.io.FileWriter(
-                "/data/local/tmp/overdrive_update_progress.json")) {
+                com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_update_progress.json"))) {
             fw.write(r.toString());
         } catch (Exception ignored) {}
     }
@@ -2693,7 +2693,7 @@ public class SurveillanceIpcServer implements Runnable {
      */
     private void handleGetUpdateProgress(JSONObject response) throws Exception {
         response.put("success", true);
-        java.io.File f = new java.io.File("/data/local/tmp/overdrive_update_progress.json");
+        java.io.File f = new java.io.File(com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_update_progress.json"));
         if (!f.exists()) {
             response.put("phase", "idle");
             response.put("percent", -1);

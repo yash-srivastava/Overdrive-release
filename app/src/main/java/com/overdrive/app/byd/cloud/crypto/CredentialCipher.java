@@ -26,7 +26,7 @@ public final class CredentialCipher {
     private static final int IV_LEN = 12;
     private static final int TAG_BITS = 128;
     private static final String KD_SALT = "overdrive-byd-cred-v1";
-    private static final String DID_PATH = "/data/local/tmp/.byd_device_id";
+    private static final String DID_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.byd_device_id");
 
     private CredentialCipher() {}
 

@@ -123,7 +123,7 @@ object CarSvcTelemetry {
             ) {
                 return null
             }
-            val path = "/data/local/tmp/.carsvc_dump_${Thread.currentThread().id}_${System.nanoTime()}.txt"
+            val path = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.carsvc_dump_${Thread.currentThread().id}_${System.nanoTime()}.txt")
             val file = File(path)
             var process: Process? = null
             var succeeded = false

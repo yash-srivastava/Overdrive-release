@@ -220,7 +220,7 @@ public class StorageManager {
     public static final String TRIPS_SUBDIR = "trips";
     
     // Config file location
-    private static final String CONFIG_FILE = "/data/local/tmp/overdrive_config.json";
+    private static final String CONFIG_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_config.json");
 
     // Persisted UUID of whichever public volume we've previously confirmed as
     // the SD card. Used as the first-class signal in classifyPublicVolume()
@@ -232,7 +232,7 @@ public class StorageManager {
     // serial from a previous successful cycle bridges the gap. File is
     // tiny (~10 bytes), atomic-write semantics not required because a stale
     // value still resolves to the same physical card.
-    private static final String LEARNED_SD_UUID_FILE = "/data/local/tmp/overdrive_sd_uuid";
+    private static final String LEARNED_SD_UUID_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_sd_uuid");
 
     /**
      * Cross-process proof that CameraDaemon recently observed the configured
@@ -243,7 +243,7 @@ public class StorageManager {
      * ~30-second reactive-recovery decision.
      */
     private static final String SD_MOUNTED_LEASE_FILE =
-            "/data/local/tmp/overdrive_sd_mounted_lease";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_sd_mounted_lease");
     private static final long SD_MOUNTED_LEASE_MS = 60_000L;
     private static final long SD_MOUNTED_LEASE_FAILURE_LOG_INTERVAL_MS =
             5 * 60_000L;
@@ -4045,7 +4045,7 @@ public class StorageManager {
     }
     
     /** Marker file that stores the epoch millis of the last successful broadcast scan. */
-    private static final String BROADCAST_MARKER_FILE = "/data/local/tmp/overdrive_last_mediascan";
+    private static final String BROADCAST_MARKER_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_last_mediascan");
     
     /** Throttle delay between individual file broadcasts (ms). */
     private static final long BROADCAST_THROTTLE_MS = 50;
@@ -10446,7 +10446,7 @@ public class StorageManager {
         return null;
     }
 
-    private static final String TRIP_JOURNAL_DIR = "/data/local/tmp/overdrive_trip_journal";
+    private static final String TRIP_JOURNAL_DIR = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_trip_journal");
 
     /**
      * Absolute path of the telemetry file for the trip CURRENTLY being recorded,

@@ -25,7 +25,7 @@ public class MqttConnectionStore {
     private static final String TAG = "MqttConnectionStore";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
-    private static final String CONFIG_PATH = "/data/local/tmp/mqtt_connections.json";
+    private static final String CONFIG_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/mqtt_connections.json");
     public static final int MAX_CONNECTIONS = 5;
 
     private final List<MqttConnectionConfig> connections = new ArrayList<>();

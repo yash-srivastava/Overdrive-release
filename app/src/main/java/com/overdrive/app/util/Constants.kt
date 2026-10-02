@@ -12,13 +12,13 @@ object Constants {
     
     // Daemon Ports
     const val TCP_PORT = 19876
-    const val HTTP_PORT = 8080
+    @JvmField val HTTP_PORT = 8080
     
     // Directories
-    const val STREAM_DIR = "/data/local/tmp/cam_stream"
-    const val APP_STREAM_DIR = "/storage/emulated/0/Android/data/com.overdrive.app/files/stream"
-    const val DEFAULT_OUTPUT_DIR = "/sdcard/DCIM/BYDCam"
-    const val LOG_DIR = "/data/local/tmp"
+    @JvmField val STREAM_DIR = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/cam_stream")
+    @JvmField val APP_STREAM_DIR = "/storage/emulated/0/Android/data/com.overdrive.app/files/stream"
+    @JvmField val DEFAULT_OUTPUT_DIR = "/sdcard/DCIM/BYDCam"
+    @JvmField val LOG_DIR = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp")
     
     // Camera Configuration (legacy Seal/Atto defaults)
     val PANO_WIDTH  = CameraProfiles.getLegacyDefault().panoWidth

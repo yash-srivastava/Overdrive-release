@@ -21,11 +21,11 @@ class SurveillanceConfigManager(
         private const val TAG = "SurveillanceConfigMgr"
         
         // Legacy paths (for migration only)
-        private const val SYSTEM_CONFIG_PATH = "/data/data/com.android.providers.settings/sentry_config.json"
-        private const val SHELL_CONFIG_PATH = "/data/local/tmp/sentry_config.json"
+        private val SYSTEM_CONFIG_PATH = "/data/data/com.android.providers.settings/sentry_config.json"
+        private val SHELL_CONFIG_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/sentry_config.json")
         
         // SOTA: Use unified config path
-        private const val UNIFIED_CONFIG_PATH = "/data/local/tmp/overdrive_config.json"
+        private val UNIFIED_CONFIG_PATH = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_config.json")
         
         private fun getDefaultConfigFile(): File {
             val uid = Process.myUid()

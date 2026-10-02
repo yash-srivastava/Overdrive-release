@@ -72,7 +72,7 @@ class DiagnosticsFragment : Fragment() {
     // rewrites this file on reset → seedInitialEstimate, which the
     // observer surfaces as CLOSE_WRITE / DELETE / MOVED_TO events.
     private var sohFileObserver: android.os.FileObserver? = null
-    private val sohFilePath = "/data/local/tmp/abrp_soh_estimate.properties"
+    private val sohFilePath = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/abrp_soh_estimate.properties")
 
     override fun onCreateView(
         inflater: LayoutInflater,

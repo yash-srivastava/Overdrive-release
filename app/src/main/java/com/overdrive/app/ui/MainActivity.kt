@@ -4065,7 +4065,7 @@ open class MainActivity : AppCompatActivity() {
             var frameMismatch = false
 
             try {
-                val sohFile = java.io.File("/data/local/tmp/abrp_soh_estimate.properties")
+                val sohFile = java.io.File(com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/abrp_soh_estimate.properties"))
                 if (sohFile.exists()) {
                     val props = java.util.Properties()
                     java.io.FileInputStream(sohFile).use { props.load(it) }
@@ -4403,7 +4403,7 @@ open class MainActivity : AppCompatActivity() {
                     }
                 } else {
                     // Fallback: try direct file delete (works if app has permissions)
-                    val sohFile = java.io.File("/data/local/tmp/abrp_soh_estimate.properties")
+                    val sohFile = java.io.File(com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/abrp_soh_estimate.properties"))
                     val deleted = if (sohFile.exists()) sohFile.delete() else true
                     runOnUiThread {
                         if (deleted) {

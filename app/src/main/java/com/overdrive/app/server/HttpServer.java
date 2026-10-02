@@ -49,7 +49,7 @@ import java.util.concurrent.TimeUnit;
  */
 public class HttpServer {
 
-    private static final String WEB_ROOT = "/data/local/tmp/web";
+    private static final String WEB_ROOT = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/web");
     private final int port;
     private ServerSocket serverSocket;
     private volatile boolean running = true;
@@ -94,7 +94,7 @@ public class HttpServer {
             extractAssetDir(assetManager, "server-i18n", new File(WEB_ROOT, "server-i18n"));
 
             // Extract overlay icons for telemetry overlay
-            extractAssetDir(assetManager, "overlay", new File("/data/local/tmp/overlay"));
+            extractAssetDir(assetManager, "overlay", new File(com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overlay")));
             
             // Extract BYD cloud crypto tables — re-extract whenever the cache
             // is missing or fails magic/size validation, so a stale or

@@ -17,9 +17,9 @@ import java.util.Properties;
 public class DaemonCommandHandler implements TelegramCommandHandler {
     
     private static final String TAG = "DaemonCmd";
-    private static final String STATE_FILE = "/data/local/tmp/daemon_telegram_state.properties";
+    private static final String STATE_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/daemon_telegram_state.properties");
     private static final String TAILSCALE_DASHBOARD_GUARD_SCRIPT =
-            "/data/local/tmp/.tailscale/secure_dashboard_serve.sh";
+            com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.tailscale/secure_dashboard_serve.sh");
     
     // Debounce duplicate commands
     private long lastCommandTime = 0;
@@ -194,14 +194,14 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
      */
     private static String sentinelForProcess(String processName) {
         switch (processName) {
-            case "byd_cam_daemon":     return "/data/local/tmp/camera_daemon.disabled";
-            case "sentry_daemon":      return "/data/local/tmp/sentry_daemon.disabled";
-            case "acc_sentry_daemon":  return "/data/local/tmp/acc_sentry_daemon.disabled";
-            case "sing-box":           return "/data/local/tmp/singbox.disabled";
-            case "cloudflared":        return "/data/local/tmp/cloudflared.disabled";
-            case "zrok":               return "/data/local/tmp/zrok.disabled";
-            case "tailscaled":         return "/data/local/tmp/tailscale.disabled";
-            case "telegram_bot_daemon": return "/data/local/tmp/telegram_bot_daemon.disabled";
+            case "byd_cam_daemon":     return com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/camera_daemon.disabled");
+            case "sentry_daemon":      return com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/sentry_daemon.disabled");
+            case "acc_sentry_daemon":  return com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/acc_sentry_daemon.disabled");
+            case "sing-box":           return com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/singbox.disabled");
+            case "cloudflared":        return com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/cloudflared.disabled");
+            case "zrok":               return com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/zrok.disabled");
+            case "tailscaled":         return com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/tailscale.disabled");
+            case "telegram_bot_daemon": return com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/telegram_bot_daemon.disabled");
             default:                   return null;
         }
     }
@@ -495,8 +495,8 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
      * Step 4: Verify daemon is running
      */
     private boolean startCameraDaemonWithWatchdog(String apkPath, CommandContext ctx) {
-        String scriptPath = "/data/local/tmp/start_cam_daemon.sh";
-        String logFile = "/data/local/tmp/cam_daemon.log";
+        String scriptPath = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/start_cam_daemon.sh");
+        String logFile = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/cam_daemon.log");
         String processName = "byd_cam_daemon";
         String outputDir = "/sdcard/DCIM/BYDCam";
         
@@ -580,7 +580,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
             "echo done\n";
         // Write via heredoc — body comes from stdin not argv, no
         // self-match. Then exec the file (argv = `sh <path>` only).
-        String cleanupTmpPath = "/data/local/tmp/.tg_cam_kill_" + System.nanoTime() + ".sh";
+        String cleanupTmpPath = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.tg_cam_kill_") + System.nanoTime() + ".sh";
         ctx.execShell(
             "cat > " + cleanupTmpPath + " <<'__TG_CAM_KILL_EOF__'\n" +
             cleanupScript +
@@ -645,7 +645,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
      * Replicates DaemonLauncher.launchAccSentryDaemon() flow.
      */
     private boolean startAccSentryDaemonWithWatchdog(String apkPath, CommandContext ctx) {
-        String scriptPath = "/data/local/tmp/start_acc_sentry.sh";
+        String scriptPath = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/start_acc_sentry.sh");
         String processName = "acc_sentry_daemon";
 
         // Step 1: Kill old processes via tmpfile script (no self-match
@@ -671,7 +671,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 "/data/local/tmp/acc_sentry_watchdog.pid 2>/dev/null\n" +
             "rm -rf /data/local/tmp/acc_sentry_watchdog.lock 2>/dev/null\n" +
             "echo done\n";
-        String accCleanupTmpPath = "/data/local/tmp/.tg_acc_kill_" + System.nanoTime() + ".sh";
+        String accCleanupTmpPath = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.tg_acc_kill_") + System.nanoTime() + ".sh";
         ctx.execShell(
             "cat > " + accCleanupTmpPath + " <<'__TG_ACC_KILL_EOF__'\n" +
             accCleanupScript +
@@ -844,7 +844,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 }
                 
                 // Same flags as UI version
-                cfCmd.append("/data/local/tmp/cloudflared ").append(com.overdrive.app.config.CloudflaredPaidConfig.getArgs());
+                cfCmd.append(com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/cloudflared ")).append(com.overdrive.app.config.CloudflaredPaidConfig.getArgs());
                 cfCmd.append("' > /data/local/tmp/cloudflared.log 2>&1 &");
                 
                 cmd = cfCmd.toString();
@@ -895,7 +895,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                         : "";
                     String enableCmd = "HOME=/data/local/tmp " +
                         zrokProxyEnv +
-                        "/data/local/tmp/zrok enable " +
+                        com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/zrok enable ") +
                         com.overdrive.app.launcher.ZrokRuntimeProbe.shellQuote(enableToken) +
                         " --headless 2>&1";
                     String enableResult = ctx.execShell(enableCmd);
@@ -961,7 +961,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 java.util.List<String> watchdogLines =
                     com.overdrive.app.launcher.ZrokLauncher.Companion.buildZrokWatchdogScriptStatic(
                         reservedMode, tokenForScript, useProxy);
-                String zrokScriptPath = "/data/local/tmp/start_zrok.sh";
+                String zrokScriptPath = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/start_zrok.sh");
                 // Heredoc-based write: one fork instead of N (where N is the
                 // number of script lines). Heredoc body comes from stdin so
                 // the daemon-pattern in the body never enters argv → no
@@ -1016,7 +1016,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 }
 
                 // Same flags as UI version
-                tailscaleCmd.append("/data/local/tmp/.tailscale/tailscaled --tun userspace-networking ");
+                tailscaleCmd.append(com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.tailscale/tailscaled --tun userspace-networking "));
                 tailscaleCmd.append("--statedir /data/local/tmp/.tailscale ");
                 if (enableProxy) {
                     tailscaleCmd.append("--socks5-server 127.0.0.1:8539 ");
@@ -1129,7 +1129,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
 
         // For tailscale get the URL
         if (started && "tailscale".equals(name)) {
-            String getIpResult = ctx.execShell("/data/local/tmp/.tailscale/tailscale --socket 127.0.0.1:8532 ip --1");
+            String getIpResult = ctx.execShell(com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/.tailscale/tailscale --socket 127.0.0.1:8532 ip --1"));
             if (getIpResult != null) {
                 String tailscaleUrl = "http://" + getIpResult.trim() + ":8080";
                 ctx.log("Tailscale URL: " + tailscaleUrl);

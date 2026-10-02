@@ -21,7 +21,7 @@ import java.io.OutputStream;
  */
 public class SurveillanceApiHandler {
     
-    private static final String UNIFIED_CONFIG_FILE = "/data/local/tmp/overdrive_config.json";
+    private static final String UNIFIED_CONFIG_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_config.json");
     
     /**
      * Handle surveillance API requests.
@@ -710,6 +710,14 @@ public class SurveillanceApiHandler {
         // the user's own platform declaration.
         config.put("di5ParkedKeepAlive",
                 survConfig.optBoolean("di5ParkedKeepAlive", false));
+        // DiLink 5 QNX common-network keep-alive (Experimental). Shown only when
+        // the firmware exposes the QnxMessage service.
+        config.put("di5QnxNetworkKeepAlive",
+                survConfig.optBoolean("di5QnxNetworkKeepAlive", false));
+        config.put("di5QnxNetworkKeepAliveMaxMinutes",
+                survConfig.optInt("di5QnxNetworkKeepAliveMaxMinutes", 60));
+        config.put("di5QnxNetworkKeepAliveSupported",
+                com.overdrive.app.byd.dilink5.QnxMessageBus.get().isAvailable());
         // HV-battery SoC surveillance cutoff (%). Lives in the "power" section
         // (the key SocCutoffMonitor reads), NOT "surveillance" — surface it on
         // the surveillance config so the General-tab slider can hydrate. 0=Off.
@@ -1598,6 +1606,29 @@ public class SurveillanceApiHandler {
                 CameraDaemon.log("DI5 BYD-cloud keep-alive set to: "
                         + cloudKeepAlive);
                 reconcileDi5CloudKeepAlive = true;
+            }
+
+            // DiLink 5 QNX common-network keep-alive (Experimental). Pure persist:
+            // the ACC sentry daemon re-reads both keys on its next parked tick.
+            if (configJson.has("di5QnxNetworkKeepAlive")
+                    || configJson.has("di5QnxNetworkKeepAliveMaxMinutes")) {
+                java.util.Map<String, Object> qnxValues = new java.util.HashMap<>();
+                if (configJson.has("di5QnxNetworkKeepAlive")) {
+                    qnxValues.put("di5QnxNetworkKeepAlive",
+                            configJson.optBoolean("di5QnxNetworkKeepAlive", false));
+                }
+                if (configJson.has("di5QnxNetworkKeepAliveMaxMinutes")) {
+                    int minutes = configJson.optInt("di5QnxNetworkKeepAliveMaxMinutes", 60);
+                    qnxValues.put("di5QnxNetworkKeepAliveMaxMinutes",
+                            Math.max(5, Math.min(minutes, 480)));
+                }
+                if (!com.overdrive.app.config.UnifiedConfigManager
+                        .updateValues("surveillance", qnxValues)) {
+                    HttpResponse.sendJsonError(
+                            out, "Failed to save DI5 QNX network keep-alive setting");
+                    return;
+                }
+                CameraDaemon.log("DI5 QNX network keep-alive set to: " + qnxValues);
             }
 
             // DiLink 5 parked keep-alive (Experimental). Pure persist: the lease
