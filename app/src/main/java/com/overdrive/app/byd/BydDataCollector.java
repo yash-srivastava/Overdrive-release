@@ -5126,6 +5126,12 @@ public class BydDataCollector {
                     logger.debug("collectStatistic evMileage feature ID error: " + e.getMessage());
                 }
             }
+            if (b.evMileageKm == BydVehicleData.UNAVAILABLE) {
+                int raw = readMileageViaManager(BydFeatureIds.STAT_MILEAGE_EV, diLink5);
+                if (raw != BydVehicleData.UNAVAILABLE) {
+                    b.evMileageKm((int) Math.round(raw * distanceFactor));
+                }
+            }
 
             // ==================== HEV MILEAGE ====================
             // Lifetime distance with the engine contributing — the other half of
@@ -5152,8 +5158,17 @@ public class BydDataCollector {
             if (b.hevMileageKm == BydVehicleData.UNAVAILABLE
                     && (hevMileageProbesLeft > 0 || hevMileagePresent)) {
                 try {
-                    Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_MILEAGE_HEV, Integer.class);
+                    // Manager tier first: on Di 3.0 it is the only path that answers
+                    // (see readMileageViaManager), and a hit here must count as a
+                    // success so the probe countdown below never retires the register.
                     boolean got = false;
+                    int managerRaw = readMileageViaManager(BydFeatureIds.STAT_MILEAGE_HEV, diLink5);
+                    if (managerRaw != BydVehicleData.UNAVAILABLE) {
+                        b.hevMileageKm((int) Math.round(managerRaw * distanceFactor));
+                        got = true;
+                    }
+                    Object val = got ? null : BydDeviceHelper.callGet(
+                            statisticDevice, BydFeatureIds.STAT_MILEAGE_HEV, Integer.class);
                     if (val != null) {
                         int raw = BydDeviceHelper.getIntValue(val);
                         if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
@@ -5445,6 +5460,40 @@ public class BydDataCollector {
 
     static boolean isUsableMileage(int value, boolean diLink5) {
         return value >= (diLink5 ? 0 : 1) && value <= 2_000_000;
+    }
+
+    /**
+     * Read a lifetime-mileage register (EV / HEV) through the system-service manager
+     * tier: {@code BYDAutoManager.getInt(statisticDeviceType, featureId)}.
+     *
+     * <p>On Di 3.0 the per-device statistic reads ({@code getEVMileageValue()},
+     * {@code get(featureId)}) throw {@code SecurityException} — they check the
+     * signature-level {@code BYDAUTO_STATISTIC_GET} permission in the caller's
+     * process — and the throw is swallowed, so the EV/HEV split never populated. The
+     * manager forwards the read to BYD's privileged system service, which answers
+     * (verified on a Sealion 6 DM-i: EV 8373 + HEV 2141 = total 10514 km). Same
+     * mechanism as {@link #readDoorOpenState}.
+     *
+     * @return the raw register value in the statistic distance unit, or
+     *         {@link BydVehicleData#UNAVAILABLE}
+     */
+    private int readMileageViaManager(int featureId, boolean diLink5) {
+        if (statisticDevice == null) return BydVehicleData.UNAVAILABLE;
+        int raw = BydManagerChannel.getInt(context, statisticDevice, featureId);
+        return isUsableManagerMileage(raw, diLink5) ? raw : BydVehicleData.UNAVAILABLE;
+    }
+
+    /**
+     * {@link BydManagerChannel#getInt} performs no sentinel filtering, so reject the
+     * HAL's not-available encodings (including the 16-bit {@code 65535}) before the
+     * plausibility range check.
+     */
+    static boolean isUsableManagerMileage(int raw, boolean diLink5) {
+        return raw != BydFeatureIds.BMS_UNAVAILABLE
+                && raw != BydFeatureIds.INVALID_VALUE
+                && raw != BydFeatureIds.INVALID_VALUE_2
+                && raw != 65535
+                && isUsableMileage(raw, diLink5);
     }
 
     static boolean isPlausibleTotalMileage(double value) {

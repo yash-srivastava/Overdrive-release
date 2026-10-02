@@ -983,6 +983,15 @@ public class VehicleControlApiHandler {
         if (data.bodyworkRangeKm != BydVehicleData.UNAVAILABLE) battery.put("bodyworkRangeKm", data.bodyworkRangeKm);
         response.put("battery", battery);
 
+        // Odometer: lifetime total plus the EV/HEV split (DM-i). A key is omitted when
+        // the vehicle doesn't report that value, so a consumer can tell "no split on
+        // this vehicle" (e.g. a BEV has no hevKm) apart from a real zero.
+        JSONObject odometer = new JSONObject();
+        if (data.totalMileageKm != BydVehicleData.UNAVAILABLE) odometer.put("totalKm", data.totalMileageKm);
+        if (data.evMileageKm != BydVehicleData.UNAVAILABLE) odometer.put("evKm", data.evMileageKm);
+        if (data.hevMileageKm != BydVehicleData.UNAVAILABLE) odometer.put("hevKm", data.hevMileageKm);
+        response.put("odometer", odometer);
+
         // Lights
         JSONObject lights = new JSONObject();
         boolean diLink5 =

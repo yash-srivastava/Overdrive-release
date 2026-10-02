@@ -323,6 +323,9 @@
                             <!-- Value = SSID / Mobile Data / Ethernet; small = IPv4 when known -->
                             <div class="dash-metric"><span data-i18n="dashboard.metric_network">Network</span><strong id="dashNetwork">--</strong><small id="dashNetworkIp" style="display:none"></small></div>
                             <div class="dash-metric"><span data-i18n="dashboard.metric_lock">Lock</span><strong id="dashLock">--</strong></div>
+                            <!-- Hidden until /api/vehicle/state carries odometer.totalKm;
+                                 small = EV/HEV split when the vehicle reports it (DM-i). -->
+                            <div class="dash-metric" id="dashOdoMetric" style="display:none"><span data-i18n="charge.detail_odometer">Odometer</span><strong id="dashOdo">--</strong><small id="dashOdoSplit" style="display:none"></small></div>
                         </div>
                     </article>
 
@@ -2138,7 +2141,31 @@
                 }
                 var lockEl = document.getElementById('dashLock');
                 if (lockEl) lockEl.textContent = lockText;
+                this.renderOdometer(data.odometer);
                 this.glance.update(data, lockText, lockState);
+            },
+            renderOdometer: function(odo) {
+                var metric = document.getElementById('dashOdoMetric');
+                if (!metric) return;
+                function km(v) { return (typeof v === 'number' && isFinite(v) && v >= 0) ? v : null; }
+                function fmt(v) {
+                    return BYD.units.distVal(v).toLocaleString() + ' ' + BYD.units.distLabel();
+                }
+                var total = odo ? km(odo.totalKm) : null;
+                if (total === null) { metric.style.display = 'none'; return; }
+                metric.style.display = '';
+                var totalEl = document.getElementById('dashOdo');
+                if (totalEl) totalEl.textContent = fmt(total);
+                var splitEl = document.getElementById('dashOdoSplit');
+                if (!splitEl) return;
+                // The split only means something on a hybrid: a BEV has no hevKm (or
+                // reports 0 on DiLink 5) and its evKm just repeats the total, so the
+                // tile shows the total alone unless the car has real HEV distance.
+                var ev = km(odo.evKm), hev = km(odo.hevKm);
+                if (ev === null || hev === null || hev <= 0) { splitEl.style.display = 'none'; return; }
+                splitEl.textContent = (BYD.i18n.t('automation.mode_ev') || 'EV') + ' ' + fmt(ev)
+                    + ' · ' + (BYD.i18n.t('automation.mode_hev') || 'HEV') + ' ' + fmt(hev);
+                splitEl.style.display = '';
             },
             renderHalRange: function(status) {
                 status = status || {};
