@@ -144,6 +144,19 @@ class BootReceiver : BroadcastReceiver() {
             "android.intent.action.QUICKBOOT_POWERON",
             "com.htc.intent.action.QUICKBOOT_POWERON" -> {
                 startDaemons(context, action)
+                // BYD DiLink does not cold-boot on ACC-on. It wakes from "quickboot"
+                // (services.jar com.android.server.accmodemanager.Utils.startAccOn) and then
+                // sends ACTION_BOOT_COMPLETED to every receiver with from_quickboot=true —
+                // on every ACC-on, not once per boot. Launching MainActivity there ran its
+                // full onCreate on the main thread each time the car was switched on, while
+                // the user was waiting for the home screen. Nothing it does at boot is needed
+                // on a wake: the daemons run as shell and survive quickboot, and the app
+                // process is already up. Keep the daemon check above (onOnly recovery relies
+                // on it) and skip the launch.
+                if (intent.getBooleanExtra("from_quickboot", false)) {
+                    Log.d(TAG, "BOOT_COMPLETED from quickboot (ACC-on wake) — daemons checked, no activity launch")
+                    return
+                }
                 try {
                     val launchIntent = Intent(context, com.overdrive.app.ui.MainActivity::class.java)
                     launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
