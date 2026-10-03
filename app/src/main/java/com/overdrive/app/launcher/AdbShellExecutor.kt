@@ -780,6 +780,15 @@ class AdbShellExecutor(private val context: Context) {
             if (settled.compareAndSet(false, true)) {
                 timedOut.set(true)
                 invalidateConnection(conn, "deadline ${deadlineMs}ms exceeded by adb#$seq")
+                // Close THIS command's connection even when it is no longer the shared one.
+                // invalidateConnection is gen-guarded and skips the close if the holder was
+                // already cleared or replaced — which is exactly the case when the command
+                // started on a connection that died at the same moment (adbd restart). The
+                // blocked read then had nothing to unblock it: on 2026-10-03 adb#2496, sent
+                // 04:59:14 as adbd restarted, sat for 5.4 h, and every daemon relaunch queued
+                // behind it until the next reboot. Closing a stale connection cannot touch
+                // the replacement: it is a different Dadb instance.
+                try { conn.dadb.close() } catch (ignored: Exception) {}
             }
         }, deadlineMs, TimeUnit.MILLISECONDS)
         try {
