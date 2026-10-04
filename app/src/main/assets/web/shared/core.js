@@ -609,6 +609,71 @@ BYD.units = {
     /** Return just the speed unit label. */
     speedLabel() { return this.mode === 'mi' ? 'mph' : 'km/h'; },
 
+    _timeLocaleHe() {
+        var lang = '';
+        try {
+            if (window.BYD && BYD.i18n && typeof BYD.i18n.getLang === 'function') {
+                lang = BYD.i18n.getLang() || '';
+            }
+        } catch (e) {}
+        if (!lang) {
+            try { lang = localStorage.getItem('overdrive_locale') || ''; } catch (e2) {}
+        }
+        if (!lang && typeof navigator !== 'undefined' && navigator.language) lang = navigator.language;
+        var base = String(lang).toLowerCase().split('-')[0];
+        return base === 'iw' || base === 'he';
+    },
+
+    _timeLabel(key, en, he) {
+        try {
+            if (window.BYD && BYD.i18n && typeof BYD.i18n.t === 'function') {
+                var v = BYD.i18n.t(key);
+                if (v && v !== key) return v;
+            }
+        } catch (e) {}
+        return this._timeLocaleHe() ? he : en;
+    },
+
+    /**
+     * Minute unit. compact=false is the word ("min" / "דקות");
+     * compact=true is the short mark next to a number ("m" / "דק׳").
+     * Meters stay "m" — this is only for durations.
+     */
+    minuteLabel(compact) {
+        return this._timeLabel(
+            compact ? 'vehicle.minute_compact' : 'vehicle.minute',
+            compact ? 'm' : 'min',
+            compact ? 'דק׳' : 'דקות');
+    },
+
+    /** Short hour mark ("h" / "שע׳"). */
+    hourLabel() {
+        return this._timeLabel('vehicle.hour_compact', 'h', 'שע׳');
+    },
+
+    /** Short second mark ("s" / "שנ׳"). */
+    secondLabel() {
+        return this._timeLabel('vehicle.second_compact', 's', 'שנ׳');
+    },
+
+    /** Leading space, except the glued English form "15m" / "3h" / "12s". */
+    _timeSuffix(label, gluedAscii) {
+        if (gluedAscii && label === gluedAscii) return label;
+        return ' ' + label;
+    },
+
+    minuteSuffix(compact, glued) {
+        return this._timeSuffix(this.minuteLabel(compact), glued ? 'm' : null);
+    },
+
+    hourSuffix(glued) {
+        return this._timeSuffix(this.hourLabel(), glued ? 'h' : null);
+    },
+
+    secondSuffix(glued) {
+        return this._timeSuffix(this.secondLabel(), glued ? 's' : null);
+    },
+
     /** Convert km value to display value (number only, no label). */
     distVal(km) {
         if (km == null || isNaN(km)) return 0;

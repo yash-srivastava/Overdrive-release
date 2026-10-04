@@ -259,8 +259,9 @@ const MQTT = {
     // Human-friendly interval label: 45 -> "45s", 300 -> "5m".
     fmtInterval(sec) {
         sec = parseInt(sec) || 0;
-        if (sec < 60) return sec + 's';
-        return (sec % 60 === 0) ? (sec / 60) + 'm' : (sec / 60).toFixed(1) + 'm';
+        if (sec < 60) return sec + BYD.units.secondSuffix(true);
+        var s = BYD.units.minuteSuffix(true, true);
+        return (sec % 60 === 0) ? (sec / 60) + s : (sec / 60).toFixed(1) + s;
     },
 
     // Live-update the min/max slider value labels.
@@ -485,9 +486,9 @@ const MQTT = {
             case 'trip_hours':
             case 'driving_time_hours':
             case 'charging_eta_hours':
-                return (+v).toFixed(2) + ' h';
+                return (+v).toFixed(2) + BYD.units.hourSuffix(false);
             case 'charging_eta_minutes':
-                return v + ' min';
+                return v + BYD.units.minuteSuffix(false, false);
             case 'motor_front_rpm': case 'motor_rear_rpm': case 'engine_rpm':
                 return v + ' rpm';
             case 'motor_front_torque':

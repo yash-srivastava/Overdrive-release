@@ -1,5 +1,7 @@
 package com.overdrive.app.daemon.telegram;
 
+import com.overdrive.app.server.Messages;
+
 import org.json.JSONObject;
 
 import java.util.Locale;
@@ -96,9 +98,16 @@ public class WhereCommandHandler implements TelegramCommandHandler {
     static String duration(long ms) {
         long mins = ms / 60_000L;
         long h = mins / 60, m = mins % 60;
-        if (h >= 48) return (h / 24) + " d " + (h % 24) + " h";
-        if (h > 0) return h + " h " + String.format(Locale.US, "%02d", m) + " m";
-        return m + " m";
+        String hour = Messages.get("units.hour_compact");
+        if (hour == null || hour.isEmpty() || "units.hour_compact".equals(hour)) hour = "h";
+        String hourTail = "h".equals(hour) ? " h" : " " + hour;
+        if (h >= 48) return (h / 24) + " d " + (h % 24) + hourTail;
+        String unit = Messages.get("units.minute_compact");
+        if (unit == null || unit.isEmpty() || "units.minute_compact".equals(unit)) unit = "m";
+        String suffix = "m".equals(unit) ? " m" : " " + unit;
+        String hourGap = "h".equals(hour) ? " h " : " " + hour + " ";
+        if (h > 0) return h + hourGap + String.format(Locale.US, "%02d", m) + suffix;
+        return m + suffix;
     }
 
     /** Legacy-Markdown escape (the daemon sends parse_mode=Markdown). */

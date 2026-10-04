@@ -649,7 +649,7 @@ BYD.roadSense = {
         const el = document.getElementById('rsWarnLeadValue');
         if (!el) return;
         const tmpl = BYD.i18n.t('road_sense.unit_seconds', { n: seconds });
-        el.textContent = (tmpl && tmpl !== 'road_sense.unit_seconds') ? tmpl : (seconds + 's');
+        el.textContent = (tmpl && tmpl !== 'road_sense.unit_seconds') ? tmpl : (seconds + BYD.units.secondSuffix(true));
     },
 
     _setConfLabel(pct) {

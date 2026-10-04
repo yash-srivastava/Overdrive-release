@@ -109,7 +109,7 @@ class NavRouteOptionAdapter(
             val ctx = itemView.context
             tvLabel.text = ctx.getString(R.string.roadsense_map_route_option, position + 1)
             tvDistance.text = formatDistance(route.totalDistanceMeters)
-            tvEta.text = formatEta(route.totalDurationSeconds)
+            tvEta.text = formatEta(ctx, route.totalDurationSeconds)
 
             // Hazards-along-route status. Three states:
             //  - has hazards → severity count pills
@@ -184,8 +184,10 @@ class NavRouteOptionAdapter(
     private fun formatDistance(m: Double): String =
         com.overdrive.app.navmap.nav.MapNetworking.formatDistance(m)
 
-    private fun formatEta(seconds: Double): String {
+    private fun formatEta(context: android.content.Context, seconds: Double): String {
         val mins = (seconds / 60.0).toInt()
-        return if (mins >= 60) "${mins / 60} h ${mins % 60} min" else "$mins min"
+        val hour = context.getString(R.string.unit_hour_compact)
+        val unit = context.getString(R.string.unit_minute)
+        return if (mins >= 60) "${mins / 60} $hour ${mins % 60} $unit" else "$mins $unit"
     }
 }

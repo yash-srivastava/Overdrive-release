@@ -1528,9 +1528,9 @@
 
     <script src="../shared/auth.js"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
-    <script src="../shared/core.js?v=20"></script>
+    <script src="../shared/core.js?v=23"></script>
     <script src="../shared/update-flow.js"></script>
-    <script src="../shared/map.js?v=6"></script>
+    <script src="../shared/map.js?v=7"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
@@ -2102,7 +2102,7 @@
                         bits.push((c.isEstimated ? '~' : '') + stripPower.toFixed(1) + ' kW');
                     }
                     if (c.timeToFullMin && c.timeToFullMin > 0) {
-                        var ttf = Math.floor(c.timeToFullMin / 60) + 'h ' + (c.timeToFullMin % 60) + 'm';
+                        var ttf = Math.floor(c.timeToFullMin / 60) + BYD.units.hourSuffix(true) + ' ' + (c.timeToFullMin % 60) + BYD.units.minuteSuffix(true, true);
                         bits.push(BYD.i18n.t('dashboard.glance_time_to_full', { t: ttf }) || (ttf + ' to full'));
                     }
                     if (c.sessionKwh && c.sessionKwh > 0) {
@@ -2684,7 +2684,7 @@
                             + c.sessionKwh.toFixed(1) + ' kWh'
                         : '--');
                     if (c.charging && c.timeToFullMin && c.timeToFullMin > 0) {
-                        setText('dashChargeTtf', Math.floor(c.timeToFullMin / 60) + 'h ' + (c.timeToFullMin % 60) + 'm');
+                        setText('dashChargeTtf', Math.floor(c.timeToFullMin / 60) + BYD.units.hourSuffix(true) + ' ' + (c.timeToFullMin % 60) + BYD.units.minuteSuffix(true, true));
                     } else {
                         setText('dashChargeTtf', '--');
                     }

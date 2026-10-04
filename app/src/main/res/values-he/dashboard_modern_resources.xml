@@ -23,8 +23,8 @@
     <string name="dashboard_modern_charge_eta_label">זמן שנותר</string>
     <string name="dashboard_modern_charge_session_label">במקטע הזה</string>
     <string name="dashboard_modern_charge_session">%1$.1f kWh</string>
-    <string name="dashboard_modern_minutes">%1$d דק׳</string>
-    <string name="dashboard_modern_hours_minutes">%1$d שע׳ %2$d דק׳</string>
+    <string name="dashboard_modern_minutes">%1$d דקות</string>
+    <string name="dashboard_modern_hours_minutes">%1$d שע׳ %2$d דקות</string>
     <string name="dashboard_modern_storage_summary">%1$s בשימוש · %2$s פנויים</string>
     <string name="dashboard_modern_storage_unavailable">האחסון לא זמין</string>
     <string name="dashboard_modern_clips_today">%1$d קליפים היום</string>

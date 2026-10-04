@@ -78,9 +78,10 @@
     function fmtDur(ms) {
         var mins = Math.max(0, Math.floor(ms / 60000));
         var h = Math.floor(mins / 60), m = mins % 60;
-        if (h >= 48) return Math.floor(h / 24) + 'd ' + (h % 24) + 'h';
-        if (h > 0) return h + 'h ' + (m < 10 ? '0' : '') + m + 'm';
-        return m + 'm';
+        if (h >= 48) return Math.floor(h / 24) + 'd ' + (h % 24) + BYD.units.hourSuffix(true);
+        var s = BYD.units.minuteSuffix(true, true);
+        if (h > 0) return h + BYD.units.hourSuffix(true) + ' ' + (m < 10 ? '0' : '') + m + s;
+        return m + s;
     }
     function fmtTime(ms) { return ms ? new Date(ms).toLocaleTimeString(lang(), { hour: '2-digit', minute: '2-digit' }) : ''; }
     function fmtDay(ms) { return new Date(ms).toLocaleDateString(lang(), { weekday: 'long', month: 'short', day: 'numeric' }); }

@@ -62,7 +62,7 @@ public class ScreenshotPrivacyModeAssetTest {
         for (String page : pages) {
             assertTrue(page, readRepositoryFile(
                     "app/src/main/assets/web/local/" + page)
-                    .contains("../shared/core.js?v=20"));
+                    .contains("../shared/core.js?v=23"));
         }
     }
 

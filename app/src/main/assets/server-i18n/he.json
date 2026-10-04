@@ -23,7 +23,7 @@
     "location_prefix": "מיקום: {0}"
   },
   "errors": {
-    "rate_limited_locked_for_seconds": "יותר מדי ניסיונות — נעול למשך {0} שנ'",
+    "rate_limited_locked_for_seconds": "יותר מדי ניסיונות — נעול למשך {0} שנ׳",
     "invalid_device_token": "טוקן מכשיר לא תקין",
     "invalid_request_with_detail": "בקשה לא תקינה: {0}",
     "bydcloud_not_configured": "BYD Cloud אינו מוגדר",
@@ -203,8 +203,8 @@
     }
   },
   "telegram": {
-    "recording_caption": "📹 הקלטה ({0}) - {1} שנ'",
-    "recording_caption_no_label": "📹 הקלטה - {0} שנ'",
+    "recording_caption": "📹 הקלטה ({0}) - {1} שנ׳",
+    "recording_caption_no_label": "📹 הקלטה - {0} שנ׳",
     "recording_label": {
       "person": "אדם",
       "bike": "אופניים",
@@ -517,8 +517,8 @@
         "changed": "🔄 כתובת המנהרה השתנתה:\n{0}"
       },
       "video": {
-        "saved_with_detection": "🎬 ההקלטה נשמרה (זוהה {0}) - {1} שנ'",
-        "saved": "🎬 ההקלטה נשמרה - {0} שנ'"
+        "saved_with_detection": "🎬 ההקלטה נשמרה (זוהה {0}) - {1} שנ׳",
+        "saved": "🎬 ההקלטה נשמרה - {0} שנ׳"
       }
     }
   },
@@ -1347,6 +1347,10 @@
   "units": {
     "bar": "בר",
     "kpa": "kPa",
-    "psi": "PSI"
+    "psi": "PSI",
+    "minute": "דקות",
+    "minute_compact": "דק׳",
+    "hour_compact": "שע׳",
+    "second_compact": "שנ׳"
   }
 }

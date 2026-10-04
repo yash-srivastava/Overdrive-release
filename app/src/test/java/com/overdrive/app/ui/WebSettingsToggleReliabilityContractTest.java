@@ -15,15 +15,15 @@ public class WebSettingsToggleReliabilityContractTest {
     @Test
     public void immediateSavePagesLockUntilHydratedAndSerializeWrites() throws IOException {
         assertPageLock("recording.html", "recording.js?v=budget16");
-        assertPageLock("road-sense.html", "road-sense.js?v=chimevolume7");
-        assertPageLock("trips.html", "trips.js?v=history11");
-        assertPageLock("abrp.html", "abrp.js?v=toggle1");
-        assertPageLock("surveillance.html", "surveillance.js?v=survtoggle8");
-        assertPageLock("byd-cloud.html", "surveillance.js?v=survtoggle8");
+        assertPageLock("road-sense.html", "road-sense.js?v=chimevolume8");
+        assertPageLock("trips.html", "trips.js?v=history13");
+        assertPageLock("abrp.html", "abrp.js?v=toggle3");
+        assertPageLock("surveillance.html", "surveillance.js?v=survtoggle10");
+        assertPageLock("byd-cloud.html", "surveillance.js?v=survtoggle10");
         assertTrue(read("app/src/main/assets/web/local/live-view.html").contains(
-                "surveillance.js?v=survtoggle8"));
+                "surveillance.js?v=survtoggle10"));
         assertTrue(read("app/src/main/assets/web/local/notifications.html").contains(
-                "surveillance.js?v=survtoggle8"));
+                "surveillance.js?v=survtoggle10"));
 
         String hydration = read("app/src/main/assets/web/shared/settings-hydration.js");
         assertTrue(hydration.contains("event.stopImmediatePropagation();"));

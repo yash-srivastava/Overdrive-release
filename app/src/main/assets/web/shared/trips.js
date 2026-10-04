@@ -1252,7 +1252,7 @@ const TRIPS = {
         this._cdrDirty.protectedHours = this.cdrConfig.protectedHours;
         this._cdrWriteVersion++;
         const el = document.getElementById('tripCdrProtectedValue');
-        if (el) el.textContent = val + 'h';
+        if (el) el.textContent = val + BYD.units.hourSuffix(true);
         this.saveCdrConfig();
     },
 
@@ -1498,7 +1498,7 @@ const TRIPS = {
         if (typeof data.protectedHours === 'number') {
             this.cdrConfig.protectedHours = data.protectedHours;
             if (ps) ps.value = data.protectedHours;
-            this.setEl('tripCdrProtectedValue', data.protectedHours + 'h');
+            this.setEl('tripCdrProtectedValue', data.protectedHours + BYD.units.hourSuffix(true));
         }
         if (ps) {
             ps.disabled = !this._cdrReady || this._cdrCleanupPending
@@ -2052,7 +2052,9 @@ const TRIPS = {
         const fmtDur = ms => {
             const mins = Math.max(0, Math.floor(ms / 60000)), h = Math.floor(mins / 60), m = mins % 60;
             if (h >= 48) return Math.floor(h / 24) + ' d ' + (h % 24) + ' h';
-            return h > 0 ? h + ' h ' + (m < 10 ? '0' : '') + m + ' m' : m + ' m';
+            var s = BYD.units.minuteSuffix(true, false);
+            var hs = BYD.units.hourSuffix(false);
+            return h > 0 ? h + hs + ' ' + (m < 10 ? '0' : '') + m + s : m + s;
         };
         const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         container.querySelectorAll('.trip-card[data-trip-end]').forEach(card => {
@@ -3500,7 +3502,7 @@ const TRIPS = {
         const axis = this._timelineAxisFor(samples);
         const durMin = Math.round((axis.end - axis.start) / 60000);
         this.setEl('sliderStartTime', '0:00');
-        this.setEl('sliderEndTime', durMin + ' min');
+        this.setEl('sliderEndTime', durMin + BYD.units.minuteSuffix(false, false));
 
         // Hover scrub — moving mouse over slider area scrubs the position
         const self = this;
@@ -3726,14 +3728,14 @@ const TRIPS = {
             html += '<div style="padding:12px;background:var(--bg-elevated);border-radius:10px;border:1px solid var(--border-subtle);">';
             html += '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">This trip</div>';
             if (tripEnergy > 0) html += '<div style="font-size:13px;color:var(--text-primary);margin-bottom:4px;">' + this.ICON_ELECTRIC + ' ' + tripEnergy.toFixed(1) + ' kWh</div>';
-            html += '<div style="font-size:13px;color:var(--text-primary);margin-bottom:4px;">⏱ ' + Math.round(tripDur/60) + ' min</div>';
+            html += '<div style="font-size:13px;color:var(--text-primary);margin-bottom:4px;">⏱ ' + Math.round(tripDur/60) + BYD.units.minuteSuffix(false, false) + '</div>';
             if (tripCost > 0) html += '<div style="font-size:13px;color:var(--text-primary);">💰 ' + currency + tripCost.toFixed(1) + '</div>';
             html += '</div>';
             // Route avg
             html += '<div style="padding:12px;background:var(--bg-elevated);border-radius:10px;border:1px solid var(--border-subtle);">';
             html += '<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Route average</div>';
             if (avgEnergy > 0) html += '<div style="font-size:13px;color:var(--text-secondary);margin-bottom:4px;">' + this.ICON_ELECTRIC + ' ' + avgEnergy.toFixed(1) + ' kWh</div>';
-            html += '<div style="font-size:13px;color:var(--text-secondary);margin-bottom:4px;">⏱ ' + Math.round(avgDur/60) + ' min</div>';
+            html += '<div style="font-size:13px;color:var(--text-secondary);margin-bottom:4px;">⏱ ' + Math.round(avgDur/60) + BYD.units.minuteSuffix(false, false) + '</div>';
             if (avgCost > 0) html += '<div style="font-size:13px;color:var(--text-secondary);">💰 ' + currency + avgCost.toFixed(1) + '</div>';
             html += '</div>';
             html += '</div>';
@@ -4199,7 +4201,7 @@ const TRIPS = {
             items.push({ icon: '🛑', label: 'Coast-Brake Events', value: moments.coastBrakeEvents.length });
             if (moments.coastBrakeEvents.length > 0) {
                 const avgGap = moments.coastBrakeEvents.reduce((s, e) => s + (e.coastGapMs || e.coast_gap_ms || 0), 0) / moments.coastBrakeEvents.length / 1000;
-                items.push({ icon: '⏳', label: 'Avg Coast Gap', value: avgGap.toFixed(1) + 's' });
+                items.push({ icon: '⏳', label: 'Avg Coast Gap', value: avgGap.toFixed(1) + BYD.units.secondSuffix(true) });
             }
         }
         if (moments.pedalSmoothnessWindows) {
@@ -4646,9 +4648,10 @@ const TRIPS = {
         ctx.font = '10px Inter, sans-serif';
         ctx.textAlign = 'center';
         const durMin = tRange / 60000;
-        ctx.fillText('0 min', pad.left, h - 5);
-        ctx.fillText(Math.round(durMin / 2) + ' min', pad.left + cw / 2, h - 5);
-        ctx.fillText(Math.round(durMin) + ' min', w - pad.right, h - 5);
+        const minSuf = BYD.units.minuteSuffix(false, false);
+        ctx.fillText('0' + minSuf, pad.left, h - 5);
+        ctx.fillText(Math.round(durMin / 2) + minSuf, pad.left + cw / 2, h - 5);
+        ctx.fillText(Math.round(durMin) + minSuf, w - pad.right, h - 5);
 
         // SoC% interpolated line (right Y-axis, zoomed to actual range)
         const tripData = this.currentTripData;
@@ -5289,9 +5292,27 @@ const TRIPS = {
         if (!ts || ts <= 0) return 'Never';
         const diffSec = Math.floor((Date.now() - ts) / 1000);
         if (diffSec < 0) return 'Just now';
-        if (diffSec < 60) return diffSec + 's ago';
-        if (diffSec < 3600) return Math.floor(diffSec / 60) + ' min ago';
-        if (diffSec < 86400) return Math.floor(diffSec / 3600) + 'h ago';
+        if (diffSec < 60) {
+            var secsAgo = diffSec;
+            var secPhrase = (window.BYD && BYD.i18n && BYD.i18n.t)
+                ? BYD.i18n.t('recording.seconds_ago', { n: secsAgo }) : null;
+            if (secPhrase && secPhrase !== 'recording.seconds_ago') return secPhrase;
+            return secsAgo + 's ago';
+        }
+        if (diffSec < 3600) {
+            var minsAgo = Math.floor(diffSec / 60);
+            var phrase = (window.BYD && BYD.i18n && BYD.i18n.t)
+                ? BYD.i18n.t('recording.minutes_ago', { n: minsAgo }) : null;
+            if (phrase && phrase !== 'recording.minutes_ago') return phrase;
+            return minsAgo + ' min ago';
+        }
+        if (diffSec < 86400) {
+            var hoursAgo = Math.floor(diffSec / 3600);
+            var hourPhrase = (window.BYD && BYD.i18n && BYD.i18n.t)
+                ? BYD.i18n.t('recording.hours_ago', { n: hoursAgo }) : null;
+            if (hourPhrase && hourPhrase !== 'recording.hours_ago') return hourPhrase;
+            return hoursAgo + 'h ago';
+        }
         return Math.floor(diffSec / 86400) + 'd ago';
     },
 
@@ -5398,7 +5419,7 @@ const TRIPS = {
         if (!seconds || seconds <= 0) return '--';
         const h = Math.floor(seconds / 3600);
         const m = Math.floor((seconds % 3600) / 60);
-        if (h > 0) return h + 'h ' + m + 'm';
-        return m + ' min';
+        if (h > 0) return h + BYD.units.hourSuffix(true) + ' ' + m + BYD.units.minuteSuffix(true, true);
+        return m + BYD.units.minuteSuffix(false, false);
     }
 };

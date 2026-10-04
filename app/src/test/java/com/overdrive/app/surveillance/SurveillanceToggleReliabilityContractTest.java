@@ -27,7 +27,7 @@ public class SurveillanceToggleReliabilityContractTest {
         assertTrue(html.contains(
                 "<main class=\"main-content\" aria-busy=\"true\" inert style=\"pointer-events:none\">"));
         assertTrue(html.contains("settings-hydration.js?v=1"));
-        assertTrue(html.contains("surveillance.js?v=survtoggle8"));
+        assertTrue(html.contains("surveillance.js?v=survtoggle10"));
         assertTrue(html.contains("id=\"cdrCleanupEnabled\" disabled"));
         assertTrue(html.contains("id=\"cdrReservedSlider\""));
         assertTrue(html.contains("id=\"cdrProtectedSlider\""));

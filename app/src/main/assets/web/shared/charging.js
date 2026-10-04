@@ -3707,9 +3707,9 @@ var CHARGING = {
     _fmtDuration: function (minutes) {
         if (minutes == null) return '--';
         var m = Math.round(minutes);
-        if (m < 60) return m + ' min';
+        if (m < 60) return m + BYD.units.minuteSuffix(false, false);
         var h = Math.floor(m / 60);
-        return h + 'h ' + (m % 60) + 'm';
+        return h + BYD.units.hourSuffix(true) + ' ' + (m % 60) + BYD.units.minuteSuffix(true, true);
     },
 
     _socRangeText: function (session) {

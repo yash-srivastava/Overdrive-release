@@ -1574,6 +1574,10 @@
         <item quantity="other">Overdrive online for %1$d hours</item>
     </plurals>
 
+    <string name="unit_minute">min</string>
+    <string name="unit_minute_compact">m</string>
+    <string name="unit_hour_compact">h</string>
+    <string name="unit_second_compact">s</string>
     <!-- Duration helpers used inside insights (last_charge etc.). -->
     <plurals name="dashboard_insight_minutes">
         <item quantity="one">%1$d min</item>

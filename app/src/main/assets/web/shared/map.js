@@ -234,11 +234,16 @@ BYD.map = {
      */
     formatTimeAgo(timestamp) {
         const seconds = Math.floor((Date.now() - timestamp) / 1000);
-        if (seconds < 60) return seconds + 's ago';
+        function ago(key, n, fallback) {
+            var phrase = (window.BYD && BYD.i18n && BYD.i18n.t) ? BYD.i18n.t(key, { n: n }) : null;
+            if (phrase && phrase !== key) return phrase;
+            return fallback;
+        }
+        if (seconds < 60) return ago('dashboard.time_seconds_ago', seconds, seconds + 's ago');
         const minutes = Math.floor(seconds / 60);
-        if (minutes < 60) return minutes + 'm ago';
+        if (minutes < 60) return ago('dashboard.time_minutes_ago', minutes, minutes + 'm ago');
         const hours = Math.floor(minutes / 60);
-        return hours + 'h ago';
+        return ago('dashboard.time_hours_ago', hours, hours + 'h ago');
     },
     
     /**

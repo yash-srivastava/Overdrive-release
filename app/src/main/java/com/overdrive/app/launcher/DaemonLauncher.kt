@@ -2432,6 +2432,20 @@ class DaemonLauncher(
      * - HH:MM:SS (e.g., "01:23:45")
      * - DD-HH:MM:SS (e.g., "1-02:03:04")
      */
+    /** Short minute mark. English stays glued ("15m"); Hebrew is "דק׳". */
+    private fun minuteMark(): String = compactMark(com.overdrive.app.R.string.unit_minute_compact, "m")
+
+    /** Short hour mark. English stays glued ("2h"); Hebrew is "שע׳". */
+    private fun hourMark(): String = compactMark(com.overdrive.app.R.string.unit_hour_compact, "h")
+
+    /** Short second mark. English stays glued ("30s"); Hebrew is "שנ׳". */
+    private fun secondMark(): String = compactMark(com.overdrive.app.R.string.unit_second_compact, "s")
+
+    private fun compactMark(resId: Int, ascii: String): String {
+        val unit = context.getString(resId)
+        return if (unit == ascii) ascii else " $unit"
+    }
+
     private fun formatUptime(etime: String): String {
         return try {
             // Check if it contains a day separator
@@ -2444,9 +2458,9 @@ class DaemonLauncher(
                 val mins = timeParts[1].toInt()
                 
                 return when {
-                    days > 0 -> "${days}d ${hours}h"
-                    hours > 0 -> "${hours}h ${mins}m"
-                    else -> "${mins}m"
+                    days > 0 -> "${days}d ${hours}${hourMark()}"
+                    hours > 0 -> "${hours}${hourMark()} ${mins}${minuteMark()}"
+                    else -> "${mins}${minuteMark()}"
                 }
             }
             
@@ -2457,8 +2471,8 @@ class DaemonLauncher(
                     val mins = parts[0].toInt()
                     val secs = parts[1].toInt()
                     when {
-                        mins > 0 -> "${mins}m ${secs}s"
-                        secs > 0 -> "${secs}s"
+                        mins > 0 -> "${mins}${minuteMark()} ${secs}${secondMark()}"
+                        secs > 0 -> "${secs}${secondMark()}"
                         else -> "just started"
                     }
                 }
@@ -2467,9 +2481,9 @@ class DaemonLauncher(
                     val mins = parts[1].toInt()
                     val secs = parts[2].toInt()
                     when {
-                        hours > 0 -> "${hours}h ${mins}m"
-                        mins > 0 -> "${mins}m ${secs}s"
-                        else -> "${secs}s"
+                        hours > 0 -> "${hours}${hourMark()} ${mins}${minuteMark()}"
+                        mins > 0 -> "${mins}${minuteMark()} ${secs}${secondMark()}"
+                        else -> "${secs}${secondMark()}"
                     }
                 }
                 else -> etime

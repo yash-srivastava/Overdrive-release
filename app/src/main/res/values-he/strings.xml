@@ -700,7 +700,7 @@
     <string name="settings_overlay_trip_title">מחוון נסיעה</string>
     <string name="settings_overlay_trip_subtitle">הצג תגית TRIP בזמן שזיהוי נסיעה פועל.</string>
     <string name="settings_overlay_replay_title">מחוון שידור חוזר מיידי</string>
-    <string name="settings_overlay_replay_subtitle">הצג תגית CLIP: ירוק בעת הקלטת שידור חוזר, כחול למשך 5 שנ\' לאחר השמירה, ואדום במקרה של כשל. מופיע רק כאשר מוגדר קיצור מקשים או אוטומציה לשידור חוזר.</string>
+    <string name="settings_overlay_replay_subtitle">הצג תגית CLIP: ירוק בעת הקלטת שידור חוזר, כחול למשך 5 שנ׳ לאחר השמירה, ואדום במקרה של כשל. מופיע רק כאשר מוגדר קיצור מקשים או אוטומציה לשידור חוזר.</string>
     <string name="settings_overlay_roadsense_title">שכבת RoadSense</string>
     <string name="settings_overlay_roadsense_subtitle">הצג את התגית הצפה וכרטיס המפגעים של RoadSense כאשר RoadSense מופעל.</string>
     <string name="remote_voice_overlay_title">שמע קולי מרחוק</string>
@@ -1076,7 +1076,7 @@
     <string name="pin_lock_subtitle_wrong">קוד PIN שגוי. נסה שוב.</string>
     <string name="pin_lock_subtitle_locked_out">יותר מדי ניסיונות. נסה שוב בקרוב.</string>
     <string name="pin_lock_subtitle_locked_out_countdown">נעול. נסה שוב בעוד %1$s.</string>
-    <string name="pin_lock_lockout_seconds">%1$d שנ\'</string>
+    <string name="pin_lock_lockout_seconds">%1$d שנ׳</string>
     <string name="pin_lock_lockout_minutes">%1$d:%2$02d</string>
     <string name="pin_lock_recovery_hint_prefix">שכחת את קוד ה-PIN? הרץ ממחשב מחובר:\n%1$s</string>
     <string name="pin_lock_backspace_cd">מחק (Backspace)</string>
@@ -1104,7 +1104,11 @@
     <string name="dashboard_insight_storage_milestone">%1$d סרטונים · %2$s הוקלטו</string>
     <string name="dashboard_insight_kwh_format">%1$.1f קוט\"ש</string>
     <string name="dashboard_insight_percent_format">%1$.1f%%</string>
-    <string name="dashboard_insight_hours_minutes">%1$d שע\' ו-%2$d דק\'</string>
+    <string name="unit_minute">דקות</string>
+    <string name="unit_minute_compact">דק׳</string>
+    <string name="unit_hour_compact">שע׳</string>
+    <string name="unit_second_compact">שנ׳</string>
+    <string name="dashboard_insight_hours_minutes">%1$d שע׳ ו-%2$d דקות</string>
     <plurals name="dashboard_insight_today_clips">
         <item quantity="one">היום הוקלט %1$d קליפ</item>
         <item quantity="two">היום הוקלטו %1$d קליפים</item>
@@ -1121,9 +1125,9 @@
         <item quantity="other">Overdrive פעיל %1$d שעות</item>
     </plurals>
     <plurals name="dashboard_insight_minutes">
-        <item quantity="one">%1$d דק׳</item>
-        <item quantity="two">%1$d דק׳</item>
-        <item quantity="other">%1$d דק׳</item>
+        <item quantity="one">%1$d דקות</item>
+        <item quantity="two">%1$d דקות</item>
+        <item quantity="other">%1$d דקות</item>
     </plurals>
     <plurals name="dashboard_insight_hours">
         <item quantity="one">%1$d שע׳</item>

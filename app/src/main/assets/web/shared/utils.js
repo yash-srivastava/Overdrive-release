@@ -387,7 +387,7 @@ const BYD = {
             if (slider) slider.value = value;
             if (valueEl) {
                 if (name === 'preBuffer' || name === 'postBuffer') {
-                    valueEl.textContent = value + 's';
+                    valueEl.textContent = value + BYD.units.secondSuffix(true);
                 } else {
                     valueEl.textContent = value + '%';
                 }
@@ -398,7 +398,7 @@ const BYD = {
             const valueEl = document.getElementById(name + 'Value');
             if (valueEl) {
                 if (name === 'preBuffer' || name === 'postBuffer') {
-                    valueEl.textContent = value + 's';
+                    valueEl.textContent = value + BYD.units.secondSuffix(true);
                 } else {
                     valueEl.textContent = value + '%';
                 }

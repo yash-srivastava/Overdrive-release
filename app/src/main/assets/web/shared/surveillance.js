@@ -1035,7 +1035,7 @@ BYD.surveillance = {
             protectedSlider.disabled = !this._cdrReady || this._cdrCleanupPending
                 || this._cdrTogglePending || this._cdrWritesPending > 0;
         }
-        if (protectedValue) protectedValue.textContent = this.cdrConfig.protectedHours + 'h';
+        if (protectedValue) protectedValue.textContent = this.cdrConfig.protectedHours + BYD.units.hourSuffix(true);
         
         const minKeepSlider = document.getElementById('cdrMinKeepSlider');
         const minKeepValue = document.getElementById('cdrMinKeepValue');
@@ -1170,7 +1170,7 @@ BYD.surveillance = {
         this._cdrDirty.protectedHours = this.cdrConfig.protectedHours;
         this._cdrWriteVersion++;
         const el = document.getElementById('cdrProtectedValue');
-        if (el) el.textContent = value + 'h';
+        if (el) el.textContent = value + BYD.units.hourSuffix(true);
         this.saveCdrConfig();
     },
     
@@ -1476,7 +1476,7 @@ BYD.surveillance = {
         const preRecSlider = document.getElementById('preRecSlider');
         if (preRecSlider) preRecSlider.value = this.config.preRecordSeconds;
         const preRecValue = document.getElementById('preRecValue');
-        if (preRecValue) preRecValue.textContent = this.config.preRecordSeconds + 's';
+        if (preRecValue) preRecValue.textContent = this.config.preRecordSeconds + BYD.units.secondSuffix(true);
         const preLabel = document.getElementById('preLabel');
         if (preLabel) preLabel.textContent = BYD.i18n.t('surveillance.before_seconds', {n: this.config.preRecordSeconds});
         const timelinePre = document.getElementById('timelinePre');
@@ -1485,7 +1485,7 @@ BYD.surveillance = {
         const postRecSlider = document.getElementById('postRecSlider');
         if (postRecSlider) postRecSlider.value = this.config.postRecordSeconds;
         const postRecValue = document.getElementById('postRecValue');
-        if (postRecValue) postRecValue.textContent = this.config.postRecordSeconds + 's';
+        if (postRecValue) postRecValue.textContent = this.config.postRecordSeconds + BYD.units.secondSuffix(true);
         const postLabel = document.getElementById('postLabel');
         if (postLabel) postLabel.textContent = BYD.i18n.t('surveillance.after_seconds', {n: this.config.postRecordSeconds});
         const timelinePost = document.getElementById('timelinePost');
@@ -1612,7 +1612,7 @@ BYD.surveillance = {
 
     updatePreRec(value) {
         this.config.preRecordSeconds = parseInt(value);
-        document.getElementById('preRecValue').textContent = value + 's';
+        document.getElementById('preRecValue').textContent = value + BYD.units.secondSuffix(true);
         document.getElementById('preLabel').textContent = BYD.i18n.t('surveillance.before_seconds', {n: value});
         document.getElementById('timelinePre').style.flex = value / 10;
         this.markChanged();
@@ -1620,7 +1620,7 @@ BYD.surveillance = {
 
     updatePostRec(value) {
         this.config.postRecordSeconds = parseInt(value);
-        document.getElementById('postRecValue').textContent = value + 's';
+        document.getElementById('postRecValue').textContent = value + BYD.units.secondSuffix(true);
         document.getElementById('postLabel').textContent = BYD.i18n.t('surveillance.after_seconds', {n: value});
         document.getElementById('timelinePost').style.flex = value / 20;
         this.markChanged();
@@ -2697,7 +2697,7 @@ BYD.surveillance = {
             const loiterSlider = document.getElementById('loiteringTimeSlider');
             if (loiterSlider) loiterSlider.value = p.loiteringTime;
             const loiterValue = document.getElementById('loiteringTimeValue');
-            if (loiterValue) loiterValue.textContent = p.loiteringTime + 's';
+            if (loiterValue) loiterValue.textContent = p.loiteringTime + BYD.units.secondSuffix(true);
             
             // Update shadow filter select
             if (p.shadowFilter !== undefined) {
@@ -2741,7 +2741,7 @@ BYD.surveillance = {
     updateLoiteringTime(value) {
         this.config.loiteringTime = parseInt(value);
         const label = document.getElementById('loiteringTimeValue');
-        if (label) label.textContent = value + 's';
+        if (label) label.textContent = value + BYD.units.secondSuffix(true);
         this._deselectPresetIfCustom();
         this.markChanged();
     },
@@ -2750,7 +2750,7 @@ BYD.surveillance = {
         const n = parseInt(value);
         this.config.approachTrigger = n;
         const label = document.getElementById('approachTriggerValue');
-        if (label) label.textContent = (n === 0) ? BYD.i18n.t('surveillance.approach_off') || 'Off' : n + 's';
+        if (label) label.textContent = (n === 0) ? BYD.i18n.t('surveillance.approach_off') || 'Off' : n + BYD.units.secondSuffix(true);
         // Independent of the environment presets — does not deselect one.
         this.markChanged();
     },
@@ -3504,7 +3504,7 @@ BYD.surveillance = {
         const loiterSlider = document.getElementById('loiteringTimeSlider');
         if (loiterSlider) loiterSlider.value = this.config.loiteringTime;
         const loiterValue = document.getElementById('loiteringTimeValue');
-        if (loiterValue) loiterValue.textContent = this.config.loiteringTime + 's';
+        if (loiterValue) loiterValue.textContent = this.config.loiteringTime + BYD.units.secondSuffix(true);
 
         // Approach trigger (0 = Off)
         if (this.config.approachTrigger !== undefined) {
@@ -3513,7 +3513,7 @@ BYD.surveillance = {
             const apValue = document.getElementById('approachTriggerValue');
             if (apValue) apValue.textContent = (this.config.approachTrigger === 0)
                 ? (BYD.i18n.t('surveillance.approach_off') || 'Off')
-                : this.config.approachTrigger + 's';
+                : this.config.approachTrigger + BYD.units.secondSuffix(true);
         }
 
         // Shadow filter
@@ -4176,7 +4176,7 @@ BYD.surveillance = {
             this.config.screenDeterrentDurationSeconds = v;
             body.screenDeterrentDurationSeconds = v;
             var label = document.getElementById('screenDeterrentDurationValue');
-            if (label) label.textContent = v + 's';
+            if (label) label.textContent = v + BYD.units.secondSuffix(true);
         } else if (field === 'message') {
             configKey = 'screenDeterrentMessage';
             previousValue = this.config[configKey];
@@ -4227,7 +4227,7 @@ BYD.surveillance = {
         var v = parseInt(value, 10);
         if (!isFinite(v)) return;
         var label = document.getElementById('screenDeterrentDurationValue');
-        if (label) label.textContent = v + 's';
+        if (label) label.textContent = v + BYD.units.secondSuffix(true);
     },
 
     /**
@@ -4487,7 +4487,7 @@ BYD.surveillance = {
         var slider = document.getElementById('screenDeterrentDurationSlider');
         if (slider) slider.value = dur;
         var label = document.getElementById('screenDeterrentDurationValue');
-        if (label) label.textContent = dur + 's';
+        if (label) label.textContent = dur + BYD.units.secondSuffix(true);
 
         var msgInput = document.getElementById('screenDeterrentMessage');
         if (msgInput && msgInput.value !== msg) msgInput.value = msg;

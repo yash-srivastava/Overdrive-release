@@ -117,7 +117,7 @@ public class GenAiAssetContractTest {
         assertTrue(html.contains("margin: 0 !important;"));
         assertTrue(html.contains(
                 "class=\"card ai-insight-card\""));
-        assertTrue(html.contains("core.js?v=21"));
+        assertTrue(html.contains("core.js?v=23"));
         assertTrue(html.contains("placeholder=\"Ask OverDrive…\""));
         assertTrue(html.contains(
                 "min-height: 180px; max-height: 720px"));

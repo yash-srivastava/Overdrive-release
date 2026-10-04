@@ -790,7 +790,7 @@ window.KM = (function () {
         var dtRange = $('kmDoubleTapWindow');
         if (dtRange) dtRange.value = state.doubleTapWindowMs;
         var dtVal = $('kmDoubleTapWindowVal');
-        if (dtVal) dtVal.textContent = (state.doubleTapWindowMs / 1000).toFixed(1) + 's';
+        if (dtVal) dtVal.textContent = (state.doubleTapWindowMs / 1000).toFixed(1) + BYD.units.secondSuffix(true);
 
         // The "Advanced: shell" action only exists when the Advanced toggle is on.
         // Hiding the OPTION (not just gating on save) makes the relationship
@@ -1084,7 +1084,7 @@ window.KM = (function () {
         if (!r) return;
         state.doubleTapWindowMs = parseInt(r.value, 10) || 450;
         var dtVal = $('kmDoubleTapWindowVal');
-        if (dtVal) dtVal.textContent = (state.doubleTapWindowMs / 1000).toFixed(1) + 's';
+        if (dtVal) dtVal.textContent = (state.doubleTapWindowMs / 1000).toFixed(1) + BYD.units.secondSuffix(true);
     }
     function onDoubleTapWindowChange() {
         onDoubleTapWindowInput();

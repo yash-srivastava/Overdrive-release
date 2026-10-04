@@ -34,7 +34,7 @@ public class RemoteDevViewAssetTest {
         String html = read("src/main/assets/web/local/remote-dev-view.html");
 
         int auth = html.indexOf("../shared/auth.js");
-        int core = html.indexOf("../shared/core.js?v=20");
+        int core = html.indexOf("../shared/core.js?v=23");
         int view = html.indexOf("../shared/remote-dev-view.js?v=10");
         assertTrue(auth >= 0);
         assertTrue(core > auth);

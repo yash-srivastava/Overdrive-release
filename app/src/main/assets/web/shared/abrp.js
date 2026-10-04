@@ -130,8 +130,9 @@ const ABRP = {
     // Human-friendly interval label: 45 -> "45s", 120 -> "2m".
     fmtInterval(sec) {
         sec = parseInt(sec) || 0;
-        if (sec < 60) return sec + 's';
-        return (sec % 60 === 0) ? (sec / 60) + 'm' : (sec / 60).toFixed(1) + 'm';
+        if (sec < 60) return sec + BYD.units.secondSuffix(true);
+        var s = BYD.units.minuteSuffix(true, true);
+        return (sec % 60 === 0) ? (sec / 60) + s : (sec / 60).toFixed(1) + s;
     },
 
     onSlider() {
