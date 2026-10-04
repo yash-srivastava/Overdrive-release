@@ -27,7 +27,7 @@
         ];
     </script>
     <script src="../shared/app-tabs.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=34">
+    <link rel="stylesheet" href="../shared/styles.css?v=38">
     <style>
         /* Blind-spot speed window: two narrow km/h fields on one row. .text-input is
            built for full-width fields (width:100% + min-width:200px), so a narrow
@@ -948,7 +948,10 @@
         }
         BYD.i18n.init().then(function () {
             BYD.core.init();
-            RoadSenseSettings.init();
+            return RoadSenseSettings.init();
+        }).catch(function (error) {
+            console.error('Failed to initialize RoadSense settings:', error);
+            if (BYD.utils && BYD.utils.unlockSettingsHydration) BYD.utils.unlockSettingsHydration();
         });
     </script>
 </body>

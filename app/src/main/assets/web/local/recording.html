@@ -30,7 +30,7 @@
         ];
     </script>
     <script src="../shared/app-tabs.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=34">
+    <link rel="stylesheet" href="../shared/styles.css?v=38">
     <script src="https://cdn.jsdelivr.net/npm/jmuxer@2.0.4/dist/jmuxer.min.js"></script>
     <script src="../shared/SotaPlayer.js?v=13"></script>
     <script src="../shared/Decoder.js"></script>
@@ -904,7 +904,10 @@
         }
         BYD.i18n.init().then(function () {
             BYD.core.init();
-            RecSettings.init();
+            return RecSettings.init();
+        }).catch(function (error) {
+            console.error('Failed to initialize recording settings:', error);
+            if (BYD.utils && BYD.utils.unlockSettingsHydration) BYD.utils.unlockSettingsHydration();
         });
     </script>
 </body>

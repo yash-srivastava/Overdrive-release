@@ -33,7 +33,7 @@
         ];
     </script>
     <script src="../shared/app-tabs.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=34">
+    <link rel="stylesheet" href="../shared/styles.css?v=38">
     <style>
         /* Per-camera detection toggles — 2-column on tablets, single column on
            narrow phones so the toggle never runs out of room next to the label. */
@@ -1709,6 +1709,7 @@
         };
         var failSettings = function (error) {
             console.error('Failed to initialize surveillance settings:', error);
+            unlockSettings();
             if (BYD.utils && BYD.utils.toast) {
                 BYD.utils.toast(BYD.i18n.t('errors.load_failed'), 'error');
             }

@@ -28,7 +28,7 @@
         ];
     </script>
     <script src="../shared/app-tabs.js"></script>
-    <link rel="stylesheet" href="../shared/styles.css?v=34">
+    <link rel="stylesheet" href="../shared/styles.css?v=38">
     <link rel="stylesheet" href="../shared/leaflet.css" />
     <style>
         /* ===== OLD WEBVIEW COMPAT (Chrome <88, Android 7.x) ===== */
@@ -2129,7 +2129,10 @@
         }
         BYD.i18n.init().then(function () {
             if (typeof BYD !== 'undefined' && BYD.core) BYD.core.init();
-            TRIPS.init();
+            return TRIPS.init();
+        }).catch(function (error) {
+            console.error('Failed to initialize trips:', error);
+            if (BYD.utils && BYD.utils.unlockSettingsHydration) BYD.utils.unlockSettingsHydration();
         });
     </script>
 </body>
