@@ -25,6 +25,20 @@
     var STORAGE_KEY = 'overdrive_theme';
     var DEFAULT_THEME = 'dark';
 
+    // Direction has to be on <html> before the stylesheet, same as the theme.
+    // core.js only sets dir after the language file arrives, so every Hebrew
+    // navigation first paints the English layout (sidebar on the left, content
+    // pushed right) and then jumps. On a phone the sidebar's transform
+    // transition also slides that menu across the screen.
+    (function stampDir() {
+        var lang = '';
+        try { lang = localStorage.getItem('overdrive_locale') || ''; } catch (e) {}
+        if (!lang && navigator.language) lang = navigator.language;
+        var base = String(lang).toLowerCase().split('-')[0];
+        if (base === 'iw') base = 'he';
+        document.documentElement.setAttribute('dir', (base === 'he' || base === 'ar') ? 'rtl' : 'ltr');
+    })();
+
     // ─── Step 0: viewport-height stabilizer ─────────────────────────────────
     // Android System WebView (and iOS Safari) resolve vh / dvh / svh / lvh
     // ONCE and don't reliably recompute them when the device rotates. After a
