@@ -401,6 +401,47 @@
         main.insertBefore(header, main.firstChild);
     }
 
+    // A freshly built sidebar always starts at scroll 0, so picking a link
+    // near the bottom and opening the menu again hid that link above the
+    // fold. Bring the current page's row into view. No-op when it is
+    // already on screen, so a short menu and the top items stay put.
+    function revealActiveNav(aside) {
+        if (!aside || !aside.clientHeight) return;
+        var link = aside.querySelector('.nav-link.active, .nav-link[aria-current="page"]');
+        if (!link || link.hasAttribute('hidden')) return;
+        var header = aside.querySelector('.sidebar-header');
+        var headerH = header ? header.offsetHeight : 0;
+        var linkRect = link.getBoundingClientRect();
+        var linkTop = linkRect.top - aside.getBoundingClientRect().top + aside.scrollTop;
+        var linkBottom = linkTop + linkRect.height;
+        var viewTop = aside.scrollTop + headerH + 8;
+        var viewBottom = aside.scrollTop + aside.clientHeight - 8;
+        if (linkTop >= viewTop && linkBottom <= viewBottom) return;
+        var target = linkTop - headerH - Math.max(12, (aside.clientHeight - headerH - linkRect.height) / 2);
+        var maxScroll = Math.max(0, aside.scrollHeight - aside.clientHeight);
+        if (target < 0) target = 0;
+        if (target > maxScroll) target = maxScroll;
+        aside.scrollTop = target;
+    }
+
+    // Pages ship their own toggleSidebar(), which replaces the shell one.
+    // Wrap whichever is installed so the row is revealed on open too
+    // (some phones drop the scroll position when the off-screen transform
+    // is removed).
+    function installSidebarReveal(aside) {
+        if (window.toggleSidebar && window.toggleSidebar._revealsActive) return;
+        var inner = window.toggleSidebar;
+        function wrapped(forceOpen) {
+            var opening = typeof forceOpen === 'boolean'
+                ? forceOpen
+                : !aside.classList.contains('open');
+            if (typeof inner === 'function') inner.apply(this, arguments);
+            if (opening) revealActiveNav(aside);
+        }
+        wrapped._revealsActive = true;
+        window.toggleSidebar = wrapped;
+    }
+
     function mount() {
         var holder = findMount();
         if (!holder) return;
@@ -470,6 +511,11 @@
         } else if (typeof window.applyI18n === 'function') {
             try { window.applyI18n(); } catch (e) {}
         }
+
+        revealActiveNav(aside);
+        installSidebarReveal(aside);
+        // Labels can wrap after i18n and push the active row down.
+        requestAnimationFrame(function () { revealActiveNav(aside); });
     }
 
     // ============================================================
