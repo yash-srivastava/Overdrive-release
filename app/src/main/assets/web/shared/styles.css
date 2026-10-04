@@ -650,10 +650,13 @@ textarea:focus,
     align-items: center;
     justify-content: space-between;
     border-bottom: 1px solid var(--border-subtle);
-    background: var(--bg-surface);
+    background: var(--bg-glass);
+    -webkit-backdrop-filter: saturate(160%) blur(16px);
+    backdrop-filter: saturate(160%) blur(16px);
     position: sticky;
     top: 0;
     z-index: 50;
+    flex-shrink: 0;
 }
 
 .page-title {
@@ -2274,9 +2277,12 @@ select.md-input ~ .md-label {
 
 /* Live view mobile header - visible with background */
 .live-view-page .mobile-header {
-    position: relative;
+    position: sticky;
+    top: 0;
     z-index: 60;
-    background: var(--bg-surface);
+    background: var(--bg-glass);
+    -webkit-backdrop-filter: saturate(160%) blur(16px);
+    backdrop-filter: saturate(160%) blur(16px);
     border-bottom: 1px solid var(--border-subtle);
     flex-shrink: 0;
     transition: background-color 200ms ease-out, border-color 200ms ease-out, backdrop-filter 200ms ease-out;
@@ -3391,6 +3397,10 @@ select.md-input ~ .md-label {
         display: flex;
         align-items: center;
         justify-content: space-between;
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        flex-shrink: 0;
         /* Pad past the iOS notch / Android cutout so the hamburger isn't
            visually clipped or cut off by the system status bar. The
            viewport-fit=cover meta tag on each page makes safe-area-inset-top
@@ -3398,7 +3408,9 @@ select.md-input ~ .md-label {
         padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 12px;
         padding-left: calc(16px + env(safe-area-inset-left, 0px));
         padding-right: calc(16px + env(safe-area-inset-right, 0px));
-        background: var(--bg-surface);
+        background: var(--bg-glass);
+        -webkit-backdrop-filter: saturate(160%) blur(16px);
+        backdrop-filter: saturate(160%) blur(16px);
         border-bottom: 1px solid var(--border-subtle);
     }
 
