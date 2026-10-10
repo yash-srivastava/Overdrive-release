@@ -1784,7 +1784,14 @@ class DashboardFragment : Fragment() {
             }
             saveButton.setOnClickListener {
                 val raw = capInput.text?.toString()?.trim().orEmpty()
-                val kwh = raw.toDoubleOrNull()
+                val lastSeparator = raw.lastIndexOfAny(charArrayOf('.', ','))
+                val normalized = if (lastSeparator >= 0) {
+                    raw.substring(0, lastSeparator).replace(",", "").replace(".", "") +
+                        "." + raw.substring(lastSeparator + 1)
+                } else {
+                    raw
+                }
+                val kwh = normalized.toDoubleOrNull()
                 if (kwh == null || !kwh.isFinite() || kwh < 5.0 || kwh > 120.0) {
                     capLayout.error = getString(R.string.vehicle_dialog_invalid_capacity)
                     return@setOnClickListener
