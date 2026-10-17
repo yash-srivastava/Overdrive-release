@@ -48,6 +48,8 @@ public class DiLink5QCarCamBackend {
         return exitCode == FAST_CAM_EXIT_AIS_STALL;
     }
     private static final long PROCESS_STOP_TIMEOUT_MS = 1_000L;
+    /** Clean QCarCam stop measured at ~120 ms; leave headroom for a busy GL thread. */
+    private static final long CLEAN_CAPTURE_STOP_TIMEOUT_MS = 1_500L;
     private static final long NATIVE_RECOVERY_WAIT_TIMEOUT_MS = 12_000L;
     private static final long NATIVE_RETIREMENT_EXECUTION_BUDGET_MS =
             9_500L;
@@ -1249,6 +1251,46 @@ public class DiLink5QCarCamBackend {
                 }
             } catch (Throwable ignored) {
             }
+        }
+    }
+
+    /**
+     * SIGTERM makes fast_cam_capture clear its loop flag and take the same
+     * exit as --time expiry: QCarCam streams stopped and closed, "[+] Done.",
+     * exit 0 (~120 ms on a Shark 6). Closing the DMA socket first instead makes
+     * the release guard give up mid-stream, and an abrupt exit can leave the
+     * QNX camera service writing into freed ION buffers. The release guard
+     * shortens its frame-release wait once the signal arrives, so this does
+     * not depend on the consumer still acknowledging frames.
+     */
+    private static boolean requestCleanCaptureStop(
+            Process process,
+            long deadlineElapsedMs) {
+        if (process == null || !process.isAlive()) return true;
+        int pid;
+        synchronized (DiLink5QCarCamBackend.class) {
+            pid = sHardwareProcess == process ? sHardwarePid : -1;
+        }
+        if (pid <= 0) return false;
+        try {
+            android.system.Os.kill(pid, android.system.OsConstants.SIGTERM);
+            long waitMs = boundedDeadlineWaitMs(
+                    deadlineElapsedMs, CLEAN_CAPTURE_STOP_TIMEOUT_MS);
+            boolean exited = waitMs > 0L
+                    && process.waitFor(waitMs, TimeUnit.MILLISECONDS);
+            if (exited) {
+                logger.info("fast_cam_capture stopped cleanly before "
+                        + "bridge release (exit=" + process.exitValue() + ").");
+            } else {
+                logger.warn("fast_cam_capture did not exit within "
+                        + waitMs + " ms of SIGTERM; continuing retirement.");
+            }
+            return exited;
+        } catch (android.system.ErrnoException e) {
+            return e.errno == android.system.OsConstants.ESRCH;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
         }
     }
 
@@ -2459,6 +2501,9 @@ public class DiLink5QCarCamBackend {
         // intent before the native bridge can make the child exit.
         Process expectedProcess =
                 markOwnedHardwareProcessExpectedStop(sessionToken);
+        // Stop capture BEFORE the bridge drops its socket and DMA-BUF imports
+        // so fast_cam_capture leaves through its own QCarCam stop/close.
+        requestCleanCaptureStop(expectedProcess, deadlineElapsedMs);
         boolean released = true;
         boolean nativeRetirementBusy = false;
         if (ownsNativeSession) {
