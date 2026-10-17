@@ -69,6 +69,17 @@ static int resolve_symbols(void) {
     return real_send && real_sendmsg;
 }
 
+/*
+ * stdout/stderr are a pipe drained by the daemon. If the daemon dies, the next
+ * FPS printf would raise SIGPIPE and kill the process before its clean QCarCam
+ * stop; ignore it so writes just fail with EPIPE.
+ */
+__attribute__((constructor))
+static void ignore_sigpipe(void) {
+    pthread_once(&symbol_once, resolve_symbols_once);
+    if (real_signal) real_signal(SIGPIPE, SIG_IGN);
+}
+
 static void guarded_stop_signal(int signal_number) {
     atomic_store(&stop_requested, 1);
     guard_handler_t handler = atomic_load(&capture_stop_handler);

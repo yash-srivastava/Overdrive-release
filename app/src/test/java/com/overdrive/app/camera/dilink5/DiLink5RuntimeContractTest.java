@@ -583,6 +583,7 @@ public class DiLink5RuntimeContractTest {
         assertTrue(releaseGuard.contains("static void request_clean_stop(int socket_fd)"));
         assertTrue(releaseGuard.contains("handler(SIGTERM);"));
         assertTrue(releaseGuard.contains("flags | MSG_NOSIGNAL"));
+        assertTrue(releaseGuard.contains("real_signal(SIGPIPE, SIG_IGN)"));
         assertTrue(releaseGuard.contains("FAST_CAM_STOPPING_RELEASE_TIMEOUT_MS"));
         assertTrue(releaseGuard.contains(
                 "\"/data/user_de/0/com.android.shell/overdrive/\""));
