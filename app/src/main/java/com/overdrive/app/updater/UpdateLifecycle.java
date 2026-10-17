@@ -47,10 +47,7 @@ public final class UpdateLifecycle {
         } catch (Throwable ignored) {
             return "";
         }
-        return psAwkKillLine("fast_cam_capture")
-                + psAwkKillLine("qcarcam_test")
-                + "killall -9 fast_cam_capture 2>/dev/null\n"
-                + "killall -9 qcarcam_test 2>/dev/null\n";
+        return com.overdrive.app.camera.dilink5.DiLink5CaptureStopScript.lines();
     }
 
     public static final String UPDATE_IN_PROGRESS_FILE = com.overdrive.app.util.DaemonStorage.rebase("/data/local/tmp/overdrive_update_in_progress");

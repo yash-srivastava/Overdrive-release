@@ -275,6 +275,17 @@ public class AppUpdaterRestartSafetyContractTest {
                 "cameraIds.equals(sHardwareCameraIds)"));
         assertTrue(backend.contains(
                 "\"--cams\", cameraIds"));
+    }
+
+    @Test
+    public void captureKillCascadesUseCleanStopHelper() throws IOException {
+        String updater = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/updater/AppUpdater.java");
+        String lifecycle = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/updater/UpdateLifecycle.java");
+        String controller = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/ui/daemon/"
+                        + "CameraDaemonController.kt");
 
         String updaterKill = methodBody(
                 updater,
@@ -283,9 +294,8 @@ public class AppUpdaterRestartSafetyContractTest {
         assertTrue(updaterKill.contains(
                 "if (!isDiLink5ModeSelected()) return \"\";"));
         assertTrue(updaterKill.contains(
-                "psAwkKillLine(\"fast_cam_capture\")"));
-        assertTrue(updaterKill.contains(
-                "psAwkKillLine(\"qcarcam_test\")"));
+                "DiLink5CaptureStopScript.lines()"));
+        assertFalse(updaterKill.contains("killall -9"));
         String updaterVerify = methodBody(
                 updater,
                 "private static String diLink5CaptureVerificationScript()",
@@ -302,20 +312,47 @@ public class AppUpdaterRestartSafetyContractTest {
         assertTrue(lifecycleKill.contains(
                 "DiLink5Platform\n                    .isSelected()"));
         assertTrue(lifecycleKill.contains(
-                "psAwkKillLine(\"fast_cam_capture\")"));
+                "DiLink5CaptureStopScript.lines()"));
+        assertFalse(lifecycleKill.contains("killall -9"));
 
         int commonProcesses = controller.indexOf(
                 "private val RELATED_PROCESSES");
-        int diLink5Processes = controller.indexOf(
-                "private val DILINK5_PROCESSES", commonProcesses);
+        int commonEnd = controller.indexOf(")", commonProcesses);
         assertTrue(commonProcesses >= 0);
-        assertTrue(diLink5Processes > commonProcesses);
-        String commonList = controller.substring(
-                commonProcesses, diLink5Processes);
+        String commonList = controller.substring(commonProcesses, commonEnd);
         assertFalse(commonList.contains("fast_cam_capture"));
         assertFalse(commonList.contains("qcarcam_test"));
-        assertTrue(controller.contains(
-                "if (diLink5Selected) RELATED_PROCESSES + DILINK5_PROCESSES"));
+        assertFalse(controller.contains("DILINK5_PROCESSES"));
+        // stop() and cleanup() both retire the capture through the shared
+        // SIGTERM-first helper, after the daemon and only in DiLink 5 mode.
+        String diLink5Retire = "if (diLink5Selected) {\n";
+        int first = controller.indexOf(diLink5Retire);
+        int second = controller.indexOf(diLink5Retire, first + 1);
+        assertTrue(first >= 0);
+        assertTrue(second > first);
+        assertTrue(controller.indexOf("psAwkKillLine(\"cam_daemon\")") < first);
+        assertTrue(controller.indexOf(
+                "DiLink5CaptureStopScript.lines()", first) > first);
+        assertTrue(controller.indexOf(
+                "DiLink5CaptureStopScript.lines()", second) > second);
+    }
+
+    @Test
+    public void diLink5CaptureStopScriptSignalsTermBeforeKill() {
+        String script = com.overdrive.app.camera.dilink5
+                .DiLink5CaptureStopScript.lines();
+        int term = script.indexOf("kill -TERM");
+        int wait = script.indexOf("while [ $W -lt 20 ]");
+        int kill = script.indexOf("kill -KILL");
+        int killall = script.indexOf("killall -9 fast_cam_capture");
+        assertTrue(term >= 0);
+        assertTrue(wait > term);
+        assertTrue(kill > wait);
+        assertTrue(killall > wait);
+        assertTrue(script.contains("grep -F 'fast_cam_capture'"));
+        assertTrue(script.contains("grep -F 'qcarcam_test'"));
+        assertTrue(script.contains("grep -E 'fast_cam_capture|qcarcam_test'"));
+        assertTrue(script.contains("if [ \"$pid\" != \"$MY_PID\" ]"));
     }
 
     @Test

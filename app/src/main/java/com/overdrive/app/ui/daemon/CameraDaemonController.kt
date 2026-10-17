@@ -31,10 +31,6 @@ class CameraDaemonController(
             "ffmpeg",
             "mediamtx"
         )
-        private val DILINK5_PROCESSES = listOf(
-            "fast_cam_capture",
-            "qcarcam_test"
-        )
     }
     
     override val type = DaemonType.CAMERA_DAEMON
@@ -96,9 +92,12 @@ class CameraDaemonController(
                 append("rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/cam_watchdog.pid 2>/dev/null\n")
                 append(gracefulExitWait)
                 append(com.overdrive.app.launcher.DaemonLauncher.psAwkKillLine("cam_daemon"))
-                relatedProcesses(diLink5Selected).forEach { proc ->
+                RELATED_PROCESSES.forEach { proc ->
                     append(com.overdrive.app.launcher.DaemonLauncher.psAwkKillLine(proc))
                     append("killall -9 $proc 2>/dev/null\n")
+                }
+                if (diLink5Selected) {
+                    append(com.overdrive.app.camera.dilink5.DiLink5CaptureStopScript.lines())
                 }
                 // Sleep so SIGKILL'd daemon releases its lockfile, then rm it.
                 // rm-after-pkill prevents the lockfile resurrection race
@@ -149,10 +148,6 @@ class CameraDaemonController(
         return com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
     }
 
-    private fun relatedProcesses(diLink5Selected: Boolean): List<String> =
-        if (diLink5Selected) RELATED_PROCESSES + DILINK5_PROCESSES
-        else RELATED_PROCESSES
-
     private fun diLink5GracefulExitWaitScript(
         shutdownAccepted: Boolean,
         diLink5Selected: Boolean,
@@ -182,9 +177,12 @@ class CameraDaemonController(
             append("rm -f /data/local/tmp/start_cam_daemon.sh /data/local/tmp/cam_watchdog.pid 2>/dev/null\n")
             append(gracefulExitWait)
             append(com.overdrive.app.launcher.DaemonLauncher.psAwkKillLine("cam_daemon"))
-            relatedProcesses(diLink5Selected).forEach { proc ->
+            RELATED_PROCESSES.forEach { proc ->
                 append(com.overdrive.app.launcher.DaemonLauncher.psAwkKillLine(proc))
                 append("killall -9 $proc 2>/dev/null\n")
+            }
+            if (diLink5Selected) {
+                append(com.overdrive.app.camera.dilink5.DiLink5CaptureStopScript.lines())
             }
             append("sleep 1\n")
             append("rm -f /data/local/tmp/camera_daemon.lock 2>/dev/null\n")

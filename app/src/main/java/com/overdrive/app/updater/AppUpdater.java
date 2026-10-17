@@ -174,10 +174,7 @@ public class AppUpdater {
 
     private static String diLink5CaptureKillScript() {
         if (!isDiLink5ModeSelected()) return "";
-        return psAwkKillLine("fast_cam_capture")
-                + psAwkKillLine("qcarcam_test")
-                + "killall -9 fast_cam_capture 2>/dev/null\n"
-                + "killall -9 qcarcam_test 2>/dev/null\n";
+        return com.overdrive.app.camera.dilink5.DiLink5CaptureStopScript.lines();
     }
 
     private static String diLink5CaptureVerificationScript() {
