@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -16,33 +17,78 @@
 
 typedef ssize_t (*send_fn)(int, const void*, size_t, int);
 typedef ssize_t (*sendmsg_fn)(int, const struct msghdr*, int);
+typedef void (*guard_handler_t)(int);
+typedef guard_handler_t (*signal_fn)(int, guard_handler_t);
 
 enum { FAST_CAM_RELEASE_TIMEOUT_MS = 3000 };
+/* Once a stop is requested, stop waiting on a consumer that is shutting down. */
+enum { FAST_CAM_STOPPING_RELEASE_TIMEOUT_MS = 250 };
 
 /*
- * Durable record of WHY the guard is about to fail closed. Must match
+ * Durable record of WHY the guard gave up on the consumer. Must match
  * DiLink5QCarCamBackend.RELEASE_GUARD_REASON_PATH, which logs and consumes
- * the file when it classifies the child's unexpected exit. The daemon log
- * gets truncated in place (log_2MEH8B86 lost the initiating exit-125 cause
- * that way); this file survives truncation, and the stderr copy reaches the
+ * the file when it classifies the child's exit. The daemon log gets
+ * truncated in place (log_2MEH8B86 lost the initiating exit-125 cause that
+ * way); this file survives truncation, and the stderr copy reaches the
  * daemon's [FastCamProc] output drainer while it is still attached.
+ * The guard only runs in DiLink 5 camera mode, where daemon storage lives in
+ * the shell user's data dir; shell cannot create files in /data/local/tmp
+ * there (SELinux).
  */
 static const char REASON_FILE_PATH[] =
-        "/data/local/tmp/overdrive_dilink5_release_guard_reason";
+        "/data/user_de/0/com.android.shell/overdrive/"
+        "overdrive_dilink5_release_guard_reason";
 
 static send_fn real_send;
 static sendmsg_fn real_sendmsg;
+static signal_fn real_signal;
 static pthread_once_t symbol_once = PTHREAD_ONCE_INIT;
 static atomic_int camera_socket = ATOMIC_VAR_INIT(-1);
+
+/*
+ * fast_cam_capture installs one SIGINT/SIGTERM handler that clears its
+ * capture-loop flag; the loop then takes the same exit as --time expiry:
+ * QCarCam streams stopped and closed, "[+] Done.", exit 0. Abrupt exit skips
+ * that, and on SA8155P the QNX-hosted camera service can keep DMA-ing into
+ * the freed ION buffers (suspected cause of system-wide gralloc metadata
+ * corruption -> hwcodec/SurfaceFlinger/HWC crashes -> boot loops). So every
+ * consumer failure requests that clean stop instead of exiting.
+ */
+static _Atomic(guard_handler_t) capture_stop_handler;
+static atomic_int stop_requested = ATOMIC_VAR_INIT(0);
+static atomic_int consumer_lost = ATOMIC_VAR_INIT(0);
 
 static void resolve_symbols_once(void) {
     real_send = (send_fn)dlsym(RTLD_NEXT, "send");
     real_sendmsg = (sendmsg_fn)dlsym(RTLD_NEXT, "sendmsg");
+    real_signal = (signal_fn)dlsym(RTLD_NEXT, "signal");
 }
 
 static int resolve_symbols(void) {
     pthread_once(&symbol_once, resolve_symbols_once);
     return real_send && real_sendmsg;
+}
+
+static void guarded_stop_signal(int signal_number) {
+    atomic_store(&stop_requested, 1);
+    guard_handler_t handler = atomic_load(&capture_stop_handler);
+    if (handler) handler(signal_number);
+}
+
+__attribute__((visibility("default")))
+guard_handler_t signal(int signal_number, guard_handler_t handler) {
+    pthread_once(&symbol_once, resolve_symbols_once);
+    if (!real_signal) {
+        errno = ENOSYS;
+        return SIG_ERR;
+    }
+    if ((signal_number == SIGINT || signal_number == SIGTERM)
+            && handler != SIG_DFL && handler != SIG_IGN
+            && handler != SIG_ERR) {
+        atomic_store(&capture_stop_handler, handler);
+        return real_signal(signal_number, guarded_stop_signal);
+    }
+    return real_signal(signal_number, handler);
 }
 
 static int64_t monotonic_millis(void) {
@@ -59,7 +105,7 @@ static int remaining_millis(int64_t deadline) {
 }
 
 /*
- * Record the initiating failure before fail_closed() erases the process.
+ * Record the initiating failure before the guard gives up on the consumer.
  * One preformatted line, written best-effort to (a) stderr — merged into
  * stdout by the daemon's redirectErrorStream(true), so the [FastCamProc]
  * drainer logs it — and (b) the reason file, which survives both a detached
@@ -113,14 +159,44 @@ static void record_failure(
     }
 }
 
-__attribute__((noreturn))
-static void fail_closed(int socket_fd) {
+/*
+ * The consumer is gone, stuck or out of protocol. Cut it off and ask
+ * fast_cam_capture to leave its loop through its own clean QCarCam stop.
+ * Returning lets it recycle the in-flight frame to the producer; at worst a
+ * consumer still sampling that buffer sees one torn frame, which is far
+ * cheaper than an abrupt exit with live streams.
+ */
+static void request_clean_stop(int socket_fd) {
+    atomic_store(&consumer_lost, 1);
     shutdown(socket_fd, SHUT_RDWR);
-    // Never return control to fast_cam_capture after an unconfirmed release:
-    // its next instruction releases the QCarCam frame back to the producer.
-    // Process exit closes capture instead, while the consumer's imported
-    // DMA-BUF reference remains alive.
-    _exit(125);
+    guard_handler_t handler = atomic_load(&capture_stop_handler);
+    if (!handler) {
+        // No handler means an unknown binary; keep the old fail-closed exit.
+        _exit(125);
+    }
+    atomic_store(&stop_requested, 1);
+    handler(SIGTERM);
+}
+
+/*
+ * A stop request (SIGTERM/SIGINT from the daemon) means the consumer is
+ * retiring and may stop releasing frames; bound the remaining wait so the
+ * capture loop reaches its flag check promptly. Polls are restarted on EINTR,
+ * so the shortened deadline applies to a wait already in progress.
+ */
+static int64_t stopping_deadline(int64_t deadline) {
+    if (!atomic_load(&stop_requested)) return deadline;
+    static _Atomic int64_t stop_deadline = ATOMIC_VAR_INIT(0);
+    int64_t cap = atomic_load(&stop_deadline);
+    if (cap == 0) {
+        int64_t candidate =
+                monotonic_millis() + FAST_CAM_STOPPING_RELEASE_TIMEOUT_MS;
+        int64_t expected = 0;
+        cap = atomic_compare_exchange_strong(
+                &stop_deadline, &expected, candidate)
+                ? candidate : expected;
+    }
+    return cap < deadline ? cap : deadline;
 }
 
 static int wait_for_fence(int fence_fd) {
@@ -134,6 +210,7 @@ static int wait_for_fence(int fence_fd) {
     };
     int result;
     do {
+        deadline = stopping_deadline(deadline);
         int timeout = remaining_millis(deadline);
         if (timeout <= 0) {
             result = 0;
@@ -163,6 +240,7 @@ static int receive_release(
         };
         int ready;
         do {
+            deadline = stopping_deadline(deadline);
             int timeout = remaining_millis(deadline);
             if (timeout <= 0) {
                 ready = 0;
@@ -288,7 +366,8 @@ ssize_t sendmsg(
     ssize_t sent = real_sendmsg(socket_fd, &guarded_message, flags);
     if (sent != (ssize_t)sizeof(guarded)) {
         record_failure("handshake-send", errno, NULL, (long)sent);
-        fail_closed(socket_fd);
+        request_clean_stop(socket_fd);
+        return sent;
     }
     atomic_store_explicit(
             &camera_socket, socket_fd, memory_order_release);
@@ -313,15 +392,24 @@ ssize_t send(int socket_fd, const void* data, size_t length, int flags) {
                 frame.magic == FAST_CAM_MAGIC
                 && frame.msg_type == FAST_CAM_MSG_FRAME_READY;
     }
-    ssize_t sent = real_send(socket_fd, data, length, flags);
+    if (guarded_frame && atomic_load(&consumer_lost)) {
+        // Already stopping: the socket is shut down, so this fails fast.
+        // MSG_NOSIGNAL keeps a SIGPIPE from killing the process before its
+        // capture loop reaches the clean QCarCam stop.
+        return real_send(socket_fd, data, length, flags | MSG_NOSIGNAL);
+    }
+    ssize_t sent = real_send(
+            socket_fd, data, length,
+            guarded_frame ? flags | MSG_NOSIGNAL : flags);
     if (!guarded_frame) return sent;
     if (sent != (ssize_t)sizeof(frame)) {
         record_failure("frame-send", errno, &frame, (long)sent);
-        fail_closed(socket_fd);
+        request_clean_stop(socket_fd);
+        return sent;
     }
     if (receive_release(socket_fd, &frame) != 0) {
         // receive_release already recorded the specific failure.
-        fail_closed(socket_fd);
+        request_clean_stop(socket_fd);
     }
     return sent;
 }

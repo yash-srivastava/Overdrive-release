@@ -573,7 +573,27 @@ public class DiLink5RuntimeContractTest {
         assertTrue(releaseGuard.contains("receive_release("));
         assertTrue(releaseGuard.contains("wait_for_fence("));
         assertTrue(releaseGuard.contains("shutdown(socket_fd, SHUT_RDWR)"));
+        // Consumer failures request fast_cam_capture's own clean QCarCam
+        // stop (its SIGINT/SIGTERM handler); _exit(125) remains only for a
+        // binary that never registered one.
         assertTrue(releaseGuard.contains("_exit(125)"));
+        assertFalse(releaseGuard.contains("fail_closed("));
+        assertTrue(releaseGuard.contains(
+                "guard_handler_t signal(int signal_number, guard_handler_t handler)"));
+        assertTrue(releaseGuard.contains("static void request_clean_stop(int socket_fd)"));
+        assertTrue(releaseGuard.contains("handler(SIGTERM);"));
+        assertTrue(releaseGuard.contains("flags | MSG_NOSIGNAL"));
+        assertTrue(releaseGuard.contains("FAST_CAM_STOPPING_RELEASE_TIMEOUT_MS"));
+        assertTrue(releaseGuard.contains(
+                "\"/data/user_de/0/com.android.shell/overdrive/\""));
+        assertFalse(releaseGuard.contains(
+                "\"/data/local/tmp/overdrive_dilink5_release_guard_reason\""));
+        String retirement = backend.substring(
+                backend.indexOf("markOwnedHardwareProcessExpectedStop(sessionToken);"));
+        assertOrdered(retirement,
+                "requestCleanCaptureStop(expectedProcess, deadlineElapsedMs);",
+                "released = nativeRelease(nativeHandle);",
+                "processStopped = stopHardwareProcessForOwner(");
         assertTrue(releaseGuard.contains(
                 "sent != (ssize_t)sizeof(frame)"));
         assertTrue(releaseGuard.contains(
