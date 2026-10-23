@@ -979,7 +979,8 @@ public class TripTelemetryRecorder {
                     speedSource, diLink5PedalsUnknown,
                     diLink5 && (lat != 0 || lon != 0) && !isLiveFix(fix, now, GPS_ACCURACY_GATE_M),
                     diLink5 && !dynamicsStale && speedKmh == 0, peakSpeedKmh,
-                    diLink5 && (lat != 0 || lon != 0) ? wholeMetres(fix.accuracy) : 0f, landedM);
+                    diLink5 && (lat != 0 || lon != 0) ? wholeMetres(fix.accuracy) : 0f, landedM,
+                    fix.fixTimeUtc);
 
             // ── Distance fusion (CAN-speed primary, accuracy-gated GPS fallback) ──
             // dt since the previous sample, clamped so a scheduler stall or a

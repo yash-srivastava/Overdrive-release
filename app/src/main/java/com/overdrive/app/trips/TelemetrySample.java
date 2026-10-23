@@ -47,6 +47,11 @@ public class TelemetrySample {
     public static final int SPEED_VEHICLE = 0;
     public static final int SPEED_GPS = 1;
     public static final int SPEED_NONE = 2;
+    /** The GPS fix's own wall-clock time (epoch ms); 0 = unreported. Distinct from
+     *  {@link #timestampMs}, which is when the sample was RECORDED. A fix arrives
+     *  already ~0.7s old, and seconds old through turns, so anything aligning this
+     *  track against another recording needs when the position was TAKEN. */
+    public final long gpsFixTimeUtc;
 
     public TelemetrySample(long timestampMs, int speedKmh, int accelPedalPercent,
                            int brakePedalPercent, boolean brakePedalPressed,
@@ -85,6 +90,19 @@ public class TelemetrySample {
                            int speedSource, boolean pedalsUnknown, boolean gpsNotLive,
                            boolean stopConfirmed, int peakSpeedKmh, float horizontalAccuracyM,
                            float distanceLandedM) {
+        this(timestampMs, speedKmh, accelPedalPercent, brakePedalPercent, brakePedalPressed,
+                gearMode, lat, lon, altitude, verticalAccuracyM, altitudeIsMsl,
+                speedSource, pedalsUnknown, gpsNotLive, stopConfirmed, peakSpeedKmh, horizontalAccuracyM,
+                distanceLandedM, 0L);
+    }
+
+    public TelemetrySample(long timestampMs, int speedKmh, int accelPedalPercent,
+                           int brakePedalPercent, boolean brakePedalPressed,
+                           int gearMode, double lat, double lon, double altitude,
+                           double verticalAccuracyM, boolean altitudeIsMsl,
+                           int speedSource, boolean pedalsUnknown, boolean gpsNotLive,
+                           boolean stopConfirmed, int peakSpeedKmh, float horizontalAccuracyM,
+                           float distanceLandedM, long gpsFixTimeUtc) {
         this.timestampMs = timestampMs;
         this.speedKmh = speedKmh;
         this.accelPedalPercent = accelPedalPercent;
@@ -103,6 +121,7 @@ public class TelemetrySample {
         this.peakSpeedKmh = peakSpeedKmh;
         this.horizontalAccuracyM = horizontalAccuracyM;
         this.distanceLandedM = distanceLandedM;
+        this.gpsFixTimeUtc = gpsFixTimeUtc;
     }
 
     /** DI5: the row's speed is a reading, vehicle or GPS. A vehicle 0 without {@link #stopConfirmed}
@@ -133,7 +152,8 @@ public class TelemetrySample {
     public TelemetrySample atTimestamp(long timestampMs) {
         return new TelemetrySample(timestampMs, speedKmh, accelPedalPercent, brakePedalPercent,
                 brakePedalPressed, gearMode, lat, lon, altitude, verticalAccuracyM, altitudeIsMsl,
-                speedSource, pedalsUnknown, gpsNotLive, stopConfirmed, peakSpeedKmh, horizontalAccuracyM, 0f);
+                speedSource, pedalsUnknown, gpsNotLive, stopConfirmed, peakSpeedKmh, horizontalAccuracyM, 0f,
+                gpsFixTimeUtc);
     }
 
     /** The same row with another landed distance. */
@@ -141,7 +161,7 @@ public class TelemetrySample {
         return new TelemetrySample(timestampMs, speedKmh, accelPedalPercent, brakePedalPercent,
                 brakePedalPressed, gearMode, lat, lon, altitude, verticalAccuracyM, altitudeIsMsl,
                 speedSource, pedalsUnknown, gpsNotLive, stopConfirmed, peakSpeedKmh, horizontalAccuracyM,
-                landedM);
+                landedM, gpsFixTimeUtc);
     }
 
     /** DI5: the row shows the car standing: a valid vehicle 0 or a GPS 0 the positions confirmed. */
@@ -184,6 +204,8 @@ public class TelemetrySample {
             json.put("lo", lon);
             json.put("al", altitude);
             if (verticalAccuracyM > 0) json.put("va", verticalAccuracyM);
+            // Omitted when unreported so existing files stay byte-identical in shape.
+            if (gpsFixTimeUtc > 0) json.put("gt", gpsFixTimeUtc);
             if (altitudeIsMsl) json.put("am", true);
             if (speedSource != SPEED_VEHICLE) json.put("ss", speedSource);
             if (pedalsUnknown) json.put("pu", true);
@@ -220,7 +242,8 @@ public class TelemetrySample {
                 json.optBoolean("sz", false),
                 json.optInt("sp", -1),
                 (float) json.optDouble("ha", 0.0),
-                (float) json.optDouble("dl", 0.0)
+                (float) json.optDouble("dl", 0.0),
+                json.optLong("gt", 0L)
         );
     }
 }

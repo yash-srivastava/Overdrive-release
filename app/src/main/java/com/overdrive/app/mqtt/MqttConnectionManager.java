@@ -605,6 +605,11 @@ public class MqttConnectionManager {
                 if (alt != 0) copy.put("elevation", alt);
                 float heading = gpsMonitor.getHeading();
                 if (heading > 0) copy.put("heading", heading);
+                // Keep the fix's own timestamp in lockstep with the refreshed position.
+                // A stale gps_utc against fresh coordinates is worse than none: it would
+                // mislead exactly the consumers that correct per point.
+                long fixUtc = gpsMonitor.getFixTimeUtc();
+                if (fixUtc > 0) copy.put("gps_utc", fixUtc);
             }
             return copy;
         } catch (Exception e) {
@@ -790,10 +795,12 @@ public class MqttConnectionManager {
                 }
             }
 
-            // lat, lon
+            // lat, lon (+ the fix's own wall-clock timestamp — see GpsFixSnapshot.fixTimeUtc)
             if (gpsMonitor.hasLocation()) {
                 payload.put("lat", gpsMonitor.getLatitude());
                 payload.put("lon", gpsMonitor.getLongitude());
+                long fixUtc = gpsMonitor.getFixTimeUtc();
+                if (fixUtc > 0) payload.put("gps_utc", fixUtc);
             }
 
             // is_charging — BMS state primary, with gun-connected + power-flowing
