@@ -1058,6 +1058,27 @@ public final class VehicleCommandRouter {
     }
 
     /**
+     * RELATIVE fan step (±N levels) — reads the level, adds the delta, clamps to 1..7, writes.
+     * SDK_ONLY like the absolute setter, for the same reason as {@link ClimateStepTempCommand}:
+     * no cloud command can express "one level faster than now". The written level is published
+     * to [resultLevel] so the caller can report it without a second read.
+     */
+    public static final class ClimateStepFanCommand extends VehicleCommand {
+        public final int delta;
+        /** The level actually written, or UNAVAILABLE when the step didn't happen. */
+        public volatile int resultLevel = com.overdrive.app.byd.BydVehicleData.UNAVAILABLE;
+        public ClimateStepFanCommand(int delta) { this.delta = delta; }
+        public String name() { return "climate-fan-step"; }
+        public Capability sdkCapability() { return Capability.REQUIRED; }
+        public RoutePreference defaultPreference() { return RoutePreference.SDK_ONLY; }
+        public boolean executeViaSdk(BydDataCollector c) {
+            int result = c.stepAcFanLevel(delta);
+            resultLevel = result;
+            return result != com.overdrive.app.byd.BydVehicleData.UNAVAILABLE;
+        }
+    }
+
+    /**
      * Seat heat / ventilation — SDK first, with a composite BYD
      * VENTILATIONHEATING fallback when the local actuator is unavailable.
      *

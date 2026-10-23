@@ -16004,6 +16004,83 @@ public class BydDataCollector {
         }
     }
 
+    /** Fan levels a write accepts — the same 1..7 band {@link #setAcFanLevel} enforces. */
+    public static final int AC_FAN_LEVEL_MIN = 1, AC_FAN_LEVEL_MAX = 7;
+
+    /**
+     * Live fan level (1..7), or {@link BydVehicleData#UNAVAILABLE} on a miss. Read fresh rather
+     * than from the snapshot for the same reason as {@link #readAcSetpointNow}: a step built on a
+     * stale level moves the fan to somewhere the user never was. 0 (fan stopped) is returned as 0
+     * so the caller can tell "off" from "unreadable"; both refuse a step.
+     */
+    public int readAcFanLevelNow() {
+        if (isDiLink5BridgeConsumer()) {
+            BydVehicleData bridge = diLink5AutomationFallback();
+            int fallback = bridge == null ? BydVehicleData.UNAVAILABLE : bridge.acFanLevel;
+            return fallback >= 0 && fallback <= AC_FAN_LEVEL_MAX ? fallback : BydVehicleData.UNAVAILABLE;
+        }
+        if (acDevice != null) {
+            try {
+                Object val = BydDeviceHelper.callGetter(acDevice, "getAcWindLevel");
+                if (val instanceof Number) {
+                    int raw = ((Number) val).intValue();
+                    if (raw >= 0 && raw <= AC_FAN_LEVEL_MAX) return raw;
+                }
+            } catch (Throwable t) {
+                logger.debug("readAcFanLevelNow error: " + t.getMessage());
+            }
+        }
+        BydVehicleData bridge = diLink5AutomationFallback();
+        int fallback = bridge == null ? BydVehicleData.UNAVAILABLE : bridge.acFanLevel;
+        return fallback >= 0 && fallback <= AC_FAN_LEVEL_MAX ? fallback : BydVehicleData.UNAVAILABLE;
+    }
+
+    /**
+     * Target level for a relative fan step, or {@link BydVehicleData#UNAVAILABLE} when [current]
+     * is not a running fan (0 = stopped, or unreadable). Clamped to 1..7: "slower" at 1 stays at
+     * 1 rather than switching the fan off, and "faster" at 7 stays at 7.
+     */
+    static int nextAcFanLevel(int current, int delta) {
+        if (current < AC_FAN_LEVEL_MIN || current > AC_FAN_LEVEL_MAX) return BydVehicleData.UNAVAILABLE;
+        long target = (long) current + delta;
+        return (int) Math.max(AC_FAN_LEVEL_MIN, Math.min(AC_FAN_LEVEL_MAX, target));
+    }
+
+    /**
+     * Relative fan step: read the level, add [delta], clamp to 1..7, write. Returns the new
+     * level, or {@link BydVehicleData#UNAVAILABLE} when the AC is off, the level couldn't be read,
+     * or the write failed.
+     *
+     * <p>Refuses while the AC is off: a fan write can switch the climate on, and a key press
+     * meant as "a bit more air" must not start the AC. Already at the end of the range is a
+     * SUCCESS with the unchanged level (pressing "slower" at 1 is a no-op, like the temperature
+     * step at its limit).
+     *
+     * <p>The write is the same {@link #setAcFanLevel} the absolute fan action uses, so the step
+     * behaves exactly like picking that level by hand, including leaving AUTO mode if the head
+     * unit does that for a manual fan change.
+     */
+    public int stepAcFanLevel(int delta) {
+        int power = readAcPowerNow();
+        if (power != 1) {
+            logger.warn("stepAcFanLevel: AC is not on (state " + power + ") — refusing to step");
+            return BydVehicleData.UNAVAILABLE;
+        }
+        int current = readAcFanLevelNow();
+        int target = nextAcFanLevel(current, delta);
+        if (target == BydVehicleData.UNAVAILABLE) {
+            logger.warn("stepAcFanLevel: fan level " + current + " is not a running fan — refusing to step");
+            return BydVehicleData.UNAVAILABLE;
+        }
+        if (target == current) {
+            logger.info("stepAcFanLevel: already at limit (" + current + ") — no write");
+            return current;
+        }
+        if (!setAcFanLevel(target)) return BydVehicleData.UNAVAILABLE;
+        logger.info("stepAcFanLevel: " + current + " -> " + target + " (delta " + delta + ")");
+        return target;
+    }
+
     public boolean setAcWindMode(int mode) {
         try {
             // SDK method: acDevice.setAcWindMode(0, mode)
