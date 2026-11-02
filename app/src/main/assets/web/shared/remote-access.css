@@ -110,6 +110,10 @@
 .ra-roster-row .ra-switch { width: 38px; height: 24px; }
 .ra-roster-row .ra-switch-thumb { width: 16px; height: 16px; }
 .ra-roster-row .ra-switch input:checked + .ra-switch-track .ra-switch-thumb { transform: translateX(14px); }
+/* RTL: the flex track starts the thumb on the right, so the checked thumb must slide left. */
+[dir="rtl"] .ra-switch input:checked + .ra-switch-track .ra-switch-thumb { transform: translateX(-18px); }
+[dir="rtl"] .ra-switch-master input:checked + .ra-switch-track .ra-switch-thumb { transform: translateX(-24px); }
+[dir="rtl"] .ra-roster-row .ra-switch input:checked + .ra-switch-track .ra-switch-thumb { transform: translateX(-14px); }
 .ra-roster-remove { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 30px; height: 30px; border-radius: var(--radius-sm); border: 0; background: transparent; color: var(--outline); cursor: pointer; font-size: 18px; }
 .ra-roster-remove:hover { color: var(--error); background: var(--error-container); }
 .ra-roster-empty { font-size: 10px; color: var(--outline); line-height: 1.6; padding: 4px 0; }
