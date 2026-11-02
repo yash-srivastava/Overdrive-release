@@ -95,15 +95,15 @@ public class ScratchRootLegacyIdentityTest {
 
     private static final Map<String, String> EXPECTED = new LinkedHashMap<>();
     static {
-        EXPECTED.put("camWatchdog", "aa6e14b622eefd6e5ede0a0e141fd8c31ba964c47e90319140d40c203740bea6");
-        EXPECTED.put("accSentryWatchdog", "e5d6b4e9cab75cb74feabcfd6b8283502a6b325de7e3fdf4369059c6355173f0");
-        EXPECTED.put("telegramWatchdog", "44a915e39d11f2a8863621b3b44c5b9f5f6d2691971716ff199567be2cb585ab");
+        EXPECTED.put("camWatchdog", "290d4c1ae6fed074c99c5aa53980fe04973c978bfa05fd4e91f1c7d4a1c45856");
+        EXPECTED.put("accSentryWatchdog", "2338b58b6b0467bcbaa7e6b1c49428dfccd066ce3449bfefbfa869061b7fe218");
+        EXPECTED.put("telegramWatchdog", "ac0e96f7f0191e9979491c832e4c0ce7a09e755b3c54c1eadbc198d9e1e5b84d");
         EXPECTED.put("watchdogWriteCommand", "b99b6b33413237a014c8eb1e73deeeef5a1625195b917c9dafe52761e6f1a24b");
         EXPECTED.put("psAwkKillLine", "5f953da755240daf8e738ed7fc72e01aa33cc3fa8d9f098efa8c2e6375ca26a8");
-        EXPECTED.put("logRotateGuard", "4eb7ceaafdbf0bd5fd39d689e11790acac20f79ed51643290ab44d22f22a3e54");
-        EXPECTED.put("logRotateCoprocess", "b53c9080b0596a164cc4a5d0c26d1a44f5dd8c643d0b71f4e0f1e35395a885e0");
-        EXPECTED.put("zrokWatchdogReserved", "c7af6f9636be9356916dde7854152970540cbb0c9124d4d59872ae52ba5a6af4");
-        EXPECTED.put("zrokWatchdogPublicProxy", "bcfede4a7bad88d8733dfec14a420e936d012a61f5ced4a2742b4fd880a3f524");
+        EXPECTED.put("logRotateGuard", "62b855c8c98ecb41aee411594caa2cb266775fd49b3a5b89f9b850e95d416804");
+        EXPECTED.put("logRotateCoprocess", "91198d522bcb1592bfe55ec0bc5697431647e60eb14aaee7f94e9f395ef1e242");
+        EXPECTED.put("zrokWatchdogReserved", "032d380fff07a3cedeedbf91aed1851de9c5ab1010f27562dc7e80ffdc252436");
+        EXPECTED.put("zrokWatchdogPublicProxy", "068cd10240ed0817051b93297a4fd58a406d665f869329d678946bda7591651a");
         EXPECTED.put("tailscaleDashboardGuard", "5043677ad005dc56cf2fd97ee3c7757862ebcf2278d9595528a160a92c0eab2e");
         EXPECTED.put("daemonLogPaths", "6222041aa8ccc8be671dc924f3c0dbdd653c3d17362eaa16e3a9e21e9a58cfaf");
         EXPECTED.put("daemonTypeSentinels", "d3b0849a7696784977157c406611a001634640d9c68da6d0a7bd4aba7f59762b");

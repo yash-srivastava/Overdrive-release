@@ -267,6 +267,9 @@ class DaemonLauncher(
             "        if [ -f \"\$LOG_FILE\" ]; then",
             "          LOG_SZ=\$(stat -c%s \"\$LOG_FILE\" 2>/dev/null || echo 0)",
             "          if [ \"\$LOG_SZ\" -gt $LOG_MAX_BYTES ]; then",
+            // Keep one previous generation before truncating; cp, not mv, so the
+            // daemon's O_APPEND fd stays on this inode.
+            "            cp -f \"\$LOG_FILE\" \"\$LOG_FILE.1\" 2>/dev/null",
             // Not `: >`: a failed redirect on a special builtin would end this poller.
             "            true 2>/dev/null > \"\$LOG_FILE\"",
             "            echo \"[\$(date)] Log truncated in place (was \${LOG_SZ} bytes)\" >> \"\$LOG_FILE\"",
@@ -360,6 +363,8 @@ class DaemonLauncher(
             "    [ -w \"\$LOG_FILE\" ] || rm -f \"\$LOG_FILE\" 2>/dev/null",
             "    LOG_SZ=\$(stat -c%s \"\$LOG_FILE\" 2>/dev/null || echo 0)",
             "    if [ \"\$LOG_SZ\" -gt $LOG_MAX_BYTES ]; then",
+            // Keep one previous generation, as in logRotateCoprocessLines.
+            "      cp -f \"\$LOG_FILE\" \"\$LOG_FILE.1\" 2>/dev/null",
             // Not `: >`: a failed redirect on a special builtin exits the whole watchdog.
             "      true 2>/dev/null > \"\$LOG_FILE\"",
             "      echo \"[\$(date)] Log truncated in place (was \${LOG_SZ} bytes)\" >> \"\$LOG_FILE\"",
@@ -637,7 +642,9 @@ class DaemonLauncher(
                 "",
                 "/system/bin/device_config put activity_manager max_phantom_processes 2147483647 > /dev/null 2>&1",
                 "",
-                "echo \"=== WATCHDOG STARTED ===\" > \$LOG_FILE",
+                // Append: ">" erased the previous run's log at every watchdog start,
+                // which is every boot. The size guard below bounds the file.
+                "echo \"[\$(date)] === WATCHDOG STARTED ===\" >> \$LOG_FILE",
                 "",
                 "echo \"[\$(date)] Waiting for system boot to complete...\" >> \$LOG_FILE",
                 "BOOT_WAIT=0",
@@ -1263,17 +1270,17 @@ class DaemonLauncher(
                                 logManager.info(TAG, "Privileged shell available (UID 1000 confirmed)")
                                 callback.onLog("Using privileged shell (UID 1000)...")
                                 // UID 1000 can write to /data/system, redirect logs there
-                                val privCmd = "nohup sh -c '$innerCmd' > $SENTRY_DAEMON_LOG_SYSTEM 2>&1 &"
+                                val privCmd = "nohup sh -c '$innerCmd' >> $SENTRY_DAEMON_LOG_SYSTEM 2>&1 &"
                                 launchSentryDaemonViaPrivilegedShell(privCmd, innerCmd, callback)
                             } else if (output.contains("uid=")) {
                                 logManager.warn(TAG, "Shell available but not UID 1000: $output")
                                 callback.onLog("Shell not UID 1000, using ADB shell...")
-                                val adbCmd = "nohup sh -c '$innerCmd' > $SENTRY_DAEMON_LOG 2>&1 &"
+                                val adbCmd = "nohup sh -c '$innerCmd' >> $SENTRY_DAEMON_LOG 2>&1 &"
                                 launchSentryDaemonViaAdb(adbCmd, callback)
                             } else {
                                 logManager.info(TAG, "Privileged shell not available, using ADB shell")
                                 callback.onLog("Privileged shell not available, using ADB shell...")
-                                val adbCmd = "nohup sh -c '$innerCmd' > $SENTRY_DAEMON_LOG 2>&1 &"
+                                val adbCmd = "nohup sh -c '$innerCmd' >> $SENTRY_DAEMON_LOG 2>&1 &"
                                 launchSentryDaemonViaAdb(adbCmd, callback)
                             }
                         }
@@ -1281,13 +1288,13 @@ class DaemonLauncher(
                         override fun onError(error: String) {
                             logManager.info(TAG, "Privileged shell check failed: $error, using ADB shell")
                             callback.onLog("Using ADB shell...")
-                            val adbCmd = "nohup sh -c '$innerCmd' > $SENTRY_DAEMON_LOG 2>&1 &"
+                            val adbCmd = "nohup sh -c '$innerCmd' >> $SENTRY_DAEMON_LOG 2>&1 &"
                             launchSentryDaemonViaAdb(adbCmd, callback)
                         }
                     }
                 )
             } else {
-                val adbCmd = "nohup sh -c '$innerCmd' > $SENTRY_DAEMON_LOG 2>&1 &"
+                val adbCmd = "nohup sh -c '$innerCmd' >> $SENTRY_DAEMON_LOG 2>&1 &"
                 launchSentryDaemonViaAdb(adbCmd, callback)
             }
         }
@@ -1321,7 +1328,7 @@ class DaemonLauncher(
                 override fun onError(error: String) {
                     logManager.error(TAG, "Privileged shell launch failed: $error, falling back to ADB")
                     callback.onLog("Privileged shell failed, using ADB shell...")
-                    val adbCmd = "nohup sh -c '$innerCmd' > $SENTRY_DAEMON_LOG 2>&1 &"
+                    val adbCmd = "nohup sh -c '$innerCmd' >> $SENTRY_DAEMON_LOG 2>&1 &"
                     launchSentryDaemonViaAdb(adbCmd, callback)
                 }
             }
@@ -1711,7 +1718,7 @@ class DaemonLauncher(
             append("com.overdrive.app.daemon.AccSentryDaemon")
         }
         
-        val cmd = "nohup sh -c '$innerCmd' > $ACC_SENTRY_DAEMON_LOG 2>&1 &"
+        val cmd = "nohup sh -c '$innerCmd' >> $ACC_SENTRY_DAEMON_LOG 2>&1 &"
         
         logManager.debug(TAG, "AccSentryDaemon fallback command: $cmd")
         callback.onLog("Launching via simple nohup (fallback)...")
