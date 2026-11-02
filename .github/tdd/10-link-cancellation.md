@@ -250,3 +250,48 @@ scratch bounds. Its wall limit was 30 seconds. Full raw output:
 `green-monotonic-metadata.json` links exact UI input hashes, RED provenance and
 unchanged prior Java/dependency fingerprints. All target processes stopped before
 promotion. The JSON substitution and standalone/API/Android limits above remain.
+
+
+### Resolved-runtime validation: Kotlin 2.1.20 and exact JSON 20231013
+
+Repository Gradle resolution during the separate full-check work selected Kotlin
+stdlib **2.1.20** transitively, despite the compiler plugin being **2.0.21**.
+Earlier references in this record to “project Kotlin stdlib 2.0.21” described the
+chosen standalone fixture classpath, not the application's actual resolved
+runtime. The historical logs and results above remain unchanged and valid within
+that recorded fixture scope; the compiler-plugin/runtime equivalence was an
+incorrect assumption.
+
+The existing combined runner was rerun without production or test logic changes
+on source commit `31cc966a8a727463ce639b152e6094c8b537d2aa`, using the resolved
+stdlib 2.1.20 and the exact declared JSON **20231013** jar. The other classpath
+entries remained OkHttp 4.12.0, Okio JVM 3.6.0, annotations 13.0, JUnit 4.13.2 and
+Hamcrest Core 1.3. The parent provisioned the public dependency jars before target
+execution. This new run has no JSON substitution; the earlier 20240303 limitation
+continues to describe the earlier runs only.
+
+This single combined execution passed **19 Java lifecycle checks and 11 actual-JS
+UI checks**. It is additional runtime-graph evidence, rather than reuse of the
+older Java result. Source, fixture and dependency SHA-256 values and the exact
+command/classpath are recorded in `resolved-runtime-metadata.json`.
+
+| Dependency | SHA-256 |
+| --- | --- |
+| Kotlin stdlib 2.1.20 | `1bcc74e8ce84e2c25eaafde10f1248349cce3062b6e36978cbeec610db1e930a` |
+| JSON 20231013 | `0f18192df289114e17aa1a0d0a7f8372cc9f5c7e4f7e39adcf8906fe714fa7d3` |
+
+The isolated sandbox exited 0 with no stop after **21.145 seconds**. Bounds were
+120 seconds wall time, 768 MiB memory, 1 CPU, 64 processes, 128 MiB scratch tmpfs,
+16 MiB per file and 64 KiB target output. Network was disabled, source/tools/jars
+were read-only and target writes remained in scratch. All target processes
+stopped before promotion.
+
+Full bounded output: `resolved-runtime.log`, **12669 bytes**, SHA-256
+`ed12a4c3f96558eab3765e694177ee2146fa61795747d196a77dc5da6ea9363a`, in the external
+`fix-10-resolved-runtime` case. Previous baseline, RED and GREEN logs were preserved.
+
+This standalone check still uses dummy storage collaborators and a dummy DOM/fetch
+for the actual JavaScript asset. It does not execute a provider/account/device,
+prove real config persistence, compile the full API class or establish full
+Android-wrapper/Kotlin-compiler acceptance. The separate repository full-check
+work owns those build results; no such acceptance is inferred from this run.
