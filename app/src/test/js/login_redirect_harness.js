@@ -156,6 +156,7 @@ async function expectSuccessfulDestination(redirect, expectedPath) {
     ['tab-obfuscated executable scheme', 'java\tscript:void(0)'],
     ['newline-obfuscated executable scheme', 'java\nscript:void(0)'],
     ['data URL', 'data:text/html,<script>document.title="marker"</script>'],
+    ['blob URL carrying the local origin', 'blob:' + origin + '/dummy-blob-id'],
     ['foreign origin', 'https://foreign.invalid/landing'],
     ['different scheme', 'http://device.invalid/landing'],
     ['different port', 'https://device.invalid:444/landing'],
@@ -175,9 +176,7 @@ async function expectSuccessfulDestination(redirect, expectedPath) {
     ['malformed percent escape', '/landing%ZZ'],
     ['incomplete percent escape', '/landing%2'],
     ['lone percent sign', '%'],
-    ['invalid UTF-8 escape', '/landing%E0%A4%A6%FF'],
-    ['encoded executable scheme', 'javascript%3Avoid(0)'],
-    ['encoded foreign authority', '%2F%2Fforeign.invalid/landing']
+    ['invalid UTF-8 escape', '/landing%E0%A4%A6%FF']
 ].forEach(function (entry) {
     test(entry[0] + ' falls back to the local root after successful login', async function () {
         await expectSuccessfulDestination(entry[1], '/');
@@ -187,6 +186,7 @@ async function expectSuccessfulDestination(redirect, expectedPath) {
 [
     ['root path', '/'],
     ['internal path with query and fragment', '/reports/charging?days=7#summary'],
+    ['relative path with query and fragment', 'reports/charging?days=7#summary'],
     ['absolute URL on the same origin',
         origin + '/reports/charging?days=7#summary'],
     ['explicit default port on the same origin',
@@ -201,6 +201,8 @@ async function expectSuccessfulDestination(redirect, expectedPath) {
         '/reports/energy%20use?query=charge%2Blimit&next=%2Fsettings#details%20tab'],
     ['literal escaped percent signs', '/reports/%252Fvalue?literal=%2525&label=100%25'],
     ['executable-looking query data', '/reports?next=javascript%3Avoid%200#safe'],
+    ['encoded scheme retained as a harmless relative path', 'javascript%3Avoid(0)'],
+    ['encoded authority retained as a harmless relative path', '%2F%2Fforeign.invalid/landing'],
     ['encoded slashes inside a local path', '/%2F%2Fforeign.invalid/path?next=%2Fsafe']
 ].forEach(function (entry) {
     test(entry[0] + ' is preserved after successful login', async function () {

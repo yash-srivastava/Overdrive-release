@@ -65,6 +65,20 @@ assertions; successful cases also check dummy cookie and local-storage session
 writes. The failing cases therefore demonstrate the intended production defect,
 rather than a missing helper, dependency, or unrelated build failure.
 
+### Extended RED before implementation
+
+Review added a relative-path compatibility case and a `blob:` URL whose parsed
+origin matches the page, so that the HTTP(S) requirement is tested independently
+of the origin check. It also corrected the two encoded-prefix expectations:
+`javascript%3Avoid(0)` and `%2F%2Fforeign.invalid/landing` should remain harmless
+local relative paths, without another decode. The original code still fails
+these cases because it turns them into an executable or foreign destination.
+
+The same isolated command against unchanged production source exits **1**, with
+**10/43 passing and 33 failing**. The extended capture is
+`fix-14-login/scratch/login-redirect-red-extended.log`; the original RED capture
+and checkpoint are preserved.
+
 ## Scope and follow-up
 
 This is a test-only RED checkpoint. Production code is unchanged. GREEN and the
