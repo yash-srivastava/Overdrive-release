@@ -1,7 +1,7 @@
-# Login redirect regression: RED checkpoint
+# Login redirect regression: TDD evidence
 
-The login page currently accepts a query-string destination, decodes it a second
-time, and assigns it to `window.location.href` after successful authentication.
+Before the fix, the login page accepted a query-string destination, decoded it a
+second time, and assigned it to `window.location.href` after successful authentication.
 The new regression executes every inline script from the actual
 `app/src/main/assets/web/local/login.html`; it does not copy its redirect logic.
 Only the DOM, navigation, timers, storage, localization, and dummy auth responses
@@ -20,7 +20,7 @@ authentication request never navigates or stores a session.
 | Executable and foreign destinations use `/` | JavaScript, mixed-case and obfuscated schemes, data URLs, foreign origins, changed scheme or port, and userinfo | Fails |
 | Backslashes and raw control characters use `/` | Authority and path backslashes, null, newline, tab, carriage return, and DEL | Fails |
 | Malformed escapes do not break page initialization | Invalid, incomplete, lone percent, and invalid UTF-8 escapes | Fails with `URI malformed` from the production script |
-| Encoded executable schemes and authorities are not decoded again | Encoded JavaScript scheme and foreign authority | Fails |
+| Encoded scheme and authority text remains harmless local path data | Encoded JavaScript scheme and authority | Fails |
 | Same-origin navigation remains compatible | Root, internal query/fragment, absolute URL, and explicit default port | Passes |
 | A normalized pathname starting with `//` remains local | Same-origin absolute and dot-segment paths | Passes; protects against unsafe pathname reconstruction in a future fix |
 | Existing percent escapes are preserved | Escaped path/query/fragment, literal percent signs, query data, and path slashes | Fails |
@@ -79,13 +79,52 @@ The same isolated command against unchanged production source exits **1**, with
 `fix-14-login/scratch/login-redirect-red-extended.log`; the original RED capture
 and checkpoint are preserved.
 
-## Scope and follow-up
+## Implementation and GREEN validation
 
-This is a test-only RED checkpoint. Production code is unchanged. GREEN and the
-production fix are pending the coordinated remediation release gate.
+`getLoginRedirect()` now resolves the query-decoded destination with the browser
+URL parser and accepts only HTTP(S) URLs on the exact current origin, including
+the effective port, with no parsed username or password. Backslashes, raw control
+characters, empty values, malformed escapes, and rejected URLs fall back to `/`.
+Percent escapes are validated without using the decoded result for navigation.
+Returning the validated absolute URL preserves its authority even when path
+normalization produces a pathname starting with `//`.
+
+The same sandboxed Node command now exits **0** with **43/43 passing**. The
+retained capture is `fix-14-login/scratch/login-redirect-green.log`.
+
+A separate Chromium fixture serves the actual fixed source assets with dummy
+auth-status and token endpoints on isolated loopback. It clicks the real login
+button, checks the resulting browser URL, cookie and local-storage writes, and
+blocks and records foreign requests. It also checks rejected and offline login.
+
+```text
+43/43 login redirect tests passed
+19/19 browser login redirect tests passed
+```
+
+The browser command was `/opt/node/bin/node /case/login-browser-smoke.mjs`, run
+through the same sandbox with no network, read-only source and fixture mounts,
+1 GiB memory, a 256 MiB scratch filesystem, and a 60-second timeout. Chromium
+`156.0.8078.4` passed **19/19 cases**, with no executed DOM marker, external
+requests, or page errors. The capture is
+`fix-14-login/scratch/login-browser-green.log`; its first two attempts preserve
+fixture-only failures (module resolution, then browser URL serialization),
+followed by the complete passing run. No production change was needed for those
+fixture corrections. The fixture is retained separately as
+`fix-14-login/scratch/login-browser-smoke.mjs`; original audit fixtures are unchanged.
+
+Validated `login.html` SHA-256:
+`3e693c63736da9131af3c478e476268b15b34cc88e40d1707397930c7b1be2fc`.
+
+The original RED checkpoint is `8799768831c83e9e793c714e049aed732d6549bb`, and
+the extended RED checkpoint is `97764d73d6373de74cdb3002cd0100924927088c`.
+Preserve the RED/GREEN summary in the PR body if commits are squash-merged.
+
+## Scope and limitations
 
 The VM records resolved browser-style destination URLs; it does not execute
-JavaScript URLs or prove native WebView behavior. Independent browser evidence
-for the original source and released assets remains in the case-14 validation
-artifacts. No numeric coverage measurement or full Android build was run for
-this test-only checkpoint.
+JavaScript URLs. The Chromium run validates source assets with dummy auth, not
+native WebView behavior or real accounts. Independent browser evidence for the
+original source and released assets remains in the case-14 validation artifacts.
+No numeric coverage measurement, full Android build, or fixed APK execution was
+performed; the released APK has not been rebuilt by this change.

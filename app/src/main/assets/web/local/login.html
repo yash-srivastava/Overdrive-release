@@ -340,12 +340,28 @@
             return (v && v !== key) ? v : fallback;
         }
 
-        // Parse redirect URL from query string
-        let redirectUrl = '/';
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.has('redirect')) {
-            redirectUrl = decodeURIComponent(urlParams.get('redirect'));
+        function getLoginRedirect() {
+            try {
+                // URLSearchParams already decodes the query parameter once.
+                const value = new URLSearchParams(window.location.search).get('redirect');
+                if (!value || /[\\\x00-\x1f\x7f]/.test(value)) return '/';
+
+                // Validate escapes without changing the path, query or fragment.
+                decodeURIComponent(value);
+                const destination = new URL(value, window.location.href);
+                if ((destination.protocol !== 'http:' && destination.protocol !== 'https:') ||
+                        destination.origin !== window.location.origin ||
+                        destination.username || destination.password) {
+                    return '/';
+                }
+                // Keep the authority: a normalized pathname beginning with // must
+                // not be reinterpreted as a foreign host during navigation.
+                return destination.href;
+            } catch (e) {
+                return '/';
+            }
         }
+        const redirectUrl = getLoginRedirect();
         
         // Store device ID for token construction
         let deviceId = '';
