@@ -291,6 +291,7 @@ object UnifiedConfigManager {
 
     /** Create the lock file 0666 (daemon UID) so the app UID can later open it. */
     private fun provisionLockFile() {
+        if (android.os.Process.myUid() != SHELL_DAEMON_UID) return
         try {
             val lf = File(LOCK_PATH)
             if (!lf.exists()) {
@@ -1489,7 +1490,9 @@ object UnifiedConfigManager {
                     if (configFile.exists() && configFile.length() > 0L) {
                         val badFile = File(configFile.parentFile, configFile.name + ".bad")
                         if (configFile.copyTo(badFile, overwrite = true).exists()) {
-                            badFile.setReadable(true, false)
+                            if (android.os.Process.myUid() == SHELL_DAEMON_UID) {
+                                badFile.setReadable(true, false)
+                            }
                             Log.e(TAG, "Corrupt config preserved to ${badFile.path}")
                         }
                     }
@@ -1843,7 +1846,7 @@ object UnifiedConfigManager {
         FileOutputStream(file, false).use { output ->
             output.write(payload.toByteArray(StandardCharsets.UTF_8))
             output.flush()
-            if (worldAccessible) {
+            if (worldAccessible && android.os.Process.myUid() == SHELL_DAEMON_UID) {
                 file.setReadable(true, false)
                 file.setWritable(true, false)
             }
@@ -4622,10 +4625,12 @@ object UnifiedConfigManager {
                         minOf(deadline, SystemClock.elapsedRealtime() + lockWaitMs())
                     )
                     if (lock != null) {
-                        try {
-                            lockFile.setReadable(true, false)
-                            lockFile.setWritable(true, false)
-                        } catch (_: Exception) {}
+                        if (android.os.Process.myUid() == SHELL_DAEMON_UID) {
+                            try {
+                                lockFile.setReadable(true, false)
+                                lockFile.setWritable(true, false)
+                            } catch (_: Exception) {}
+                        }
                         recordStableLockOwner(channel)
                     }
                 } catch (e: Exception) {

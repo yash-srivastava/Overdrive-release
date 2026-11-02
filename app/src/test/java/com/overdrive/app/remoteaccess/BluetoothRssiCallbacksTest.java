@@ -2,10 +2,6 @@ package com.overdrive.app.remoteaccess;
 
 import org.junit.Test;
 
-import java.lang.management.LockInfo;
-import java.lang.management.ManagementFactory;
-import java.lang.management.ThreadInfo;
-import java.lang.management.ThreadMXBean;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -396,16 +392,28 @@ public class BluetoothRssiCallbacksTest {
     }
 
     private static boolean blockedOn(Thread thread, Object lock) {
-        ThreadMXBean threads = ManagementFactory.getThreadMXBean();
-        long deadline = System.nanoTime() + 2_000_000_000L;
-        do {
-            ThreadInfo info = threads.getThreadInfo(thread.getId());
-            if (info == null) return false;
-            LockInfo waiting = info.getLockInfo();
-            if (info.getThreadState() == Thread.State.BLOCKED && waiting != null
-                    && waiting.getIdentityHashCode() == System.identityHashCode(lock)) return true;
-            Thread.yield();
-        } while (System.nanoTime() < deadline);
+        try {
+            Class<?> mfClass = Class.forName("java.lang.management.ManagementFactory");
+            Object threads = mfClass.getMethod("getThreadMXBean").invoke(null);
+            Method getThreadInfo = threads.getClass().getMethod("getThreadInfo", long.class);
+            long deadline = System.nanoTime() + 2_000_000_000L;
+            do {
+                Object info = getThreadInfo.invoke(threads, thread.getId());
+                if (info == null) return false;
+                Method getLockInfo = info.getClass().getMethod("getLockInfo");
+                Object waiting = getLockInfo.invoke(info);
+                Method getThreadState = info.getClass().getMethod("getThreadState");
+                Thread.State state = (Thread.State) getThreadState.invoke(info);
+                if (state == Thread.State.BLOCKED && waiting != null) {
+                    Method getIdentityHashCode = waiting.getClass().getMethod("getIdentityHashCode");
+                    int hash = (int) getIdentityHashCode.invoke(waiting);
+                    if (hash == System.identityHashCode(lock)) return true;
+                }
+                Thread.yield();
+            } while (System.nanoTime() < deadline);
+        } catch (Throwable t) {
+            return false;
+        }
         return false;
     }
 }

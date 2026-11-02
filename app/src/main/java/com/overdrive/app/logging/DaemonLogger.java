@@ -341,6 +341,19 @@ public class DaemonLogger {
         if (!DaemonLogConfig.isFileLoggingEnabled(tag)) return;
         if (writerInitialized) return;
         
+        // App process (UID >= 10000 or UID != 2000) cannot write to shared daemon logs in /data/local/tmp
+        // due to SELinux untrusted_app constraints ({ append } / { write } denied).
+        // Skip file logging immediately to avoid triggering kernel audit denials.
+        try {
+            int uid = android.os.Process.myUid();
+            if (uid != 2000 && uid != 0) {
+                writerInitialized = true;
+                return;
+            }
+        } catch (Throwable ignored) {
+            // Running on host JVM / Robolectric stubs
+        }
+        
         try {
             File logFile = new File(logFilePath);
             File parentDir = logFile.getParentFile();
@@ -361,6 +374,7 @@ public class DaemonLogger {
         } catch (Exception e) {
             // Silently skip file logging if directory is not writable (e.g. app process can't write to /data/local/tmp/)
             // Falls back to logcat only — this is expected when AuthManager is called from app UI
+            writerInitialized = true;
         }
     }
     

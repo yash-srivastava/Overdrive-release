@@ -4,6 +4,12 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
 
 ## [In corso / Unreleased]
 
+- **Fix SELinux Denials (`UnifiedConfigManager.kt`, `DaemonLogger.java`, `.gitignore`)**:
+  - **Guard `setattr` on `overdrive_config.json.lock` (`UnifiedConfigManager.kt`)**: Restricted file attribute changes (`setReadable`/`setWritable`) inside `withConfigFileLock`, `writeFileAndSync`, `provisionLockFile`, and corruption recovery to `SHELL_DAEMON_UID` (2000). The app process (`untrusted_app_25`, UID 10043) no longer invokes `chmod` on `shell_data_file`, eliminating high-frequency SELinux AVC denials (`avc: denied { setattr }`) that saturated `logd` CPU (~42.5%) and elevated system load average to 17-21 on Android 11 Automotive platforms (BYD DiLink 100 / SA8155P).
+  - **Suppress direct file logging in App process (`DaemonLogger.java`)**: `DaemonLogger` now detects execution within the Android app process (`UID != 2000 && UID != 0`) and immediately suppresses direct file append to `/data/local/tmp/*.log`, preventing `avc: denied { append }` on `shell_data_file` and routing logs cleanly to Android Logcat. Also marks writer initialized on failure to prevent infinite retry loops on every log line.
+  - **Fix clean-clone asset linking & test compilation**: Whitelisted committed drawable PNGs in `.gitignore` (`!app/src/main/res/**/*.png`) and restored missing Google Maps attribution drawables; updated test reflection in `BluetoothRssiCallbacksTest` and byte array conversion in `ClusterAdasOwnershipMarkerTest` for clean JVM unit test builds.
+
+
 - **Allineamento con Upstream `origin/main` & Risoluzione Conflitti PR**:
   - Eseguito il merge dei commit più recenti di `origin/main` (`ead978a4`).
   - Risolto il conflitto `modify/delete` causato dalla dismissione upstream della cartella `dilink-probe/`.

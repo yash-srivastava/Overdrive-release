@@ -57,7 +57,7 @@ public class ClusterAdasOwnershipMarkerTest {
             assertEquals(UNCERTAIN, m.ownership("11111111-1111-1111-1111-111111111111"));
             assertFalse(m.acquire("11111111-1111-1111-1111-111111111111")); assertFalse(m.begin("11111111-1111-1111-1111-111111111111"));
             assertFalse(m.clear());
-            assertEquals(bad, Files.readString(f.toPath()));
+            assertEquals(bad, new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8));
         }
     }
 
