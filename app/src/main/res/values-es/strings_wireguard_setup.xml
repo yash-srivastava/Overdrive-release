@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="wgsetup_title">Configuración de WireGuard</string>
+    <string name="wgsetup_explainer">Conecta el vehículo a tu red doméstica mediante WireGuard. Las direcciones incluidas en AllowedIPs (por ejemplo, tu broker de Home Assistant) se alcanzan a través del túnel; todo lo demás sigue su ruta normal. Usa la configuración del par (cliente) que exportó tu router, por ejemplo desde OPNsense, Fritz!Box o wg-easy.</string>
+    <string name="wgsetup_status_loading">Comprobando el estado…</string>
+    <string name="wgsetup_status_none">Aún no hay configuración</string>
+    <string name="wgsetup_status_stopped">Configurado, túnel detenido. Actívalo en la lista de Daemons.</string>
+    <string name="wgsetup_status_connected">Conectado a %1$s</string>
+    <string name="wgsetup_status_connecting">Conectando con %1$s…</string>
+    <string name="wgsetup_status_reloading">Aplicando la nueva configuración…</string>
+    <string name="wgsetup_status_error">Error: %1$s</string>
+    <string name="wgsetup_status_unavailable">Estado no disponible: no se puede contactar con el daemon</string>
+    <string name="wgsetup_handshake_seconds">Último handshake hace %1$d s</string>
+    <string name="wgsetup_handshake_minutes">Último handshake hace %1$d min</string>
+    <string name="wgsetup_handshake_hours">Último handshake hace %1$d h</string>
+    <string name="wgsetup_handshake_none">Aún no hay handshake</string>
+    <string name="wgsetup_detail_address">Dirección del túnel: %1$s</string>
+    <string name="wgsetup_detail_routes">Rutas: %1$s</string>
+    <string name="wgsetup_expose">Panel accesible por WireGuard</string>
+    <string name="wgsetup_expose_warning">Cualquier par que pueda llegar a la dirección del túnel del vehículo puede abrir la página de inicio de sesión. Restringe el acceso en el servidor WireGuard.</string>
+    <string name="wgsetup_expose_url">Panel: %1$s</string>
+    <string name="wgsetup_expose_failed">No se pudo cambiar el ajuste del panel</string>
+    <string name="wgsetup_config_hint">Pega tu configuración de WireGuard ([Interface] … [Peer] …)</string>
+    <string name="wgsetup_key_note">La clave privada se queda en el vehículo y no vuelve a mostrarse. Al guardar una configuración nueva se reemplaza la anterior.</string>
+    <string name="wgsetup_paste">Pegar</string>
+    <string name="wgsetup_import">Importar archivo</string>
+    <string name="wgsetup_phone">Configurar desde el teléfono</string>
+    <string name="wgsetup_delete">Eliminar configuración</string>
+    <string name="wgsetup_clipboard_empty">El portapapeles está vacío</string>
+    <string name="wgsetup_import_failed">No se pudo leer ese archivo</string>
+    <string name="wgsetup_import_too_large">Ese archivo es demasiado grande</string>
+    <string name="wgsetup_import_no_qr">No se encontró ningún código QR en esa imagen</string>
+    <string name="wgsetup_imported">Importado. Revisa el texto y toca Guardar.</string>
+    <string name="wgsetup_phone_title">Abre esto en tu teléfono</string>
+    <string name="wgsetup_phone_steps">Escanea el código, inicia sesión y sube o pega la configuración que exportó tu router. El teléfono debe poder llegar al vehículo (mismo Wi-Fi o punto de acceso, o a través de un túnel activo).</string>
+    <string name="wgsetup_phone_lan_note">Ábrelo solo en tu propio Wi-Fi o en el punto de acceso del vehículo.</string>
+    <string name="wgsetup_phone_no_url">No hay ninguna dirección disponible. Conecta primero el vehículo a una red Wi-Fi, activa el punto de acceso o inicia un túnel.</string>
+    <string name="wgsetup_empty">Primero pega o importa una configuración</string>
+    <string name="wgsetup_saved">Configuración de WireGuard guardada</string>
+    <string name="wgsetup_delete_title">¿Eliminar la configuración de WireGuard?</string>
+    <string name="wgsetup_delete_message">Se elimina la configuración guardada, incluida su clave privada, y se detiene el túnel.</string>
+    <string name="wgsetup_deleted">Configuración de WireGuard eliminada</string>
+    <string name="wgsetup_delete_failed">No se pudo eliminar la configuración</string>
+</resources>

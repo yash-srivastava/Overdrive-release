@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_navigation_title">Navegación</string>
+    <string name="settings_navigation_subtitle">Elige qué destinos opcionales permanecen fijados en la navegación de la izquierda.</string>
+    <string name="settings_navigation_fixed_hint">El panel, los ajustes y «Acerca de» siempre están disponibles.</string>
+    <string name="settings_navigation_reset">Restablecer valores predeterminados</string>
+    <string name="settings_navigation_reset_done">Navegación restaurada</string>
+    <string name="settings_navigation_shown">visible</string>
+    <string name="settings_navigation_hidden">oculto</string>
+    <string name="settings_navigation_option_state">%1$s, %2$s en la navegación</string>
+</resources>
