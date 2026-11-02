@@ -166,6 +166,32 @@ BYD.i18n = (function () {
         try { localStorage.setItem(STORAGE_KEY, lang); } catch (e) { /* private mode */ }
     }
 
+    // Last catalog fetched per language, kept in localStorage so the next page
+    // load can translate synchronously instead of painting the English HTML
+    // and swapping text in after the fetch. Only non-English users write it.
+    var CATALOG_CACHE_PREFIX = 'overdrive_i18n_catalog_';
+    function readCachedCatalog(lang) {
+        try {
+            var raw = localStorage.getItem(CATALOG_CACHE_PREFIX + lang);
+            return raw ? JSON.parse(raw) : null;
+        } catch (e) { return null; }
+    }
+    function writeCachedCatalog(lang, cat) {
+        if (!cat || state.lang === DEFAULT_LANG) return;
+        try { localStorage.setItem(CATALOG_CACHE_PREFIX + lang, JSON.stringify(cat)); } catch (e) { /* quota / private mode */ }
+    }
+    /** Catalog available without waiting: the app bundle in-app, else the cache. */
+    function syncCatalog(lang) {
+        try {
+            if (window.AndroidBridge
+                    && typeof window.AndroidBridge.getI18nCatalog === 'function') {
+                var bundled = window.AndroidBridge.getI18nCatalog(lang);
+                if (bundled) return JSON.parse(bundled);
+            }
+        } catch (e) { /* fall through to the cache */ }
+        return readCachedCatalog(lang);
+    }
+
     /** Fetch the catalog JSON for `lang`. Falls back to en on failure. */
     function fetchCatalog(lang) {
         // The embedded WebView can read the APK asset directly. This avoids a
@@ -182,6 +208,7 @@ BYD.i18n = (function () {
                 if (!r.ok) throw new Error('catalog ' + lang + ' http ' + r.status);
                 return r.json();
             })
+            .then(function (cat) { writeCachedCatalog(lang, cat); return cat; })
             .catch(function () {
                 if (lang === DEFAULT_LANG) return {};
                 // Same { cache: 'no-cache' } as the primary fetch above. The daemon
@@ -548,6 +575,39 @@ BYD.i18n = (function () {
             return Promise.resolve(null);
         }
     }
+
+    /**
+     * Translate the page as soon as core.js runs, before first paint, when the
+     * catalog is available synchronously (in-app bundle or localStorage cache).
+     * Pages still call init() later; it re-fetches the catalog and re-hydrates,
+     * so a stale cache is corrected without blocking the first paint.
+     */
+    (function earlyHydrate() {
+        var picked = null;
+        try {
+            if (inAppWebView() && typeof window.AndroidBridge.getAppLocale === 'function') {
+                picked = window.AndroidBridge.getAppLocale();
+            }
+        } catch (e) {}
+        var lang = resolveLang(picked || getStored() || detectFromBrowser());
+        if (lang === DEFAULT_LANG) return;
+        var early = window.__odI18nEarly;
+        var cat = (early && early.lang === lang) ? early.catalog : syncCatalog(lang);
+        if (early) {
+            var stopEarly = function () { early.stop(); };
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', stopEarly);
+            else stopEarly();
+        }
+        if (!cat) return;
+        state.lang = lang;
+        state.catalog = cat;
+        state.enCatalog = syncCatalog(DEFAULT_LANG);
+        state.loaded = true;
+        hydrate(document);
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function () { hydrate(document); });
+        }
+    })();
 
     return {
         init: init,

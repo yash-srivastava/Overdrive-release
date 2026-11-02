@@ -46,6 +46,84 @@
         document.documentElement.setAttribute('dir', (base === 'he' || base === 'ar') ? 'rtl' : 'ltr');
     })();
 
+    // Translate [data-i18n] text while the HTML is still being parsed, so a
+    // non-English page paints translated from the very first frame instead of
+    // showing the English markup until core.js fetches the catalog. The
+    // catalog comes from (in order) the app bundle via AndroidBridge, the copy
+    // core.js cached in localStorage on the last load, or, on a cold cache
+    // only, a synchronous read of the same /i18n/<lang>.json. core.js picks up
+    // window.__odI18nEarly, does the full hydrate and refreshes the cache.
+    // English users skip all of this.
+    (function earlyI18n() {
+        var code = '';
+        try { code = localStorage.getItem('overdrive_locale') || ''; } catch (e) {}
+        try {
+            if (window.AndroidBridge && typeof window.AndroidBridge.getAppLocale === 'function') {
+                code = window.AndroidBridge.getAppLocale() || code;
+            }
+        } catch (e) {}
+        if (!code && navigator.language) code = navigator.language;
+        if (/^iw(-|$)/i.test(code)) code = 'he';
+        if (/^he-/i.test(code)) code = 'he';
+        if (!code || /^en(-|$)/i.test(code)) return;
+        function load(lang) {
+            try {
+                if (window.AndroidBridge && typeof window.AndroidBridge.getI18nCatalog === 'function') {
+                    var b = window.AndroidBridge.getI18nCatalog(lang);
+                    if (b) return JSON.parse(b);
+                }
+            } catch (e) {}
+            try {
+                var c = localStorage.getItem('overdrive_i18n_catalog_' + lang);
+                if (c) return JSON.parse(c);
+            } catch (e) {}
+            try {
+                var x = new XMLHttpRequest();
+                x.open('GET', '/i18n/' + lang + '.json', false);
+                x.send();
+                if (x.status === 200) return JSON.parse(x.responseText);
+            } catch (e) {}
+            return null;
+        }
+        var cat = load(code);
+        if (!cat) return;
+        function look(key) {
+            if (cat[key] != null) return cat[key];
+            var cur = cat, parts = key.split('.');
+            for (var i = 0; i < parts.length && cur != null; i++) cur = cur[parts[i]];
+            return cur;
+        }
+        function apply(el) {
+            var v = look(el.getAttribute('data-i18n'));
+            if (typeof v !== 'string') return;
+            for (var c = el.firstChild; c; c = c.nextSibling) {
+                if (c.nodeType === 3 && /\S/.test(c.nodeValue)) {
+                    if (c.nodeValue !== v) c.nodeValue = v;
+                    return;
+                }
+            }
+        }
+        var obs = new MutationObserver(function (records) {
+            for (var i = 0; i < records.length; i++) {
+                var added = records[i].addedNodes;
+                for (var j = 0; j < added.length; j++) {
+                    var n = added[j];
+                    if (n.nodeType === 3) {
+                        if (n.parentNode && n.parentNode.hasAttribute && n.parentNode.hasAttribute('data-i18n')) apply(n.parentNode);
+                    } else if (n.nodeType === 1) {
+                        if (n.hasAttribute('data-i18n')) apply(n);
+                        var inner = n.querySelectorAll('[data-i18n]');
+                        for (var k = 0; k < inner.length; k++) apply(inner[k]);
+                    }
+                }
+            }
+        });
+        var existing = document.querySelectorAll('[data-i18n]');
+        for (var e = 0; e < existing.length; e++) apply(existing[e]);
+        obs.observe(document.documentElement, { childList: true, subtree: true });
+        window.__odI18nEarly = { lang: code, catalog: cat, stop: function () { obs.disconnect(); } };
+    })();
+
     // ─── Step 0: viewport-height stabilizer ─────────────────────────────────
     // Android System WebView (and iOS Safari) resolve vh / dvh / svh / lvh
     // ONCE and don't reliably recompute them when the device rotates. After a
