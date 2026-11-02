@@ -3,20 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Proximity - OverDrive</title>
+    <title data-i18n="remote_access.document_title">Proximity - OverDrive</title>
     <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
     <script src="../shared/theme.js?v=11"></script>
     <script src="../shared/app-shell.js?v=18"></script>
     <link rel="stylesheet" href="../shared/styles.css?v=38">
     <link rel="stylesheet" href="../shared/revamp.css?v=2">
-    <link rel="stylesheet" href="../shared/remote-access.css?v=14">
+    <link rel="stylesheet" href="../shared/remote-access.css?v=15">
 </head>
 <body>
     <div class="app-layout">
         <div id="app-shell-mount"></div>
         <main class="main-content ra-page" id="remoteAccessPage">
             <div class="mobile-header">
-                <button class="menu-toggle" type="button" onclick="toggleSidebar()" aria-label="Open menu">
+                <button class="menu-toggle" type="button" onclick="toggleSidebar()" aria-label="Open menu" data-i18n-attr="aria-label:remote_access.open_menu">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
                 </button>
                 <span style="font-weight:600;" data-i18n="remote_access.page_title">Proximity</span>
@@ -25,9 +25,9 @@
             <header class="page-header">
                 <h1 class="page-title" data-i18n="remote_access.page_title">Proximity</h1>
                 <div class="header-actions">
-                    <div id="raBluetoothStatus" class="header-badge ra-bluetooth-status" data-state="unknown" role="status" aria-live="polite" aria-label="Car Bluetooth: Unknown">
+                    <div id="raBluetoothStatus" class="header-badge ra-bluetooth-status" data-state="unknown" role="status" aria-live="polite" aria-label="Car Bluetooth: Unknown" data-i18n-attr="aria-label:remote_access.bluetooth_status_initial">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m7 7 10 10-5 5V2l5 5L7 17"/></svg>
-                        <span>Bluetooth</span><strong id="raBluetoothState">Unknown</strong>
+                        <span data-i18n="remote_access.bluetooth_label">Bluetooth</span><strong id="raBluetoothState" data-i18n="remote_access.state_unknown">Unknown</strong>
                     </div>
                     <div class="header-badge ra-clock-badge">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -42,27 +42,27 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v9"/><path d="M7.1 5.5a8 8 0 1 0 9.8 0"/></svg>
                     </div>
                     <div class="ra-master-copy">
-                        <div class="ra-master-title"><h2 id="raMasterTitle">Proximity access</h2><span id="raMasterBadge" class="ra-badge">Disabled</span></div>
-                        <p id="raMasterDetail">Switch on to monitor your approved phones and enabled keyfob detection. All proximity actions and monitoring stop when disabled.</p>
+                        <div class="ra-master-title"><h2 id="raMasterTitle" data-i18n="remote_access.master_title">Proximity access</h2><span id="raMasterBadge" class="ra-badge" data-i18n="remote_access.state_disabled">Disabled</span></div>
+                        <p id="raMasterDetail" data-i18n="remote_access.master_initial_detail">Switch on to monitor your approved phones and enabled keyfob detection. All proximity actions and monitoring stop when disabled.</p>
                     </div>
                     <label class="ra-switch ra-switch-master">
-                        <input type="checkbox" id="raMasterToggle" aria-label="Enable proximity access" disabled>
+                        <input type="checkbox" id="raMasterToggle" aria-label="Enable proximity access" data-i18n-attr="aria-label:remote_access.master_toggle_aria" disabled>
                         <span class="ra-switch-track"><span class="ra-switch-thumb"></span></span>
                     </label>
                 </section>
                 <div class="ra-view-controls">
-                    <div><strong>Advanced mode</strong><span>Custom signal settings, calibration, and live diagnostics.</span></div>
-                    <label class="ra-switch"><input type="checkbox" id="raAdvancedMode" aria-label="Enable advanced settings" disabled><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></label>
+                    <div><strong data-i18n="remote_access.advanced_mode">Advanced mode</strong><span data-i18n="remote_access.advanced_mode_desc">Custom signal settings, calibration, and live diagnostics.</span></div>
+                    <label class="ra-switch"><input type="checkbox" id="raAdvancedMode" aria-label="Enable advanced settings" data-i18n-attr="aria-label:remote_access.advanced_mode_aria" disabled><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></label>
                 </div>
 
                 <div class="ra-dashboard">
                     <section class="ra-hero card" aria-labelledby="raSignalTitle">
                         <div class="ra-panel-heading">
-                            <div><div class="ra-eyebrow">LIVE PROXIMITY</div><h2 id="raSignalTitle">Waiting for your phone</h2></div>
-                            <span class="ra-stream-state" id="raStreamState"><span></span><span id="raStreamLabel">Monitoring off</span></span>
+                            <div><div class="ra-eyebrow" data-i18n="remote_access.eyebrow_live">LIVE PROXIMITY</div><h2 id="raSignalTitle" data-i18n="remote_access.waiting_for_phone_title">Waiting for your phone</h2></div>
+                            <span class="ra-stream-state" id="raStreamState"><span></span><span id="raStreamLabel" data-i18n="remote_access.keyfob_monitoring_off">Monitoring off</span></span>
                         </div>
                         <div class="ra-radar" id="raRadar" data-state="disabled" data-nearby-phones="0" data-keyfob-near="false">
-                            <svg viewBox="0 0 420 260" class="ra-radar-art" role="img" aria-label="Phone and keyfob proximity illustration">
+                            <svg viewBox="0 0 420 260" class="ra-radar-art" role="img" aria-label="Phone and keyfob proximity illustration" data-i18n-attr="aria-label:remote_access.radar_aria">
                                 <defs><linearGradient id="raSignalLink" x1="0" x2="1"><stop offset="0" stop-color="currentColor" stop-opacity=".12"/><stop offset="1" stop-color="currentColor" stop-opacity=".8"/></linearGradient></defs>
                                 <g class="ra-orbit-grid" fill="none">
                                     <ellipse cx="208" cy="142" rx="176" ry="104"/>
@@ -73,49 +73,49 @@
                                 <ellipse class="ra-orbit-glow" cx="208" cy="142" rx="88" ry="52" fill="none"/>
                                 <ellipse class="ra-orbit-pulse" cx="208" cy="142" rx="88" ry="52" fill="none"/>
                                 <g id="raPhoneLinks" aria-hidden="true" style="display:none"></g>
-                                <g id="raPhoneMarkers" role="group" aria-label="Nearby approved phones" style="display:none"></g>
+                                <g id="raPhoneMarkers" role="group" aria-label="Nearby approved phones" data-i18n-attr="aria-label:remote_access.nearby_phones_aria" style="display:none"></g>
                                 <g id="raKeyFobLinks" aria-hidden="true" style="display:none"></g>
-                                <g id="raKeyFobMarkers" role="group" aria-label="Detected keyfob" style="display:none"></g>
+                                <g id="raKeyFobMarkers" role="group" aria-label="Detected keyfob" data-i18n-attr="aria-label:remote_access.detected_keyfob_aria" style="display:none"></g>
                             </svg>
-                            <div class="ra-vehicle-preview" id="raVehiclePreview" aria-label="Your selected vehicle model and paint">
-                                <img id="raVehiclePoster" alt="Your selected vehicle" hidden>
-                                <canvas id="raVehicleCanvas" width="640" height="360" aria-label="Your selected 3D vehicle model" hidden></canvas>
-                                <span id="raVehiclePlaceholder">Selected vehicle preview</span>
+                            <div class="ra-vehicle-preview" id="raVehiclePreview" aria-label="Your selected vehicle model and paint" data-i18n-attr="aria-label:remote_access.vehicle_preview_aria">
+                                <img id="raVehiclePoster" alt="Your selected vehicle" data-i18n-attr="alt:remote_access.vehicle_poster_alt" hidden>
+                                <canvas id="raVehicleCanvas" width="640" height="360" aria-label="Your selected 3D vehicle model" data-i18n-attr="aria-label:remote_access.vehicle_canvas_aria" hidden></canvas>
+                                <span id="raVehiclePlaceholder" data-i18n="remote_access.vehicle_placeholder">Selected vehicle preview</span>
                             </div>
-                            <div class="ra-radar-caption"><span id="raProximityState">Disabled</span><span id="raProximityDetail">No background monitoring</span></div>
+                            <div class="ra-radar-caption"><span id="raProximityState" data-i18n="remote_access.state_disabled">Disabled</span><span id="raProximityDetail" data-i18n="remote_access.reason_disabled">No background monitoring</span></div>
                         </div>
                         <div class="ra-metric-row ra-advanced">
-                            <div><span class="ra-metric-label">Raw signal</span><span class="ra-metric-value" id="raRawValue">—</span><span class="ra-metric-unit">RSSI units</span></div>
-                            <div><span class="ra-metric-label">Filtered signal</span><span class="ra-metric-value" id="raFilteredValue">—</span><span class="ra-metric-unit" id="raFilterDetail">Trailing median</span></div>
-                            <div><span class="ra-metric-label">Freshness</span><span class="ra-metric-value ra-metric-text" id="raAgeValue">—</span><span class="ra-metric-unit" id="raFreshDetail">No reading</span></div>
+                            <div><span class="ra-metric-label" data-i18n="remote_access.metric_raw">Raw signal</span><span class="ra-metric-value" id="raRawValue">—</span><span class="ra-metric-unit" data-i18n="remote_access.rssi_units">RSSI units</span></div>
+                            <div><span class="ra-metric-label" data-i18n="remote_access.metric_filtered">Filtered signal</span><span class="ra-metric-value" id="raFilteredValue">—</span><span class="ra-metric-unit" id="raFilterDetail" data-i18n="remote_access.trailing_median">Trailing median</span></div>
+                            <div><span class="ra-metric-label" data-i18n="remote_access.metric_freshness">Freshness</span><span class="ra-metric-value ra-metric-text" id="raAgeValue">—</span><span class="ra-metric-unit" id="raFreshDetail" data-i18n="remote_access.no_reading">No reading</span></div>
                         </div>
-                        <div class="ra-signal-filters ra-advanced" aria-live="polite"><span id="raArrivalDiagnostics">Unlock: waiting for fresh Near readings</span><span id="raDepartureDiagnostics">Lock: waiting for signal</span></div>
+                        <div class="ra-signal-filters ra-advanced" aria-live="polite"><span id="raArrivalDiagnostics" data-i18n="remote_access.diagnostics_unlock_initial">Unlock: waiting for fresh Near readings</span><span id="raDepartureDiagnostics" data-i18n="remote_access.diagnostics_lock_initial">Lock: waiting for signal</span></div>
                     </section>
                     <section class="ra-phone-card card" aria-labelledby="raPhoneTitle">
-                        <div class="ra-panel-heading"><div><div class="ra-eyebrow">TRUSTED DEVICE</div><h2 id="raPhoneTitle">Choose your phone</h2></div>
+                        <div class="ra-panel-heading"><div><div class="ra-eyebrow" data-i18n="remote_access.eyebrow_trusted">TRUSTED DEVICE</div><h2 id="raPhoneTitle" data-i18n="remote_access.phone_title">Choose your phone</h2></div>
                             <svg class="ra-panel-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m7 7 10 10-5 5V2l5 5L7 17"/></svg>
                         </div>
-                        <label class="ra-field"><span>Live phone</span><select id="raDeviceSelect" disabled><option value="">Add an approved phone</option></select></label>
-                        <div class="ra-device-detail"><span id="raConnectionDot" class="ra-status-dot"></span><span id="raConnectionState">Not selected</span><code id="raDeviceAddress" class="ra-advanced">—</code></div>
+                        <label class="ra-field"><span data-i18n="remote_access.live_phone">Live phone</span><select id="raDeviceSelect" disabled><option value="" data-i18n="remote_access.add_approved_phone">Add an approved phone</option></select></label>
+                        <div class="ra-device-detail"><span id="raConnectionDot" class="ra-status-dot"></span><span id="raConnectionState" data-i18n="remote_access.state_not_selected">Not selected</span><code id="raDeviceAddress" class="ra-advanced">—</code></div>
                         <div class="ra-phone-roster" id="raPhoneRoster"></div>
                         <div class="ra-add-phone">
-                            <label class="ra-field"><span>Add a paired phone</span><select id="raAddPhoneSelect" disabled><option value="">Loading paired devices…</option></select></label>
-                            <button type="button" class="btn btn-secondary" id="raAddPhoneBtn" disabled>Add</button>
+                            <label class="ra-field"><span data-i18n="remote_access.add_paired_phone">Add a paired phone</span><select id="raAddPhoneSelect" disabled><option value="" data-i18n="remote_access.loading_paired_devices">Loading paired devices…</option></select></label>
+                            <button type="button" class="btn btn-secondary" id="raAddPhoneBtn" data-i18n="remote_access.add" disabled>Add</button>
                         </div>
-                        <p class="ra-roster-hint">Up to 8 approved phones. Each phone has its own saved signal thresholds.</p>
-                        <div class="ra-radio-note" id="raRadioNote">Pair phones in the car's Bluetooth settings first. Proximity can retry approved phones while parked and keeps existing active phone connections.</div>
-                        <div class="ra-summary-line ra-advanced"><span>Arrival detection</span><strong id="raArmedState">Disarmed</strong></div>
-                        <div class="ra-summary-line"><span>Last lock result</span><strong id="raLockState">Unknown</strong></div>
-                        <div class="ra-summary-line"><span>Mode</span><strong id="raModeLabel">Learning</strong></div>
-                        <button class="btn btn-secondary ra-refresh" type="button" id="raRefreshBtn">Refresh status &amp; devices</button>
+                        <p class="ra-roster-hint" data-i18n="remote_access.roster_hint">Up to 8 approved phones. Each phone has its own saved signal thresholds.</p>
+                        <div class="ra-radio-note" id="raRadioNote" data-i18n="remote_access.radio_note_initial">Pair phones in the car's Bluetooth settings first. Proximity can retry approved phones while parked and keeps existing active phone connections.</div>
+                        <div class="ra-summary-line ra-advanced"><span data-i18n="remote_access.arrival_detection">Arrival detection</span><strong id="raArmedState" data-i18n="remote_access.disarmed">Disarmed</strong></div>
+                        <div class="ra-summary-line"><span data-i18n="remote_access.last_lock_result">Last lock result</span><strong id="raLockState" data-i18n="remote_access.state_unknown">Unknown</strong></div>
+                        <div class="ra-summary-line"><span data-i18n="remote_access.mode">Mode</span><strong id="raModeLabel" data-i18n="remote_access.mode_learning">Learning</strong></div>
+                        <button class="btn btn-secondary ra-refresh" type="button" id="raRefreshBtn" data-i18n="remote_access.refresh">Refresh status &amp; devices</button>
                     </section>
                 </div>
 
                 <section class="card ra-chart-card ra-advanced" aria-labelledby="raChartTitle">
-                    <div class="ra-panel-heading"><div><div class="ra-eyebrow">SIGNAL TIMELINE</div><h2 id="raChartTitle">See what your rules see</h2></div><div class="ra-chart-legend"><span><i class="ra-legend-raw"></i>Raw</span><span><i class="ra-legend-filtered"></i>Filtered</span></div></div>
+                    <div class="ra-panel-heading"><div><div class="ra-eyebrow" data-i18n="remote_access.eyebrow_timeline">SIGNAL TIMELINE</div><h2 id="raChartTitle" data-i18n="remote_access.chart_title">See what your rules see</h2></div><div class="ra-chart-legend"><span data-i18n="remote_access.legend_raw"><i class="ra-legend-raw"></i>Raw</span><span data-i18n="remote_access.legend_filtered"><i class="ra-legend-filtered"></i>Filtered</span></div></div>
                     <div class="ra-chart-wrap">
                         <svg id="raSignalChart" viewBox="0 0 900 180" preserveAspectRatio="none" role="img" aria-labelledby="raChartTitle raChartDescription">
-                            <desc id="raChartDescription">Live raw and filtered Bluetooth values with separate arrival and departure thresholds.</desc>
+                            <desc id="raChartDescription" data-i18n="remote_access.chart_description">Live raw and filtered Bluetooth values with separate arrival and departure thresholds.</desc>
                             <defs><linearGradient id="raChartGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="currentColor" stop-opacity=".22"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs>
                             <g class="ra-chart-grid"><path d="M48 16h838M48 55h838M48 94h838M48 133h838M48 164h838"/></g>
                             <path id="raChartFill" class="ra-chart-fill" d=""/>
@@ -123,73 +123,73 @@
                             <path id="raChartFiltered" class="ra-chart-filtered" d=""/>
                             <path id="raChartNear" class="ra-chart-threshold ra-chart-near" d=""/>
                             <path id="raChartAway" class="ra-chart-threshold ra-chart-away" d=""/>
-                            <g class="ra-chart-labels"><text id="raChartMax" x="0" y="20">5</text><text id="raChartMin" x="0" y="164">−45</text><text id="raNearLabel" x="888" y="30" text-anchor="end">Near</text><text id="raAwayLabel" x="888" y="135" text-anchor="end">Away</text></g>
+                            <g class="ra-chart-labels"><text id="raChartMax" x="0" y="20">5</text><text id="raChartMin" x="0" y="164">−45</text><text id="raNearLabel" x="888" y="30" text-anchor="end" data-i18n="remote_access.chart_near_label">Near</text><text id="raAwayLabel" x="888" y="135" text-anchor="end" data-i18n="remote_access.chart_away_label">Away</text></g>
                         </svg>
-                        <div id="raChartEmpty" class="ra-chart-empty">Enable proximity access to see live readings.</div>
+                        <div id="raChartEmpty" class="ra-chart-empty" data-i18n="remote_access.chart_enable">Enable proximity access to see live readings.</div>
                     </div>
-                    <div class="ra-chart-footer"><span id="raChartStatus">Monitoring off</span><span>Last 90 seconds · RSSI units</span></div>
+                    <div class="ra-chart-footer"><span id="raChartStatus" data-i18n="remote_access.keyfob_monitoring_off">Monitoring off</span><span data-i18n="remote_access.chart_footer">Last 90 seconds · RSSI units</span></div>
                 </section>
 
                 <form id="raSettingsForm" novalidate>
                     <div class="ra-settings-grid ra-advanced">
                         <section class="card ra-calibration-card" aria-labelledby="raCalibrationTitle">
-                            <div class="ra-panel-heading"><div><div class="ra-eyebrow">CALIBRATION</div><h2 id="raCalibrationTitle">Learn your signal</h2></div><span class="ra-step-tag">01</span></div>
-                            <p class="ra-section-copy">Capture the selected phone beside the door, then farther away. Each approved phone keeps its own thresholds. Repeat with the phone in your pocket before enabling actions.</p>
+                            <div class="ra-panel-heading"><div><div class="ra-eyebrow" data-i18n="remote_access.eyebrow_calibration">CALIBRATION</div><h2 id="raCalibrationTitle" data-i18n="remote_access.calibration_title">Learn your signal</h2></div><span class="ra-step-tag">01</span></div>
+                            <p class="ra-section-copy" data-i18n="remote_access.calibration_copy">Capture the selected phone beside the door, then farther away. Each approved phone keeps its own thresholds. Repeat with the phone in your pocket before enabling actions.</p>
                             <div class="ra-capture-grid">
                                 <button class="ra-capture" type="button" id="raCaptureNear" disabled>
                                     <span class="ra-capture-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3v18M3 12h18M6 6l12 12M6 18 18 6"/><circle cx="12" cy="12" r="6"/></svg></span>
-                                    <strong>Capture nearby</strong><span id="raNearCaptureValue">No saved capture</span>
+                                    <strong data-i18n="remote_access.capture_near">Capture nearby</strong><span id="raNearCaptureValue" data-i18n="remote_access.capture_none">No saved capture</span>
                                 </button>
                                 <button class="ra-capture" type="button" id="raCaptureAway" disabled>
                                     <span class="ra-capture-icon ra-capture-icon-away"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M5 5l3 3M16 16l3 3M5 19l3-3M16 8l3-3M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></span>
-                                    <strong>Capture away</strong><span id="raAwayCaptureValue">No saved capture</span>
+                                    <strong data-i18n="remote_access.capture_away">Capture away</strong><span id="raAwayCaptureValue" data-i18n="remote_access.capture_none">No saved capture</span>
                                 </button>
                             </div>
-                            <p id="raCalibrationDetail" class="ra-hint">Captures fill this phone's draft thresholds. Edit them as needed, then Save rules.</p>
+                            <p id="raCalibrationDetail" class="ra-hint" data-i18n="remote_access.calibration_detail">Captures fill this phone's draft thresholds. Edit them as needed, then Save rules.</p>
                         </section>
                         <section class="card" aria-labelledby="raThresholdTitle">
-                            <div class="ra-panel-heading"><div><div class="ra-eyebrow">SIGNAL BOUNDARIES</div><h2 id="raThresholdTitle">Separate near and away</h2></div><span class="ra-step-tag">02</span></div>
-                            <div class="ra-threshold-line"><label for="raNearThreshold">Nearby threshold <small>Arrival at or above</small></label><div class="ra-number-wrap"><input type="number" id="raNearThreshold" min="-127" max="20" step="1" value="-12" required><span>RSSI</span></div></div>
-                            <div class="ra-threshold-line"><label for="raAwayThreshold">Away threshold <small>Departure at or below</small></label><div class="ra-number-wrap"><input type="number" id="raAwayThreshold" min="-127" max="20" step="1" value="-24" required><span>RSSI</span></div></div>
-                            <div class="ra-boundary-visual" aria-hidden="true"><span>Away</span><i></i><span>Hold current state</span><i></i><span>Near</span></div>
-                            <p class="ra-hint">The gap absorbs small signal changes. An unknown or disconnected phone never counts as departure.</p>
+                            <div class="ra-panel-heading"><div><div class="ra-eyebrow" data-i18n="remote_access.eyebrow_boundaries">SIGNAL BOUNDARIES</div><h2 id="raThresholdTitle" data-i18n="remote_access.threshold_title">Separate near and away</h2></div><span class="ra-step-tag">02</span></div>
+                            <div class="ra-threshold-line"><label for="raNearThreshold"><span data-i18n="remote_access.near_threshold">Nearby threshold</span> <small data-i18n="remote_access.near_threshold_hint">Arrival at or above</small></label><div class="ra-number-wrap"><input type="number" id="raNearThreshold" min="-127" max="20" step="1" value="-12" required><span>RSSI</span></div></div>
+                            <div class="ra-threshold-line"><label for="raAwayThreshold"><span data-i18n="remote_access.away_threshold">Away threshold</span> <small data-i18n="remote_access.away_threshold_hint">Departure at or below</small></label><div class="ra-number-wrap"><input type="number" id="raAwayThreshold" min="-127" max="20" step="1" value="-24" required><span>RSSI</span></div></div>
+                            <div class="ra-boundary-visual" aria-hidden="true"><span data-i18n="remote_access.state_away_title">Away</span><i></i><span data-i18n="remote_access.hold_current_state">Hold current state</span><i></i><span data-i18n="remote_access.chart_near_label">Near</span></div>
+                            <p class="ra-hint" data-i18n="remote_access.gap_hint">The gap absorbs small signal changes. An unknown or disconnected phone never counts as departure.</p>
                             <div class="ra-fields-two">
-                                <label class="ra-field"><span><span data-i18n="remote_access.unlock_filter_window">Unlock filter window</span> <small>seconds</small></span><input type="number" id="raNearWindowSeconds" min="2" max="60" step="1" value="2" required></label>
-                                <label class="ra-field"><span><span data-i18n="remote_access.unlock_confirmation">Unlock confirmation</span> <small>seconds</small></span><input type="number" id="raNearDwellSeconds" min="1" max="30" step="1" value="1" required></label>
+                                <label class="ra-field"><span><span data-i18n="remote_access.unlock_filter_window">Unlock filter window</span> <small data-i18n="remote_access.seconds_unit">seconds</small></span><input type="number" id="raNearWindowSeconds" min="2" max="60" step="1" value="2" required></label>
+                                <label class="ra-field"><span><span data-i18n="remote_access.unlock_confirmation">Unlock confirmation</span> <small data-i18n="remote_access.seconds_unit">seconds</small></span><input type="number" id="raNearDwellSeconds" min="1" max="30" step="1" value="1" required></label>
                             </div>
                             <div class="ra-fast-unlock">
                                 <button type="button" class="btn btn-secondary" id="raFastUnlockDefaults" data-i18n="remote_access.fast_unlock_defaults" disabled>Use fast unlock defaults</button>
                                 <p class="ra-hint" data-i18n="remote_access.unlock_confirmation_hint">Unlock requires at least two fresh Near readings inside the filter window for the confirmation time; a single reading never unlocks. Weak readings restart confirmation. This preset restores the default unlock timings (2 s window, 1 s confirmation); Save rules to apply.</p>
                             </div>
                             <div class="ra-fields-two">
-                                <label class="ra-field"><span><span data-i18n="remote_access.departure_filter_window">Departure filter window</span> <small>seconds</small></span><input type="number" id="raMedianSeconds" min="4" max="60" step="1" value="6" required></label>
-                                <label class="ra-field"><span><span data-i18n="remote_access.lock_confirmation">Lock confirmation</span> <small>seconds</small></span><input type="number" id="raDwellSeconds" min="1" max="30" step="1" value="2" required></label>
+                                <label class="ra-field"><span><span data-i18n="remote_access.departure_filter_window">Departure filter window</span> <small data-i18n="remote_access.seconds_unit">seconds</small></span><input type="number" id="raMedianSeconds" min="4" max="60" step="1" value="6" required></label>
+                                <label class="ra-field"><span><span data-i18n="remote_access.lock_confirmation">Lock confirmation</span> <small data-i18n="remote_access.seconds_unit">seconds</small></span><input type="number" id="raDwellSeconds" min="1" max="30" step="1" value="2" required></label>
                             </div>
-                            <label class="ra-field ra-cooldown"><span><span>Action cooldown</span> <small>seconds</small></span><input type="number" id="raCooldownSeconds" min="5" max="300" step="1" value="10" required></label>
+                            <label class="ra-field ra-cooldown"><span><span data-i18n="remote_access.action_cooldown">Action cooldown</span> <small data-i18n="remote_access.seconds_unit">seconds</small></span><input type="number" id="raCooldownSeconds" min="5" max="300" step="1" value="10" required></label>
                             <p class="ra-hint" data-i18n="remote_access.timing_defaults_hint">Defaults: 2 s unlock window, 1 s unlock confirmation, 6 s departure window, 2 s lock confirmation, 10 s cooldown. Every decision needs at least two readings in its zone. The car's confirmation runs in the background and never delays the next decision.</p>
                             <div class="ra-fields-two">
-                                <label class="ra-field"><span><span data-i18n="remote_access.relock_grace">Relock grace after unlock</span> <small>seconds</small></span><input type="number" id="raRelockGraceSeconds" min="3" max="30" step="1" value="10" required></label>
-                                <label class="ra-field"><span><span data-i18n="remote_access.post_lock_quiet">Keyfob quiet period after lock</span> <small>seconds</small></span><input type="number" id="raPostLockQuietSeconds" min="3" max="30" step="1" value="10" required></label>
+                                <label class="ra-field"><span><span data-i18n="remote_access.relock_grace">Relock grace after unlock</span> <small data-i18n="remote_access.seconds_unit">seconds</small></span><input type="number" id="raRelockGraceSeconds" min="3" max="30" step="1" value="10" required></label>
+                                <label class="ra-field"><span><span data-i18n="remote_access.post_lock_quiet">Keyfob quiet period after lock</span> <small data-i18n="remote_access.seconds_unit">seconds</small></span><input type="number" id="raPostLockQuietSeconds" min="3" max="30" step="1" value="10" required></label>
                             </div>
                             <p class="ra-hint" data-i18n="remote_access.grace_quiet_hint">After a proximity unlock, an automatic lock waits until a door opens or the relock grace passes (3–30 s). After a confirmed proximity lock, a lone keyfob detection within the quiet period (3–30 s) is not an arrival. Normal mode uses 10 s for both.</p>
                         </section>
                     </div>
                     <section class="card ra-rules-card" aria-labelledby="raRulesTitle">
-                        <div class="ra-panel-heading"><div><div class="ra-eyebrow">SAVED ACTIONS</div><h2 id="raRulesTitle">Choose what happens</h2></div><span class="ra-step-tag">03</span></div>
+                        <div class="ra-panel-heading"><div><div class="ra-eyebrow" data-i18n="remote_access.eyebrow_actions">SAVED ACTIONS</div><h2 id="raRulesTitle" data-i18n="remote_access.rules_title">Choose what happens</h2></div><span class="ra-step-tag">03</span></div>
                         <label class="ra-rule ra-learning-rule">
                             <span class="ra-rule-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 19V5m0 14h16M7 15l4-4 4 2 5-8"/></svg></span>
-                            <span class="ra-rule-copy"><strong>Monitor preview</strong><span>Show arrivals and departures without sending vehicle commands. Turn off to allow your enabled lock and unlock rules.</span></span>
+                            <span class="ra-rule-copy"><strong data-i18n="remote_access.monitor_preview">Monitor preview</strong><span data-i18n="remote_access.monitor_preview_desc">Show arrivals and departures without sending vehicle commands. Turn off to allow your enabled lock and unlock rules.</span></span>
                             <span class="ra-switch"><input type="checkbox" id="raLearningMode" checked><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
                         </label>
                         <div class="ra-actions-grid">
                             <label class="ra-rule">
                                 <span class="ra-rule-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 9-3"/></svg></span>
-                                <span class="ra-rule-copy"><strong data-i18n="remote_access.automatic_unlock">Automatic unlock</strong><span id="raUnlockRuleDetail">Unlock when any enabled approved phone has a stable Near signal.</span></span>
+                                <span class="ra-rule-copy"><strong data-i18n="remote_access.automatic_unlock">Automatic unlock</strong><span id="raUnlockRuleDetail" data-i18n="remote_access.unlock_near_detail">Unlock when any enabled approved phone has a stable Near signal.</span></span>
                                 <span class="ra-switch"><input type="checkbox" id="raUnlockOnArrival"><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
                             </label>
                             <label class="ra-rule">
                                 <span class="ra-rule-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
-                                <span class="ra-rule-copy"><strong data-i18n="remote_access.automatic_lock">Automatic lock</strong><span id="raLockRuleDetail">Confirmed keyfob departure takes priority when enabled. Phone-only locking requires every active phone to be freshly Away.</span></span>
+                                <span class="ra-rule-copy"><strong data-i18n="remote_access.automatic_lock">Automatic lock</strong><span id="raLockRuleDetail" data-i18n="remote_access.lock_rule_initial">Confirmed keyfob departure takes priority when enabled. Phone-only locking requires every active phone to be freshly Away.</span></span>
                                 <span class="ra-switch"><input type="checkbox" id="raLockOnDeparture"><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
                             </label>
                         </div>
@@ -200,37 +200,37 @@
                                     <option value="near" data-i18n="remote_access.unlock_trigger_near" selected>When near</option>
                                 </select>
                             </label>
-                            <p class="ra-hint" id="raUnlockTriggerHint">Unlock after a stable Near signal, including first connection or reconnection. No prior Away signal is required.</p>
+                            <p class="ra-hint" id="raUnlockTriggerHint" data-i18n="remote_access.unlock_trigger_near_hint">Unlock after a stable Near signal, including first connection or reconnection. No prior Away signal is required.</p>
                         </div>
                         <label class="ra-rule ra-confirm-vehicle-rule ra-advanced">
                             <span class="ra-rule-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 12l5 5L20 6"/></svg></span>
                             <span class="ra-rule-copy"><strong data-i18n="remote_access.confirm_with_vehicle">Confirm with the car's lock state</strong><span data-i18n="remote_access.confirm_with_vehicle_desc">After a proximity command is sent, read the driver-door lock state back from the car and record whether it changed. This runs in the background and never delays the next decision. Turning it off records every command as sent without checking the car and also disables the cloud fallback, which needs that check to know when it is required.</span></span>
-                            <span class="ra-switch"><input type="checkbox" id="raConfirmWithVehicle" aria-label="Confirm proximity commands with the car's lock state"><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
+                            <span class="ra-switch"><input type="checkbox" id="raConfirmWithVehicle" aria-label="Confirm proximity commands with the car's lock state" data-i18n-attr="aria-label:remote_access.confirm_with_vehicle_aria"><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
                         </label>
                         <label class="ra-rule ra-cloud-fallback-rule">
                             <span class="ra-rule-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M7 18h10a4 4 0 0 0 .4-8 6 6 0 0 0-11.4 2.2A3 3 0 0 0 7 18Z"/></svg></span>
                             <span class="ra-rule-copy"><strong data-i18n="remote_access.cloud_fallback">Cloud fallback for unconfirmed commands</strong><span data-i18n="remote_access.cloud_fallback_desc">If the car does not confirm a local proximity lock or unlock command, send it through the BYD cloud as well. The safety check before the command and the confirmation after it still use the car's local state.</span></span>
-                            <span class="ra-switch"><input type="checkbox" id="raCloudFallback" aria-label="Send unconfirmed proximity lock and unlock commands through the BYD cloud as well"><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
+                            <span class="ra-switch"><input type="checkbox" id="raCloudFallback" aria-label="Send unconfirmed proximity lock and unlock commands through the BYD cloud as well" data-i18n-attr="aria-label:remote_access.cloud_fallback_aria"><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
                         </label>
                         <label class="ra-rule ra-keyfob-rule">
                             <span class="ra-rule-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="8" cy="8" r="5"/><path d="m11.5 11.5 9 9M16 16l3-3M19 19l3-3"/></svg></span>
                             <span class="ra-rule-copy"><strong data-i18n="remote_access.keyfob_approach">Keyfob detection</strong><span data-i18n="remote_access.keyfob_priority_approach_desc">Detect your fob while parked for automatic unlock and optional departure locking. Verified keyfob signals take priority wherever supported.</span></span>
-                            <span class="ra-switch"><input type="checkbox" id="raKeyFobEnabled" aria-label="Enable keyfob approach detection" disabled><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
+                            <span class="ra-switch"><input type="checkbox" id="raKeyFobEnabled" aria-label="Enable keyfob approach detection" data-i18n-attr="aria-label:remote_access.keyfob_enable_aria" disabled><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
                         </label>
                         <label class="ra-rule ra-keyfob-unlock-rule ra-advanced" id="raKeyFobUnlockRule">
                             <span class="ra-rule-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="6" y="11" width="12" height="10" rx="2"/><path d="M9 11V7a3 3 0 0 1 5.8-1"/></svg></span>
                             <span class="ra-rule-copy"><strong data-i18n="remote_access.keyfob_unlock_on_detection">Unlock as soon as the key is detected</strong><span id="raKeyFobUnlockDetail" data-i18n="remote_access.keyfob_unlock_on_detection_desc">Off: the car must first report the key as absent (after a lock) before a detection can unlock — slower after installs, restarts and remote power cycles.</span></span>
-                            <span class="ra-switch"><input type="checkbox" id="raKeyFobUnlockNear" aria-label="Unlock as soon as the key is detected" aria-describedby="raKeyFobUnlockDetail" disabled><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
+                            <span class="ra-switch"><input type="checkbox" id="raKeyFobUnlockNear" aria-label="Unlock as soon as the key is detected" data-i18n-attr="aria-label:remote_access.keyfob_unlock_on_detection" aria-describedby="raKeyFobUnlockDetail" disabled><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
                         </label>
                         <label class="ra-rule ra-keyfob-lock-rule" id="raKeyFobLockRule">
                             <span class="ra-rule-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="6" y="11" width="12" height="10" rx="2"/><path d="M9 11V7a3 3 0 0 1 6 0v4"/></svg></span>
-                            <span class="ra-rule-copy"><strong data-i18n="remote_access.keyfob_lock">Use keyfob departure for locking</strong><span id="raKeyFobLockDetail">Enable Keyfob detection above to use departure locking. Automatic lock must also be on.</span></span>
-                            <span class="ra-switch"><input type="checkbox" id="raKeyFobLockEnabled" aria-label="Enable keyfob departure locking" aria-describedby="raKeyFobLockDetail" disabled><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
+                            <span class="ra-rule-copy"><strong data-i18n="remote_access.keyfob_lock">Use keyfob departure for locking</strong><span id="raKeyFobLockDetail" data-i18n="remote_access.keyfob_lock_requires_detection">Enable Keyfob detection above to use departure locking. Automatic lock must also be on.</span></span>
+                            <span class="ra-switch"><input type="checkbox" id="raKeyFobLockEnabled" aria-label="Enable keyfob departure locking" data-i18n-attr="aria-label:remote_access.keyfob_lock_aria" aria-describedby="raKeyFobLockDetail" disabled><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
                         </label>
                         <label class="ra-rule ra-lock-waits-rule ra-advanced" id="raLockWaitsForKeyRule">
                             <span class="ra-rule-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span>
                             <span class="ra-rule-copy"><strong data-i18n="remote_access.lock_waits_for_key_absence">Phone locking waits for the key search</strong><span id="raLockWaitsForKeyDetail" data-i18n="remote_access.lock_waits_for_key_absence_desc">Off: phones lock as soon as every active phone is away; a key detected nearby or found inside still blocks. On: also wait until a key search confirms no key is inside. Protects against a key left in the car before its next search runs.</span></span>
-                            <span class="ra-switch"><input type="checkbox" id="raLockWaitsForKeyAbsence" aria-label="Phone locking waits for the key search" aria-describedby="raLockWaitsForKeyDetail" disabled><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
+                            <span class="ra-switch"><input type="checkbox" id="raLockWaitsForKeyAbsence" aria-label="Phone locking waits for the key search" data-i18n-attr="aria-label:remote_access.lock_waits_for_key_absence" aria-describedby="raLockWaitsForKeyDetail" disabled><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
                         </label>
                          <div class="ra-keyfob-window ra-advanced">
                              <label class="ra-field"><span data-i18n="remote_access.keyfob_lock_window">Keyfob locking window</span>
@@ -247,10 +247,10 @@
                              <p class="ra-hint" id="raKeyFobLockSamplesHint" data-i18n="remote_access.keyfob_lock_samples_hint">1 = lock at the first search that finds no key inside (fastest). 2-3 = require consecutive results; protects against a single missed read locking a key left inside.</p>
                          </div>
                         <div class="ra-keyfob-status" id="raKeyFobPanel" data-state="disabled" hidden>
-                            <div class="ra-keyfob-status-heading"><span data-i18n="remote_access.keyfob_signal">Keyfob signal</span><strong id="raKeyFobState" role="status">Monitoring off</strong></div>
-                            <p id="raKeyFobDetail">Save rules to start keyfob detection.</p>
-                            <div class="ra-keyfob-departure" id="raKeyFobDepartureRow" hidden><span data-i18n="remote_access.keyfob_departure">Departure</span><strong id="raKeyFobDeparture">Waiting for departure</strong></div>
-                             <div class="ra-keyfob-departure" id="raKeyFobPresenceRow" hidden><span data-i18n="remote_access.keyfob_presence_search">Key search for locking</span><strong id="raKeyFobPresence">Waiting for a search</strong></div>
+                            <div class="ra-keyfob-status-heading"><span data-i18n="remote_access.keyfob_signal">Keyfob signal</span><strong id="raKeyFobState" role="status" data-i18n="remote_access.keyfob_monitoring_off">Monitoring off</strong></div>
+                            <p id="raKeyFobDetail" data-i18n="remote_access.keyfob_save_first_detail">Save rules to start keyfob detection.</p>
+                            <div class="ra-keyfob-departure" id="raKeyFobDepartureRow" hidden><span data-i18n="remote_access.keyfob_departure">Departure</span><strong id="raKeyFobDeparture" data-i18n="remote_access.keyfob_departure_waiting">Waiting for departure</strong></div>
+                             <div class="ra-keyfob-departure" id="raKeyFobPresenceRow" hidden><span data-i18n="remote_access.keyfob_presence_search">Key search for locking</span><strong id="raKeyFobPresence" data-i18n="remote_access.keyfob_presence_unavailable">Waiting for a search</strong></div>
                             <div class="ra-keyfob-diagnostics ra-advanced">
                                 <div><span data-i18n="remote_access.keyfob_mask">Last CAN mask</span><code id="raKeyFobMask">—</code></div>
                                 <div><span data-i18n="remote_access.keyfob_event_age">Last valid event</span><strong id="raKeyFobAge">—</strong></div>
@@ -265,11 +265,11 @@
                             <div class="ra-actions-grid ra-safe-zone-actions">
                                 <label class="ra-rule">
                                     <span class="ra-rule-copy"><strong data-i18n="remote_access.safe_zones_unlock">Unlock only outside safe zones</strong><span data-i18n="remote_access.safe_zones_unlock_desc">Apply to all enabled phone and keyfob unlock rules.</span></span>
-                                    <span class="ra-switch"><input type="checkbox" id="raRestrictUnlockSafeZones" aria-label="Allow automatic unlock only outside selected safe zones" disabled><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
+                                    <span class="ra-switch"><input type="checkbox" id="raRestrictUnlockSafeZones" aria-label="Allow automatic unlock only outside selected safe zones" data-i18n-attr="aria-label:remote_access.safe_zones_unlock_aria" disabled><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
                                 </label>
                                 <label class="ra-rule">
                                     <span class="ra-rule-copy"><strong data-i18n="remote_access.safe_zones_lock">Lock only outside safe zones</strong><span data-i18n="remote_access.safe_zones_lock_desc">Apply to all enabled phone and keyfob lock rules.</span></span>
-                                    <span class="ra-switch"><input type="checkbox" id="raRestrictLockSafeZones" aria-label="Allow automatic lock only outside selected safe zones" disabled><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
+                                    <span class="ra-switch"><input type="checkbox" id="raRestrictLockSafeZones" aria-label="Allow automatic lock only outside selected safe zones" data-i18n-attr="aria-label:remote_access.safe_zones_lock_aria" disabled><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
                                 </label>
                             </div>
                             <fieldset class="ra-safe-zone-list" id="raSafeZoneList" aria-describedby="raSafeZoneListHint" tabindex="-1" disabled>
@@ -287,35 +287,35 @@
                             <span class="ra-rule-copy"><strong data-i18n="remote_access.bluetooth_shared">Keep Bluetooth on while parked</strong><span data-i18n="remote_access.bluetooth_shared_keyfob_desc">Shared with Surveillance, Automations and key bindings. Saves immediately. Turning this off stops parked phone proximity and reconnect; enabled keyfob rules remain active.</span></span>
                             <span class="ra-switch"><input type="checkbox" id="raKeepBluetoothOn"><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
                         </label>
-                        <div class="ra-notification-heading"><strong>Priority action alerts</strong><span>Notify when a proximity lock or unlock command finishes. Learning observations do not send alerts.</span></div>
+                        <div class="ra-notification-heading"><strong data-i18n="remote_access.alerts_title">Priority action alerts</strong><span data-i18n="remote_access.alerts_desc">Notify when a proximity lock or unlock command finishes. Learning observations do not send alerts.</span></div>
                         <div class="ra-actions-grid ra-notification-grid">
                             <label class="ra-rule">
                                 <span class="ra-rule-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg></span>
-                                <span class="ra-rule-copy"><strong>Priority push notification</strong><span>Use your saved notification channels.</span></span>
+                                <span class="ra-rule-copy"><strong data-i18n="remote_access.priority_push">Priority push notification</strong><span data-i18n="remote_access.priority_push_desc">Use your saved notification channels.</span></span>
                                 <span class="ra-switch"><input type="checkbox" id="raNotifyPush"><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
                             </label>
                             <label class="ra-rule">
                                 <span class="ra-rule-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="m22 2-11 11"/></svg></span>
-                                <span class="ra-rule-copy"><strong>Priority Telegram alert</strong><span>Use your configured Telegram recipients.</span></span>
+                                <span class="ra-rule-copy"><strong data-i18n="remote_access.priority_telegram">Priority Telegram alert</strong><span data-i18n="remote_access.priority_telegram_desc">Use your configured Telegram recipients.</span></span>
                                 <span class="ra-switch"><input type="checkbox" id="raNotifyTelegram"><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
                             </label>
                         </div>
-                        <div class="ra-notification-links"><a href="notifications.html">Notification settings ↗</a><a href="telegram.html">Telegram settings ↗</a><span>Master off stops proximity alerts.</span></div>
-                        <div class="ra-rule-status" id="raRuleStatus">Learning mode is on. Vehicle commands are disabled.</div>
+                        <div class="ra-notification-links"><a href="notifications.html" data-i18n="remote_access.notification_settings_link">Notification settings ↗</a><a href="telegram.html" data-i18n="remote_access.telegram_settings_link">Telegram settings ↗</a><span data-i18n="remote_access.alerts_master_off">Master off stops proximity alerts.</span></div>
+                        <div class="ra-rule-status" id="raRuleStatus" data-i18n="remote_access.learning_note">Learning mode is on. Vehicle commands are disabled.</div>
                         <div class="ra-save-row">
                             <div class="ra-save-feedback">
-                                <span id="raSaveState">Settings are stored on the vehicle.</span>
+                                <span id="raSaveState" data-i18n="remote_access.settings_stored">Settings are stored on the vehicle.</span>
                                 <div id="raSaveError" role="alert" aria-live="assertive" aria-atomic="true" hidden></div>
                             </div>
-                            <button class="btn btn-primary" type="submit" id="raSaveBtn" disabled>Save rules</button>
+                            <button class="btn btn-primary" type="submit" id="raSaveBtn" data-i18n="remote_access.save_rules" disabled>Save rules</button>
                         </div>
                     </section>
                 </form>
 
                 <section class="card ra-history-card" aria-labelledby="raHistoryTitle">
-                    <div class="ra-panel-heading"><div><div class="ra-eyebrow">ACTIVITY</div><h2 id="raHistoryTitle">Every transition, explained</h2></div><span id="raEventCount" class="ra-badge">0 events</span></div>
-                    <div id="raEventList" class="ra-event-list"><div class="ra-history-empty">Detected transitions and action results will appear here.</div></div>
-                    <p class="ra-history-note">Latest 40 events, newest first; no fixed time limit. Activity clears when the daemon restarts. Sent commands and confirmed lock changes are shown separately.</p>
+                    <div class="ra-panel-heading"><div><div class="ra-eyebrow" data-i18n="remote_access.eyebrow_activity">ACTIVITY</div><h2 id="raHistoryTitle" data-i18n="remote_access.history_title">Every transition, explained</h2></div><span id="raEventCount" class="ra-badge" data-i18n="remote_access.event_count_zero">0 events</span></div>
+                    <div id="raEventList" class="ra-event-list"><div class="ra-history-empty" data-i18n="remote_access.history_empty">Detected transitions and action results will appear here.</div></div>
+                    <p class="ra-history-note" data-i18n="remote_access.history_note">Latest 40 events, newest first; no fixed time limit. Activity clears when the daemon restarts. Sent commands and confirmed lock changes are shown separately.</p>
                 </section>
             </div>
         </main>
@@ -324,7 +324,7 @@
     <div id="toastContainer" class="toast-container"></div>
     <script src="../shared/auth.js"></script>
     <script src="../shared/core.js?v=24"></script>
-    <script src="../shared/remote-access.js?v=27"></script>
+    <script src="../shared/remote-access.js?v=28"></script>
     <script>
         function toggleSidebar() {
             var sidebar = document.getElementById('sidebar');

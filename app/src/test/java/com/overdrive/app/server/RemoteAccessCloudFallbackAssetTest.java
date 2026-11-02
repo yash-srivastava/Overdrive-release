@@ -62,9 +62,9 @@ public class RemoteAccessCloudFallbackAssetTest {
                 < script.indexOf("config.cloudFallback = el('raCloudFallback').checked;"));
         // Outcome labels: the event list and the lock-state line know cloud_acknowledged.
         assertTrue(script.contains("cloud_acknowledged: 'Cloud command acknowledged · no local confirmation',"));
-        assertTrue(script.contains("status === 'cloud_acknowledged' ? action + ' sent · cloud acknowledged, unconfirmed locally' :"));
-        assertTrue(script.indexOf("status === 'unconfirmed' ? action + ' sent · unconfirmed' :")
-                < script.indexOf("status === 'cloud_acknowledged' ?"));
+        assertTrue(script.contains("cloud_acknowledged: '{action} sent · cloud acknowledged, unconfirmed locally',"));
+        assertTrue(script.indexOf("unconfirmed: '{action} sent · unconfirmed',")
+                < script.indexOf("cloud_acknowledged: '{action} sent ·"));
         // The existing labels are untouched.
         assertTrue(script.contains("unconfirmed: 'Command sent · no state confirmation',"));
         assertTrue(script.contains("blocked: 'Action blocked', failed: 'Action failed' };"));

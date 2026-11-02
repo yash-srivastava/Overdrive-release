@@ -43,11 +43,11 @@ public class RemoteAccessSnappyLocksAssetTest {
         assertTrue(row.contains("<option value=\"near\" data-i18n=\"remote_access.unlock_trigger_near\" selected>When near</option>"));
         assertTrue(row.contains("<option value=\"away_to_near\" data-i18n=\"remote_access.unlock_trigger_away_to_near\">Away → Near</option>"));
         assertEquals(1, count(row, " selected"));
-        assertTrue(row.contains("<p class=\"ra-hint\" id=\"raUnlockTriggerHint\">Unlock after a stable Near signal, "
+        assertTrue(row.contains("<p class=\"ra-hint\" id=\"raUnlockTriggerHint\" data-i18n=\"remote_access.unlock_trigger_near_hint\">Unlock after a stable Near signal, "
                 + "including first connection or reconnection. No prior Away signal is required.</p>"));
         assertEquals(0, count(html, "<div class=\"ra-unlock-trigger\">"));
         assertEquals(1, count(html, "id=\"raUnlockTrigger\""));
-        assertEquals(1, count(html, "remote-access.js?v=27"));
+        assertEquals(1, count(html, "remote-access.js?v=28"));
         String script = readRepositoryFile(SCRIPT);
         // Advanced-only and only with Automatic unlock on; Advanced on restores the custom choice, off resets.
         assertTrue(script.contains("el('raUnlockTrigger').disabled = !state.ready || state.saving || !el('raUnlockOnArrival').checked ||\n"
@@ -77,7 +77,7 @@ public class RemoteAccessSnappyLocksAssetTest {
         assertTrue(row.contains("<span id=\"raLockWaitsForKeyDetail\" data-i18n=\"remote_access.lock_waits_for_key_absence_desc\">"
                 + desc + "</span>"));
         assertTrue(row.contains("<input type=\"checkbox\" id=\"raLockWaitsForKeyAbsence\" aria-label=\"" + label
-                + "\" aria-describedby=\"raLockWaitsForKeyDetail\" disabled>"));
+                + "\" data-i18n-attr=\"aria-label:remote_access.lock_waits_for_key_absence\" aria-describedby=\"raLockWaitsForKeyDetail\" disabled>"));
         assertFalse(row.contains(" checked"));
         assertTrue(desc.startsWith("Off: phones lock as soon as every active phone is away"));
         assertTrue(desc.contains("Protects against a key left in the car"));
@@ -128,7 +128,7 @@ public class RemoteAccessSnappyLocksAssetTest {
         assertTrue(script.contains("config.keyFobLockSamples = lockSamplesValue(custom);"));
         assertTrue(script.contains("config.keyFobLockWindowMs = custom.keyFobLockWindowMs || KEYFOB_LOCK_DEFAULTS.windowMs;"));
         assertTrue(script.contains("if ([1, 2, 3].indexOf(config.keyFobLockSamples) < 0)\n"
-                + "            throw new Error('Choose 1, 2 or 3 keyfob absence results.');"));
+                + "            throw new Error(tr('error_keyfob_samples', 'Choose 1, 2 or 3 keyfob absence results.'));"));
         assertTrue(script.contains("el('raKeyFobLockSamples').disabled = !state.ready || state.saving || !el('raAdvancedMode').checked || !fobLock;"));
         assertTrue(script.contains("' ' + (el('raAdvancedMode').checked ? el('raKeyFobLockSeconds').value || '5' : '5') +"));
         assertTrue(script.contains("tr('keyfob_lock_absence_priority_desc', '"

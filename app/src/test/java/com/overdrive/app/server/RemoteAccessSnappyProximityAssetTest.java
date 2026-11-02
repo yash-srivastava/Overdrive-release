@@ -50,7 +50,7 @@ public class RemoteAccessSnappyProximityAssetTest {
         assertFalse(html.contains("three consecutive"));
         assertTrue(html.contains("data-i18n=\"remote_access.timing_defaults_hint\">Defaults: 2 s unlock window, 1 s unlock confirmation, 6 s departure window, 2 s lock confirmation, 10 s cooldown."));
         assertTrue(html.contains("data-i18n=\"remote_access.grace_quiet_hint\">"));
-        assertEquals(1, count(html, "remote-access.js?v=27")); // 18 Oct bumped to 24; 19 Oct (fob trigger switch) to 25; 20 Oct (snappy locks) to 26; 22 Oct (car-on pause) to 27
+        assertEquals(1, count(html, "remote-access.js?v=28")); // 18 Oct bumped to 24; 19 Oct (fob trigger switch) to 25; 20 Oct (snappy locks) to 26; 22 Oct (car-on pause) to 27; 2 Nov (Hebrew i18n) to 28
     }
 
     @Test
@@ -105,16 +105,16 @@ public class RemoteAccessSnappyProximityAssetTest {
         assertTrue(script.contains("config.nearWindowMs < 2000 || config.nearWindowMs > 60000"));
         assertTrue(script.contains("config.nearDwellMs < 1000 || config.nearDwellMs > 30000"));
         assertTrue(script.contains("config.cooldownMs < 5000 || config.cooldownMs > 300000"));
-        assertTrue(script.contains("throw new Error('Use a 2–60 second unlock window, a 4–60 second departure window, 1–30 second confirmations, and a 5–300 second cooldown.');"));
+        assertTrue(script.contains("throw new Error(tr('error_timing_range', 'Use a 2–60 second unlock window, a 4–60 second departure window, 1–30 second confirmations, and a 5–300 second cooldown.'));"));
         assertTrue(script.contains("config.relockGraceMs < 3000 || config.relockGraceMs > 30000"));
         assertTrue(script.contains("config.postLockQuietMs < 3000 || config.postLockQuietMs > 30000"));
-        assertTrue(script.contains("throw new Error('Use a 3–30 second relock grace and a 3–30 second keyfob quiet period.');"));
+        assertTrue(script.contains("throw new Error(tr('error_grace_range', 'Use a 3–30 second relock grace and a 3–30 second keyfob quiet period.'));"));
         // Diagnostics show the two-reading floor; the arrival median stays the last three readings.
-        assertTrue(script.contains("'/2 fresh Near readings'"));
-        assertTrue(script.contains("'Unlock · last 3 / ' + arrivalWindow / 1000 + 's'"));
+        assertTrue(script.contains("{count}/2 fresh Near readings"));
+        assertTrue(script.contains("tr('filter_unlock', 'Unlock · last 3 / {n}s', { n: arrivalWindow / 1000 })"));
         // The sent outcome (confirmation off) in the event list and the lock-state line.
         assertTrue(script.contains("sent: 'Command sent · vehicle confirmation off',"));
-        assertTrue(script.contains("status === 'sent' ? action + ' sent · vehicle confirmation off' :"));
+        assertTrue(script.contains("sent: '{action} sent · vehicle confirmation off',"));
         // Existing cloud fallback wiring untouched.
         assertEquals(1, count(script, "config.cloudFallback = "));
         assertTrue(script.contains("cloud_acknowledged: 'Cloud command acknowledged · no local confirmation',"));

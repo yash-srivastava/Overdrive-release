@@ -1127,12 +1127,16 @@ public class HttpServer {
                 HttpResponse.sendJson(out, 403, "{\"success\":false,\"error\":\"Signal authentication refused\"}");
             } catch (IllegalArgumentException | org.json.JSONException invalid) {
                 logProximitySaveFailure(method, path, 400, invalid);
-                HttpResponse.sendJson(out, 400, new org.json.JSONObject()
-                        .put("success", false).put("error", invalid.getMessage()).toString());
+                // The *Key fields only let the page translate the unchanged English error.
+                HttpResponse.sendJson(out, 400, com.overdrive.app.remoteaccess.RemoteAccessMessageCodes.annotate(
+                        new org.json.JSONObject().put("success", false).put("error", invalid.getMessage()),
+                        "error", invalid.getMessage()).toString());
             } catch (Exception unavailable) {
                 logProximitySaveFailure(method, path, 503, unavailable);
-                HttpResponse.sendJson(out, 503, new org.json.JSONObject()
-                        .put("success", false).put("error", "Remote access is temporarily unavailable").toString());
+                HttpResponse.sendJson(out, 503, com.overdrive.app.remoteaccess.RemoteAccessMessageCodes.annotate(
+                        new org.json.JSONObject().put("success", false)
+                                .put("error", "Remote access is temporarily unavailable"),
+                        "error", "Remote access is temporarily unavailable").toString());
             }
             return true;
         }
