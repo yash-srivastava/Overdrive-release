@@ -22,8 +22,11 @@ The OS sandbox has no external network. A loopback proxy supplies deterministic
 inert data and forwards only the exact Cisco host's CONNECT requests to a
 fixture-owned loopback TLS listener. Source and
 toolchains are read-only, the environment is an explicit allowlist, and only
-scratch is writable. Bounds are two CPUs, 2 GiB memory, 192 processes, 1 GiB
+scratch is writable. Original task-only bounds were two CPUs, 2 GiB memory, 192 processes, 1 GiB
 scratch, a 256 MiB file limit, 480 seconds and 120,000 output bytes.
+The combined Android-configuration/TLS run uses two CPUs, 3 GiB memory,
+256 processes, 2 GiB scratch, a 256 MiB file limit, 400 seconds and
+240,000 output bytes.
 
 The inner command actually executed was:
 
@@ -31,12 +34,15 @@ The inner command actually executed was:
 /usr/bin/python3 /src/tools/tests/openh264-integrity/run.py \
   --source /src --scratch /scratch \
   --gradle /gradle-wrapper/gradle-8.13-bin/5xuhj0ry160q40clulazy9h7d/gradle-8.13/bin/gradle \
+  --android-sdk /opt/android-sdk --module-cache /gradle-cache \
   --trusted-library /case/trusted-library.so \
   --trusted-archive /case/trusted-archive.bz2
 ```
 
-The task uses Gradle 8.13 with `--offline --no-daemon --max-workers=1`; it has no
-third-party Gradle plugin dependency. No dependency was fetched. Unused inert
+The task uses Gradle 8.13 with `--offline --no-daemon --max-workers=1`.
+The extracted-task phase has no third-party plugin dependency; the mandatory
+complete-script phase uses the actual Android/Kotlin plugins from an existing
+read-only dependency cache. No dependency was fetched. Unused inert
 header files prevent unrelated GitHub requests.
 
 ## RED evidence
@@ -100,7 +106,13 @@ Certificate and hostname validation remain enabled. No insecure production
 override, custom trust manager or hostname verifier is introduced. It also
 asserts staging cleanup after each successful or failed invocation.
 
-GREEN result: all 10 tests pass, with no skips. The isolated run exits 0, has no resource-limit stop, and completes in 58.422 seconds including cleanup. The raw log contains both successful TLS acceptance of the verified archive and explicit SHA-256 rejection after successful TLS. Its SHA-256 is `52c360676158131da3c203a60d2a65417aadcbaeaf0c524822a2526843d182de`.
+Task-only GREEN: all 10 tests passed, with no skips. That isolated run exited 0,
+had no resource-limit stop, and completed in 58.422 seconds including cleanup.
+Its raw log includes successful TLS acceptance of the verified archive and
+explicit SHA-256 rejection after successful TLS, SHA-256
+`52c360676158131da3c203a60d2a65417aadcbaeaf0c524822a2526843d182de`.
+The later full Android-plugin script check exposed the name-resolution issue
+described below; task-only success did not establish build-script compatibility.
 
 ## Coverage and limits
 
@@ -131,4 +143,8 @@ The full Android plugin adds a `java` Kotlin DSL accessor. Qualified package ref
 
 The new check reproduced the regression on commit `c219a56a9539f43594ee8998dbaf3b2a07e7fb21`: Gradle reaches Android project configuration, then exits 1 with the relevant unresolved Java package references. Runtime RED took 44.856 seconds including cleanup; the raw log SHA-256 is `a6c72274b70f8cd32c28a9b0764a75c7830f3eaa46003ef8c160506dcba3b937`. This is a real script-compilation failure, not an unavailable dependency.
 
-Import correction and combined configuration/TLS GREEN verification are pending at this test checkpoint.
+Explicit imports now resolve the JDK classes without the generated `java` accessor. The integrity values and decisions are unchanged. The new regression suite preserves those imports verbatim and always requires actual Android-plugin script configuration before running the TLS cases.
+
+Combined GREEN passes: actual Android/Kotlin project configuration reaches `:app:help` and exits 0, then all 10 TLS/cache tests pass without skips. Total isolated time is 93.054 seconds including cleanup, with no resource-limit stop. Combined raw-log SHA-256: `0648cfde10500bfb7be47e7d8df1d42bc3859c7f433a0441304e13ca232e585b`. The configuration-only evidence is an exact prefix of that same run, SHA-256 `99337c6887787f48f7516627dd9adb275ad6c6ea7a04f156f5ac0b0e80fd1832`; it is not a separate execution.
+
+The previous task-only GREEN remains historical evidence. This mandatory configuration check replaces it as the build-script compatibility gate. Application-source compilation and complete APK acceptance remain separate integration checks.

@@ -1,4 +1,12 @@
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URI
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
 import java.util.Properties
+import javax.net.ssl.HttpsURLConnection
 
 plugins {
     alias(libs.plugins.android.application)
@@ -31,12 +39,12 @@ tasks.register("downloadOpenH264") {
         val archiveBytes = 496662L
         val libraryBytes = 1276136L
 
-        fun verifyInput(input: java.io.File, expectedBytes: Long, expectedSha256: String) {
-            if (!java.nio.file.Files.isRegularFile(input.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)
+        fun verifyInput(input: File, expectedBytes: Long, expectedSha256: String) {
+            if (!Files.isRegularFile(input.toPath(), LinkOption.NOFOLLOW_LINKS)
                 || input.length() != expectedBytes) {
                 throw GradleException("Unexpected OpenH264 input type or size: ${input.name}")
             }
-            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            val digest = MessageDigest.getInstance("SHA-256")
             input.inputStream().use { stream ->
                 val buffer = ByteArray(8192)
                 while (true) {
@@ -64,20 +72,20 @@ tasks.register("downloadOpenH264") {
             libDir.mkdirs()
             
             val soFile = file("${libDir}/libopenh264.so")
-            if (java.nio.file.Files.exists(soFile.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            if (Files.exists(soFile.toPath(), LinkOption.NOFOLLOW_LINKS)) {
                 verifyInput(soFile, libraryBytes, librarySha256)
             } else {
                 println("Downloading OpenH264 ${openh264Version} for ${abi}...")
-                val stagingDir = java.nio.file.Files.createTempDirectory(libDir.toPath(), ".openh264-").toFile()
+                val stagingDir = Files.createTempDirectory(libDir.toPath(), ".openh264-").toFile()
                 try {
-                    val bzFile = java.io.File(stagingDir, "download.so.bz2")
-                    val unpacked = java.io.File(stagingDir, "libopenh264.so")
-                    val connection = java.net.URI(url).toURL().openConnection() as javax.net.ssl.HttpsURLConnection
+                    val bzFile = File(stagingDir, "download.so.bz2")
+                    val unpacked = File(stagingDir, "libopenh264.so")
+                    val connection = URI(url).toURL().openConnection() as HttpsURLConnection
                     connection.instanceFollowRedirects = false
                     connection.connectTimeout = 15000
                     connection.readTimeout = 15000
                     try {
-                        if (connection.responseCode != java.net.HttpURLConnection.HTTP_OK) {
+                        if (connection.responseCode != HttpURLConnection.HTTP_OK) {
                             throw GradleException("OpenH264 download returned HTTP ${connection.responseCode}; redirects are not accepted")
                         }
                         connection.inputStream.use { input ->
@@ -101,10 +109,10 @@ tasks.register("downloadOpenH264") {
                     verifyInput(bzFile, archiveBytes, archiveSha256)
                     ant.invokeMethod("bunzip2", mapOf("src" to bzFile.absolutePath, "dest" to unpacked.absolutePath))
                     verifyInput(unpacked, libraryBytes, librarySha256)
-                    java.nio.file.Files.move(
+                    Files.move(
                         unpacked.toPath(), soFile.toPath(),
-                        java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-                        java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING
                     )
                     println("✓ OpenH264 verified for ${abi}")
                 } finally {
