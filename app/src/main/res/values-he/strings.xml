@@ -699,6 +699,7 @@
     <string name="nav_page_abrp">ABRP</string>
     <string name="nav_page_mqtt">MQTT</string>
     <string name="nav_page_byd_cloud">BYD Cloud</string>
+    <string name="nav_page_remote_access">קרבה</string>
     <string name="nav_page_assistant">עוזר</string>
     <string name="status_overlay_notif_title">סטטוס OverDrive</string>
     <string name="status_overlay_notif_text">שכבת סטטוס פעילה</string>
