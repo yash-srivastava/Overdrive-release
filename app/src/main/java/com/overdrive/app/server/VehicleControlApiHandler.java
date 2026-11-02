@@ -2260,6 +2260,43 @@ public class VehicleControlApiHandler {
                     cmd = new VehicleCommandRouter.ClimateSetFanCommand(fan);
                     break;
                 }
+                // RELATIVE step: "delta" fan levels from wherever the fan is now. Refused while
+                // the AC is off; at 1 / 7 it succeeds without a write. Answers with the new level.
+                case "step_fan": {
+                    Integer deltaValue = jsonInteger(req, "delta");
+                    if (deltaValue == null) {
+                        sendClimateInputError(out, response, "delta must be a non-zero integer");
+                        return;
+                    }
+                    int delta = deltaValue.intValue();
+                    if (delta == 0) {
+                        response.put("success", false);
+                        response.put("error", "delta must be non-zero");
+                        HttpResponse.sendJson(out, response.toString());
+                        return;
+                    }
+                    // One full range per call at most (1..7 spans 6 levels); the clamp still
+                    // stops a legal step at the real end.
+                    final int maxDelta = com.overdrive.app.byd.BydDataCollector.AC_FAN_LEVEL_MAX
+                            - com.overdrive.app.byd.BydDataCollector.AC_FAN_LEVEL_MIN;
+                    if (delta < -maxDelta || delta > maxDelta) {
+                        response.put("success", false);
+                        response.put("error", "delta out of range (-" + maxDelta + ".." + maxDelta + ")");
+                        HttpResponse.sendJson(out, response.toString());
+                        return;
+                    }
+                    VehicleCommandRouter.ClimateStepFanCommand step =
+                            new VehicleCommandRouter.ClimateStepFanCommand(delta);
+                    CommandResult sr = VehicleCommandRouter.getInstance().execute(step);
+                    logger.info("Climate: action=step_fan delta=" + delta + " " + sr.outcome
+                            + " path=" + sr.path + " level=" + step.resultLevel);
+                    JSONObject stepResp = routedResponse(sr, "climate");
+                    if (step.resultLevel != com.overdrive.app.byd.BydVehicleData.UNAVAILABLE) {
+                        stepResp.put("fanLevel", step.resultLevel);
+                    }
+                    HttpResponse.sendJson(out, stepResp.toString());
+                    return;
+                }
                 case "auto_on":  cmd = new VehicleCommandRouter.AcAutoModeCommand(true);  break;
                 case "auto_off": cmd = new VehicleCommandRouter.AcAutoModeCommand(false); break;
                 case "sync_on":  cmd = new VehicleCommandRouter.AcTemperatureSyncCommand(true);  break;

@@ -516,6 +516,18 @@ public class Actions {
                 "/api/vehicle/climate",
                 "{\"action\":\"set_fan\",\"fan\":${speed}}",
                 new IntType(new Label("speed", "automation.speed"), 1, 7)));
+        // RELATIVE fan step — one level faster/slower than it is now, clamped to 1..7. Refused
+        // while the AC is off, so a rule cannot start the climate by nudging the fan.
+        addAction(new ApiAction(
+                new Label("stepAcFan", "automation.step_ac_fan"),
+                "automation.step_ac_fan_description",
+                "POST",
+                "/api/vehicle/climate",
+                "{\"action\":\"step_fan\",\"delta\":${delta}}",
+                new EnumType(
+                        new Label("delta", "automation.step_direction"),
+                        new Label("1", "automation.step_faster"),
+                        new Label("-1", "automation.step_slower"))));
         addAction(new VehicleControlAction(
                 new Label("seat", "automation.seat_climate"),
                 "automation.set_seat_climate_description",

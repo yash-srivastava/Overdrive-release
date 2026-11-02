@@ -68,6 +68,11 @@ window.KM = (function () {
         { id: 'ac_fan',          i18n: 'keymap.act_ac_fan',           kind: 'api',
           method: 'POST', path: '/api/vehicle/climate', body: '{"action":"set_fan","fan":${v}}',
           payloads: [ { v: '1', i18n: 'keymap.fan_1' }, { v: '2', i18n: 'keymap.fan_2' }, { v: '3', i18n: 'keymap.fan_3' }, { v: '4', i18n: 'keymap.fan_4' }, { v: '5', i18n: 'keymap.fan_5' }, { v: '6', i18n: 'keymap.fan_6' }, { v: '7', i18n: 'keymap.fan_7' } ] },
+        // AC fan speed — RELATIVE step: one press = one level faster/slower from wherever the
+        // fan is now (stops at 1 and 7, refused while the AC is off). ${v} carries the delta.
+        { id: 'ac_fan_step',     i18n: 'keymap.act_ac_fan_step',      kind: 'api',
+          method: 'POST', path: '/api/vehicle/climate', body: '{"action":"step_fan","delta":${v}}',
+          payloads: [ { v: '1', i18n: 'keymap.fan_faster' }, { v: '-1', i18n: 'keymap.fan_slower' } ] },
         // AC temperature — RELATIVE step, the natural fit for a hardware key: one press = one
         // degree warmer/cooler from wherever the dial is now. ${v} carries the signed delta.
         // (An absolute "set to 22" binding would need one key per temperature.)
@@ -541,7 +546,7 @@ window.KM = (function () {
         sunroof: 'windows_body', sunshade: 'windows_body', child_lock: 'windows_body',
         mirror_fold: 'windows_body', wireless_charging: 'windows_body',
         wireless_charging_left: 'windows_body', wireless_charging_right: 'windows_body',
-        climate: 'climate', ac_fan: 'climate', ac_temp_step: 'climate',
+        climate: 'climate', ac_fan: 'climate', ac_fan_step: 'climate', ac_temp_step: 'climate',
         ac_temp_step_driver: 'climate', ac_temp_step_passenger: 'climate',
         ac_auto: 'climate', fan_only: 'climate', steering_heat: 'climate', recirculation: 'climate',
         max_cool: 'climate', air_purify: 'climate', rain_close_windows: 'windows_body',
