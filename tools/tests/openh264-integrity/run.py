@@ -13,12 +13,16 @@ import json
 import os
 from pathlib import Path
 import re
+import select
+import socket
+import ssl
 import subprocess
 import threading
 import unittest
 
 
 TRUSTED_LIBRARY_SHA256 = "4d9bc54d2d38e53eb7bd551ec61acb8ad8320d8b957bda751cfdbdcbfabc3b07"
+TRUSTED_ARCHIVE_SHA256 = "c702d68c9c8db492a43c1d73a497cea5f31ae5d23e330dcb13bd28cab1dbbf2a"
 HEADERS = ("codec_api.h", "codec_app_def.h", "codec_def.h", "codec_ver.h")
 
 
@@ -50,28 +54,118 @@ def original_task(source):
     }
 
 
-class Proxy(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        with self.server.state_lock:
-            self.server.requests.append({"method": "GET", "url": self.path})
-            payload = self.server.payload
-        if self.path != self.server.expected_url:
+class Download(http.server.BaseHTTPRequestHandler):
+    def serve_payload(self, transport):
+        state = self.server.state
+        with state.lock:
+            state.requests.append({"method": "GET", "url": self.path, "transport": transport})
+            payload, mode = state.payload, state.mode
+        expected = state.archive_path if transport == "https" else "http://ciscobinary.openh264.org" + state.archive_path
+        if self.path != expected:
             self.send_error(404)
+            return
+        if mode == "redirect":
+            self.send_response(302)
+            self.send_header("Location", "http://ciscobinary.openh264.org/forbidden-redirect")
+            self.end_headers()
             return
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
-        self.wfile.write(payload)
-
-    def do_CONNECT(self):
-        # Never create a tunnel. HTTPS is a real transport boundary in this test.
-        with self.server.state_lock:
-            self.server.requests.append({"method": "CONNECT", "url": self.path})
-        self.send_error(502, "No external transport in this offline test")
+        if mode == "truncate":
+            payload = payload[:len(payload) // 2]
+        try:
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def log_message(self, *_):
         pass
+
+
+class SecureDownload(Download):
+    def do_GET(self):
+        self.serve_payload("https")
+
+
+class Proxy(Download):
+    def do_GET(self):
+        self.serve_payload("http")
+
+    def do_CONNECT(self):
+        state = self.server.state
+        with state.lock:
+            state.requests.append({"method": "CONNECT", "url": self.path})
+        if self.path != "ciscobinary.openh264.org:443":
+            self.send_error(502, "Only the fixture-owned TLS destination is available")
+            return
+        # The destination is always the owned loopback TLS listener. Never resolve
+        # or connect to the requested remote host or any other destination.
+        with socket.create_connection(("127.0.0.1", state.tls_port), timeout=10) as upstream:
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.flush()
+            peers = (self.connection, upstream)
+            while True:
+                readable, _, _ = select.select(peers, [], [], 40)
+                if not readable:
+                    return
+                for peer in readable:
+                    try:
+                        data = peer.recv(65536)
+                        if not data:
+                            return
+                        other = upstream if peer is self.connection else self.connection
+                        other.sendall(data)
+                    except (BrokenPipeError, ConnectionResetError, socket.timeout):
+                        return
+
+
+class State:
+    def __init__(self, archive_path):
+        self.lock = threading.Lock()
+        self.requests = []
+        self.payload = b""
+        self.mode = "normal"
+        self.archive_path = archive_path
+        self.tls_port = 0
+
+
+def create_fixture_tls(root):
+    """Generate scratch-only test keys and an ordinary JVM CA truststore."""
+    tls = root / "tls"
+    tls.mkdir()
+    config = tls / "openssl.cnf"
+    config.write_text(
+        "[req]\ndistinguished_name=dn\nprompt=no\n[dn]\nCN=unused\n"
+        "[v3_ca]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n",
+        encoding="utf-8",
+    )
+    commands = [
+        ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2",
+         "-keyout", "ca.key", "-out", "ca.pem", "-subj", "/CN=OpenH264 offline fixture CA",
+         "-extensions", "v3_ca"],
+        ["openssl", "req", "-newkey", "rsa:2048", "-nodes", "-keyout", "server.key",
+         "-out", "server.csr", "-subj", "/CN=ciscobinary.openh264.org"],
+        ["openssl", "x509", "-req", "-in", "server.csr", "-CA", "ca.pem", "-CAkey", "ca.key",
+         "-CAcreateserial", "-out", "server.pem", "-days", "2", "-extfile", "extensions.txt"],
+        ["keytool", "-importcert", "-noprompt", "-alias", "fixture-ca", "-file", "ca.pem",
+         "-keystore", "trust.p12", "-storetype", "PKCS12", "-storepass", "fixture-only"],
+    ]
+    (tls / "extensions.txt").write_text(
+        "subjectAltName=DNS:ciscobinary.openh264.org\nextendedKeyUsage=serverAuth\n", encoding="utf-8"
+    )
+    env = dict(os.environ)
+    env["OPENSSL_CONF"] = str(config)
+    for command in commands:
+        result = subprocess.run(command, cwd=tls, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, timeout=30, check=False, env=env)
+        if result.returncode:
+            raise RuntimeError("TLS fixture preparation failed: " + result.stdout.decode(errors="replace")[-2000:])
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(tls / "server.pem", tls / "server.key")
+    return context, tls / "trust.p12"
 
 
 class IntegrityTests(unittest.TestCase):
@@ -96,16 +190,22 @@ class IntegrityTests(unittest.TestCase):
         include.mkdir(parents=True)
         for header in HEADERS:
             (include / header).write_text("/* unused inert test header */\n", encoding="utf-8")
+        tls_context, cls.truststore = create_fixture_tls(cls.root)
+        cls.state = State(
+            "/libopenh264-" + provenance["version"] + "-android-arm64.8.so.bz2"
+        )
+        cls.tls_server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), SecureDownload)
+        cls.tls_server.daemon_threads = True
+        cls.tls_server.state = cls.state
+        cls.tls_server.socket = tls_context.wrap_socket(cls.tls_server.socket, server_side=True)
+        cls.state.tls_port = cls.tls_server.server_port
+        cls.tls_thread = threading.Thread(target=cls.tls_server.serve_forever, daemon=True)
+        cls.tls_thread.start()
+        cls.addClassCleanup(cls.tls_server.server_close)
+        cls.addClassCleanup(cls.tls_server.shutdown)
         cls.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Proxy)
         cls.server.daemon_threads = True
-        cls.server.state_lock = threading.Lock()
-        cls.server.requests = []
-        cls.server.payload = b""
-        cls.server.expected_url = (
-            "http://ciscobinary.openh264.org/libopenh264-"
-            + provenance["version"]
-            + "-android-arm64.8.so.bz2"
-        )
+        cls.server.state = cls.state
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
         cls.addClassCleanup(cls.server.server_close)
@@ -115,21 +215,25 @@ class IntegrityTests(unittest.TestCase):
     def setUp(self):
         for name in ("libopenh264.so", "temp", "temp.bz2"):
             (self.output.parent / name).unlink(missing_ok=True)
-        with self.server.state_lock:
-            self.server.requests.clear()
+        with self.state.lock:
+            self.state.requests.clear()
+            self.state.mode = "normal"
         # Deterministic, non-executable high-entropy data exceeds the original
         # compressed-size heuristic. It contains neither ELF code nor secrets.
         self.dummy = b"INERT_TEST_DATA_ONLY\n" + hashlib.shake_256(self.id().encode()).digest(8192)
         self.payload = bz2.compress(self.dummy)
 
-    def run_task(self, payload):
-        with self.server.state_lock:
-            self.server.payload = payload
+    def run_task(self, payload, mode="normal"):
+        with self.state.lock:
+            self.state.payload = payload
+            self.state.mode = mode
         port = str(self.server.server_port)
         proxy_options = (
             " -Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=" + port
             + " -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=" + port
             + " -Dhttp.nonProxyHosts= -Dhttps.nonProxyHosts="
+            + " -Djavax.net.ssl.trustStore=" + str(self.truststore)
+            + " -Djavax.net.ssl.trustStorePassword=fixture-only -Djavax.net.ssl.trustStoreType=PKCS12"
         )
         env = dict(os.environ)  # The enclosing sandbox supplies an empty allowlist environment.
         env["JAVA_TOOL_OPTIONS"] = env.get("JAVA_TOOL_OPTIONS", "") + proxy_options
@@ -144,8 +248,8 @@ class IntegrityTests(unittest.TestCase):
         )
         output = process.stdout.decode("utf-8", errors="replace")
         print("GRADLE_OUTPUT " + self.id() + "\n" + output[-16384:], flush=True)
-        with self.server.state_lock:
-            requests = list(self.server.requests)
+        with self.state.lock:
+            requests = list(self.state.requests)
         published = self.output.read_bytes() if self.output.is_file() else None
         print("TASK_RESULT " + json.dumps({
             "test": self.id(), "exit": process.returncode, "requests": requests,
@@ -156,22 +260,37 @@ class IntegrityTests(unittest.TestCase):
         # Configuration/compiler failures must never masquerade as integrity RED.
         if "Task :downloadOpenH264" not in output:
             self.fail("SETUP ERROR: production task did not execute")
+        self.last_output = output
         return process.returncode, published, requests
+
+    def assert_clean_staging(self):
+        leftovers = sorted(p.name for p in self.output.parent.iterdir() if p.name != "libopenh264.so")
+        self.assertEqual(leftovers, [], "Download staging files were retained")
+
+    def trusted_archive(self):
+        if ARGS.trusted_archive is None:
+            self.skipTest("Provide the verified Cisco2.6.0 archive for TLS controls")
+        archive = ARGS.trusted_archive.read_bytes()
+        self.assertEqual(sha256(archive), TRUSTED_ARCHIVE_SHA256, "TLS control archive provenance mismatch")
+        return archive
 
     def test_01_rejects_unknown_download(self):
         code, published, _ = self.run_task(self.payload)
         self.assertFalse(published == self.dummy, "Unverified network bytes became the native build input")
         self.assertNotEqual(code, 0, "Unavailable trusted native input must fail the build")
+        self.assert_clean_staging()
 
     def test_02_rejects_second_unknown_download(self):
         code, published, _ = self.run_task(self.payload)
         self.assertFalse(published == self.dummy, "A second unrelated archive was also accepted")
         self.assertNotEqual(code, 0, "Unavailable trusted native input must fail the build")
+        self.assert_clean_staging()
 
     def test_03_rejects_corrupt_cached_library(self):
         self.output.write_bytes(self.dummy)
         code, _, _ = self.run_task(self.payload)
         self.assertNotEqual(code, 0, "An unchecked preexisting native library satisfied the task")
+        self.assert_clean_staging()
 
     def test_04_preserves_verified_existing_library(self):
         if ARGS.trusted_library is None:
@@ -183,11 +302,61 @@ class IntegrityTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(published == trusted, "Verified cached input changed")
         self.assertEqual(requests, [], "A valid existing library should support offline builds")
+        self.assert_clean_staging()
 
     def test_05_rejects_invalid_archive(self):
         code, published, _ = self.run_task(b"NOT_A_BZIP2_ARCHIVE\n" + self.dummy)
         self.assertIsNone(published)
         self.assertNotEqual(code, 0, "Download/decompression failure was silently treated as build success")
+        self.assert_clean_staging()
+
+    def test_06_accepts_verified_download_over_real_tls(self):
+        code, published, requests = self.run_task(self.trusted_archive())
+        self.assertEqual(code, 0, self.last_output[-2000:])
+        self.assertIsNotNone(published)
+        self.assertEqual(sha256(published), TRUSTED_LIBRARY_SHA256)
+        self.assertTrue(any(r.get("transport") == "https" for r in requests), "No HTTPS response was consumed")
+        self.assertFalse(any(r.get("transport") == "http" for r in requests), "Plain HTTP was used")
+        self.assert_clean_staging()
+
+    def test_07_rejects_same_size_wrong_digest_over_real_tls(self):
+        archive = bytearray(self.trusted_archive())
+        archive[len(archive) // 2] ^= 1
+        code, published, requests = self.run_task(bytes(archive))
+        self.assertNotEqual(code, 0)
+        self.assertIsNone(published)
+        self.assertTrue(any(r.get("transport") == "https" for r in requests))
+        self.assertIn("SHA-256 mismatch", self.last_output)
+        self.assert_clean_staging()
+
+    def test_08_rejects_truncated_tls_response(self):
+        code, published, requests = self.run_task(self.trusted_archive(), mode="truncate")
+        self.assertNotEqual(code, 0)
+        self.assertIsNone(published)
+        self.assertTrue(any(r.get("transport") == "https" for r in requests))
+        self.assert_clean_staging()
+
+    def test_09_rejects_redirect_without_following_it(self):
+        code, published, requests = self.run_task(self.trusted_archive(), mode="redirect")
+        self.assertNotEqual(code, 0)
+        self.assertIsNone(published)
+        self.assertTrue(any(r.get("transport") == "https" for r in requests))
+        self.assertFalse(any("forbidden-redirect" in r["url"] for r in requests))
+        self.assert_clean_staging()
+
+    def test_10_rejects_same_size_wrong_digest_in_cache(self):
+        if ARGS.trusted_library is None:
+            self.skipTest("Provide the verified library for the cache-digest control")
+        cached = bytearray(ARGS.trusted_library.read_bytes())
+        self.assertEqual(sha256(cached), TRUSTED_LIBRARY_SHA256)
+        cached[len(cached) // 2] ^= 1
+        self.output.write_bytes(cached)
+        code, published, requests = self.run_task(self.payload)
+        self.assertNotEqual(code, 0)
+        self.assertIn("SHA-256 mismatch", self.last_output)
+        self.assertTrue(published == cached, "Corrupt cache should remain available for diagnosis")
+        self.assertEqual(requests, [], "Invalid existing input should fail before any download")
+        self.assert_clean_staging()
 
 
 if __name__ == "__main__":
@@ -196,5 +365,6 @@ if __name__ == "__main__":
     parser.add_argument("--scratch", type=Path, required=True)
     parser.add_argument("--gradle", type=Path, required=True, help="Existing local Gradle 8.13 executable")
     parser.add_argument("--trusted-library", type=Path, help="Optional verified Cisco 2.6.0 positive-control input")
+    parser.add_argument("--trusted-archive", type=Path, help="Verified Cisco 2.6.0 bz2 input for real TLS controls")
     ARGS = parser.parse_args()
     unittest.main(argv=[__file__], verbosity=2, exit=True)
