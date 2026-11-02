@@ -552,7 +552,9 @@ public class HttpServer {
                 // BufferedReader.readLine() loop above is unaffected.
                 int CHUNK = Math.min(contentLength, 4096);
                 char[] bodyChars = new char[CHUNK];
-                StringBuilder sb = new StringBuilder(contentLength);
+                // Reserve only the bounded read chunk. Content-Length is untrusted;
+                // let the accumulator grow as body characters actually arrive.
+                StringBuilder sb = new StringBuilder(CHUNK);
                 int bytesAccumulated = 0;
                 while (bytesAccumulated < contentLength) {
                     int read = reader.read(bodyChars, 0, CHUNK);
