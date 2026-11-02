@@ -40,6 +40,7 @@ function fixture(provider = 'gdrive') {
     const elements = new Map();
     const requests = [], warnings = [], timers = new Map();
     const linkStatus = { state: 'pending' };
+    const statusResponses = [];
     let nextTimer = 0;
     const start = deferred(), cancel = deferred(), finish = deferred();
     const document = {
@@ -67,7 +68,9 @@ function fixture(provider = 'gdrive') {
             if (url === '/api/safekeep/link/start') return start.promise;
             if (url === '/api/safekeep/link/cancel') return cancel.promise;
             if (url === '/api/safekeep/link/finish') return finish.promise;
-            if (url.indexOf('/api/safekeep/link/status?') === 0) return Promise.resolve(reply(linkStatus));
+            if (url.indexOf('/api/safekeep/link/status?') === 0) {
+                return statusResponses.length ? statusResponses.shift().promise : Promise.resolve(reply(linkStatus));
+            }
             if (url === '/api/safekeep/dest/test') return Promise.resolve(reply({ success: true, result: {} }));
             throw new Error('Unexpected dummy request: ' + url);
         }
@@ -86,7 +89,41 @@ function fixture(provider = 'gdrive') {
         await flush();
         assert.equal(body.children.length, 1);
     }
-    return { body, requests, warnings, start, cancel, finish, reply, button, openSignIn, timers, linkStatus };
+    return { body, requests, warnings, start, cancel, finish, reply, button, openSignIn, timers, linkStatus, statusResponses };
+}
+
+async function fireTimers(f) {
+    for (const [id, callback] of [...f.timers.entries()]) {
+        f.timers.delete(id);
+        callback();
+    }
+    await flush();
+}
+
+async function pasteWithHeldStatus() {
+    const f = fixture('dropbox');
+    await f.openSignIn();
+    f.start.resolve(f.reply({ success: true, linkId: 'DUMMY_LINK', state: 'pending', mode: 'paste' }));
+    await flush();
+    f.button(1).onclick(); // Leave the actual finish request in flight.
+    f.button(0).onclick();
+    f.cancel.resolve(f.reply({ success: false, error: 'link_commit_started' }, 409));
+    await flush();
+    const status = deferred();
+    f.statusResponses.push(status);
+    await fireTimers(f);
+    assert.equal(f.requests.filter(request => request.url.indexOf('/api/safekeep/link/status?') === 0).length, 1);
+    return { f, status };
+}
+
+function destinationChecks(f) { return f.requests.filter(request => request.url === '/api/safekeep/dest/test').length; }
+
+async function closeWithoutAnotherCancellation(f) {
+    assert.equal(f.button(0).textContent, 'Close');
+    f.button(0).onclick();
+    await flush();
+    assert.equal(f.body.children.length, 0, 'terminal sign-in can close without another cancellation');
+    assert.equal(f.requests.filter(request => request.url === '/api/safekeep/link/cancel').length, 1);
 }
 
 async function run() {
@@ -188,6 +225,42 @@ async function run() {
         assert.equal(f.body.children.length, 0, 'recovered paste modal can be dismissed');
         assert.equal(f.requests.filter(request => request.url === '/api/safekeep/link/cancel').length, 1);
         console.log('UI PASS lost paste response recovers through conflict status polling and closes');
+    }
+    {
+        const { f, status } = await pasteWithHeldStatus();
+        f.finish.resolve(f.reply({ success: true, destId: 'DUMMY_DESTINATION' }));
+        await flush();
+        assert.equal(destinationChecks(f), 1);
+        status.resolve(f.reply({ state: 'pending' }));
+        await flush();
+        await closeWithoutAnotherCancellation(f);
+        assert.equal(destinationChecks(f), 1, 'old pending response cannot repeat completion');
+        console.log('UI PASS old pending status cannot overwrite a successful finish');
+    }
+    for (const lateFinish of ['success', 'http-error', 'transport-error']) {
+        const { f, status } = await pasteWithHeldStatus();
+        status.resolve(f.reply({ state: 'done', destId: 'DUMMY_DESTINATION' }));
+        await flush();
+        assert.equal(destinationChecks(f), 1);
+        const warnings = f.warnings.length;
+        if (lateFinish === 'success') f.finish.resolve(f.reply({ success: true, destId: 'DUMMY_DESTINATION' }));
+        else if (lateFinish === 'http-error') f.finish.resolve(f.reply({ success: false, error: 'DUMMY_LATE_ERROR' }, 400));
+        else f.finish.reject(new Error('dummy late transport failure'));
+        await flush();
+        assert.equal(destinationChecks(f), 1, 'late finish cannot repeat linked destination work');
+        assert.equal(f.warnings.length, warnings, 'late finish cannot report an error after completion');
+        await closeWithoutAnotherCancellation(f);
+        console.log('UI PASS terminal done ignores late finish ' + lateFinish);
+    }
+    {
+        const { f, status } = await pasteWithHeldStatus();
+        status.resolve(f.reply({ state: 'error', error: 'DUMMY_TERMINAL_ERROR' }));
+        await flush();
+        f.finish.resolve(f.reply({ success: true, destId: 'DUMMY_DESTINATION' }));
+        await flush();
+        assert.equal(destinationChecks(f), 0, 'late finish cannot replace terminal error with success');
+        await closeWithoutAnotherCancellation(f);
+        console.log('UI PASS terminal error ignores late finish success');
     }
 }
 

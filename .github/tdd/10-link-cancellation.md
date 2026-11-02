@@ -211,3 +211,42 @@ does not compile that full API class or establish a full Android build. Dummy
 storage observations do not prove encrypted/config persistence, real provider
 behavior, device/runtime acceptance or any transfer. Already claimed commits may
 finish during shutdown; cancellation is not rollback of an accepted commit.
+
+
+### Follow-up: terminal UI responses stay terminal
+
+Independent review found that an older in-flight status response could overwrite
+`done` from paste completion with `pending`, causing Close to send cancellation
+again. The symmetric ordering could repeat the linked/destination check or show
+a stale error when a late finish response arrived after status had already
+published a terminal result.
+
+Only the finish/status response guards changed in this follow-up. Both resolved
+and rejected response handlers keep the existing closed-modal guard and act only
+while the local link remains `pending`. A terminal `done` or `error` result cannot
+be downgraded or repeated by a late response.
+
+The added interleaving test first reproduced RED against production JavaScript
+from `3bd1b81f8c373bdd8aff6357c616b5aa6c2fa64b`: an old `pending` status response
+caused the completed sign-in modal to remain open after Close retried cancellation.
+The full RED log is preserved as `monotonic-red-runtime.raw.log` (exit 1).
+
+After the guard change, a separate **UI-only** sandbox run passed **11 actual-JS
+checks**. The five added interleavings cover an old pending status after finish
+success; terminal done before late finish success, HTTP error or transport
+failure; and terminal error before late finish success. They assert that linked
+work runs at most once, stale errors are ignored and Close does not cancel again.
+The preexisting closed-modal and lost-response recovery controls also pass.
+
+Java was **not rerun** for this JavaScript-only follow-up. All Java source/test
+and dependency hashes still match the prior reviewed full run, which passed 19
+Java checks. This is two linked evidence runs, not a new combined 19+11 execution.
+
+The UI-only GREEN run exited 0 with no stop after 0.749 seconds, with the same
+network-disabled/read-only/tmpfs isolation and 768 MiB/1 CPU/64-process/128 MiB
+scratch bounds. Its wall limit was 30 seconds. Full raw output:
+`green-monotonic-runtime.raw.log`, **1291 bytes**, SHA-256
+`1adf1f6ae16a83dbd9ad7174d30ad65b50e58ecd9b6010206c5b596b7f450108`.
+`green-monotonic-metadata.json` links exact UI input hashes, RED provenance and
+unchanged prior Java/dependency fingerprints. All target processes stopped before
+promotion. The JSON substitution and standalone/API/Android limits above remain.

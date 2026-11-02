@@ -12,12 +12,17 @@ Shutdown closes registration and revokes pending sessions without waiting for an
 accepted commit, avoiding lifecycle lock inversion. Delayed registration, stale
 retry/error callbacks, expiry, duplicate paste and commit failure paths follow the
 same authority rules. The UI checks both cancellation responses and recovers paste
-sign-in through status polling when a finish response is lost.
+sign-in through status polling when a finish response is lost. Finish/status
+callbacks ignore late responses after a terminal result, avoiding duplicate
+completion work, stale errors and a completed modal reverting to cancellation.
 
 Validation: original RED checkpoint `ba9f850a4be7ce3f56caf7b31d1f621e4ebfb40f`
-recorded 3 tests / 1 intended failure. The reviewed GREEN run passed **19 JUnit
-lifecycle tests + 6 actual-JavaScript UI checks** inside the isolated, network-disabled
-lab; `git diff --check` also passed. Tests compile actual `LinkManager`/`OAuthApps`
+recorded 3 tests / 1 intended failure. The reviewed full GREEN run passed **19 JUnit lifecycle tests + 6 actual-JavaScript
+UI checks**. A subsequent UI-only terminal-state follow-up passed **11 UI checks**,
+including both finish/status response orders and late HTTP/transport errors.
+Unchanged Java and dependency hashes link the earlier 19-test result; Java was not
+rerun or claimed as a new combined execution. Both runs used the isolated,
+network-disabled lab; `git diff --check` also passed. Tests compile actual `LinkManager`/`OAuthApps`
 and use real OkHttp 4.12.0 with dummy collaborators. No real provider/account,
 device or transfer is used.
 

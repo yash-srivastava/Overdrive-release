@@ -847,13 +847,13 @@ window.SK = (function () {
                         label: t('safekeep.connect', 'Connect'), cls: 'btn-primary', onClick: function (mm, btn) {
                             btn.disabled = true;
                             api('POST', '/api/safekeep/link/finish', { id: r.linkId, code: val('skPasteCode') }).then(function (f) {
+                                if (closed || link.state !== 'pending') return;
                                 btn.disabled = false;
-                                if (closed) return;
                                 if (f.success) { link.state = 'done'; linked(mm, f.destId); }
                                 else { toast(linkError(f), 'error'); poll(); }
                             }, function () {
+                                if (closed || link.state !== 'pending') return;
                                 btn.disabled = false;
-                                if (closed) return;
                                 toast(t('safekeep.err_link_status', 'Could not confirm sign-in. Checking its status.'), 'warning');
                                 poll();
                             });
@@ -872,13 +872,17 @@ window.SK = (function () {
                 polling = true;
                 api('GET', '/api/safekeep/link/status?id=' + encodeURIComponent(link.linkId)).then(function (s) {
                     polling = false;
-                    if (closed) return;
+                    if (closed || link.state !== 'pending') return;
                     link.state = s.state;
                     if (s.state === 'done') return linked(m, s.destId);
                     if (s.state === 'pending') return poll();
                     m.body.innerHTML = '<p class="sk-queue-err">' + esc(s.state === 'expired' ? t('safekeep.code_expired', 'The code expired. Try again.') : linkError(s)) + '</p>';
                     m.setActions([{ label: t('common.close', 'Close'), onClick: function (mm) { mm.close(); } }]);
-                }, function () { polling = false; poll(); });
+                }, function () {
+                    polling = false;
+                    if (closed || link.state !== 'pending') return;
+                    poll();
+                });
             }, 3000);
         }
     }
