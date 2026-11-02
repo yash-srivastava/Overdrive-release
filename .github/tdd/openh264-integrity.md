@@ -122,3 +122,13 @@ the rejected `libopenh264.so` and rebuild to acquire and verify a fresh copy.
 
 Preserve this RED evidence if the test and future fix checkpoints are squashed.
 No push, merge, deployment or release publication is part of these checkpoints.
+
+## Actual Android-plugin script configuration
+
+The full Android plugin adds a `java` Kotlin DSL accessor. Qualified package references such as `java.nio.file.Files` in the task body resolve through that accessor and fail script compilation. The earlier extracted-task fixture did not apply this plugin and therefore did not detect that build regression.
+
+`run.py` now requires the real offline project-configuration phase to pass before the TLS cases run. `configure-android-project.py` copies eight allowlisted public inputs, retains the complete app script and actual repository plugin aliases, and executes only `:app:help`. No application compile, download, native or deployment task runs.
+
+The new check reproduced the regression on commit `c219a56a9539f43594ee8998dbaf3b2a07e7fb21`: Gradle reaches Android project configuration, then exits 1 with the relevant unresolved Java package references. Runtime RED took 44.856 seconds including cleanup; the raw log SHA-256 is `a6c72274b70f8cd32c28a9b0764a75c7830f3eaa46003ef8c160506dcba3b937`. This is a real script-compilation failure, not an unavailable dependency.
+
+Import correction and combined configuration/TLS GREEN verification are pending at this test checkpoint.

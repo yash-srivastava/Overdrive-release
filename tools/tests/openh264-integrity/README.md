@@ -1,7 +1,9 @@
 # OpenH264 binary-input integrity regression
 
-This standalone Python/Gradle harness executes the production
-`downloadOpenH264` task extracted verbatim from `app/build.gradle.kts`.
+This Python/Gradle harness first configures the complete production Android
+build script with the repository's actual Android and Kotlin plugins. Only
+after that succeeds does it execute the production `downloadOpenH264` task
+extracted verbatim, including its imports, from `app/build.gradle.kts`.
 It records the source and task hashes and fails visibly if the extraction
 adapter no longer matches the task layout. The harness does not reimplement
 the download, decompression, cache check or publication decisions.
@@ -20,6 +22,7 @@ Inside that sandbox, run:
 python3 /src/tools/tests/openh264-integrity/run.py \
   --source /src --scratch /scratch \
   --gradle /tools/gradle-8.13/bin/gradle \
+  --android-sdk /tools/android-sdk --module-cache /fixtures/gradle-cache \
   --trusted-library /fixtures/verified-openh264-2.6.0-arm64.so \
   --trusted-archive /fixtures/verified-openh264-2.6.0-arm64.so.bz2
 ```
@@ -53,10 +56,18 @@ The regression checks:
 - A corrupt cache with the correct size must fail its digest check before networking.
 - Download staging must be removed after success and failure.
 
-Headers are preseeded with unused inert files so this binary-input test never
-contacts GitHub. Task extraction and plain Gradle execution intentionally omit
-the Android plugin, native compiler and application packaging. Separate
-baseline packaging evidence establishes the input's build graph connection.
+The mandatory first phase uses `configure-android-project.py` to copy eight
+allowlisted public configuration inputs and run `:app:help` with the actual
+repository plugins, completely offline. It copies no local properties, OAuth
+configuration or signing material. The complete app script remains unchanged.
+This catches plugin-generated Kotlin DSL names that can change script name
+resolution; the extracted-task fixture alone cannot establish compatibility.
+
+In the subsequent task-only phase, headers are preseeded with unused inert
+files so this binary-input test never contacts GitHub. That phase omits the
+Android plugin, native compiler and packaging. Neither phase compiles the app
+or executes native tasks. Separate baseline packaging evidence establishes
+the input's build graph connection.
 
 The positive TLS control and same-size wrong-digest control distinguish digest
 validation from a transport-only rejection. The fixture's certificate is valid

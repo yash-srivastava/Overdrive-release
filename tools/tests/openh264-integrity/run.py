@@ -17,6 +17,7 @@ import select
 import socket
 import ssl
 import subprocess
+import sys
 import threading
 import unittest
 
@@ -42,7 +43,11 @@ def original_task(source):
     )
     if not version or not task:
         raise RuntimeError("Task layout changed: update the extraction adapter, not the tested task")
-    preamble = version.group(0) + "\n\n"
+    plugins = re.search(r"^plugins\s*\{", text, re.MULTILINE)
+    if not plugins:
+        raise RuntimeError("Plugin block layout changed: update the extraction adapter")
+    imports = "\n".join(re.findall(r"^import .+$", text[:plugins.start()], re.MULTILINE))
+    preamble = imports + "\n\n" + version.group(0) + "\n\n"
     return preamble + task.group(0) + "\n", {
         "source": "app/build.gradle.kts",
         "whole_file_sha256": sha256(build.read_bytes()),
@@ -51,6 +56,8 @@ def original_task(source):
         "task_last_line": text[:task.end()].count("\n") + 1,
         "version": version.group(1),
         "task_changes": [],
+        "imports_sha256": sha256(imports.encode()),
+        "import_changes": [],
     }
 
 
@@ -366,5 +373,16 @@ if __name__ == "__main__":
     parser.add_argument("--gradle", type=Path, required=True, help="Existing local Gradle 8.13 executable")
     parser.add_argument("--trusted-library", type=Path, help="Optional verified Cisco 2.6.0 positive-control input")
     parser.add_argument("--trusted-archive", type=Path, help="Verified Cisco 2.6.0 bz2 input for real TLS controls")
+    parser.add_argument("--android-sdk", type=Path, required=True, help="Existing SDK for mandatory real Android-plugin configuration")
+    parser.add_argument("--module-cache", type=Path, help="Existing read-only Gradle dependency cache")
     ARGS = parser.parse_args()
+    configuration = [
+        sys.executable, str(Path(__file__).with_name("configure-android-project.py")),
+        "--source", str(ARGS.source), "--scratch", str(ARGS.scratch),
+        "--gradle", str(ARGS.gradle), "--sdk", str(ARGS.android_sdk),
+    ]
+    if ARGS.module_cache is not None:
+        configuration += ["--module-cache", str(ARGS.module_cache)]
+    if subprocess.run(configuration, check=False).returncode:
+        raise SystemExit("Actual Android-plugin script configuration failed; TLS-only results would be insufficient")
     unittest.main(argv=[__file__], verbosity=2, exit=True)
