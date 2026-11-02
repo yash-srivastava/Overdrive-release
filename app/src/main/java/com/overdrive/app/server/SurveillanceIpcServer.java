@@ -1970,6 +1970,7 @@ public class SurveillanceIpcServer implements Runnable {
             // daemon-side gate treats as "no monotonic basis" and falls back to the
             // send-time age (prior behavior, no regression).
             long fixElapsedMs = request.optLong("fixElapsedMs", 0L);
+            long fixTimeUtc = request.optLong("fixTimeUtc", 0L);
             // Vertical accuracy + altitude source (elevation pipeline). Older
             // sidecars omit them → 0/false, meaning "unreported / ellipsoidal".
             float verticalAccuracy = (float) request.optDouble("vAcc", 0.0);
@@ -1978,7 +1979,7 @@ public class SurveillanceIpcServer implements Runnable {
             // Directly update GpsMonitor
             com.overdrive.app.monitor.GpsMonitor.getInstance()
                 .updateFromIpc(lat, lng, speed, heading, accuracy, time, altitude, fixElapsedMs,
-                        verticalAccuracy, altitudeIsMsl);
+                        verticalAccuracy, altitudeIsMsl, fixTimeUtc);
             
         } catch (Exception e) {
             logger.error("Failed to update GPS", e);

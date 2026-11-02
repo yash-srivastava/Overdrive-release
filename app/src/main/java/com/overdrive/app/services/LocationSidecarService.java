@@ -68,6 +68,13 @@ public class LocationSidecarService extends Service implements LocationListener 
     // location — AND it can't cross the device-RTC clock domain (which is wrong
     // at cold boot until GPS/NTP corrects it).
     private volatile long fixElapsedMs = 0L;
+    // The fix's own WALL-CLOCK timestamp (Location.getTime(), epoch ms), shipped
+    // raw and used for nothing here. Deliberately NOT an aging input — see the
+    // long comment in onLocationChanged for why fix age is measured on the
+    // monotonic clock instead. This exists for consumers that must align a
+    // position against another system's clock (video sync stamps frames with the
+    // device RTC), which a since-boot value cannot express. 0 = unreported.
+    private volatile long fixTimeUtc = 0L;
     private boolean permissionGranted = false;
 
     // SOTA: Throttling fields to prevent IPC/Disk spam.
@@ -509,6 +516,13 @@ public class LocationSidecarService extends Service implements LocationListener 
         // absolute RTC is wrong; only the delta is used. If getTime() is also
         // unusable (0 / future-dated), leave fixElapsedMs=0 → the daemon gate's
         // send-time fallback governs (never worse than before this feature).
+        // Wall-clock stamp, carried alongside the monotonic one. Raw: no
+        // back-dating, no substitution of now() — a consumer aligning clocks needs
+        // to know when the fix has no usable stamp rather than be handed a
+        // plausible one.
+        long fixUtcRaw = location.getTime();
+        fixTimeUtc = (fixUtcRaw > 0) ? fixUtcRaw : 0L;
+
         long ern = location.getElapsedRealtimeNanos();
         if (ern > 0) {
             fixElapsedMs = ern / 1_000_000L;
@@ -627,6 +641,7 @@ public class LocationSidecarService extends Service implements LocationListener 
             // cache-loaded fix is already rejected by isLoadedFromCache in the geo
             // gate, so the cross-boot value is never used for an age decision.
             json.put("fixElapsedMs", fixElapsedMs);
+            json.put("fixTimeUtc", fixTimeUtc);
 
             // Write to app's files directory
             java.io.File file = new java.io.File(getFilesDir(), "gps_cache.json");
@@ -739,6 +754,7 @@ public class LocationSidecarService extends Service implements LocationListener 
             // perpetually fresh) reads as stale, WITHOUT crossing the device-RTC
             // clock domain (wrong at cold boot until GPS/NTP corrects it).
             json.put("fixElapsedMs", fixElapsedMs);
+            json.put("fixTimeUtc", fixTimeUtc);
         } catch (Exception e) {
             return;
         }

@@ -880,6 +880,11 @@ public class MqttPublisherService implements MqttCallback {
             JSONObject loc = new JSONObject();
             loc.put("latitude", snap.optDouble("lat"));
             loc.put("longitude", snap.optDouble("lon"));
+            // When the fix carried its own timestamp, pass it on: a consumer aligning
+            // this position against another clock needs when the fix was TAKEN, not
+            // when it was published. Omitted rather than zeroed when unreported.
+            long fixUtc = snap.optLong("gps_utc", 0L);
+            if (fixUtc > 0) loc.put("gps_utc", fixUtc);
             publishString(HomeAssistantDiscovery.locationTopic(config.topic), loc.toString(), true, config.qos);
         } catch (Exception ignored) {}
     }

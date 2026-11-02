@@ -100,13 +100,19 @@ public class GpsMonitor {
         // MONOTONIC since-boot fix timestamp from the sidecar. A zero value
         // means an older sidecar or a cache-loaded, cross-boot fix.
         public final long fixElapsedMs;
+        // The fix's own WALL-CLOCK timestamp (epoch ms). Distinct from lastUpdate,
+        // which is the IPC send time and is what staleness is measured against, and
+        // from fixElapsedMs, which is monotonic and is what fix AGE is measured
+        // against. This one exists for aligning a position with another system's
+        // clock — a since-boot value cannot express that. 0 = unreported.
+        public final long fixTimeUtc;
         public final boolean loadedFromCache;
 
         private GpsFixSnapshot(
                 double latitude, double longitude,
                 float speed, float heading, float accuracy,
                 double altitude, float verticalAccuracy, boolean altitudeIsMsl,
-                long lastUpdate, long fixElapsedMs, boolean loadedFromCache) {
+                long lastUpdate, long fixElapsedMs, long fixTimeUtc, boolean loadedFromCache) {
             this.latitude = latitude;
             this.longitude = longitude;
             this.speed = speed;
@@ -117,13 +123,14 @@ public class GpsMonitor {
             this.altitudeIsMsl = altitudeIsMsl;
             this.lastUpdate = lastUpdate;
             this.fixElapsedMs = fixElapsedMs;
+            this.fixTimeUtc = fixTimeUtc;
             this.loadedFromCache = loadedFromCache;
         }
 
         private static GpsFixSnapshot empty() {
             return new GpsFixSnapshot(
                     0.0, 0.0, 0.0f, 0.0f, 0.0f,
-                    0.0, 0.0f, false, 0L, 0L, false);
+                    0.0, 0.0f, false, 0L, 0L, 0L, false);
         }
 
         public boolean hasLocation() {
@@ -293,6 +300,14 @@ public class GpsMonitor {
     public void updateFromIpc(double lat, double lng, float speed, float heading, float accuracy,
                               long time, double altitude, long fixElapsedMs,
                               float verticalAccuracy, boolean altitudeIsMsl) {
+        // Back-compat overload: no wall-clock stamp → 0 = unreported.
+        updateFromIpc(lat, lng, speed, heading, accuracy, time, altitude, fixElapsedMs,
+                verticalAccuracy, altitudeIsMsl, 0L);
+    }
+
+    public void updateFromIpc(double lat, double lng, float speed, float heading, float accuracy,
+                              long time, double altitude, long fixElapsedMs,
+                              float verticalAccuracy, boolean altitudeIsMsl, long fixTimeUtc) {
         // Reject invalid coordinates (0,0 is in the ocean, not a real location)
         if (lat == 0.0 && lng == 0.0) {
             return;
@@ -300,7 +315,7 @@ public class GpsMonitor {
 
         GpsFixSnapshot fix = new GpsFixSnapshot(
                 lat, lng, speed, heading, accuracy, altitude, verticalAccuracy, altitudeIsMsl,
-                time, fixElapsedMs, false);
+                time, fixElapsedMs, fixTimeUtc, false);
         GpsFixSnapshot previous = this.fixSnapshot;
         if (fixElapsedMs > 0L) {
             unstampedSinceElapsed = 0L;
@@ -496,6 +511,9 @@ public class GpsMonitor {
                         json.optBoolean("altMsl", false),
                         json.optLong("time", 0),
                         0L,
+                        // Unlike the monotonic stamp above, a wall-clock time stays
+                        // meaningful across a reboot, so a cached fix keeps it.
+                        json.optLong("fixTimeUtc", 0L),
                         true);
                 return true;
             }
@@ -538,6 +556,7 @@ public class GpsMonitor {
      *  ages against the daemon's own elapsedRealtime(). 0 = no monotonic basis
      *  (older sidecar / cache-loaded); callers then fall back to send-time aging. */
     public long getFixElapsedMs() { return fixSnapshot.fixElapsedMs; }
+    public long getFixTimeUtc() { return fixSnapshot.fixTimeUtc; }
     public String getProvider() { return "sidecar"; }
     public boolean isMoving() { return fixSnapshot.isMoving(); }
 
