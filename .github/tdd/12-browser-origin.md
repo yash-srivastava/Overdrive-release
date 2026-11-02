@@ -51,4 +51,26 @@ dependency. Actual browser, installed-app and supported firmware acceptance
 require separate evidence. Requests with no `Origin` remain compatible with the
 existing native fallback; this change does not identify every browser request.
 
-Implementation and GREEN validation are pending this RED checkpoint.
+## Implementation and GREEN evidence
+
+HTTP and WebSocket ingress pass the actual Origin header and accepted listener
+port to the shared middleware. Duplicate Origin headers become an opaque value.
+Only Tier2 local fallback is restricted; valid JWT/public/signed asset precedence
+is unchanged. Supplied origins must identify the HTTP loopback listener, without
+credentials, query, fragment or non-root path. Native absent-Origin behavior and
+the existing peer-address classifier remain unchanged.
+
+The exact same 49 assertions compiled and ran against the changed source:
+**49 passed, 0 failed**, exit0, no stop, 2.550s. Existing
+`HttpServerProxyProtocolTest` and `GenAiRequestSecurityTest` also compiled and
+passed: **6 JUnit tests**, exit0, no stop, 3.469s. The parent retained these
+results after the author agent was interrupted by the service filter; the
+interrupted runtime assignment was not retried.
+
+Fixed-source Android browser controls were prepared but not executed. The
+pre-change API29/WebView74 browser observation remains baseline evidence only;
+no post-fix browser, installed APK or fleet acceptance is claimed. Final source
+and retained fixture hashes must pass independent review before PR publication.
+
+
+Retained GREEN log SHA256: `ab5306f587239b0e582473e286d4757f7ae17bb1b27e285b07d9b87c957ca946`.

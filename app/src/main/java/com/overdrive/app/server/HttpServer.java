@@ -486,7 +486,9 @@ public class HttpServer {
                 } else if (lower.startsWith("host:")) {
                     hostHeader = line.substring(5).trim();
                 } else if (lower.startsWith("origin:")) {
-                    originHeader = line.substring(7).trim();
+                    // Multiple Origin fields are not a browser origin. Keep an
+                    // opaque value so neither auth fallback nor GenAI accepts it.
+                    originHeader = originHeader == null ? line.substring(7).trim() : "null";
                 } else if (lower.startsWith("x-forwarded-for:")) {
                     hasTunnelHeaders = true;
                     forwardedFor = forwardedForValue(
@@ -621,7 +623,8 @@ public class HttpServer {
                     ? AuthMiddleware.checkJwtOnly(
                         wsPathOnly, cookieHeader, wsAuthHeader, out)
                     : AuthMiddleware.checkAuth(wsPathOnly, cookieHeader, wsAuthHeader, out,
-                        client.getRemoteSocketAddress(), hasTunnelHeaders);
+                        client.getRemoteSocketAddress(), hasTunnelHeaders,
+                        originHeader, client.getLocalPort());
                 if (!wsAuthenticated) {
                     client.close();
                     return;
@@ -746,7 +749,8 @@ public class HttpServer {
                     || widgetWriteRequest
                 ? AuthMiddleware.checkJwtOnly(path, cookieHeader, authHeader, out)
                 : AuthMiddleware.checkAuth(path, cookieHeader, authHeader, out,
-                    client.getRemoteSocketAddress(), hasTunnelHeaders);
+                    client.getRemoteSocketAddress(), hasTunnelHeaders,
+                    originHeader, client.getLocalPort());
             if (!authenticated) {
                 client.close();
                 return;

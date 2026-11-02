@@ -21,6 +21,8 @@ import java.util.Set;
  *            keeps developer-tools and ADB shell access working while
  *            blocking traffic relayed via cloudflared / zrok / ngrok which
  *            all forward to localhost but inject these proxy headers.
+ *            Browser requests may use this fallback only when their Origin
+ *            is the local HTTP daemon on the accepted listener's port.
  *
  * Public paths (no auth required at all) — the authoritative list is PUBLIC_PATHS /
  * PUBLIC_PREFIXES below; this summary must not drift from it:
@@ -80,6 +82,17 @@ public class AuthMiddleware {
     public static boolean checkAuth(String path, String cookieHeader, String authHeader,
                                      OutputStream out, java.net.SocketAddress clientAddress,
                                      boolean hasTunnelHeaders) throws Exception {
+        // Compatibility for in-process/native callers that have no browser headers.
+        // HTTP and WebSocket ingress must use the overload carrying Origin and port.
+        return checkAuth(path, cookieHeader, authHeader, out, clientAddress,
+                hasTunnelHeaders, null, -1);
+    }
+
+    /** Full network-ingress check, including browser-origin restrictions on Tier 2. */
+    public static boolean checkAuth(String path, String cookieHeader, String authHeader,
+                                     OutputStream out, java.net.SocketAddress clientAddress,
+                                     boolean hasTunnelHeaders, String originHeader,
+                                     int localPort) throws Exception {
         // Tier 0 — public paths (login UI, static assets, login submission)
         if (isPublicPath(path)) {
             return true;
@@ -140,8 +153,10 @@ public class AuthMiddleware {
         // tunnel-fingerprint headers are present. Reverse proxies (cloudflared,
         // zrok, ngrok) all forward to localhost but inject these headers — so
         // their absence is a strong signal we're talking to a same-device
-        // caller. Defense in depth alongside Tier 1.
-        if (!hasTunnelHeaders && clientAddress != null) {
+        // caller. A foreign browser page also reaches this socket from loopback,
+        // so a supplied Origin must independently identify the local listener.
+        if (!hasTunnelHeaders && clientAddress != null
+                && isLocalBrowserOrigin(originHeader, localPort)) {
             String addrStr = clientAddress.toString();
             boolean isLoopback = addrStr.contains("127.0.0.1") || addrStr.contains("/0:0:0:0:0:0:0:1");
             if (isLoopback) {
@@ -151,6 +166,35 @@ public class AuthMiddleware {
 
         return handleUnauthorized(path, out,
             jwt == null || jwt.isEmpty() ? "No session token" : "Invalid session token");
+    }
+
+    private static boolean isLocalBrowserOrigin(String origin, int localPort) {
+        // Native clients and direct navigation do not supply Origin. Preserve the
+        // existing fallback for them; an explicitly empty/opaque Origin is different.
+        if (origin == null) return true;
+        if (origin.trim().isEmpty() || localPort < 1 || localPort > 65535) return false;
+        try {
+            java.net.URI source = new java.net.URI(origin.trim());
+            if (!"http".equalsIgnoreCase(source.getScheme())
+                    || source.getUserInfo() != null || source.getQuery() != null
+                    || source.getFragment() != null
+                    || (source.getPath() != null && !source.getPath().isEmpty()
+                        && !"/".equals(source.getPath()))) {
+                return false;
+            }
+            String host = source.getHost();
+            boolean loopbackHost = "127.0.0.1".equals(host)
+                    || "localhost".equalsIgnoreCase(host)
+                    || "[::1]".equals(host) || "::1".equals(host)
+                    || "[0:0:0:0:0:0:0:1]".equals(host)
+                    || "0:0:0:0:0:0:0:1".equals(host);
+            int port = source.getPort() < 0 ? 80 : source.getPort();
+            // Host / forwarded headers are client-controlled and cannot grant
+            // fallback authority. Compare with the actual accepted socket instead.
+            return loopbackHost && port == localPort;
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     /**
