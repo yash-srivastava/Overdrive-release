@@ -21,3 +21,4 @@ javac -encoding UTF-8 -cp "$1" -d "$BUILD_DIR/classes" \
     "$ROOT/app/src/main/java/com/overdrive/app/safekeep/auth/OAuthApps.java"
 java -ea -cp "$BUILD_DIR/classes:$1" org.junit.runner.JUnitCore \
     com.overdrive.app.safekeep.LinkManagerCancellationTest
+node "$TEST_ROOT/ui.test.cjs"

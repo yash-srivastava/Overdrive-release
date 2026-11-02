@@ -7,9 +7,9 @@ final class Engine {
     final ScheduledThreadPoolExecutor aux;
     final Config cfg = new Config();
     Engine(ScheduledThreadPoolExecutor aux) { this.aux = aux; }
-    static final class Config { Object destination(String id) { return null; } }
+    static final class Config { Object destination(String id) { return LinkManagerCancellationTest.destination(id); } }
     void runCtl(Runnable command) { command.run(); }
     void setDestState(String id, String state, String error, long retryAt) {
-        throw new AssertionError("Relink is outside this new-destination fixture");
+        LinkManagerCancellationTest.recordControlState(id, state);
     }
 }

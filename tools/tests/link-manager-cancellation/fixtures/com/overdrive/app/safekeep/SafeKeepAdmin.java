@@ -6,9 +6,11 @@ import org.json.JSONObject;
 final class SafeKeepAdmin {
     static boolean addDestination(String id, String type, String name, JSONObject params, String proxy) {
         LinkManagerCancellationTest.recordStorage("admin.addDestination", null);
-        return true;
+        return LinkManagerCancellationTest.adminResult();
     }
     static boolean updateDestination(String id, JSONObject patch) {
-        throw new AssertionError("Relink is outside this new-destination fixture");
+        LinkManagerCancellationTest.recordUpdate(patch);
+        LinkManagerCancellationTest.recordStorage("admin.updateDestination", null);
+        return LinkManagerCancellationTest.adminResult();
     }
 }

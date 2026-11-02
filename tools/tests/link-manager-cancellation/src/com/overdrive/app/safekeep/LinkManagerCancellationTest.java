@@ -1,6 +1,7 @@
 package com.overdrive.app.safekeep;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -11,12 +12,16 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.Future;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
@@ -53,13 +58,31 @@ public class LinkManagerCancellationTest {
     /** Used solely by the isolated HttpFactory collaborator. */
     public static OkHttpClient client() { return current.client; }
 
+    public static void recordWarning(String message) { current.warnings.add(message); }
+    static Object destination(String id) { return id.equals(current.relinkId) ? current : null; }
+    static void recordControlState(String id, String state) { current.controlState = id + ":" + state; }
+    static void recordUpdate(JSONObject patch) { current.destinationPatch = patch; }
+    static boolean secretsResult() {
+        if (current.throwSecrets) throw new IllegalStateException("dummy storage failure");
+        return !current.failSecrets;
+    }
+    static boolean adminResult() { return !current.failAdmin; }
+
     static void recordStorage(String operation, JSONObject secrets) {
-        if (secrets != null) {
+        if (secrets != null && secrets.has("accessToken")) {
             assertEquals("DUMMY_ACCESS_TOKEN", secrets.optString("accessToken"));
             assertEquals("DUMMY_REFRESH_TOKEN", secrets.optString("refreshToken"));
+        } else if (secrets != null) {
+            assertEquals("DUMMY_LOGIN", secrets.optString("username"));
+            assertEquals("DUMMY_PASSWORD", secrets.optString("password"));
         }
         synchronized (current.storage) { current.storage.add(operation); }
         current.event("STORAGE " + operation + " cancelReturned=" + current.cancelReturned);
+        if ("secrets.put".equals(operation) && current.pauseStorage) {
+            current.storageEntered.countDown();
+            try { await(current.resumeStorage, "storage resumed"); }
+            catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new AssertionError(e); }
+        }
     }
 
     @Before public void setUp() {
@@ -67,18 +90,35 @@ public class LinkManagerCancellationTest {
         current = fixture;
         fixture.client = new OkHttpClient.Builder().addInterceptor(chain -> {
             Request request = chain.request();
-            assertEquals("POST", request.method());
             assertEquals("https", request.url().scheme());
-            assertEquals("oauth2.googleapis.com", request.url().host());
+            String host = request.url().host();
+            String path = request.url().encodedPath();
             ResponseBody body;
-            if ("/device/code".equals(request.url().encodedPath())) {
+            if ("oauth2.googleapis.com".equals(host) && "/device/code".equals(path)) {
+                assertEquals("POST", request.method());
                 fixture.startRequests.incrementAndGet();
                 fixture.event("INTERCEPT dummy start response; transportUnused=true");
-                body = ResponseBody.create(MediaType.get("application/json"), START_RESPONSE);
-            } else if ("/token".equals(request.url().encodedPath())) {
+                body = fixture.pauseStart ? pausedBody(fixture.startResponse, fixture.startPaused,
+                        fixture.resumeStart, "START") : jsonBody(fixture.startResponse);
+            } else if (("oauth2.googleapis.com".equals(host) && "/token".equals(path))
+                    || ("api.dropboxapi.com".equals(host) && "/oauth2/token".equals(path))) {
+                assertEquals("POST", request.method());
                 fixture.pollRequests.incrementAndGet();
                 fixture.event("INTERCEPT dummy poll response; transportUnused=true");
-                body = fixture.pauseBody ? pausedBody() : ResponseBody.create(MediaType.get("application/json"), TOKEN_RESPONSE);
+                String response = fixture.tokenResponses.poll();
+                if (response == null) response = TOKEN_RESPONSE;
+                body = fixture.pauseBody ? pausedBody(response, fixture.bodyPaused, fixture.resumeBody, "POLL") : jsonBody(response);
+            } else if ("dummy.invalid".equals(host) && "/index.php/login/v2".equals(path)) {
+                assertEquals("POST", request.method());
+                body = jsonBody("{\"poll\":{\"token\":\"DUMMY_POLL_TOKEN\",\"endpoint\":\"https://dummy.invalid/dummy-poll\"},\"login\":\"https://dummy.invalid/login\"}");
+            } else if ("dummy.invalid".equals(host) && "/dummy-poll".equals(path)) {
+                assertEquals("POST", request.method());
+                fixture.pollRequests.incrementAndGet();
+                String response = "{\"loginName\":\"DUMMY_LOGIN\",\"appPassword\":\"DUMMY_PASSWORD\"}";
+                body = fixture.pauseBody ? pausedBody(response, fixture.bodyPaused, fixture.resumeBody, "POLL") : jsonBody(response);
+            } else if ("dummy.invalid".equals(host) && "/ocs/v1.php/cloud/user".equals(path)) {
+                assertEquals("GET", request.method());
+                body = jsonBody("{\"ocs\":{\"data\":{\"id\":\"DUMMY_USER_ID\"}}}");
             } else {
                 throw new AssertionError("Unexpected source URL path");
             }
@@ -98,10 +138,14 @@ public class LinkManagerCancellationTest {
     @After public void tearDown() throws Exception {
         // Release the callback even if an assertion fails or cancellation blocks.
         fixture.resumeBody.countDown();
+        fixture.resumeStart.countDown();
+        fixture.resumeStorage.countDown();
         canceller.shutdownNow();
         scheduler.shutdownNow();
         assertTrue("cancellation worker stopped", canceller.awaitTermination(2, TimeUnit.SECONDS));
         assertTrue("poll worker stopped", scheduler.awaitTermination(2, TimeUnit.SECONDS));
+        assertEquals("unexpected logger warnings: " + fixture.warnings,
+                fixture.expectedWarnings, fixture.warnings.size());
         fixture.client.connectionPool().evictAll();
         fixture.client.dispatcher().executorService().shutdownNow();
         current = null;
@@ -114,13 +158,14 @@ public class LinkManagerCancellationTest {
         assertEquals(1, fixture.startRequests.get());
         assertEquals(1, fixture.pollRequests.get());
         assertEquals(Arrays.asList("secrets.put", "admin.addDestination"), fixture.storageCalls());
+        assertFalse("completed commit cannot be reported cancelled", manager.cancel(id));
         fixture.event("CONTROL_PASS normal completion");
     }
 
     @Test(timeout = 20_000L) public void bCancelBeforeCallbackPreventsStorage() throws Exception {
         String id = start();
         assertEquals(0, fixture.pollRequests.get());
-        cancelAndAwait(id);
+        assertTrue(cancelAndAwait(id));
         assertTrue(scheduler.poller.isCancelled());
         // A scheduler sentinel proves the original 5s callback deadline has passed.
         CountDownLatch pastDeadline = new CountDownLatch(1);
@@ -138,7 +183,7 @@ public class LinkManagerCancellationTest {
         String id = start();
         await(fixture.bodyPaused, "poll response body paused");
         assertEquals(Collections.emptyList(), fixture.storageCalls());
-        cancelAndAwait(id);
+        assertTrue(cancelAndAwait(id));
         assertTrue(scheduler.poller.isCancelled());
         assertEquals("expired", manager.status(id).getString("state"));
         fixture.event("STATUS_AFTER_CANCEL expired; resume response");
@@ -151,24 +196,219 @@ public class LinkManagerCancellationTest {
                 Collections.emptyList(), fixture.storageCalls());
     }
 
-    private String start() throws Exception {
-        JSONObject params = new JSONObject().put("app", new JSONObject().put("clientId", "DUMMY_CLIENT_ID"));
-        JSONObject state = manager.start("gdrive", params, System.currentTimeMillis() + 10_000L);
+    @Test(timeout = 20_000L) public void dCommitClaimWinsWithoutBlockingCancellationOrShutdown() throws Exception {
+        fixture.fastScheduling = true;
+        fixture.pauseStorage = true;
+        fixture.startResponse = START_RESPONSE.replace("600", "1");
+        String id = start();
+        await(fixture.storageEntered, "first storage call after commit claim");
+        assertFalse("commit claim must be reported too late", cancelAndAwait(id));
+        canceller.submit(() -> manager.cancelAll()).get(2, TimeUnit.SECONDS);
+        // Status expiry and shutdown cannot overwrite the accepted commit or wait for its I/O.
+        Thread.sleep(1100);
+        assertEquals("pending", manager.status(id).getString("state"));
+        fixture.resumeStorage.countDown();
+        awaitCallback();
+        assertEquals("done", manager.status(id).getString("state"));
+        assertEquals(Arrays.asList("secrets.put", "admin.addDestination"), fixture.storageCalls());
+    }
+
+    @Test(timeout = 20_000L) public void eCancelAllRevokesInFlightResponse() throws Exception {
+        fixture.fastScheduling = true;
+        fixture.pauseBody = true;
+        String id = start();
+        await(fixture.bodyPaused, "response paused");
+        canceller.submit(() -> manager.cancelAll()).get(2, TimeUnit.SECONDS);
+        fixture.resumeBody.countDown();
+        awaitCallback();
+        assertEquals("expired", manager.status(id).getString("state"));
+        assertEquals(Collections.emptyList(), fixture.storageCalls());
+        expectState("disabled", () -> start());
+        assertEquals(1, fixture.startRequests.get());
+    }
+
+    @Test(timeout = 20_000L) public void fDelayedStartCannotRegisterAfterShutdown() throws Exception {
+        fixture.pauseStart = true;
+        Future<String> started = canceller.submit(() -> start());
+        await(fixture.startPaused, "start response paused");
+        manager.cancelAll();
+        fixture.resumeStart.countDown();
+        try { started.get(2, TimeUnit.SECONDS); throw new AssertionError("start must fail after shutdown"); }
+        catch (ExecutionException e) { assertEquals("disabled", e.getCause().getMessage()); }
+        assertEquals(0, scheduler.schedules.get());
+        assertEquals(Collections.emptyList(), fixture.storageCalls());
+    }
+
+    @Test(timeout = 20_000L) public void gTimedOutStartNeverSchedules() throws Exception {
+        expectState("timeout", () -> manager.start("gdrive", params(), 0));
+        assertEquals(0, scheduler.schedules.get());
+        assertEquals(Collections.emptyList(), fixture.storageCalls());
+    }
+
+    @Test(timeout = 20_000L) public void hStaleSlowDownCannotRescheduleAfterCancel() throws Exception {
+        fixture.fastScheduling = true;
+        fixture.pauseBody = true;
+        fixture.tokenResponses.add("{\"error\":\"slow_down\"}");
+        String id = start();
+        await(fixture.bodyPaused, "slow_down response paused");
+        assertTrue(cancelAndAwait(id));
+        fixture.resumeBody.countDown();
+        awaitCallback();
+        assertEquals(1, scheduler.schedules.get());
+        assertEquals("expired", manager.status(id).getString("state"));
+    }
+
+    @Test(timeout = 20_000L) public void iSlowDownAndPendingResponsesStillRetry() throws Exception {
+        fixture.fastScheduling = true;
+        fixture.tokenResponses.add("{\"error\":\"slow_down\"}");
+        fixture.tokenResponses.add("{\"error\":\"authorization_pending\"}");
+        String id = start();
+        awaitCallback();
+        awaitCallback();
+        awaitCallback();
+        assertEquals("done", manager.status(id).getString("state"));
+        assertEquals(2, scheduler.schedules.get());
+        assertEquals(Arrays.asList(5000L, 10000L), scheduler.requestedDelays);
+        assertEquals(3, fixture.pollRequests.get());
+    }
+
+    @Test(timeout = 20_000L) public void jStaleProviderErrorCannotOverwriteCancellation() throws Exception {
+        fixture.fastScheduling = true;
+        fixture.pauseBody = true;
+        fixture.tokenResponses.add("{\"error\":\"access_denied\"}");
+        String id = start();
+        await(fixture.bodyPaused, "error response paused");
+        assertTrue(cancelAndAwait(id));
+        fixture.resumeBody.countDown();
+        awaitCallback();
+        assertEquals("expired", manager.status(id).getString("state"));
+        assertEquals(Collections.emptyList(), fixture.storageCalls());
+    }
+
+    @Test(timeout = 20_000L) public void kExpiryBeforeClaimPreventsPersistence() throws Exception {
+        fixture.fastScheduling = true;
+        fixture.pauseBody = true;
+        fixture.startResponse = START_RESPONSE.replace("600", "1");
+        String id = start();
+        await(fixture.bodyPaused, "response paused before expiry");
+        Thread.sleep(1100);
+        assertEquals("expired", manager.status(id).getString("state"));
+        fixture.resumeBody.countDown();
+        awaitCallback();
+        assertEquals(Collections.emptyList(), fixture.storageCalls());
+    }
+
+    @Test(timeout = 20_000L) public void lRelinkCommitStillUpdatesExistingDestination() throws Exception {
+        fixture.fastScheduling = true;
+        fixture.relinkId = "dummy-existing";
+        String id = start("gdrive", params().put("relinkId", fixture.relinkId));
+        awaitCallback();
+        assertEquals("done", manager.status(id).getString("state"));
+        assertEquals(fixture.relinkId, manager.status(id).getString("destId"));
+        assertEquals(Collections.singletonList("secrets.put"), fixture.storageCalls());
+        assertEquals("dummy-existing:ok", fixture.controlState);
+    }
+
+    @Test(timeout = 20_000L) public void mDuplicatePasteAndCancellationCannotCommit() throws Exception {
+        fixture.pauseBody = true;
+        String id = start("dropbox", params());
+        Future<JSONObject> paste = canceller.submit(() -> manager.finishPaste(id, "DUMMY_CODE"));
+        await(fixture.bodyPaused, "paste response paused");
+        expectState("link_in_progress", () -> manager.finishPaste(id, "DUMMY_CODE"));
+        assertTrue(manager.cancel(id));
+        fixture.resumeBody.countDown();
+        assertEquals("expired", paste.get(2, TimeUnit.SECONDS).getString("state"));
+        assertEquals(1, fixture.pollRequests.get());
+        assertEquals(Collections.emptyList(), fixture.storageCalls());
+    }
+
+    @Test(timeout = 20_000L) public void nPasteSuccessCommitsOnlyOnce() throws Exception {
+        String id = start("dropbox", params());
+        assertEquals("done", manager.finishPaste(id, "DUMMY_CODE").getString("state"));
+        expectState("link_expired", () -> manager.finishPaste(id, "DUMMY_CODE"));
+        assertFalse(manager.cancel(id));
+        assertEquals(1, fixture.pollRequests.get());
+        assertEquals(Arrays.asList("secrets.put", "admin.addDestination"), fixture.storageCalls());
+    }
+
+    @Test(timeout = 20_000L) public void oSecretsFailurePublishesTerminalError() throws Exception {
+        fixture.fastScheduling = true;
+        fixture.failSecrets = true;
+        String id = start();
+        awaitCallback();
+        assertEquals("error", manager.status(id).getString("state"));
+        assertEquals(Collections.singletonList("secrets.put"), fixture.storageCalls());
+    }
+
+    @Test(timeout = 20_000L) public void pDestinationFailureRollsBackAndFinishes() throws Exception {
+        fixture.fastScheduling = true;
+        fixture.failAdmin = true;
+        String id = start();
+        awaitCallback();
+        assertEquals("error", manager.status(id).getString("state"));
+        assertEquals(Arrays.asList("secrets.put", "admin.addDestination", "secrets.remove"), fixture.storageCalls());
+    }
+
+    @Test(timeout = 20_000L) public void qUnexpectedStorageExceptionCannotRemainPending() throws Exception {
+        fixture.fastScheduling = true;
+        fixture.throwSecrets = true;
+        fixture.expectedWarnings = 1;
+        String id = start();
+        awaitCallback();
+        assertEquals("error", manager.status(id).getString("state"));
+        assertEquals(1, fixture.warnings.size());
+    }
+
+    @Test(timeout = 20_000L) public void rNextcloudRelinkStillUpdatesAccountPath() throws Exception {
+        fixture.fastScheduling = true;
+        fixture.relinkId = "dummy-existing";
+        String id = start("nextcloud", params().put("server", "https://dummy.invalid").put("relinkId", fixture.relinkId));
+        awaitCallback();
+        assertEquals("done", manager.status(id).getString("state"));
+        assertEquals(Arrays.asList("secrets.put", "admin.updateDestination"), fixture.storageCalls());
+        assertEquals("https://dummy.invalid/remote.php/dav/files/DUMMY_USER_ID/",
+                fixture.destinationPatch.getJSONObject("params").getString("url"));
+        assertEquals("dummy-existing:ok", fixture.controlState);
+    }
+
+    @Test(timeout = 20_000L) public void sNextcloudCancelledResponseCannotPersist() throws Exception {
+        fixture.fastScheduling = true;
+        fixture.pauseBody = true;
+        String id = start("nextcloud", params().put("server", "https://dummy.invalid"));
+        await(fixture.bodyPaused, "Nextcloud response paused");
+        assertTrue(cancelAndAwait(id));
+        fixture.resumeBody.countDown();
+        awaitCallback();
+        assertEquals("expired", manager.status(id).getString("state"));
+        assertEquals(Collections.emptyList(), fixture.storageCalls());
+    }
+
+    private interface CheckedCall { Object run() throws Exception; }
+    private static void expectState(String expected, CheckedCall call) throws Exception {
+        try { call.run(); throw new AssertionError("Expected " + expected); }
+        catch (IllegalStateException e) { assertEquals(expected, e.getMessage()); }
+    }
+
+    private JSONObject params() { return new JSONObject().put("app", new JSONObject().put("clientId", "DUMMY_CLIENT_ID")); }
+    private String start() throws Exception { return start("gdrive", params()); }
+    private String start(String type, JSONObject params) throws Exception {
+        JSONObject state = manager.start(type, params, System.currentTimeMillis() + 10_000L);
         assertEquals("pending", state.getString("state"));
         fixture.event("START_RETURNED pending");
         return state.getString("linkId");
     }
 
-    private void cancelAndAwait(String id) throws Exception {
+    private boolean cancelAndAwait(String id) throws Exception {
         fixture.event("CANCEL_CALL");
         // Bound this wait to catch a future fix holding a commit lock during network I/O.
-        canceller.submit(() -> manager.cancel(id)).get(2, TimeUnit.SECONDS);
+        boolean cancelled = canceller.submit(() -> manager.cancel(id)).get(2, TimeUnit.SECONDS);
         fixture.cancelReturned = true;
-        fixture.event("CANCEL_RETURNED");
+        fixture.event("CANCEL_RETURNED accepted=" + cancelled);
+        return cancelled;
     }
 
     private void awaitCallback() throws Exception {
-        await(fixture.callbackEnded, "poll callback completed");
+        assertEquals("poll callback completed", Boolean.TRUE, fixture.callbacks.poll(10, TimeUnit.SECONDS));
         assertNull("callback must not fail independently of the cancellation assertion", fixture.callbackFailure);
     }
 
@@ -176,18 +416,20 @@ public class LinkManagerCancellationTest {
         assertTrue("Timed out: " + reason, latch.await(10, TimeUnit.SECONDS));
     }
 
-    private ResponseBody pausedBody() {
-        Buffer buffer = new Buffer().writeUtf8(TOKEN_RESPONSE);
+    private static ResponseBody jsonBody(String payload) { return ResponseBody.create(MediaType.get("application/json"), payload); }
+
+    private ResponseBody pausedBody(String payload, CountDownLatch paused, CountDownLatch resume, String label) {
+        Buffer buffer = new Buffer().writeUtf8(payload);
         BufferedSource source = Okio.buffer(new Source() {
             boolean first = true;
             @Override public long read(Buffer sink, long count) throws IOException {
                 if (first) {
                     first = false;
-                    fixture.event("POLL_BODY_PAUSED");
-                    fixture.bodyPaused.countDown();
-                    try { await(fixture.resumeBody, "response resumed"); }
+                    fixture.event(label + "_BODY_PAUSED");
+                    paused.countDown();
+                    try { await(resume, "response resumed"); }
                     catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IOException(e); }
-                    fixture.event("POLL_BODY_RESUMED cancelReturned=" + fixture.cancelReturned);
+                    fixture.event(label + "_BODY_RESUMED cancelReturned=" + fixture.cancelReturned);
                 }
                 return buffer.read(sink, count);
             }
@@ -196,7 +438,7 @@ public class LinkManagerCancellationTest {
         });
         return new ResponseBody() {
             @Override public MediaType contentType() { return MediaType.get("application/json"); }
-            @Override public long contentLength() { return TOKEN_RESPONSE.getBytes(StandardCharsets.UTF_8).length; }
+            @Override public long contentLength() { return payload.getBytes(StandardCharsets.UTF_8).length; }
             @Override public BufferedSource source() { return source; }
         };
     }
@@ -206,11 +448,28 @@ public class LinkManagerCancellationTest {
         final List<String> storage = new ArrayList<>();
         final CountDownLatch bodyPaused = new CountDownLatch(1);
         final CountDownLatch resumeBody = new CountDownLatch(1);
-        final CountDownLatch callbackEnded = new CountDownLatch(1);
+        final CountDownLatch startPaused = new CountDownLatch(1);
+        final CountDownLatch resumeStart = new CountDownLatch(1);
+        final CountDownLatch storageEntered = new CountDownLatch(1);
+        final CountDownLatch resumeStorage = new CountDownLatch(1);
+        final BlockingQueue<Boolean> callbacks = new LinkedBlockingQueue<>();
+        final BlockingQueue<String> tokenResponses = new LinkedBlockingQueue<>();
+        final List<String> warnings = Collections.synchronizedList(new ArrayList<>());
         final AtomicInteger startRequests = new AtomicInteger();
         final AtomicInteger pollRequests = new AtomicInteger();
         volatile boolean pauseBody;
         volatile boolean cancelReturned;
+        volatile boolean fastScheduling;
+        volatile boolean pauseStart;
+        volatile boolean pauseStorage;
+        volatile boolean failSecrets;
+        volatile boolean failAdmin;
+        volatile boolean throwSecrets;
+        int expectedWarnings;
+        String startResponse = START_RESPONSE;
+        String relinkId;
+        volatile String controlState;
+        volatile JSONObject destinationPatch;
         volatile Throwable callbackFailure;
         OkHttpClient client;
         Fixture(String name) { this.name = name; }
@@ -223,6 +482,8 @@ public class LinkManagerCancellationTest {
     private static final class ObservedScheduler extends ScheduledThreadPoolExecutor {
         final Fixture fixture;
         volatile ScheduledFuture<?> poller;
+        final AtomicInteger schedules = new AtomicInteger();
+        final List<Long> requestedDelays = Collections.synchronizedList(new ArrayList<>());
         ObservedScheduler(Fixture fixture) {
             super(1, task -> {
                 Thread thread = new Thread(task, "test-poll");
@@ -234,7 +495,10 @@ public class LinkManagerCancellationTest {
         @Override public ScheduledFuture<?> scheduleWithFixedDelay(Runnable command,
                 long initialDelay, long delay, TimeUnit unit) {
             fixture.event("SCHEDULE initialMs=" + unit.toMillis(initialDelay) + " delayMs=" + unit.toMillis(delay));
-            // Observe only; preserve requested delays and the actual JDK Future.
+            schedules.incrementAndGet();
+            requestedDelays.add(unit.toMillis(initialDelay));
+            // Original RED controls retain real delays; additional lifecycle cases advance time
+            // through 1ms scheduling while keeping the actual JDK Future/cancellation behavior.
             poller = super.scheduleWithFixedDelay(() -> {
                 fixture.event("CALLBACK_BEGIN");
                 try { command.run(); }
@@ -243,9 +507,10 @@ public class LinkManagerCancellationTest {
                     throw new AssertionError("Callback failed", failure);
                 } finally {
                     fixture.event("CALLBACK_END");
-                    fixture.callbackEnded.countDown();
+                    fixture.callbacks.offer(Boolean.TRUE);
                 }
-            }, initialDelay, delay, unit);
+            }, fixture.fastScheduling ? 1 : initialDelay, fixture.fastScheduling ? 1 : delay,
+                    fixture.fastScheduling ? TimeUnit.MILLISECONDS : unit);
             return poller;
         }
     }

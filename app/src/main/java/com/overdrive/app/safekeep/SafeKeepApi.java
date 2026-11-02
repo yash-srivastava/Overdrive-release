@@ -85,7 +85,11 @@ public final class SafeKeepApi {
                     return post && linkFinish(e, body, out);
                 case "link/cancel":
                     if (!post) return false;
-                    e.links.cancel(new JSONObject(safe(body)).optString("id"));
+                    if (!e.links.cancel(new JSONObject(safe(body)).optString("id"))) {
+                        HttpResponse.sendJson(out, 409, err("link_commit_started",
+                                "Sign-in is already being saved; check its status").toString());
+                        return true;
+                    }
                     return json(out, ok());
                 case "link/qr.png":
                     return get && qr(e, param(query, "id"), out);

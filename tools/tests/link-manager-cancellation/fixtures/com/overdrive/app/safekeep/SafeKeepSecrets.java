@@ -7,7 +7,10 @@ final class SafeKeepSecrets {
     static JSONObject get(String id) { return new JSONObject(); }
     static boolean put(String id, JSONObject value) {
         LinkManagerCancellationTest.recordStorage("secrets.put", value);
+        return LinkManagerCancellationTest.secretsResult();
+    }
+    static boolean remove(String id) {
+        LinkManagerCancellationTest.recordStorage("secrets.remove", null);
         return true;
     }
-    static boolean remove(String id) { throw new AssertionError("Unexpected storage rollback"); }
 }

@@ -1,7 +1,7 @@
 # Case 10: LinkManager cancellation — test-only RED checkpoint
 
-Production behavior is unchanged at this checkpoint. The regression deliberately
-fails until a separately authorized production change enforces cancellation.
+The RED checkpoint below left production behavior unchanged. The subsequently
+authorized fix and its GREEN evidence are recorded at the end of this file.
 
 ## Contract and test design
 
@@ -141,3 +141,73 @@ when reviewing the shared path; those flows are not claimed as runtime-tested by
 this three-test fixture.
 
 No production fix, push or pull request is included in this checkpoint.
+
+
+## GREEN: cancellation and commit admission
+
+Cancellation now competes with a single, irrevocable commit claim under a short
+manager state lock. If cancellation wins, it revokes the registered session and
+no later callback may enter persistence. If the commit claim wins, `cancel(id)`
+returns false; the API returns HTTP 409 with `link_commit_started`. That accepted
+commit may finish. A completed `done` session also cannot be reported cancelled.
+This is ordinary linearizable cancellation, **not** a promise that storage stops
+after every cancellation attempt.
+
+The claim checks manager-open status, identical registered session, pending
+state, expiry and ownership immediately before the first persistence operation.
+The public state stays `pending` until `done` or `error`. Network operations,
+secret/config storage, lifecycle calls and queued engine work all run outside
+the state lock. No `SafeKeepAdmin` or engine lifecycle split is introduced.
+`cancelAll` closes registration and revokes unclaimed sessions without waiting;
+already accepted commits retain authority to publish their terminal state.
+This avoids the lifecycle-monitor/commit-lock inversion identified above.
+
+Registration, expiry, rescheduling and state publication follow the same state
+lock. A delayed start cannot register after shutdown. A cancelled callback cannot
+install a stale `slow_down` poller or overwrite a terminal/claimed state. Paste
+requests capture their verifier before I/O and admit only one in-flight exchange;
+commit failures and unexpected exceptions publish a terminal error.
+
+Both frontend cancellation callers inspect the result. A pending modal closes
+only after successful cancellation. A conflict warns the user and retains or
+starts an idempotent status loop. A paste completion response lost after commit
+claim recovers through status polling and can subsequently be closed. A late
+paste response after confirmed cancellation does not revive the closed modal.
+
+### Observed GREEN checks
+
+The reviewed run passed **19 JUnit lifecycle checks and 6 actual-JavaScript public
+UI checks**. The Java source is compiled directly, with the same dummy-collaborator
+boundary as the RED checkpoint. The original three controls retain real polling
+delays; additional lifecycle cases use 1 ms controlled scheduling with real JDK
+futures. The logger collaborator records warnings and every test rejects unexpected
+warnings, including failures swallowed by the production scheduled callback.
+Only the deliberate storage-exception case permits one warning.
+
+Coverage includes both cancellation/claim winners, nonblocking cancellation and
+shutdown while storage is paused, delayed start registration, start timeout,
+expiry before and after claim, stale provider errors, `slow_down` and pending
+retries, relink, duplicate/successful/cancelled paste, Nextcloud relink/account
+path and cancellation, secret/admin failure, rollback and unexpected storage
+exceptions. UI checks execute the unchanged production asset through public
+provider/sign-in controls with a dummy DOM/fetch, including lost paste response
+→ cancellation conflict → `done` status → successful Close.
+
+The reviewed sandbox run exited 0, with no limit stop, after **21.182 seconds**.
+Limits: 120 seconds wall time, 768 MiB memory, 1 CPU, 64 processes, 128 MiB scratch,
+16 MiB per file, 64 KiB target output. Network was disabled; source/tool/dependency
+mounts were read-only and target writes stayed in scratch tmpfs. All target
+processes stopped before evidence promotion.
+
+Full raw output: `green-reviewed-runtime.raw.log`, **12,314 bytes**, SHA-256
+`564808008e26241247d093aed6f1738c2aa8475fcff7f4890ac8f4b360b4f642`.
+`green-reviewed-metadata.json` records the exact command and input/dependency hashes.
+Earlier GREEN logs are preserved separately; independent review found and corrected
+the missing paste conflict recovery before this reviewed run.
+
+The real JSON **20240303** substitution for declared **20231013** remains explicit.
+The HTTP 409 bridge in `SafeKeepApi` is reviewed from source; this standalone suite
+does not compile that full API class or establish a full Android build. Dummy
+storage observations do not prove encrypted/config persistence, real provider
+behavior, device/runtime acceptance or any transfer. Already claimed commits may
+finish during shutdown; cancellation is not rollback of an accepted commit.
