@@ -26,13 +26,13 @@ public class CameraWatchdogApkPathAssetTest {
             Path fakeBin = root.resolve("bin");
             Files.createDirectories(fakeBin);
             Path appProcess = fakeBin.resolve("app_process");
-            Files.writeString(appProcess,
+            Files.write(appProcess, (
                     "#!/bin/sh\n"
                     + "printf '%s\\n' \"$CLASSPATH\" \"$@\" >> \"$CALLS\"\n"
-                    + ": > \"$STOP_FILE\"\n");
+                    + ": > \"$STOP_FILE\"\n").getBytes(StandardCharsets.UTF_8));
             assertTrue(appProcess.toFile().setExecutable(true));
             Path sleep = fakeBin.resolve("sleep");
-            Files.writeString(sleep, "#!/bin/sh\nexec /bin/sleep 30\n");
+            Files.write(sleep, "#!/bin/sh\nexec /bin/sleep 30\n".getBytes(StandardCharsets.UTF_8));
             assertTrue(sleep.toFile().setExecutable(true));
 
             // Keep both generations on disk: old APK existence must not affect
@@ -62,6 +62,29 @@ public class CameraWatchdogApkPathAssetTest {
             assertFalse(launches.subList(7, 14).toString().contains(oldLib));
         } finally {
             deleteTree(root);
+        }
+    }
+
+    @Test
+    public void cameraClasspathRetainsTheLegacyAndAlternateJarPolicy() throws Exception {
+        java.lang.reflect.Method pin = com.overdrive.app.util.ScratchRoot.class
+                .getDeclaredMethod("setResolvedDirForTest", String.class);
+        pin.setAccessible(true);
+        try {
+            pin.invoke(null, com.overdrive.app.util.ScratchRoot.LEGACY_DIR);
+            String legacy = String.join("\n", DaemonLauncher.Companion
+                    .buildCamDaemonWatchdogScript("/installed/base.apk", "/native", "/output", ""));
+            assertTrue(legacy.contains(
+                    "CLASSPATH=/system/framework/bmmcamera.jar:/installed/base.apk app_process"));
+            pin.invoke(null, com.overdrive.app.util.ScratchRoot.ALT_DIR);
+            String alternate = String.join("\n", DaemonLauncher.Companion
+                    .buildCamDaemonWatchdogScript("/installed/base.apk", "/native", "/output", ""));
+            String jar = new java.io.File("/system/framework/bmmcamera.jar").isFile()
+                    ? "/system/framework/bmmcamera.jar:" : "";
+            assertTrue(alternate.contains(
+                    "CLASSPATH=" + jar + "/installed/base.apk app_process"));
+        } finally {
+            pin.invoke(null, new Object[] {null});
         }
     }
 
@@ -116,7 +139,7 @@ public class CameraWatchdogApkPathAssetTest {
         String generated = String.join("\n", DaemonLauncher.Companion
                 .buildCamDaemonWatchdogScript(apk, nativeDir, "/output", ""))
                 .replace("/data/local/tmp", root.toString());
-        Files.writeString(script, generated + "\n");
+        Files.write(script, (generated + "\n").getBytes(StandardCharsets.UTF_8));
         ProcessBuilder builder = new ProcessBuilder("/bin/sh", script.toString())
                 .redirectErrorStream(true);
         builder.environment().put("PATH", fakeBin + ":/usr/bin:/bin");
@@ -125,7 +148,6 @@ public class CameraWatchdogApkPathAssetTest {
         Process process = builder.start();
         boolean done = process.waitFor(10, TimeUnit.SECONDS);
         if (!done) {
-            process.descendants().forEach(ProcessHandle::destroyForcibly);
             process.destroyForcibly();
         }
         assertTrue("generated watchdog did not stop after dummy daemon marker", done);
@@ -155,7 +177,7 @@ public class CameraWatchdogApkPathAssetTest {
         Path current = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
         while (current != null) {
             Path candidate = current.resolve(relativePath);
-            if (Files.isRegularFile(candidate)) return Files.readString(candidate);
+            if (Files.isRegularFile(candidate)) return new String(Files.readAllBytes(candidate), StandardCharsets.UTF_8);
             current = current.getParent();
         }
         throw new AssertionError("Could not locate repository file: " + relativePath);
