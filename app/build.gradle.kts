@@ -340,17 +340,19 @@ tasks.register("downloadFastCam") {
 // Keep the source compatibility symlink required by CONTRIBUTING, while packaging
 // the canonical web/shared tree once. Depending on the producer (rather than
 // another preBuild sibling) ensures fast_cam_capture is staged after extraction.
+val packagedMainAssetsDir = layout.buildDirectory.dir("generated/packaged-assets/main")
 val preparePackagedMainAssets = tasks.register<Sync>("preparePackagedMainAssets") {
     dependsOn("downloadFastCam")
     from("src/main/assets") {
         exclude("web/local/shared", "web/local/shared/**")
     }
-    into(layout.buildDirectory.dir("generated/packaged-assets/main"))
+    into(packagedMainAssetsDir)
 }
 
 // Unit packaging contracts inspect the same staged bytes that Android consumes.
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     dependsOn(preparePackagedMainAssets)
+    systemProperty("overdrive.packagedMainAssetsDir", packagedMainAssetsDir.get().asFile.absolutePath)
 }
 
 

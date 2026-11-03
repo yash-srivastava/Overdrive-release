@@ -1,6 +1,7 @@
 package com.overdrive.app.battery;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -35,7 +36,9 @@ public class BatteryChartHoverGeometryTest {
         assertEquals(Paths.get("../shared"), Files.readSymbolicLink(alias));
         assertTrue(Files.isSameFile(shared, alias));
         assertTrue(readRepositoryFile("app/src/main/assets/web/shared/performance.js").length() > 0);
-        Path packaged = root.resolve("app/build/generated/packaged-assets/main");
+        String packagedDirectory = System.getProperty("overdrive.packagedMainAssetsDir");
+        assertNotNull("Run through Gradle so the asset producer is staged", packagedDirectory);
+        Path packaged = Paths.get(packagedDirectory);
         assertFalse(Files.exists(packaged.resolve("web/local/shared"),
                 java.nio.file.LinkOption.NOFOLLOW_LINKS));
         assertArrayEquals(Files.readAllBytes(shared.resolve("performance.js")),
