@@ -1,0 +1,271 @@
+/**
+ * Overdrive — Unified search (command palette) styles.
+ *
+ * Theming is automatic: every rule uses the semantic tokens defined in
+ * styles.css / design-tokens.css (--bg-surface, --text-primary, …), which
+ * each theme redefines. No hardcoded light/dark colours here.
+ *
+ * Chrome 58 (BYD head-unit WebView) floor — no `inset`, no `gap` on flex
+ * where a fallback matters, no :is()/:where(). Plain properties only.
+ */
+
+/* ============================================================
+ * Triggers
+ * ============================================================ */
+
+/* Sidebar search pill — sits between the brand header and the nav. Looks
+   like a muted search field; the whole thing is one button. */
+.sidebar-search {
+    display: flex;
+    align-items: center;
+    /* Inset to match the nav's 12px horizontal padding so the pill lines up
+       with the nav links below instead of sitting flush to the edges. */
+    width: auto;
+    box-sizing: border-box;
+    margin: 6px 12px 12px;
+    padding: 9px 12px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg, 12px);
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+.sidebar-search:hover {
+    border-color: var(--primary);
+    color: var(--text-secondary);
+}
+.sidebar-search svg {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    margin-right: 8px;
+    color: var(--text-muted);
+}
+.sidebar-search .sidebar-search-label {
+    flex: 1 1 auto;
+}
+.sidebar-search .sidebar-search-kbd {
+    flex: 0 0 auto;
+    margin-left: 8px;
+    padding: 1px 6px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    font-size: 11px;
+    font-family: var(--family-mono, monospace);
+    color: var(--text-muted);
+    opacity: 0.8;
+}
+/* No physical keyboard on the head unit — hide the shortcut hint there and
+   on narrow phones. */
+html[data-android-embed="1"] .sidebar-search .sidebar-search-kbd {
+    display: none;
+}
+@media (max-width: 768px) {
+    .sidebar-search .sidebar-search-kbd { display: none; }
+}
+
+/* Mobile-header search icon button (replaces the layout spacer). */
+.mobile-header .od-search-mobtrigger {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 0;
+    color: var(--text-primary);
+    cursor: pointer;
+    padding: 0;
+}
+.mobile-header .od-search-mobtrigger svg {
+    width: 22px;
+    height: 22px;
+}
+
+/* ============================================================
+ * Overlay
+ * ============================================================ */
+
+.od-search-backdrop {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    /* Clear the in-app WebView footer-bar (10000) and toast stack (20000),
+       matching .modal-backdrop. */
+    z-index: 30000;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 24px;
+    padding-top: 9vh;
+    box-sizing: border-box;
+    background: var(--modal-backdrop);
+    -webkit-tap-highlight-color: transparent;
+}
+.od-search-backdrop[hidden] { display: none; }
+
+.od-search-panel {
+    width: 100%;
+    max-width: 560px;
+    max-height: 72vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xl, 16px);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+}
+
+.od-search-inputrow {
+    display: flex;
+    align-items: center;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+    flex: 0 0 auto;
+}
+.od-search-inputrow .od-search-leadicon {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 auto;
+    margin-right: 10px;
+    color: var(--text-muted);
+}
+.od-search-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    background: transparent;
+    border: 0;
+    outline: none;
+    color: var(--text-primary);
+    /* 16px avoids the iOS focus-zoom; comfortable on the head unit too. */
+    font-size: 16px;
+    font-family: inherit;
+    padding: 2px 0;
+}
+.od-search-input::placeholder { color: var(--text-muted); }
+.od-search-clear {
+    flex: 0 0 auto;
+    margin-left: 8px;
+    width: 30px;
+    height: 30px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-full, 999px);
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0;
+}
+.od-search-clear:hover { background: var(--bg-hover, var(--bg-elevated)); }
+.od-search-clear svg { width: 16px; height: 16px; }
+.od-search-panel.has-query .od-search-clear { display: flex; }
+
+.od-search-results {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 6px;
+    margin: 0;
+    list-style: none;
+}
+
+.od-search-item {
+    display: flex;
+    align-items: center;
+    padding: 9px 10px;
+    border-radius: var(--radius-md, 10px);
+    cursor: pointer;
+    color: var(--text-primary);
+}
+.od-search-item.is-active,
+.od-search-item:hover {
+    background: var(--bg-elevated);
+}
+.od-search-item-icon {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    margin-right: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-md, 8px);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+}
+.od-search-item.is-active .od-search-item-icon {
+    background: var(--primary);
+    color: var(--on-primary, #fff);
+}
+.od-search-item-icon svg { width: 16px; height: 16px; }
+.od-search-item-text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.od-search-item-label {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.od-search-item-crumb {
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 3px;
+}
+/* Type chip at the trailing edge (Page / Tab / Setting glyph is in the
+   lead icon; this is the small textual kind marker). */
+.od-search-item-kind {
+    flex: 0 0 auto;
+    margin-left: 10px;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    opacity: 0.75;
+}
+
+.od-search-empty {
+    padding: 36px 16px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+/* ============================================================
+ * Deep-link arrival highlight (setting scrolled into view)
+ * ============================================================ */
+.od-setting-flash {
+    animation: odSettingFlash 2s ease;
+    border-radius: var(--radius-md, 10px);
+}
+@keyframes odSettingFlash {
+    0%, 15% {
+        box-shadow: 0 0 0 2px var(--primary);
+        background: var(--bg-elevated);
+    }
+    100% {
+        box-shadow: 0 0 0 0 transparent;
+        background: transparent;
+    }
+}
+
+[dir="rtl"] .sidebar-search svg { margin-right: 0; margin-left: 8px; }
+[dir="rtl"] .od-search-inputrow .od-search-leadicon { margin-right: 0; margin-left: 10px; }
+[dir="rtl"] .od-search-item-icon { margin-right: 0; margin-left: 12px; }
+[dir="rtl"] .od-search-item-kind { margin-left: 0; margin-right: 10px; }
