@@ -25,12 +25,18 @@ public class BatteryChartHoverGeometryTest {
 
     @Test
     public void performanceScriptShipsOnce() throws Exception {
-        // web/local/shared was a symlinked second copy that the APK packaged in full.
-        assertFalse(java.nio.file.Files.exists(
-                java.nio.file.Paths.get("src/main/assets/web/local/shared"), java.nio.file.LinkOption.NOFOLLOW_LINKS)
-                || java.nio.file.Files.exists(
-                java.nio.file.Paths.get("app/src/main/assets/web/local/shared"), java.nio.file.LinkOption.NOFOLLOW_LINKS));
+        // Source consumers keep the documented compatibility symlink. The
+        // packaging task excludes that alias, not its canonical target.
+        Path root = repositoryRoot();
+        Path shared = root.resolve("app/src/main/assets/web/shared");
+        Path alias = root.resolve("app/src/main/assets/web/local/shared");
+        assertTrue(Files.isSymbolicLink(alias));
+        assertEquals(Paths.get("../shared"), Files.readSymbolicLink(alias));
+        assertTrue(Files.isSameFile(shared, alias));
         assertTrue(readRepositoryFile("app/src/main/assets/web/shared/performance.js").length() > 0);
+        String build = readRepositoryFile("app/build.gradle.kts");
+        assertTrue(build.contains("assets.setSrcDirs(listOf(preparePackagedMainAssets))"));
+        assertTrue(build.contains("exclude(\"web/local/shared\", \"web/local/shared/**\")"));
     }
 
     @Test
@@ -57,6 +63,15 @@ public class BatteryChartHoverGeometryTest {
 
         assertTrue(js.contains("socPadLeft = 45, socPadRight = 15"));
         assertTrue(js.contains("padding = { top: 15, right: 15, bottom: 30, left: 45 }"));
+    }
+
+    private static Path repositoryRoot() {
+        Path current = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
+        while (current != null) {
+            if (Files.isRegularFile(current.resolve("app/build.gradle.kts"))) return current;
+            current = current.getParent();
+        }
+        throw new AssertionError("Could not locate repository root");
     }
 
     private static String readRepositoryFile(String relativePath) throws IOException {

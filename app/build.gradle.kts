@@ -337,6 +337,18 @@ tasks.register("downloadFastCam") {
 }
 
 
+// Keep the source compatibility symlink required by CONTRIBUTING, while packaging
+// the canonical web/shared tree once. Depending on the producer (rather than
+// another preBuild sibling) ensures fast_cam_capture is staged after extraction.
+val preparePackagedMainAssets = tasks.register<Sync>("preparePackagedMainAssets") {
+    dependsOn("downloadFastCam")
+    from("src/main/assets") {
+        exclude("web/local/shared", "web/local/shared/**")
+    }
+    into(layout.buildDirectory.dir("generated/packaged-assets/main"))
+}
+
+
 // Task to extract web assets to /data/local/tmp/web on device
 // Run: ./gradlew :app:extractWebAssets
 tasks.register("extractWebAssets") {
@@ -391,6 +403,9 @@ android {
     sourceSets {
         getByName("main") {
             res.srcDir(hebrewIwResDir)
+            // TaskProvider source notation carries the staging dependency into
+            // each variant's asset merge; variant overlays remain unchanged.
+            assets.setSrcDirs(listOf(preparePackagedMainAssets))
         }
     }
     buildToolsVersion = "36.0.0"
