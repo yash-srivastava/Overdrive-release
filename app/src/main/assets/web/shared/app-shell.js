@@ -181,6 +181,7 @@
             + '</div>';
 
         var nav = '<nav class="sidebar-nav">' + buildNav() + '</nav>';
+        var search = buildSearchTrigger();
 
         // Footer = device status card + EV vehicle status card + fuel card (PHEV).
         // Element IDs (deviceId, accValue, batteryValue, survStatus, networkValue,
@@ -222,7 +223,23 @@
             +   buildFuelCard()
             + '</div>';
 
-        return header + nav + footer;
+        // Search pill sits between the brand header and the nav so it reads as
+        // "jump anywhere" above the page list.
+        return header + search + nav + footer;
+    }
+
+    // Unified-search trigger. Styled as a muted search field (see search.css);
+    // the whole button opens the palette (wired via the .od-search-open
+    // delegate below). The ⌘K / Ctrl K hint is hidden on the head unit and on
+    // phones via CSS. search.js itself is lazy-loaded on first use / on idle.
+    function buildSearchTrigger() {
+        var isMac = /Mac|iPhone|iPad/.test((navigator && navigator.platform) || '');
+        var kbd = isMac ? '⌘K' : 'Ctrl K';
+        return '<button type="button" class="sidebar-search od-search-open" aria-label="Search" data-i18n-attr="aria-label:common.search">'
+            +   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>'
+            +   '<span class="sidebar-search-label" data-i18n="common.search">Search</span>'
+            +   '<span class="sidebar-search-kbd" aria-hidden="true">' + kbd + '</span>'
+            + '</button>';
     }
 
     function buildEvCard() {
@@ -383,8 +400,16 @@
             });
         }
 
-        if (embeddedInNativeApp ||
-            document.querySelector('.mobile-header, .vc-nav-btn')) return;
+        if (embeddedInNativeApp) return;
+        // Most pages now ship their own static .mobile-header; inject the search
+        // icon into it rather than bailing (otherwise the mobile search trigger
+        // would be missing on those pages — phones have no keyboard shortcut).
+        var existingHeader = document.querySelector('.mobile-header');
+        if (existingHeader) {
+            addMobileSearchTrigger(existingHeader);
+            return;
+        }
+        if (document.querySelector('.vc-nav-btn')) return;
 
         var main = document.querySelector('.main-content');
         if (!main) return;
@@ -409,11 +434,37 @@
               '</svg>' +
             '</button>' +
             '<span style="font-weight:600;">' + title + '</span>' +
-            '<div style="width:48px;" aria-hidden="true"></div>';
+            // Search icon takes the trailing slot (was a layout spacer); the
+            // .od-search-open delegate below opens the palette.
+            '<button class="od-search-mobtrigger od-search-open" type="button" aria-label="Search" data-i18n-attr="aria-label:common.search">' +
+              '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>' +
+            '</button>';
         header.querySelector('.menu-toggle').addEventListener('click', function () {
             window.toggleSidebar();
         });
         main.insertBefore(header, main.firstChild);
+    }
+
+    // Add the unified-search icon to a mobile header (static page markup or the
+    // one we build). Replaces a trailing empty spacer <div> (static headers use
+    // one to balance the hamburger) so the 3-slot layout is preserved; else
+    // appends. Idempotent via the .od-search-mobtrigger guard. The document
+    // .od-search-open click delegate wires the tap.
+    function addMobileSearchTrigger(header) {
+        if (!header || header.querySelector('.od-search-mobtrigger')) return;
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'od-search-mobtrigger od-search-open';
+        btn.setAttribute('aria-label', 'Search');
+        btn.setAttribute('data-i18n-attr', 'aria-label:common.search');
+        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>';
+        var last = header.lastElementChild;
+        if (last && last.tagName === 'DIV' && !last.children.length &&
+            !(last.textContent && last.textContent.replace(/\s/g, ''))) {
+            header.replaceChild(btn, last);
+        } else {
+            header.appendChild(btn);
+        }
     }
 
     // Phone bottom navigation (CSS shows it under 769px): four primary
@@ -1436,6 +1487,24 @@
     window.OverdriveAppShell = window.OverdriveAppShell || {};
     window.OverdriveAppShell.refreshVehicle = applyVehicleSelection;
 
+    // Expose the page registry (non-divider nav items) to the unified-search
+    // palette (search.js). Returns fresh objects so callers can't mutate
+    // NAV_ITEMS. Each: { href, i18n, label, svg }.
+    window.OverdriveAppShell.getPages = function () {
+        var out = [];
+        for (var i = 0; i < NAV_ITEMS.length; i++) {
+            var it = NAV_ITEMS[i];
+            if (it.divider || !it.href) continue;
+            out.push({
+                href: it.href,
+                i18n: it.i18n || null,
+                label: it.label || '',
+                svg: it.svg || ''
+            });
+        }
+        return out;
+    };
+
     // Mount an additional OverdriveEvCard3D on a custom canvas (e.g. the
     // Live View camera selector). Reuses the sidebar's vendor download —
     // ev-card-3d.js is idempotent and adopts already-loaded THREE — and
@@ -1749,6 +1818,90 @@
         else document.head.appendChild(s);
     }
     ensureCollapseScript();
+
+    // ============================================================
+    // Unified search (command palette) — trigger + lazy loader
+    // ============================================================
+    //
+    // The palette lives in search.js (+ search.css), loaded the same
+    // next-to-app-shell.js way as app-collapse.js. We defer the load to idle
+    // so the index can pre-warm without competing with first paint, but also
+    // load eagerly the moment a trigger is used.
+
+    function ensureSearchCss() {
+        if (document.querySelector('link[data-overdrive-search-css]')) return;
+        var l = document.createElement('link');
+        l.rel = 'stylesheet';
+        l.href = '../shared/search.css';
+        l.setAttribute('data-overdrive-search-css', '1');
+        document.head.appendChild(l);
+    }
+    function ensureSearchScript() {
+        if (window.OverdriveSearch) return;
+        if (document.querySelector('script[data-overdrive-search]')) return;
+        ensureSearchCss();
+        var s = document.createElement('script');
+        s.src = '../shared/search.js';
+        s.setAttribute('data-overdrive-search', '1');
+        s.async = false;
+        var ref = document.querySelector('script[src*="app-shell.js"]');
+        if (ref && ref.parentNode) ref.parentNode.insertBefore(s, ref.nextSibling);
+        else document.head.appendChild(s);
+    }
+    function openSearch() {
+        if (window.OverdriveSearch && typeof window.OverdriveSearch.open === 'function') {
+            window.OverdriveSearch.open();
+        } else {
+            // search.js drains this flag on load.
+            window.__odSearchPendingOpen = true;
+            ensureSearchScript();
+        }
+    }
+
+    // Delegate clicks from any .od-search-open trigger (sidebar pill, mobile
+    // header icon). Walk up from the event target to the trigger element —
+    // SVG children have a non-string className, but the button ancestor is an
+    // HTMLElement whose className is a plain string.
+    document.addEventListener('click', function (ev) {
+        var el = ev.target;
+        while (el && el !== document.body &&
+               !(el.className && ('' + el.className).indexOf('od-search-open') >= 0)) {
+            el = el.parentNode;
+        }
+        if (el && el.className && ('' + el.className).indexOf('od-search-open') >= 0) {
+            ev.preventDefault();
+            openSearch();
+        }
+    });
+
+    // Keyboard: Ctrl/Cmd+K anywhere; '/' when focus isn't in a text field.
+    document.addEventListener('keydown', function (ev) {
+        var k = ev.key;
+        if ((ev.ctrlKey || ev.metaKey) && (k === 'k' || k === 'K' || ev.keyCode === 75)) {
+            ev.preventDefault();
+            openSearch();
+            return;
+        }
+        // Match ev.key only — keyCode 191 is a different physical key on many
+        // non-US layouts, so a keyCode fallback would hijack it.
+        if (k === '/' && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+            var ae = document.activeElement;
+            var tag = ae && ae.tagName ? ae.tagName.toLowerCase() : '';
+            if (tag === 'input' || tag === 'textarea' || tag === 'select' ||
+                (ae && ae.isContentEditable)) return;
+            ev.preventDefault();
+            openSearch();
+        }
+    });
+
+    // Warm the palette on idle so the first open is instant and a setting
+    // deep-link's arrival handler (which reads the sessionStorage handoff — no
+    // query string, the static server 404s those) runs even without a trigger.
+    if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(function () { ensureSearchScript(); }, { timeout: 4000 });
+    } else {
+        setTimeout(ensureSearchScript, 1500);
+    }
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', mount);
