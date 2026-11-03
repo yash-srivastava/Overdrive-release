@@ -1,0 +1,99 @@
+enum class DaemonStatus { STARTING, RUNNING, STOPPING, STOPPED, ERROR }
+enum class DaemonType(val displayName: String) { CLOUDFLARED_TUNNEL("Cloudflared") }
+interface DaemonCallback {
+    fun onStatusChanged(status: DaemonStatus, message: String)
+    fun onError(error: String)
+}
+interface Controller { fun stop(callback: DaemonCallback) }
+class AdbDaemonLauncher {
+    interface LaunchCallback { fun onLog(message: String); fun onLaunched(); fun onError(error: String) }
+    var pending: LaunchCallback? = null
+    var immediate: ((LaunchCallback) -> Unit)? = null
+    fun stopTunnel(callback: LaunchCallback) { pending = callback; immediate?.invoke(callback) }
+}
+class UrlState(var value: String?) { fun postValue(next: String?) { value = next } }
+open class BaseController(val adbLauncher: AdbDaemonLauncher, val _tunnelUrl: UrlState)
+class ControllerHarness(launcher: AdbDaemonLauncher, url: UrlState) : BaseController(launcher, url), Controller {
+@CONTROLLER@
+}
+class IncorrectClearController(launcher: AdbDaemonLauncher, url: UrlState) : BaseController(launcher, url), Controller {
+@BAD_CLEAR@
+}
+class IncorrectStoppedController(launcher: AdbDaemonLauncher, url: UrlState) : BaseController(launcher, url), Controller {
+@BAD_STOPPED@
+}
+object DaemonStartupManager {
+    val OPTIONAL_DAEMONS = setOf(DaemonType.CLOUDFLARED_TUNNEL)
+    val stopped = mutableListOf<DaemonType>()
+    fun markUserStopped(type: DaemonType) { stopped.add(type) }
+}
+class StartupManager { fun onDaemonToggled(type: DaemonType, enabled: Boolean) {} }
+object R { object string { const val daemon_status_stop_failed = 1 } }
+class ViewModelHarness(controller: Controller) {
+    val controllers = mapOf(DaemonType.CLOUDFLARED_TUNNEL to controller)
+    val states = mutableListOf<DaemonStatus>()
+    val refreshes = mutableListOf<DaemonType>()
+    val sentinels = mutableListOf<DaemonType>()
+    val errors = mutableListOf<String>()
+    val startupManager: StartupManager? = StartupManager()
+    fun updateState(type: DaemonType, state: DaemonStatus, message: String) { states.add(state); if (state == DaemonStatus.ERROR) errors.add(message) }
+    fun refreshDaemonStatus(type: DaemonType) { refreshes.add(type) }
+    fun writeDisableSentinel(type: DaemonType) { sentinels.add(type) }
+    fun appStr(id: Int, error: String) = "Stop failed: $error"
+@VIEWMODEL@
+}
+fun verifyFailure(controller: Controller, launcher: AdbDaemonLauncher, url: UrlState, immediate: Boolean) {
+    android.os.Clock.pending.clear()
+    val vm = ViewModelHarness(controller)
+    if (immediate) launcher.immediate = { it.onError("dummy stop failure") }
+    vm.stopDaemon(DaemonType.CLOUDFLARED_TUNNEL)
+    check(vm.sentinels == listOf(DaemonType.CLOUDFLARED_TUNNEL))
+    if (!immediate) {
+        check(vm.states.last() == DaemonStatus.STOPPING)
+        check(url.value == "https://dummy.invalid")
+        launcher.pending!!.onLog("dummy still stopping")
+        check(vm.states.last() == DaemonStatus.STOPPING)
+        launcher.pending!!.onError("dummy stop failure")
+    }
+    check(vm.states.last() == DaemonStatus.ERROR)
+    check(DaemonStatus.STOPPED !in vm.states)
+    check(url.value == "https://dummy.invalid")
+    check(vm.errors.single() == "Stop failed: dummy stop failure")
+    check(android.os.Clock.pending.single().first == 1000L)
+    check(vm.refreshes.isEmpty())
+    android.os.Clock.pending.single().second.invoke()
+    check(vm.refreshes == listOf(DaemonType.CLOUDFLARED_TUNNEL))
+    check(url.value == "https://dummy.invalid")
+}
+fun expectRejected(name: String, body: () -> Unit) {
+    var rejected = false
+    try { body() } catch (expected: IllegalStateException) { rejected = true }
+    check(rejected) { "negative control was not caught: $name" }
+}
+fun main() {
+    for (immediate in listOf(false, true)) {
+        val launcher = AdbDaemonLauncher(); val url = UrlState("https://dummy.invalid")
+        verifyFailure(ControllerHarness(launcher, url), launcher, url, immediate)
+    }
+    for (immediate in listOf(false, true)) {
+        android.os.Clock.pending.clear()
+        val launcher = AdbDaemonLauncher(); val url = UrlState("https://dummy.invalid")
+        if (immediate) launcher.immediate = { it.onLaunched() }
+        val vm = ViewModelHarness(ControllerHarness(launcher, url))
+        vm.stopDaemon(DaemonType.CLOUDFLARED_TUNNEL)
+        if (!immediate) launcher.pending!!.onLaunched()
+        check(url.value == null)
+        check(vm.states.last() == DaemonStatus.STOPPED)
+        check(DaemonStatus.ERROR !in vm.states)
+        check(android.os.Clock.pending.isEmpty())
+    }
+    expectRejected("failure clears URL") {
+        val launcher = AdbDaemonLauncher(); val url = UrlState("https://dummy.invalid")
+        verifyFailure(IncorrectClearController(launcher, url), launcher, url, false)
+    }
+    expectRejected("failure reports stopped") {
+        val launcher = AdbDaemonLauncher(); val url = UrlState("https://dummy.invalid")
+        verifyFailure(IncorrectStoppedController(launcher, url), launcher, url, false)
+    }
+    println("PASS: 4 immediate/delayed success/failure scenarios; 2 incorrect callback mutations rejected")
+}
