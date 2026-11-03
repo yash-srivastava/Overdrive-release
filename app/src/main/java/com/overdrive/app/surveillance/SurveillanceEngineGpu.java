@@ -8722,6 +8722,28 @@ public class SurveillanceEngineGpu {
         return Actor.suppressFromSummary(a);
     }
 
+    /** Localized plain-motion push title; English fallback when the catalog is unavailable. */
+    private static String motionTitle(String camHint) {
+        if (camHint == null) return notifText("notifications.motion_detected", "Motion detected");
+        String cam = notifText("notifications.camera_" + camHint, camHint);
+        String key = "notifications.motion_at";
+        try {
+            String v = com.overdrive.app.server.Messages.get(key, cam);
+            if (v != null && !v.equals(key)) return v;
+        } catch (Throwable ignored) {
+        }
+        return "Motion at " + camHint;
+    }
+
+    private static String notifText(String key, String fallback) {
+        try {
+            String v = com.overdrive.app.server.Messages.get(key);
+            if (v != null && !v.equals(key)) return v;
+        } catch (Throwable ignored) {
+        }
+        return fallback;
+    }
+
     /** Camera name for a caption — the actor's CURRENT (last-seen) quadrant, NOT
      *  the lifetime peakCamera high-water latch. Naming peakCamera captioned a
      *  quadrant the actor may have already left ("person at front" when it has
@@ -9064,8 +9086,8 @@ public class SurveillanceEngineGpu {
                 String name = cameraNameFor(a);
                 if (name != null) { camHint = name; break; }
             }
-            String title = (camHint != null) ? "Motion at " + camHint : "Motion detected";
-            String body = "Recording in progress";
+            String title = motionTitle(camHint);
+            String body = notifText("notifications.recording_in_progress", "Recording in progress");
 
             com.overdrive.app.notifications.NotificationBus.get().publish(
                     new com.overdrive.app.notifications.NotificationEvent(
@@ -9339,7 +9361,7 @@ public class SurveillanceEngineGpu {
             // or plain "Motion at front" when AI didn't classify.
             String title;
             if (threat == null) {
-                title = (camHint != null) ? "Motion at " + camHint : "Motion detected";
+                title = motionTitle(camHint);
             } else {
                 StringBuilder sb = new StringBuilder();
                 if (peakSev == Actor.Severity.CRITICAL) sb.append("CRITICAL · ");

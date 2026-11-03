@@ -197,8 +197,8 @@
                 session = data.session;
                 setRunning(true);
                 placeholder.textContent = data.activityReady
-                    ? 'Connecting live stream...'
-                    : 'Waiting for Overdrive to render...';
+                    ? t('remote_dev.connecting_stream', 'Connecting live stream...')
+                    : t('remote_dev.waiting_render', 'Waiting for Overdrive to render...');
                 setMessage('', false);
                 openFrameStream();
                 try { viewerCard.focus({ preventScroll: true }); }
@@ -457,8 +457,8 @@
             } else if (error.sessionInvalid) setMessage(error.message + '.', true);
             else {
                 connectionState.textContent = currentObjectUrl
-                    ? 'Connected - holding last frame'
-                    : 'Waiting for a stable frame';
+                    ? t('remote_dev.holding_last_frame', 'Connected - holding last frame')
+                    : t('remote_dev.waiting_frame', 'Waiting for a stable frame');
                 if (!currentObjectUrl) placeholder.textContent = t('remote_dev.waiting_frame_long', 'Waiting for a stable app frame...');
             }
         }).then(function () {
@@ -814,10 +814,30 @@
         if (session) endSession(true);
     });
 
+    // Idle labels the markup ships in English; re-applied once the catalog loads.
+    function applyIdleLabels() {
+        if (session || !stopped) return;
+        startButton.textContent = t('remote_dev.start_session', 'Start session');
+        connectionState.textContent = t('remote_dev.stopped', 'Stopped');
+        if (!currentObjectUrl) placeholder.textContent = t('remote_dev.placeholder', 'Start a session to view Overdrive.');
+        syncFullscreenState();
+        backButton.textContent = t('remote_dev.back', 'Back');
+        keyboardButton.textContent = t('remote_dev.keyboard', 'Keyboard');
+        fullscreenKeyboardButton.textContent = t('remote_dev.keyboard', 'Keyboard');
+        if (!screenshotInFlight) {
+            screenshotButton.textContent = t('remote_dev.screenshot', 'Screenshot');
+            fullscreenScreenshotButton.textContent = t('remote_dev.screenshot', 'Screenshot');
+        }
+        pixelCopyState.textContent = t('remote_dev.capture_idle', 'Capture --');
+        activityState.textContent = t('remote_dev.activity', 'Activity {name}', {name: '--'});
+        keyboardCapture.setAttribute('aria-label', t('remote_dev.keyboard_input_aria', 'Remote keyboard input'));
+    }
+
     bindPointer();
     setRunning(false);
     syncFullscreenState();
     if (window.BYD && BYD.i18n && BYD.i18n.init) {
-        BYD.i18n.init();
+        var i18nReady = BYD.i18n.init();
+        if (i18nReady && typeof i18nReady.then === 'function') i18nReady.then(applyIdleLabels);
     }
 })();

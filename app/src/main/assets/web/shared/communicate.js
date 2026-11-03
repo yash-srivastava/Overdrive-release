@@ -16,6 +16,23 @@ var CommunicatePage = {
         return fallback || key;
     },
 
+    // " • <label>" status suffix; the English fallback keeps its own bullet.
+    ttSuffix: function (key, fallback) {
+        var v = (window.BYD && BYD.i18n && BYD.i18n.t) ? BYD.i18n.t(key) : null;
+        if (v && v !== key) return ' \u2022 ' + v;
+        return fallback;
+    },
+
+    // Stop reasons are protocol strings sent to the car; translate only for display.
+    reasonLabel: function (reason) {
+        var keys = {
+            'Touch cancelled': 'communicate.reason_touch_cancelled',
+            'Page hidden': 'communicate.reason_page_hidden',
+            'Navigation': 'communicate.reason_navigation'
+        };
+        return keys[reason] ? this.tt(keys[reason], reason) : reason;
+    },
+
     status: null,
     statusTimer: null,
     statusGeneration: 0,
@@ -557,18 +574,20 @@ var CommunicatePage = {
         var unreachable = carState === 'unreachable';
         var ready = !carOff && !unreachable && !!status.audioReady;
         var warning = !carOff && !unreachable && !ready;
-        var carLabel = carState === 'unknown' ? 'Car reachable' : 'Car online';
+        var carLabel = carState === 'unknown'
+            ? this.tt('communicate.car_reachable', 'Car reachable')
+            : this.tt('communicate.car_online', 'Car online');
         var text;
         if (carOff) {
-            text = 'Car off \u2022 Communication unavailable';
+            text = this.tt('communicate.status_car_off', 'Car off \u2022 Communication unavailable');
         } else if (unreachable) {
-            text = 'Car unreachable';
+            text = this.tt('communicate.car_unreachable', 'Car unreachable');
         } else if (ready) {
-            text = carLabel + ' \u2022 Audio ready';
+            text = carLabel + this.ttSuffix('communicate.audio_ready', ' \u2022 Audio ready');
         } else if (status.audioState === 'busy') {
-            text = carLabel + ' \u2022 Talk busy';
+            text = carLabel + this.ttSuffix('communicate.talk_busy', ' \u2022 Talk busy');
         } else {
-            text = carLabel + ' \u2022 Setup required';
+            text = carLabel + this.ttSuffix('communicate.setup_required', ' \u2022 Setup required');
         }
         if (availability) {
             availability.classList.toggle('is-ready', ready);
@@ -694,8 +713,8 @@ var CommunicatePage = {
         }).catch(function (error) {
             if (!self.isPressCurrent(generation)) return;
             var reason = error && error.name === 'NotAllowedError'
-                ? 'Microphone permission was denied'
-                : 'Microphone is unavailable';
+                ? self.tt('communicate.mic_denied', 'Microphone permission was denied')
+                : self.tt('communicate.mic_unavailable', 'Microphone is unavailable');
             self.failTalk(reason);
         });
     },
@@ -1105,11 +1124,11 @@ var CommunicatePage = {
 
         this.stopping = false;
         if (document.hidden || silent) {
-            this.setTalkState('disabled', this.tt('communicate.talk_unavailable', 'Talk unavailable'), reason || '', '');
+            this.setTalkState('disabled', this.tt('communicate.talk_unavailable', 'Talk unavailable'), this.reasonLabel(reason || ''), '');
             return;
         }
         if (reason && reason !== 'Released' && reason !== 'Talk tab closed') {
-            this.setTalkState('disabled', this.tt('communicate.talk_stopped', 'Talk stopped'), reason, '');
+            this.setTalkState('disabled', this.tt('communicate.talk_stopped', 'Talk stopped'), this.reasonLabel(reason), '');
         }
         this.startStatusPolling(true);
     },

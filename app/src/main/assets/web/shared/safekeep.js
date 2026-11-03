@@ -1410,7 +1410,10 @@ window.SK = (function () {
                 ? [['eq', t('safekeep.is', 'is')], ['neq', t('safekeep.is_not', 'is not')]]
                 : [['eq', '='], ['neq', '≠'], ['gt', '>'], ['gte', '≥'], ['lt', '<'], ['lte', '≤']];
             var valHtml;
-            if (def.kind === 'enum') valHtml = select('skCV_' + laneId + '_' + i, def.opts, c.value);
+            if (def.kind === 'enum') valHtml = select('skCV_' + laneId + '_' + i, def.opts.map(function (o) {
+                // Gear letters stay as-is; other enum labels are localized for display only.
+                return c.type === 'gear' ? o : [o[0], t('safekeep.cond_' + c.type + '_' + o[0], o[1])];
+            }), c.value);
             else if (def.kind === 'time') valHtml = '<input type="time" class="text-input" id="skCV_' + laneId + '_' + i + '" value="' + minToTime(c.value) + '">';
             else if (def.kind === 'int') valHtml = '<input type="number" class="text-input" id="skCV_' + laneId + '_' + i + '" min="' + def.min + '" max="' + def.max + '" value="' + esc(c.value == null ? def.min : c.value) + '">';
             else valHtml = '<input class="text-input" id="skCV_' + laneId + '_' + i + '" value="' + esc(c.value || '') + '">';

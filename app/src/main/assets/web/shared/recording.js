@@ -1840,10 +1840,11 @@ BYD.recording = {
                 const fields = qualityRejectedFields.join(', ');
                 const submittedQualityFieldCount = 4; // recordingQuality, recordingCodec, cameraFps, segmentDurationMinutes
                 if (qualityRejectedFields.length >= submittedQualityFieldCount) {
-                    msg = 'No changes applied — values rejected: ' + fields;
+                    msg = BYD.i18n.t('recording.values_rejected_all', {fields: fields}) || ('No changes applied — values rejected: ' + fields);
                     severity = 'error';
                 } else {
-                    msg = BYD.i18n.t('recording.settings_applied') + ' — but kept old values for: ' + fields;
+                    msg = BYD.i18n.t('recording.kept_old_values', {applied: BYD.i18n.t('recording.settings_applied'), fields: fields})
+                        || (BYD.i18n.t('recording.settings_applied') + ' — but kept old values for: ' + fields);
                     severity = 'warn';
                 }
             } else {

@@ -1161,7 +1161,8 @@ BYD.performance = {
             const gpuValueEl = document.getElementById('gpuValue');
             if (gpuValueEl) {
                 if (data.gpu.usageSource === 'freq_ratio_hardcoded') {
-                    gpuValueEl.title = 'Estimated from clock ratio (no GPU busy counter available on this firmware) — not a measured load.';
+                    gpuValueEl.title = (BYD.i18n && BYD.i18n.t && BYD.i18n.t('performance.gpu_estimated_title'))
+                        || 'Estimated from clock ratio (no GPU busy counter available on this firmware) — not a measured load.';
                     gpuValueEl.classList.add('estimated');
                 } else {
                     gpuValueEl.removeAttribute('title');

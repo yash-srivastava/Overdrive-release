@@ -192,7 +192,15 @@
     "settings_saved": "Parking settings saved",
     "settings_open_page": "Open Parking",
     "settings_models_present": "OCR models found",
-    "settings_models_missing": "OCR models not installed"
+    "settings_models_missing": "OCR models not installed",
+    "settings_end_trigger": "Session ends",
+    "settings_end_trigger_desc": "When a parking session closes. \"When I return\": a door opens after you have been away, or an unlock followed by a door (or power-on). \"When the car powers on\": door and unlock only refresh the returned stills. \"When I drive away\": waits until the gear leaves P; without a usable gear reading it closes ~2 minutes after power-on.",
+    "end_trigger_return": "When I return",
+    "end_trigger_power_on": "When the car powers on",
+    "end_trigger_drive_away": "When I drive away",
+    "trigger_drive_away": "drove away",
+    "energy_used": "Energy used",
+    "soc_charged": "Charged while parked"
   },
   "communicate": {
     "output_level": "Custom voice level",
@@ -259,7 +267,17 @@
     "displayed": "Displayed",
     "displayed_moving": "Displayed as a toast while the vehicle is moving",
     "display_failed": "The car failed to display the message",
-    "display_no_ack": "The car did not acknowledge the message"
+    "display_no_ack": "The car did not acknowledge the message",
+    "car_reachable": "Car reachable",
+    "car_online": "Car online",
+    "status_car_off": "Car off • Communication unavailable",
+    "audio_ready": "Audio ready",
+    "talk_busy": "Talk busy",
+    "mic_denied": "Microphone permission was denied",
+    "mic_unavailable": "Microphone is unavailable",
+    "reason_touch_cancelled": "Touch cancelled",
+    "reason_page_hidden": "Page hidden",
+    "reason_navigation": "Navigation"
   },
   "remote_dev": {
     "page_title": "Remote Dev View",
@@ -295,7 +313,12 @@
     "session_expired": "Developer-view session expired.",
     "unlock_resume": "Unlock the physical Overdrive UI to resume.",
     "screenshot_failed": "Screenshot failed: {error}",
-    "aria_live": "Live Overdrive app window"
+    "aria_live": "Live Overdrive app window",
+    "capture_idle": "Capture --",
+    "keyboard_input_aria": "Remote keyboard input",
+    "connecting_stream": "Connecting live stream...",
+    "waiting_render": "Waiting for Overdrive to render...",
+    "holding_last_frame": "Connected - holding last frame"
   },
   "widgets": {
     "page_title": "Widgets",
@@ -799,7 +822,13 @@
     "access_code": "Access Code",
     "access_mode": "Access Mode",
     "saving": "Saving…",
-    "copied": "Copied"
+    "copied": "Copied",
+    "saved": "Saved",
+    "tz_group_common": "Common",
+    "tz_group_asia": "Asia / Pacific",
+    "tz_group_mideast": "Middle East / Africa",
+    "tz_group_europe": "Europe (non-EUR)",
+    "tz_group_latam": "Latin America"
   },
   "errors": {
     "generic": "Something went wrong",
@@ -1132,7 +1161,14 @@
     "tariff_fallback_global": "Charges outside every tariff use {rate}/kWh.",
     "tariff_auto_hint": "Saved. Charges within {radius} m of here will use this tariff automatically.",
     "tariff_label_placeholder": "Home",
-    "per_kwh_unit": "/kWh"
+    "per_kwh_unit": "/kWh",
+    "clear_failed": "Could not clear charging history",
+    "tariff_reprice_pending": "Tariff saved. Past charges will be re-priced automatically when storage is ready.",
+    "tariff_reprice_failed": "Tariff saved, but past-charge repricing could not be queued.",
+    "tariff_reprice_unconfirmed": "Tariff saved, but past-charge repricing could not be confirmed.",
+    "lfp_candidate_badge": "LFP CALIBRATION CANDIDATE",
+    "lfp_candidate_note": "LFP calibration candidate.",
+    "legacy_power_hidden": "Contradictory power and charging energy are hidden because this session contains invalid legacy power data."
   },
   "trip": {
     "tab_trips": "Trips",
@@ -1491,7 +1527,12 @@
     "ice_share_distance_minimal": "Engine drove <1% of the way",
     "ice_share_distance_pct_only": "Engine drove {pct}% of the way",
     "ice_share_time_label": "Engine ran {pct}% of the time",
-    "tier_score": "Score: {score}"
+    "tier_score": "Score: {score}",
+    "no_score_badge_title": "Driving score unavailable for this trip",
+    "speed_hist_avg": "Avg:",
+    "speed_hist_max": "Max:",
+    "speed_hist_low": "Low speed:",
+    "speed_hist_high": "High speed:"
   },
   "automation": {
     "mode_label": "Execution mode",
@@ -1991,7 +2032,9 @@
     "telemetry_field_lowBeam": "Low beam",
     "telemetry_field_highBeam": "High beam",
     "telemetry_field_location": "GPS location",
-    "telemetry_field_vin": "VIN"
+    "telemetry_field_vin": "VIN",
+    "values_rejected_all": "No changes applied — values rejected: {fields}",
+    "kept_old_values": "{applied} — but kept old values for: {fields}"
   },
   "events": {
     "select_date": "Select Date",
@@ -2083,7 +2126,15 @@
     "videos_count_initial": "0 videos",
     "selected_count_initial": "0 selected",
     "page_initial": "Page 1 of 1",
-    "calendar_title_initial": "Calendar"
+    "calendar_title_initial": "Calendar",
+    "seek_aria": "Seek",
+    "pack_confirm_title": "Create evidence pack?",
+    "pack_confirm_body": "OverDrive sends only filtered event metadata to your configured AI provider. The video stays local and is added only to the downloaded evidence pack.",
+    "pack_confirm_fallback": "Create an incident evidence pack? {body}",
+    "pack_create": "Create pack",
+    "pack_failed": "Could not create evidence pack",
+    "pack_invalid_id": "The daemon returned an invalid pack id",
+    "pack_ready": "Evidence pack ready"
   },
   "surveillance": {
     "tab_general": "General",
@@ -2659,7 +2710,8 @@
     "ha_short": "Home Assistant",
     "allow_control": "Allow vehicle control",
     "allow_control_desc": "Expose controllable entities (climate, windows, seats, settings…) and act on commands from Home Assistant. Local SDK only — never the BYD cloud. Off by default.",
-    "control_short": "control"
+    "control_short": "control",
+    "live_preview_title": "Live Telemetry Preview"
   },
   "abrp": {
     "connected": "Connected",
@@ -2707,7 +2759,8 @@
     "app_mode_foreground": "ABRP is on screen (recommended)",
     "app_mode_running": "ABRP is running (incl. background)",
     "app_grace": "Grace period",
-    "app_status": "ABRP app"
+    "app_status": "ABRP app",
+    "card_token": "ABRP Token"
   },
   "soh": {
     "fallback_caption": "From last charge · {pct}% · {date}",
@@ -2959,7 +3012,8 @@
     "soc_will_appear": "SOC history will appear once data is collected",
     "soc_current_label": "Current Battery Level",
     "soc_history_will_build": "History will build over time",
-    "page_header_short": "Performance"
+    "page_header_short": "Performance",
+    "gpu_estimated_title": "Estimated from clock ratio (no GPU busy counter available on this firmware) — not a measured load."
   },
   "update": {
     "check_for_updates": "Check for Updates",
@@ -3557,7 +3611,8 @@
     "tyre_alerts_desc": "Send a Telegram message when a tyre goes outside your configured pressure range, or when the TPMS reports a leak. Uses the limits set under Tyre pressure limits.",
     "parking_messages": "Parking messages",
     "parking_messages_desc": "Send \"Parked\" (place, GPS freshness, sentry state, four-camera still) and \"Back at car\" (time away, events, neighbours that came or went). Requires Parking Intelligence under Surveillance settings.",
-    "always_on_note": "The daemon is enabled on the native Daemons screen, so it keeps running whether or not this toggle is on — including while parked. Turn it off there to stop it."
+    "always_on_note": "The daemon is enabled on the native Daemons screen, so it keeps running whether or not this toggle is on — including while parked. Turn it off there to stop it.",
+    "show_token": "Show token"
   },
   "dashboard": {
     "heading": "Dashboard",
@@ -3872,7 +3927,8 @@
     "unconfirmed_note_unset": "No model is selected in Settings. Reading and saving are safe; apply will ask first.",
     "unconfirmed_title": "Not confirmed for this car",
     "unconfirmed_body": "Seat and mirror positions are read using addresses confirmed on a BYD Seal, and your car may use different ones. Every value being sent was read back from this same car when the position was captured, and the car must be parked, so the likely worst case is that something other than the seat moves slightly. Worth checking the numbers first: capture a position, move the seat, capture another, and see whether the values follow the seat.",
-    "unconfirmed_confirm": "Apply anyway"
+    "unconfirmed_confirm": "Apply anyway",
+    "gate_state_unavailable": "The current gear or speed could not be confirmed, so seat movement is blocked for safety. Saving and renaming still work."
   },
   "keymap": {
     "act_voice_assistant": "Talk to OverDrive",
@@ -4241,7 +4297,8 @@
     "qc_need_action": "Choose what the button should do.",
     "qc_need_label": "Give the button a label.",
     "qc_save_failed": "Could not save dashboard buttons",
-    "qc_saved": "Dashboard buttons saved"
+    "qc_saved": "Dashboard buttons saved",
+    "act_ivi_reboot": "Reboot IVI"
   },
   "network": {
     "nav": "Network",
@@ -4292,7 +4349,10 @@
     "copied": "Copied",
     "tab_hotspot": "Hotspot",
     "tab_devices": "Devices",
-    "tab_limits": "Limits"
+    "tab_limits": "Limits",
+    "stopping": "Stopping hotspot…",
+    "starting": "Starting hotspot…",
+    "usage_reset": "Usage counter reset"
   },
   "genai": {
     "page_title": "OverDrive Assistant",
@@ -4994,7 +5054,35 @@
     "gd_step6": "Clients → Create client → “TVs and Limited Input devices”. Paste the client ID and secret below.",
     "gd_open_console": "Open Google Cloud console",
     "google_testing_expired": "Google signed the car out because your Google Cloud project is still in Testing. In the console go to Audience → Publish app, then tap Reconnect.",
-    "own_app_keep": "Optional — leave empty to keep the one you used before"
+    "own_app_keep": "Optional — leave empty to keep the one you used before",
+    "tab_overview": "Overview",
+    "tab_storage": "Storage",
+    "tab_backup": "What & when",
+    "tab_limits": "Limits",
+    "tab_activity": "Activity",
+    "err_cancel": "Could not confirm cancellation. Check the sign-in status.",
+    "err_link_status": "Could not confirm sign-in. Checking its status.",
+    "err_cancel_late": "Sign-in is already being saved. Check its status before removing the storage.",
+    "err_link_busy": "Sign-in is already in progress.",
+    "cond_power_off": "Off",
+    "cond_power_acc": "Accessory",
+    "cond_power_on": "On",
+    "cond_chargingState_on": "Charging",
+    "cond_chargingState_off": "Not charging",
+    "cond_wifiState_on": "Connected",
+    "cond_wifiState_off": "Disconnected",
+    "cond_day_monday": "Monday",
+    "cond_day_tuesday": "Tuesday",
+    "cond_day_wednesday": "Wednesday",
+    "cond_day_thursday": "Thursday",
+    "cond_day_friday": "Friday",
+    "cond_day_saturday": "Saturday",
+    "cond_day_sunday": "Sunday",
+    "opt_15min": "15 min",
+    "opt_30min": "30 min",
+    "opt_1h": "1 h",
+    "opt_2h": "2 h",
+    "opt_4h": "4 h"
   },
   "voice_assistant": {
     "command_language": "Command language",

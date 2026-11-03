@@ -192,7 +192,15 @@
     "settings_saved": "הגדרות החניה נשמרו",
     "settings_open_page": "פתיחת חניה",
     "settings_models_present": "מודלי OCR נמצאו",
-    "settings_models_missing": "מודלי OCR אינם מותקנים"
+    "settings_models_missing": "מודלי OCR אינם מותקנים",
+    "settings_end_trigger": "סיום החניה",
+    "settings_end_trigger_desc": "מתי נסגרת חניה. \"כשאני חוזר\": דלת נפתחת אחרי שהיית רחוק, או ביטול נעילה ואחריו דלת (או הדלקה). \"כשהרכב מודלק\": דלת וביטול נעילה רק מרעננים את תמונות החזרה. \"כשאני נוסע\": ממתין עד שההילוך יוצא מ-P; בלי קריאת הילוך תקינה החניה נסגרת כ-2 דקות אחרי ההדלקה.",
+    "end_trigger_return": "כשאני חוזר",
+    "end_trigger_power_on": "כשהרכב מודלק",
+    "end_trigger_drive_away": "כשאני נוסע",
+    "trigger_drive_away": "הרכב יצא לנסיעה",
+    "energy_used": "אנרגיה שנצרכה",
+    "soc_charged": "נטען בזמן החניה"
   },
   "communicate": {
     "output_level": "עוצמת שמע מותאמת אישית",
@@ -259,7 +267,17 @@
     "displayed": "הוצג",
     "displayed_moving": "הוצג כהודעה קופצת בזמן שהרכב בתנועה",
     "display_failed": "הרכב נכשל בהצגת ההודעה",
-    "display_no_ack": "הרכב לא אישר את קבלת ההודעה"
+    "display_no_ack": "הרכב לא אישר את קבלת ההודעה",
+    "car_reachable": "הרכב נגיש",
+    "car_online": "הרכב מחובר",
+    "status_car_off": "הרכב כבוי • התקשורת אינה זמינה",
+    "audio_ready": "השמע מוכן",
+    "talk_busy": "הדיבור תפוס",
+    "mic_denied": "הגישה למיקרופון נדחתה",
+    "mic_unavailable": "המיקרופון אינו זמין",
+    "reason_touch_cancelled": "המגע בוטל",
+    "reason_page_hidden": "הדף הוסתר",
+    "reason_navigation": "מעבר לדף אחר"
   },
   "remote_dev": {
     "page_title": "תצוגת פיתוח מרחוק",
@@ -295,7 +313,12 @@
     "session_expired": "תוקף הפעלת תצוגת הפיתוח פג.",
     "unlock_resume": "בטל את נעילת ממשק ה-Overdrive ברכב כדי להמשיך.",
     "screenshot_failed": "צילום המסך נכשל: {error}",
-    "aria_live": "חלון אפליקציית Overdrive חי"
+    "aria_live": "חלון אפליקציית Overdrive חי",
+    "capture_idle": "לכידה --",
+    "keyboard_input_aria": "קלט מקלדת מרחוק",
+    "connecting_stream": "מתחבר לשידור החי...",
+    "waiting_render": "ממתין ש-Overdrive יוצג...",
+    "holding_last_frame": "מחובר - מוצגת התמונה האחרונה"
   },
   "widgets": {
     "page_title": "ווידג'טים",
@@ -799,7 +822,13 @@
     "access_code": "קוד גישה",
     "access_mode": "מצב גישה",
     "saving": "שומר…",
-    "copied": "הועתק"
+    "copied": "הועתק",
+    "saved": "נשמר",
+    "tz_group_common": "נפוצים",
+    "tz_group_asia": "אסיה / האוקיינוס השקט",
+    "tz_group_mideast": "המזרח התיכון / אפריקה",
+    "tz_group_europe": "אירופה (ללא אירו)",
+    "tz_group_latam": "אמריקה הלטינית"
   },
   "errors": {
     "generic": "משהו השתבש",
@@ -1132,7 +1161,14 @@
     "tariff_fallback_global": "טעינות מחוץ לכל תעריף מוגדר מחושבות לפי {rate}/קוט\"ש.",
     "tariff_auto_hint": "נשמר. טעינות בטווח של {radius} מ' מכאן ישתמשו בתעריף זה באופן אוטומטי.",
     "tariff_label_placeholder": "בית",
-    "per_kwh_unit": "/קוט\"ש"
+    "per_kwh_unit": "/קוט\"ש",
+    "clear_failed": "לא ניתן לנקות את היסטוריית הטעינה",
+    "tariff_reprice_pending": "התעריף נשמר. מחירי הטעינות הקודמות יחושבו מחדש אוטומטית כשהאחסון יהיה זמין.",
+    "tariff_reprice_failed": "התעריף נשמר, אך לא ניתן היה לתזמן חישוב מחדש של מחירי הטעינות הקודמות.",
+    "tariff_reprice_unconfirmed": "התעריף נשמר, אך לא ניתן היה לאשר את החישוב מחדש של מחירי הטעינות הקודמות.",
+    "lfp_candidate_badge": "מועמד לכיול LFP",
+    "lfp_candidate_note": "מועמד לכיול LFP.",
+    "legacy_power_hidden": "נתוני הספק ואנרגיית טעינה סותרים מוסתרים, כי הטעינה הזו כוללת נתוני הספק ישנים לא תקינים."
   },
   "trip": {
     "tab_trips": "נסיעות",
@@ -1491,7 +1527,12 @@
     "ice_share_distance_minimal": "המנוע נסע פחות מ-1% מהדרך",
     "ice_share_distance_pct_only": "המנוע נסע {pct}% מהדרך",
     "ice_share_time_label": "המנוע פעל ב-{pct}% מהזמן",
-    "tier_score": "ציון: {score}"
+    "tier_score": "ציון: {score}",
+    "no_score_badge_title": "ציון הנהיגה אינו זמין לנסיעה זו",
+    "speed_hist_avg": "ממוצע:",
+    "speed_hist_max": "מקסימום:",
+    "speed_hist_low": "מהירות נמוכה:",
+    "speed_hist_high": "מהירות גבוהה:"
   },
   "automation": {
     "mode_label": "מצב ביצוע",
@@ -1991,7 +2032,9 @@
     "telemetry_field_lowBeam": "אורות מעבר",
     "telemetry_field_highBeam": "אורות גבוהים",
     "telemetry_field_location": "מיקום GPS",
-    "telemetry_field_vin": "מספר שלדה (VIN)"
+    "telemetry_field_vin": "מספר שלדה (VIN)",
+    "values_rejected_all": "לא הוחלו שינויים — ערכים נדחו: {fields}",
+    "kept_old_values": "{applied} — אך נשמרו הערכים הקודמים עבור: {fields}"
   },
   "events": {
     "select_date": "בחר תאריך",
@@ -2083,7 +2126,15 @@
     "videos_count_initial": "0 סרטונים",
     "selected_count_initial": "0 נבחרו",
     "page_initial": "עמוד 1 מתוך 1",
-    "calendar_title_initial": "לוח שנה"
+    "calendar_title_initial": "לוח שנה",
+    "seek_aria": "דילוג בציר הזמן",
+    "pack_confirm_title": "ליצור חבילת ראיות?",
+    "pack_confirm_body": "OverDrive שולח לספק ה-AI שהגדרת רק מטא-נתונים מסוננים של האירוע. הווידאו נשאר מקומי ומתווסף רק לחבילת הראיות שמורדת.",
+    "pack_confirm_fallback": "ליצור חבילת ראיות לאירוע? {body}",
+    "pack_create": "צור חבילה",
+    "pack_failed": "לא ניתן ליצור את חבילת הראיות",
+    "pack_invalid_id": "השירות החזיר מזהה חבילה לא תקין",
+    "pack_ready": "חבילת הראיות מוכנה"
   },
   "surveillance": {
     "tab_general": "כללי",
@@ -2659,7 +2710,8 @@
     "ha_short": "Home Assistant",
     "allow_control": "אפשר שליטה ברכב",
     "allow_control_desc": "חשיפת ישויות שניתנות לשליטה (בקרת אקלים, חלונות, מושבים, הגדרות...) וביצוע פקודות מ-Home Assistant. דרך ה-SDK המקומי בלבד — לעולם לא דרך ענן BYD. כבוי כברירת מחדל.",
-    "control_short": "שליטה"
+    "control_short": "שליטה",
+    "live_preview_title": "תצוגה מקדימה של טלמטריה חיה"
   },
   "abrp": {
     "connected": "מחובר",
@@ -2707,7 +2759,8 @@
     "app_mode_foreground": "ABRP מוצגת על המסך (מומלץ)",
     "app_mode_running": "ABRP פועלת (כולל ברקע)",
     "app_grace": "תקופת חסד",
-    "app_status": "אפליקציית ABRP"
+    "app_status": "אפליקציית ABRP",
+    "card_token": "אסימון ABRP"
   },
   "soh": {
     "fallback_caption": "מהטעינה האחרונה · {pct}% · {date}",
@@ -2959,7 +3012,8 @@
     "soc_will_appear": "היסטוריית רמת הסוללה תופיע לאחר איסוף הנתונים",
     "soc_current_label": "רמת סוללה נוכחית",
     "soc_history_will_build": "ההיסטוריה תיבנה עם הזמן",
-    "page_header_short": "ביצועים"
+    "page_header_short": "ביצועים",
+    "gpu_estimated_title": "הערכה לפי יחס התדר (אין מונה עומס GPU בקושחה הזו) — לא עומס שנמדד."
   },
   "update": {
     "check_for_updates": "בדוק עדכונים",
@@ -3557,7 +3611,8 @@
     "tyre_alerts_desc": "שליחת הודעת Telegram כאשר לחץ הצמיג חורג מהטווח המוגדר, או כאשר ה-TPMS מזהה פנצ'ר/דליפה. משתמש בהגדרות שנקבעו תחת 'גבולות לחץ אוויר בצמיגים'.",
     "parking_messages": "הודעות חניה",
     "parking_messages_desc": "שליחת הודעות \"בחניה\" (מיקום, עדכניות GPS, מצב שומר, תמונת 4 מצלמות) ו\"חזרה לרכב\" (זמן היעדרות, אירועים, רכבים שכנים שבאו או עזבו). דורש הפעלת 'חניה חכמה' בהגדרות האבטחה.",
-    "always_on_note": "השירות מופעל במסך השירותים באפליקציה שברכב, ולכן הוא ממשיך לפעול ללא תלות במתג זה — כולל בזמן חניה. כבה אותו שם כדי לעצור אותו לחלוטין."
+    "always_on_note": "השירות מופעל במסך השירותים באפליקציה שברכב, ולכן הוא ממשיך לפעול ללא תלות במתג זה — כולל בזמן חניה. כבה אותו שם כדי לעצור אותו לחלוטין.",
+    "show_token": "הצג אסימון"
   },
   "dashboard": {
     "heading": "לוח בקרה",
@@ -3872,7 +3927,8 @@
     "unconfirmed_note_unset": "לא נבחר דגם בהגדרות. קריאה ושמירה בטוחות; לפני החלה תוצג בקשת אישור.",
     "unconfirmed_title": "לא אומת עבור רכב זה",
     "unconfirmed_body": "תנוחות המושב והמראות נקראות מכתובות שאומתו ב-BYD Seal, וייתכן שברכבך נעשה שימוש בכתובות שונות. כל ערך שנשלח נקרא מאותו הרכב בעת שמירת התנוחה, והרכב חייב להיות בחניה, כך שבמקרה הגרוע ביותר רכיב שאינו המושב יזוז מעט. כדאי לבדוק את הערכים תחילה: שמור תנוחה, הזז את המושב, שמור תנוחה נוספת ובדוק אם הערכים משתנים בהתאם למושב.",
-    "unconfirmed_confirm": "החל בכל זאת"
+    "unconfirmed_confirm": "החל בכל זאת",
+    "gate_state_unavailable": "לא ניתן לאשר את ההילוך או המהירות הנוכחיים, ולכן הזזת המושב חסומה מטעמי בטיחות. שמירה ושינוי שם עדיין פועלים."
   },
   "keymap": {
     "act_voice_assistant": "דבר עם OverDrive",
@@ -4241,7 +4297,8 @@
     "qc_need_action": "בחר מה הכפתור אמור לבצע.",
     "qc_need_label": "הזן תווית לכפתור.",
     "qc_save_failed": "לא ניתן לשמור כפתורים בלוח הבקרה",
-    "qc_saved": "כפתורי לוח הבקרה נשמרו"
+    "qc_saved": "כפתורי לוח הבקרה נשמרו",
+    "act_ivi_reboot": "הפעל מחדש את ה-IVI"
   },
   "network": {
     "nav": "רשת",
@@ -4292,7 +4349,10 @@
     "copied": "הועתק",
     "tab_hotspot": "נקודה חמה",
     "tab_devices": "מכשירים",
-    "tab_limits": "מגבלות"
+    "tab_limits": "מגבלות",
+    "stopping": "עוצר את הנקודה החמה…",
+    "starting": "מפעיל את הנקודה החמה…",
+    "usage_reset": "מונה השימוש אופס"
   },
   "genai": {
     "page_title": "עוזר OverDrive",
@@ -4994,7 +5054,35 @@
     "gd_step6": "Clients -> Create client -> „TVs and Limited Input devices”. הדבק למטה את מזהה הלקוח ואת הסוד.",
     "gd_open_console": "פתח את מסוף Google Cloud",
     "google_testing_expired": "‏Google ניתקה את הרכב כי פרויקט Google Cloud שלך עדיין במצב Testing. במסוף עבור אל Audience -> Publish app, ואז הקש על התחבר מחדש.",
-    "own_app_keep": "אופציונלי — השאר ריק כדי להמשיך עם זה שהשתמשת בו קודם"
+    "own_app_keep": "אופציונלי — השאר ריק כדי להמשיך עם זה שהשתמשת בו קודם",
+    "tab_overview": "סקירה",
+    "tab_storage": "אחסון",
+    "tab_backup": "מה ומתי",
+    "tab_limits": "מגבלות",
+    "tab_activity": "פעילות",
+    "err_cancel": "לא ניתן לאשר את הביטול. בדוק את מצב ההתחברות.",
+    "err_link_status": "לא ניתן לאשר את ההתחברות. בודק את מצבה.",
+    "err_cancel_late": "ההתחברות כבר נשמרת. בדוק את מצבה לפני הסרת האחסון.",
+    "err_link_busy": "ההתחברות כבר מתבצעת.",
+    "cond_power_off": "כבוי",
+    "cond_power_acc": "אביזרים (ACC)",
+    "cond_power_on": "מופעל",
+    "cond_chargingState_on": "בטעינה",
+    "cond_chargingState_off": "לא בטעינה",
+    "cond_wifiState_on": "מחובר",
+    "cond_wifiState_off": "מנותק",
+    "cond_day_monday": "יום שני",
+    "cond_day_tuesday": "יום שלישי",
+    "cond_day_wednesday": "יום רביעי",
+    "cond_day_thursday": "יום חמישי",
+    "cond_day_friday": "יום שישי",
+    "cond_day_saturday": "שבת",
+    "cond_day_sunday": "יום ראשון",
+    "opt_15min": "15 דק׳",
+    "opt_30min": "30 דק׳",
+    "opt_1h": "שעה",
+    "opt_2h": "שעתיים",
+    "opt_4h": "4 שע׳"
   },
   "voice_assistant": {
     "command_language": "שפת הפקודות",

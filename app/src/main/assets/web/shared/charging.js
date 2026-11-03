@@ -1425,7 +1425,7 @@ var CHARGING = {
                                 self._esc(estimateLabel) +
                               '</span>'
                             : '') +
-                        (calibration ? '<div class="calibration-badge">LFP CALIBRATION CANDIDATE</div>' : '') +
+                        (calibration ? '<div class="calibration-badge">' + self._esc(self._t('charge.lfp_candidate_badge', 'LFP CALIBRATION CANDIDATE')) + '</div>' : '') +
                         (poisoned ? '<div class="quality-warning">' + self._qualityWarningContent(
                             self._t('charge.quality_warning_short', 'Contradictory power and charging energy hidden.')) + '</div>' : '') +
                     '</div>' +
@@ -1867,8 +1867,8 @@ var CHARGING = {
         var calibration = s.calibration && s.calibration.qualified === true;
         var qualityWarning = document.getElementById('detailQualityWarning');
         if (qualityWarning) {
-            var warningText = (calibration ? 'LFP calibration candidate. ' : '') +
-                (poisoned ? 'Contradictory power and charging energy are hidden because this session contains invalid legacy power data.' : '');
+            var warningText = (calibration ? this._t('charge.lfp_candidate_note', 'LFP calibration candidate.') + ' ' : '') +
+                (poisoned ? this._t('charge.legacy_power_hidden', 'Contradictory power and charging energy are hidden because this session contains invalid legacy power data.') : '');
             qualityWarning.innerHTML = poisoned
                 ? this._qualityWarningContent(warningText)
                 : '<span class="quality-warning-text">' + this._esc(warningText) + '</span>';

@@ -5129,11 +5129,12 @@ const TRIPS = {
 
             const summaryEl = document.getElementById('speedHistSummary');
             if (summaryEl) {
+                const tRC = (k, fb) => (window.BYD && BYD.i18n && BYD.i18n.t(k) && BYD.i18n.t(k) !== k) ? BYD.i18n.t(k) : fb;
                 summaryEl.innerHTML =
-                    '<span class="speed-hist-stat">Avg: <span class="shval">' + BYD.units.speed(avg) + '</span></span>' +
-                    '<span class="speed-hist-stat">Max: <span class="shval">' + BYD.units.speed(max) + '</span></span>' +
-                    '<span class="speed-hist-stat">Low speed: <span class="shval">' + lowPct + '%</span></span>' +
-                    '<span class="speed-hist-stat">High speed: <span class="shval">' + highPct + '%</span></span>';
+                    '<span class="speed-hist-stat">' + tRC('trip.speed_hist_avg', 'Avg:') + ' <span class="shval">' + BYD.units.speed(avg) + '</span></span>' +
+                    '<span class="speed-hist-stat">' + tRC('trip.speed_hist_max', 'Max:') + ' <span class="shval">' + BYD.units.speed(max) + '</span></span>' +
+                    '<span class="speed-hist-stat">' + tRC('trip.speed_hist_low', 'Low speed:') + ' <span class="shval">' + lowPct + '%</span></span>' +
+                    '<span class="speed-hist-stat">' + tRC('trip.speed_hist_high', 'High speed:') + ' <span class="shval">' + highPct + '%</span></span>';
             }
         }
     },
@@ -5448,9 +5449,10 @@ const TRIPS = {
     },
 
     _formatCdrRelativeTime(ts) {
-        if (!ts || ts <= 0) return 'Never';
+        const tRC = (k, fb) => (window.BYD && BYD.i18n && BYD.i18n.t(k) && BYD.i18n.t(k) !== k) ? BYD.i18n.t(k) : fb;
+        if (!ts || ts <= 0) return tRC('recording.never', 'Never');
         const diffSec = Math.floor((Date.now() - ts) / 1000);
-        if (diffSec < 0) return 'Just now';
+        if (diffSec < 0) return tRC('recording.just_now', 'Just now');
         if (diffSec < 60) {
             var secsAgo = diffSec;
             var secPhrase = (window.BYD && BYD.i18n && BYD.i18n.t)

@@ -173,7 +173,14 @@
     "area_fuel_cap": "Fuel cap",
     "area_door_n": "Door {0}",
     "soh_frame_mismatch_title": "Battery capacity needs review",
-    "soh_frame_mismatch_body": "Vehicle reports {0} kWh at full charge but pack capacity is set to {1} kWh. Open Battery Health to fix in one tap."
+    "soh_frame_mismatch_body": "Vehicle reports {0} kWh at full charge but pack capacity is set to {1} kWh. Open Battery Health to fix in one tap.",
+    "motion_detected": "Motion detected",
+    "motion_at": "Motion at {0}",
+    "recording_in_progress": "Recording in progress",
+    "camera_front": "front",
+    "camera_right": "right",
+    "camera_rear": "rear",
+    "camera_left": "left"
   },
   "parking": {
     "notify": {

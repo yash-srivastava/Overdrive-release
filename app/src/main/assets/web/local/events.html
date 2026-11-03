@@ -2561,9 +2561,8 @@
                             <input type="search" id="placeSearchInput"
                                    autocomplete="off" autocorrect="off"
                                    autocapitalize="off" spellcheck="false"
-                                   data-i18n-attr="placeholder:events.place_search_hint"
+                                   data-i18n-attr="placeholder:events.place_search_hint;aria-label:events.place_search_hint"
                                    placeholder="Search places…"
-                                   data-i18n-attr-aria="aria-label:events.place_search_hint"
                                    aria-label="Search places" />
                             <button type="button" class="place-search-clear"
                                     id="placeSearchClear"
@@ -2677,7 +2676,7 @@
                 <!-- Always-visible scrubber. Markers are populated only when
                      a JSON sidecar exists; the bar itself stays so users have
                      a seek surface for plain recordings too. -->
-                <div class="timeline-scrubber" id="timelineScrubber" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Seek">
+                <div class="timeline-scrubber" id="timelineScrubber" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Seek" data-i18n-attr="aria-label:events.seek_aria">
                     <div class="timeline-track" id="timelineTrack">
                         <div class="timeline-progress" id="timelineProgress"></div>
                     </div>

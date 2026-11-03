@@ -1885,17 +1885,22 @@ BYD.events = {
     async createIncidentPack(recordingKey) {
         const rec = this.findRecording(recordingKey);
         if (!rec || !rec.id || !/^[a-f0-9]{32}$/i.test(rec.id)) return;
-        const body = 'OverDrive sends only filtered event metadata to your configured AI provider. '
-            + 'The video stays local and is added only to the downloaded evidence pack.';
+        const tEv = (key, fallback, vars) => {
+            const v = (BYD.i18n && BYD.i18n.t) ? BYD.i18n.t(key, vars) : null;
+            return (v && v !== key) ? v : fallback;
+        };
+        const body = tEv('events.pack_confirm_body',
+            'OverDrive sends only filtered event metadata to your configured AI provider. '
+            + 'The video stays local and is added only to the downloaded evidence pack.');
         const confirmed = window.BYD && BYD.utils
                 && BYD.utils.confirmDialog
             ? await BYD.utils.confirmDialog({
-                title: 'Create evidence pack?',
+                title: tEv('events.pack_confirm_title', 'Create evidence pack?'),
                 body: body,
-                confirmLabel: 'Create pack',
-                cancelLabel: 'Cancel'
+                confirmLabel: tEv('events.pack_create', 'Create pack'),
+                cancelLabel: tEv('common.cancel', 'Cancel')
             })
-            : confirm('Create an incident evidence pack? ' + body);
+            : confirm(tEv('events.pack_confirm_fallback', 'Create an incident evidence pack? ' + body, {body: body}));
         if (!confirmed) return;
         try {
             const response = await fetch('/api/genai/incidents', {
@@ -1908,14 +1913,14 @@ BYD.events = {
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok || data.success === false) {
-                throw new Error(data.error || 'Could not create evidence pack');
+                throw new Error(data.error || tEv('events.pack_failed', 'Could not create evidence pack'));
             }
             const packId = String(data.id || data.packId || '');
             if (!/^[a-f0-9-]{36}$/i.test(packId)) {
-                throw new Error('The daemon returned an invalid pack id');
+                throw new Error(tEv('events.pack_invalid_id', 'The daemon returned an invalid pack id'));
             }
             if (BYD.core && BYD.core.toast) {
-                BYD.core.toast('Evidence pack ready', 'success');
+                BYD.core.toast(tEv('events.pack_ready', 'Evidence pack ready'), 'success');
             }
             window.location.href = '/api/genai/incidents/'
                 + encodeURIComponent(packId) + '/download';
