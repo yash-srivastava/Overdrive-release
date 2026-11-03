@@ -13,7 +13,7 @@ handler sends remote Back and consumes Escape, then the document listener also
 exits fullscreen. Consumed capture Escape should send exactly one Back; a separate
 unconsumed viewer Escape should exit fullscreen without sending remote Back.
 
-The fix will respect `event.defaultPrevented` at the document listener entry.
+The fix respects `event.defaultPrevented` at the document listener entry.
 Only the dedicated HTML script version token changes to refresh cached clients.
 Native fullscreen palette placement belongs to a separate PR. Browser-managed
 native fullscreen Escape is outside this fallback-specific JavaScript contract.
@@ -37,7 +37,7 @@ The bounded offline sandbox completes with exit 1 in 44.025 seconds.
 
 The accepted runner SHA256 is
 `2ba5f8c860e89c5f23a46edf26de2eaa3369ac70433f9d967e061937dbd0b5f2`.
-Parent-retained `fullscreen-escape/stage4.log` and `stage4-result.json` record the
+The external `fullscreen-escape` case's `stage4.log` and `stage4-result.json` record the
 exact command, source/fixture hashes, checks and resource bounds: 2 CPUs, 2 GiB
 memory, 512 MiB scratch, 256 processes and 180 seconds, network disabled and
 read-only source/tools. Only dummy capability/session/input fixtures are used.
@@ -46,13 +46,35 @@ Initial runs are preserved separately: stage1 asserted focus before search's
 deferred focus callback; stages2/3 completed five cases but the Hebrew 1280-pixel
 pointer control delivered button pointerdown without button pointerup/click.
 A diagnostic DOM click then activated fullscreen, so no fullscreen-handler fix
-was inferred from that incomplete pointer sequence. The accepted tool pre-focuses
-the button with `preventScroll` before a real pointer click; all six pointer
-controls then complete. The original pointer/focus observation remains outside
-this Escape fix and needs separate validation; it is not declared fixture-only.
+was inferred from that incomplete pointer sequence. The accepted trace narrows
+the cause: while the keyboard textarea is active, the fullscreen button spans
+x=348..419; focusing another control triggers the capture blur handler, which
+relabels its neighboring keyboard button and moves the fullscreen button to
+x=310..381 without scrolling. The original pointerdown at x=383.5 then lies
+outside the shifted button. The accepted tool pre-focuses the button with
+`preventScroll` before a real pointer click; all six activation controls complete.
+This separate existing RTL label-layout pointer issue remains outside the Escape
+fix and requires separate validation. These checks do not establish blanket
+pointer acceptance or declare the observation fixture-only.
 
 ## GREEN and submission gates
 
-GREEN is pending. Independent review and the actual `./gradlew assembleDebug` and
-`./gradlew test` runs remain required before submission. This browser source
-fixture does not establish installed-app, BYD hardware or fleet acceptance.
+RED checkpoint: `16e074ca87a53a2bcc9454c83b6d93f06ef3138d`.
+With the unchanged regression runner, all 168 checks pass in all six cases after
+the one-line guard and dedicated v12 script-token update. The 18 previously
+failing checks now pass; the other 150 controls remain green. There are no setup
+failures, diagnostic recoveries, page/console errors, missing assets, external
+requests, unexpected writes or microphone calls. Stage5 completes with exit 0 in
+43.595 seconds under the same sandbox/resource bounds. `stage5.log`,
+`stage5-result.json` and bounded before/after PNGs record the evidence; promotion
+to retained artifacts is parent-owned and separate from target execution.
+
+GREEN production SHA256 values:
+
+- `remote-dev-view.js`: `dd0f237f658750ebe16bdf61d520d2ce95807ad4423d1ec944c9519f27102e45`
+- `remote-dev-view.html`: `d258720ea7cafba8471ecc9d32bb4d2ed2b4c8de335fa763b9bb501c1ca26447`
+
+Independent source and focused-evidence review passes. The actual
+`./gradlew assembleDebug` and `./gradlew test` runs remain required before
+submission and are coordinated separately on the frozen branch. This browser
+source fixture does not establish installed-app, BYD hardware or fleet acceptance.

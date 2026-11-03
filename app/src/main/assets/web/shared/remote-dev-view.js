@@ -800,6 +800,7 @@
     document.addEventListener('fullscreenchange', syncFullscreenState);
     document.addEventListener('webkitfullscreenchange', syncFullscreenState);
     document.addEventListener('keydown', function (event) {
+        if (event.defaultPrevented) return;
         if (event.key === 'Escape' && isFullscreen()) {
             event.preventDefault();
             exitFullscreen();
