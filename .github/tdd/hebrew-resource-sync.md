@@ -81,3 +81,40 @@ The independently scoped companion-locale correction is required to reach all
 app assertions; this one-line fix alone does not supply absent companion files
 or establish a fully green project. No Android device or vehicle behavior is
 claimed by a build-resource synchronization test.
+
+## Maintained app-owned regression guard
+
+Two added methods in the existing `HebrewLocaleSupportTest` exercise the named
+`syncHebrewIwResources` registration independently of any companion reads.
+The guard requires that exact task to use `Sync`, take `src/main/res/values-he`,
+and target the dedicated generated `values-iw` child. Every original assertion
+is retained.
+
+The negative control changes only that named alias registration to `Copy` and
+leaves an unrelated `tasks.registering(Sync::class)` present. The old generic
+substring check would accept this input; the new scoped guard rejects it. It
+also rejects mutations of the alias source or destination.
+
+Both new methods were run from the actual test class against exact build-script
+bytes in disposable scratch storage, without executing the other methods:
+
+- RED: actual public-main `Copy` script, positive guard fails and negative
+  control passes; two tests/one intended failure, exit 1, 1.979 s.
+- GREEN: actual corrected `Sync` script, both tests pass; exit 0, 1.916 s.
+
+Compilation used `javac --release 8`, JUnit 4.13.2, Hamcrest Core 1.3 and exact
+JSON 20231013. The exact pure `LocaleManager` excerpt was compiled only to link
+the existing test class; no locale, Android persistence or companion method was
+invoked. This remains focused JUnit evidence, not a replacement for the actual
+full app checks. The offline sandbox used 512 MiB memory, one CPU, 64 processes,
+128 MiB scratch and a 60-second wall limit; neither run hit a limit.
+
+Actual maintained test-class SHA-256:
+`35395b4dc947c283de9b9ffb813d1c2c0500744819c630496c6c934daf3569a3`.
+RED log SHA-256:
+`e86b9f1ce9bb244da650c923e3e2db88d8ecd2d9930a833b456a44fb6e01baf3`.
+GREEN log SHA-256:
+`bff8db2597466422290e83645cf17f03110dab77cc367fae0bd99fea3ccb1d7d`.
+The app build script is unchanged from the functional nine-XML RED/GREEN checks
+above. Complete app configuration, variant/resource and canonical results must
+be associated with the final published head, including these maintained tests.

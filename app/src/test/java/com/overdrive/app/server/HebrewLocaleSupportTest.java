@@ -104,6 +104,42 @@ public class HebrewLocaleSupportTest {
         assertTrue(launcherBuild.contains("tasks.registering(Sync::class)"));
     }
 
+    @Test
+    public void generatedHebrewAliasUsesSyncForItsDedicatedInputsAndDestination()
+            throws Exception {
+        assertTrue("The Hebrew alias must mirror its own source directory",
+                hebrewAliasUsesSync(read("app/build.gradle.kts")));
+    }
+
+    @Test
+    public void unrelatedSyncTaskCannotMaskARegressedHebrewAlias()
+            throws Exception {
+        String build = read("app/build.gradle.kts");
+        String registration = "val syncHebrewIwResources by tasks.registering(Sync::class)";
+        String regressed = build.replace(registration,
+                "val syncHebrewIwResources by tasks.registering(Copy::class)")
+                + "\nval unrelatedResourceSync by tasks.registering(Sync::class) {}\n";
+        assertTrue(regressed.contains("tasks.registering(Sync::class)"));
+        assertFalse("An unrelated Sync must not satisfy the Hebrew alias contract",
+                hebrewAliasUsesSync(regressed));
+        assertFalse(hebrewAliasUsesSync(build.replace("from(\"src/main/res/values-he\")",
+                "from(\"src/main/res/values-en\")")));
+        assertFalse(hebrewAliasUsesSync(build.replace("it.dir(\"values-iw\")",
+                "it.dir(\"values-fr\")")));
+    }
+
+    private static boolean hebrewAliasUsesSync(String build) {
+        String registration = "val syncHebrewIwResources by tasks.registering(Sync::class) {";
+        int start = build.indexOf(registration);
+        if (start < 0) return false;
+        int end = build.indexOf("\n}", start);
+        if (end < 0) return false;
+        String task = build.substring(start, end);
+        return build.contains("val hebrewIwResDir = layout.buildDirectory.dir(\"generated/res/iwAlias\")")
+                && task.contains("from(\"src/main/res/values-he\")")
+                && task.contains("into(hebrewIwResDir.map { it.dir(\"values-iw\") })");
+    }
+
     private static void assertCatalogCoversEnglish(String englishPath, String hebrewPath)
             throws Exception {
         JSONObject english = readJson(englishPath);
