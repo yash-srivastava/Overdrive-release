@@ -33,8 +33,12 @@ def main():
     classes = root / 'classes'
     classes.mkdir()
     classpath = args.classpath_file.read_text().strip()
-    if not classpath or any(not Path(entry).exists() for entry in classpath.split(os.pathsep)):
-        raise AssertionError('actual compiled Test runtime classpath is incomplete')
+    entries = classpath.split(os.pathsep)
+    if not classpath or not any(Path(entry).exists() for entry in entries):
+        raise AssertionError('actual compiled Test runtime classpath is missing')
+    # Gradle may include absent optional resource directories. Preserve its
+    # exact classpath/order; javac and the JVM enforce required generator types.
+    missing_optional_entries = sum(not Path(entry).exists() for entry in entries)
     source = Path(__file__).with_name('ExportWatchdogFixture.java')
     subprocess.run(['javac', '-cp', classpath, '-d', str(classes), str(source)], check=True, timeout=30)
     fixture = root / 'fixture'
@@ -54,7 +58,10 @@ def main():
     stop = fixture / 'camera_daemon.disabled'
     for generation in ['old', 'new']:
         stop.unlink(missing_ok=True)
-        process = subprocess.Popen(['/bin/sh', str(fixture / (generation + '.sh'))],
+        # The ownership protocol checks this exact script path in /proc.
+        live_script = fixture / 'start_cam_daemon.sh'
+        live_script.write_bytes((fixture / (generation + '.sh')).read_bytes())
+        process = subprocess.Popen(['/bin/sh', str(live_script)],
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                    env={'PATH': str(fake_bin) + ':/usr/bin:/bin',
                                         'CALLS': str(calls), 'STOP_FILE': str(stop)},
@@ -86,6 +93,7 @@ def main():
         raise AssertionError('old APK control must remain present')
     print(json.dumps({'dummy_generations': 2, 'old_apk_retained': True,
                       'paired_metadata': 'PASS', 'ownership_cleanup': 'PASS',
+                      'missing_optional_classpath_entries': missing_optional_entries,
                       'scope': 'real compiled generator, explicit Linux tool; no Android/camera/JNI acceptance'}))
 
 

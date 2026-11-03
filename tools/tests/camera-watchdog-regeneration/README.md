@@ -34,7 +34,9 @@ JVM, remaps both legacy and alternate production root strings, and exports two
 scripts with distinct supplied APK/native-directory pairs. The old dummy APK
 remains present throughout the new generation's execution.
 
-Each script runs in its own Linux process group with fake `app_process` and
+Each exported script is deployed as `start_cam_daemon.sh`, matching the actual
+ownership protocol's process-identity check, and runs in its own Linux process
+group with fake `app_process` and
 `sleep` programs, a ten-second limit and cleanup of only that owned group. The
 probe verifies two launch records, unchanged system/vendor search paths, no old
 metadata in the new launch, and removal of watchdog ownership files. No Android
