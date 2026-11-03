@@ -12,11 +12,11 @@ import java.nio.file.Paths;
 import org.json.JSONObject;
 import org.junit.Test;
 
-/** Regression coverage for Czech locale selection and shipped catalogs. */
+/** Regression coverage for Czech locale selection and catalogs shipped by the app module. */
 public class CzechLocaleSupportTest {
 
     @Test
-    public void czechIsSelectableAndAvailableAcrossSurfaces() throws Exception {
+    public void czechIsSelectableAndAvailableAcrossAppSurfaces() throws Exception {
         assertTrue(LocaleManager.isSupported("cs"));
         assertEquals("cs", LocaleManager.resolve("cs-CZ"));
         assertEquals("cs", LocaleManager.fromAcceptLanguage(
@@ -43,13 +43,11 @@ public class CzechLocaleSupportTest {
         assertTrue(core.contains("Čeština"));
         assertTrue(core.contains("n === i && i >= 2 && i <= 4"));
 
-        String launcherController = readRepositoryFile(
-                "launcher/src/main/java/com/overdrive/launcher/i18n/LocaleController.kt");
-        String launcherStrings = readRepositoryFile(
-                "launcher/src/main/res/values-cs/strings.xml");
-        assertTrue(launcherController.contains("\"cs\""));
-        assertTrue(launcherStrings.contains(
-                "name=\"settings_language\">Jazyk</string>"));
+        String appLocaleConfig = readRepositoryFile(
+                "app/src/main/res/xml/locales_config.xml");
+        assertTrue(appLocaleConfig.contains("android:name=\"cs\""));
+        // The separately versioned companion's unchanged contracts live under
+        // tools/tests/companion-launcher-locales and require its actual checkout.
     }
 
     private static JSONObject readJson(String relativePath) throws Exception {
