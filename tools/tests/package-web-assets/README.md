@@ -11,8 +11,9 @@ python3 tools/tests/package-web-assets/check.py app/build/outputs/apk/debug/app-
 
 The checker verifies every ordinary source asset remains byte-identical in the
 APK and the source `web/local/shared -> ../shared` compatibility link remains
-intact, while its duplicate packaged subtree is absent. The empty
-`models/.gitkeep` placeholder is omitted by AAPT's existing ignore policy.
+intact, while its duplicate packaged subtree is absent. The versioned
+`models/.gitkeep` documentation marker is omitted by AAPT's existing dotfile policy,
+regardless of its size; the checker records its path, byte count and SHA-256.
 APK files from dependencies may add assets; they do not replace this check of
 all main-source assets. Duplicate ZIP names are rejected independently.
 
@@ -45,3 +46,8 @@ Web shared assets currently contain no packaged font files. A real native UI
 font from the same APK is copied to a fixture-only shared URL for an additional
 alias/MIME check; that URL is not a shipped application resource. All original
 native font assets are independently covered by the APK byte-preservation check.
+
+The dotfile rule comes from AAPT's existing default filter (`.*`), not from this
+packaging change. See the [AOSP asset filter](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/tools/aapt/AaptAssets.cpp).
+Only the exact tracked `models/.gitkeep` marker is exempted by this checker; no
+other missing main-source asset is tolerated.

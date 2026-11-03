@@ -36,10 +36,13 @@ def check(root, apk):
             for name in files:
                 item = Path(directory) / name
                 relative = item.relative_to(assets).as_posix()
-                # AAPT's existing ignore pattern omits Git placeholders. This
-                # exact, empty source marker is not a runtime asset.
-                if relative == 'models/.gitkeep' and item.stat().st_size == 0:
-                    ignored.append(relative)
+                # AAPT's existing dotfile ignore pattern omits this exact
+                # versioned Git/documentation marker, irrespective of size.
+                # Record its identity; every other asset remains mandatory.
+                if relative == 'models/.gitkeep':
+                    marker = item.read_bytes()
+                    ignored.append({'path': relative, 'bytes': len(marker),
+                                    'sha256': sha(marker), 'reason': 'existing AAPT dotfile policy'})
                     continue
                 entry = 'assets/' + relative
                 if item.is_symlink() or not item.is_file():
@@ -52,7 +55,7 @@ def check(root, apk):
             raise AssertionError('canonical performance script missing')
         return {'apk': apk.name, 'source_alias_preserved': True,
                 'duplicate_apk_entry_names': 0, 'packaged_alias_entries': 0,
-                'preserved_source_assets': preserved, 'aapt_ignored_empty_markers': ignored}
+                'preserved_source_assets': preserved, 'aapt_ignored_markers': ignored}
 
 
 if __name__ == '__main__':

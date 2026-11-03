@@ -32,7 +32,9 @@ separate Android source sets. No HTTP, WebView, auth or camera code changes.
 The source symlink remains `../shared`. Unit packaging contracts depend on the staging task and check the real staged
 performance bytes and absence of the alias, in addition to source-link identity. Actual APK checks are supplied under
 `tools/tests/package-web-assets`, including all non-alias source asset bytes.
-The empty `models/.gitkeep` marker is already ignored by AAPT.
+The versioned `models/.gitkeep` documentation marker is already ignored by
+AAPT's dotfile policy regardless of its size; its path, byte count and hash are
+recorded explicitly, with every other source asset remaining mandatory.
 
 ## Existing runtime compatibility
 
