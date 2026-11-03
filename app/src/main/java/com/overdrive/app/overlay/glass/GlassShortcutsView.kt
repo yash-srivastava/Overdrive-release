@@ -1,5 +1,6 @@
 package com.overdrive.app.overlay.glass
 
+import com.overdrive.app.R
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
@@ -106,15 +107,15 @@ class GlassShortcutsView(context: Context, env: GlassEnv, ticker: GlassTicker) :
     private fun wrap(i: Int) {
         val sl = slots[i]
         val lines = captions[i]
-        if (sl.id == null) { lines[0] = "Add automation"; lines[1] = ""; return }
+        if (sl.id == null) { lines[0] = gs(R.string.glass_sc_add); lines[1] = ""; return }
         val max = SW - 12f
         // a removed or turned-off key keeps its name on one line, with what's wrong under it
         if (sl.missing || sl.off) {
-            lines[0] = ellipsize(sl.name.ifBlank { "Automation" }, max)
-            lines[1] = if (sl.missing) "Removed" else "Turned off"
+            lines[0] = ellipsize(sl.name.ifBlank { gs(R.string.glass_automation) }, max)
+            lines[1] = if (sl.missing) gs(R.string.glass_sc_removed) else gs(R.string.glass_sc_turned_off)
             return
         }
-        val words = sl.name.ifBlank { "Automation" }.split(' ').filter { it.isNotEmpty() }
+        val words = sl.name.ifBlank { gs(R.string.glass_automation) }.split(' ').filter { it.isNotEmpty() }
         var a = ""; var idx = 0
         while (idx < words.size) {
             val t = if (a.isEmpty()) words[idx] else "$a ${words[idx]}"
@@ -188,8 +189,8 @@ class GlassShortcutsView(context: Context, env: GlassEnv, ticker: GlassTicker) :
         val sl = slots[i]
         val id = sl.id
         if (id == null) { edit(i); return }
-        if (sl.missing) { hint(i, "Hold to change"); return }
-        if (sl.off) { hint(i, "Off in Automations"); return }
+        if (sl.missing) { hint(i, gs(R.string.glass_sc_hold_to_change)); return }
+        if (sl.off) { hint(i, gs(R.string.glass_sc_off_in_automations)); return }
         if (runningId[i] != null) return
         // a tap during the last run's tick or bang would queue that automation a second time
         if (resultAt[i] >= 0 && SystemClock.uptimeMillis() - resultAt[i] < RESULT_MS) return
@@ -214,7 +215,7 @@ class GlassShortcutsView(context: Context, env: GlassEnv, ticker: GlassTicker) :
     private fun edit(i: Int) {
         // the overlay may have hidden (reverse, another app) while the finger was down
         if (env.hidden) return
-        if (!parked) { hint(i, "Park to edit"); return }
+        if (!parked) { hint(i, gs(R.string.glass_sc_park_to_edit)); return }
         onEdit?.invoke(i)
     }
 

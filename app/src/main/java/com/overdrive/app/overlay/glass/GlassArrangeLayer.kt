@@ -1,5 +1,6 @@
 package com.overdrive.app.overlay.glass
 
+import com.overdrive.app.R
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Context
@@ -1508,9 +1509,9 @@ class GlassArrangeBar(context: Context, env: GlassEnv, ticker: GlassTicker, priv
         // title and hint
         if (!compact) {
             title.color = t.text
-            c.drawText("Edit widgets", 84f, 38f, title)
+            c.drawText(gs(R.string.glass_arrange_title), 84f, 38f, title)
             hint.color = t.text2
-            c.drawText("Drag to move · pull a corner or pinch to resize", 84f, 60f, hint)
+            c.drawText(gs(R.string.glass_arrange_hint), 84f, 60f, hint)
         }
         label.getFontMetrics(fm)
         // add: an outlined pill (a round key when compact), lit while the tray is open, dimmed with nothing to add
@@ -1531,7 +1532,7 @@ class GlassArrangeBar(context: Context, env: GlassEnv, ticker: GlassTicker, priv
             s.color = if (open) GlassColor.alpha(t.glowAccent, 0.8f) else if (t.night) 0x40FFFFFF else 0x400B281E; s.strokeWidth = 1.2f
             c.drawRoundRect(r, 21.4f, 21.4f, s)
             label.color = t.text
-            c.drawText("Add widget", addX + PLUS_X + 54f, 42f - (fm.ascent + fm.descent) / 2f, label)
+            c.drawText(gs(R.string.glass_arrange_add), addX + PLUS_X + 54f, 42f - (fm.ascent + fm.descent) / 2f, label)
         }
         if (dim) c.restore()
         c.restore()
@@ -1545,7 +1546,7 @@ class GlassArrangeBar(context: Context, env: GlassEnv, ticker: GlassTicker, priv
         s.color = if (t.night) 0x40FFFFFF else 0x400B281E; s.strokeWidth = 1.2f
         c.drawRoundRect(r, 21.4f, 21.4f, s)
         label.color = t.text
-        c.drawText("Reset", r.centerX(), r.centerY() - (fm.ascent + fm.descent) / 2f, label)
+        c.drawText(gs(R.string.glass_arrange_reset), r.centerX(), r.centerY() - (fm.ascent + fm.descent) / 2f, label)
         c.restore()
         // done: a lit accent pill
         val k2 = if (pressed == Action.DONE) 0.95f else 1f
@@ -1557,7 +1558,7 @@ class GlassArrangeBar(context: Context, env: GlassEnv, ticker: GlassTicker, priv
         p.color = GlassColor.alpha(0xFFFFFFFF.toInt(), 0.35f)
         c.drawRoundRect(r.left + 10f, r.top + 2f, r.right - 10f, r.top + 3.4f, 1f, 1f, p)
         label.color = if (t.night) 0xFF03140F.toInt() else 0xFFFFFFFF.toInt()
-        c.drawText("Done", r.centerX(), r.centerY() - (fm.ascent + fm.descent) / 2f, label)
+        c.drawText(gs(R.string.glass_arrange_done), r.centerX(), r.centerY() - (fm.ascent + fm.descent) / 2f, label)
         c.restore()
     }
 

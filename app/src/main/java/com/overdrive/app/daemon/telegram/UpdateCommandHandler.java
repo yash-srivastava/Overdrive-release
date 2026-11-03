@@ -107,7 +107,7 @@ public class UpdateCommandHandler implements TelegramCommandHandler {
 
         String releaseNotes = resp.optString("releaseNotes", "").trim();
         String text;
-        if (!releaseNotes.isEmpty() && !TelegramMessages.isPortuguese()) {
+        if (!releaseNotes.isEmpty() && !TelegramMessages.mapsTechnicalDetails()) {
             String trimmed = releaseNotes.length() > 600
                     ? releaseNotes.substring(0, 600) + "…"
                     : releaseNotes;

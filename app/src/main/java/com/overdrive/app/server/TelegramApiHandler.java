@@ -159,14 +159,14 @@ public class TelegramApiHandler {
             String token = req.optString("token", "").trim();
             if (token.isEmpty()) {
                 response.put("success", false);
-                response.put("error", "Token is empty");
+                response.put("error", Messages.get("errors.telegram_token_empty"));
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
             // Quick format sanity — Telegram tokens are "<digits>:<base64ish>".
             if (!token.contains(":") || token.length() < 30) {
                 response.put("success", false);
-                response.put("error", "Invalid token format");
+                response.put("error", Messages.get("errors.telegram_token_invalid_format"));
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
@@ -179,11 +179,10 @@ public class TelegramApiHandler {
                 // so the user knows what to fix instead of a vague combined msg.
                 if (gm.rejectedByTelegram) {
                     response.put("error", gm.description != null && !gm.description.isEmpty()
-                            ? ("Telegram rejected this token: " + gm.description)
-                            : "Telegram rejected this token — check it's correct and not revoked");
+                            ? Messages.get("errors.telegram_token_rejected_with_reason", gm.description)
+                            : Messages.get("errors.telegram_token_rejected"));
                 } else {
-                    response.put("error", "Couldn't reach Telegram. Check the head unit's "
-                            + "internet/proxy connection and try again.");
+                    response.put("error", Messages.get("errors.telegram_unreachable"));
                 }
                 HttpResponse.sendJson(out, response.toString());
                 return;
@@ -285,7 +284,7 @@ public class TelegramApiHandler {
         try {
             if (!UnifiedTelegramConfig.hasBotToken()) {
                 response.put("success", false);
-                response.put("error", "Set the bot token first");
+                response.put("error", Messages.get("errors.telegram_token_required"));
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }

@@ -473,7 +473,7 @@ public final class MessageOverlayService extends Service {
             NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
             if (nm != null && nm.getNotificationChannel(CHANNEL_ID) == null) {
                 NotificationChannel ch = new NotificationChannel(
-                        CHANNEL_ID, "On-screen messages", NotificationManager.IMPORTANCE_MIN);
+                        CHANNEL_ID, com.overdrive.app.util.AppLocaleContext.INSTANCE.of(this).getString(com.overdrive.app.R.string.notif_channel_onscreen_messages), NotificationManager.IMPORTANCE_MIN);
                 ch.setShowBadge(false);
                 nm.createNotificationChannel(ch);
             }
@@ -504,7 +504,7 @@ public final class MessageOverlayService extends Service {
         Notification.Builder b = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
-        return b.setContentTitle("On-screen message")
+        return b.setContentTitle(com.overdrive.app.util.AppLocaleContext.INSTANCE.of(this).getString(com.overdrive.app.R.string.notif_onscreen_message_title))
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setPriority(Notification.PRIORITY_MIN)
                 .build();

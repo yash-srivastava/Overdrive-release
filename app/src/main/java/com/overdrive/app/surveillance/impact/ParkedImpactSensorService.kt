@@ -152,7 +152,7 @@ class ParkedImpactSensorService : Service(), SensorEventListener {
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL_ID, "Parked impact watch", NotificationManager.IMPORTANCE_LOW)
+            val ch = NotificationChannel(CHANNEL_ID, com.overdrive.app.util.AppLocaleContext.of(this).getString(R.string.notif_channel_parked_impact), NotificationManager.IMPORTANCE_LOW)
             ch.setShowBadge(false)
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(ch)
         }
@@ -164,8 +164,8 @@ class ParkedImpactSensorService : Service(), SensorEventListener {
         } else {
             @Suppress("DEPRECATION") Notification.Builder(this)
         }
-        return b.setContentTitle("Sentry")
-            .setContentText("Watching for impacts while parked")
+        return b.setContentTitle(com.overdrive.app.util.AppLocaleContext.of(this).getString(R.string.notif_parked_impact_title))
+            .setContentText(com.overdrive.app.util.AppLocaleContext.of(this).getString(R.string.notif_parked_impact_text))
             .setSmallIcon(R.drawable.ic_diagnostics)
             .setOngoing(true)
             .setGroup(DaemonKeepaliveService.NOTIFICATION_GROUP_KEY)

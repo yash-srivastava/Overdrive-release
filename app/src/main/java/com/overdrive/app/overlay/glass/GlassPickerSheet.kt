@@ -1,5 +1,6 @@
 package com.overdrive.app.overlay.glass
 
+import com.overdrive.app.R
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
@@ -166,7 +167,7 @@ class GlassPickerSheet(
         titleP.color = t.text
         c.drawText(title, 24f, 34f, titleP)
         sub.color = t.text2
-        c.drawText(when { failed -> "Couldn't load automations"; items == null -> "Loading automations…"; else -> "Tap one to put it on this key" }, 24f, 54f, sub)
+        c.drawText(when { failed -> gs(R.string.glass_picker_failed); items == null -> gs(R.string.glass_picker_loading); else -> gs(R.string.glass_picker_hint) }, 24f, 54f, sub)
         s.color = t.etch; s.strokeWidth = 1f
         c.drawLine(16f, HEAD - 1f, W - 16f, HEAD - 1f, s)
         if (canRemove) {
@@ -181,13 +182,13 @@ class GlassPickerSheet(
             c.drawLine(35f, cy, 45f, cy, s)
             name.color = t.warn
             name.getFontMetrics(fm)
-            c.drawText("Remove from this key", 64f, cy - (fm.ascent + fm.descent) / 2f, name)
+            c.drawText(gs(R.string.glass_picker_remove), 64f, cy - (fm.ascent + fm.descent) / 2f, name)
         }
         if (items != null && items.isEmpty()) {
             note.color = t.text2
-            c.drawText("No automations yet", W / 2f, (listTop + listBottom) / 2f - 4f, note)
+            c.drawText(gs(R.string.glass_picker_empty), W / 2f, (listTop + listBottom) / 2f - 4f, note)
             note.color = t.text3
-            c.drawText("Create one in OverDrive → Automations", W / 2f, (listTop + listBottom) / 2f + 18f, note)
+            c.drawText(gs(R.string.glass_picker_empty_hint), W / 2f, (listTop + listBottom) / 2f + 18f, note)
         }
     }
 
@@ -224,7 +225,7 @@ class GlassPickerSheet(
                 if (off) 0 else GlassIcons.hue(glyph), bright = sel) { GlassIcons.outline(glyph) }, if (off) 110 else 255)
             c.restore()
             val right = if (sel) W - 52f else W - 96f
-            val label = shownNames[i] ?: fit(it.name.ifBlank { "Automation" }, right - 72f).also { n -> shownNames[i] = n }
+            val label = shownNames[i] ?: fit(it.name.ifBlank { gs(R.string.glass_automation) }, right - 72f).also { n -> shownNames[i] = n }
             name.color = if (it.mode == "disabled") t.text3 else t.text
             c.drawText(label, 68f, cy - (fm.ascent + fm.descent) / 2f, name)
             if (sel) {
@@ -262,7 +263,7 @@ class GlassPickerSheet(
         return "$e…"
     }
 
-    private fun modeLabel(mode: String) = when (mode) { "manual" -> "Manual"; "disabled" -> "Off"; else -> "Auto" }
+    private fun modeLabel(mode: String) = when (mode) { "manual" -> gs(R.string.glass_mode_manual); "disabled" -> gs(R.string.glass_mode_off); else -> gs(R.string.glass_mode_auto) }
 
     override fun drawFront(c: Canvas) {}
 

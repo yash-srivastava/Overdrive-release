@@ -1,5 +1,6 @@
 package com.overdrive.app.overlay.glass
 
+import com.overdrive.app.R
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
@@ -77,12 +78,12 @@ class GlassWidgetTray(context: Context, env: GlassEnv, ticker: GlassTicker, priv
     override fun drawBack(c: Canvas) {
         val t = env.theme
         titleP.color = t.text
-        c.drawText("Add widgets", 22f, 32f, titleP)
+        c.drawText(gs(R.string.glass_tray_title), 22f, 32f, titleP)
         sub.color = if (dropTarget) t.accent else t.text2
-        c.drawText(if (dropTarget) "Let go to put it away" else "Tap one to add it, or drag it where it goes", 22f, 51f, sub)
+        c.drawText(if (dropTarget) gs(R.string.glass_tray_drop) else gs(R.string.glass_tray_hint), 22f, 51f, sub)
         if (ids.isEmpty()) {
             note.color = t.text2
-            c.drawText("Every widget is on screen", shellW / 2f, HEAD + 18f, note)
+            c.drawText(gs(R.string.glass_tray_all_shown), shellW / 2f, HEAD + 18f, note)
         }
     }
 

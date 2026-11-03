@@ -1,5 +1,6 @@
 package com.overdrive.app.overlay.glass
 
+import com.overdrive.app.R
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
@@ -75,7 +76,7 @@ class GlassTripView(context: Context, env: GlassEnv, ticker: GlassTicker) : Glas
         val t = env.theme
         val miles = env.miles
 
-        text.labelText = if (st.live) "This trip" else "Last trip"
+        text.labelText = if (st.live) gs(R.string.glass_this_trip) else gs(R.string.glass_last_trip)
         dotX = X0 + text.label.measureText(text.labelText) + 9f
         text.statusLead = duration(st.minutes.roundToInt())
         text.statusText = extras(st)
@@ -87,12 +88,12 @@ class GlassTripView(context: Context, env: GlassEnv, ticker: GlassTicker) : Glas
             effText = String.format(Locale.US, "%.1f", GlassUnits.consumptionValue(wh, miles))
             val (w, wc) = when {
                 // petrol covered part of the way (or may have), so the electric figure alone can't be judged
-                st.engine == true -> "With engine" to t.text2
-                st.engine == null -> "Hybrid" to t.text2
-                wh <= 130 -> "Efficient" to t.good
-                wh <= 170 -> "Normal" to t.accent
-                wh <= 220 -> "Heavy" to t.warn
-                else -> "Very heavy" to t.danger
+                st.engine == true -> gs(R.string.glass_eff_engine) to t.text2
+                st.engine == null -> gs(R.string.glass_eff_hybrid) to t.text2
+                wh <= 130 -> gs(R.string.glass_eff_efficient) to t.good
+                wh <= 170 -> gs(R.string.glass_eff_normal) to t.accent
+                wh <= 220 -> gs(R.string.glass_eff_heavy) to t.warn
+                else -> gs(R.string.glass_eff_very_heavy) to t.danger
             }
             wordText = w; wordColor = wc
             val c = if (st.engine != false) t.text2 else effColor(t, wh.toFloat())
@@ -103,7 +104,7 @@ class GlassTripView(context: Context, env: GlassEnv, ticker: GlassTicker) : Glas
             meter.set((wh / MAX_WH).coerceIn(0f, 1f), instant)
         } else {
             effText = DASH
-            wordText = if (st.live) "Measuring" else ""
+            wordText = if (st.live) gs(R.string.glass_measuring) else ""
             wordColor = t.text2
             // the first figure sweeps in from the left end
             meter.snap(0f)
@@ -137,12 +138,12 @@ class GlassTripView(context: Context, env: GlassEnv, ticker: GlassTicker) : Glas
     // fuel burned, the cost and the trip's score after the time, as many as fit beside the efficiency column
     private fun extras(st: State): String {
         val parts = ArrayList<String>(3)
-        st.fuelL?.takeIf { it > 0f }?.let { parts.add(String.format(Locale.US, "%.1f L fuel", it)) }
+        st.fuelL?.takeIf { it > 0f }?.let { parts.add(gs(R.string.glass_trip_fuel, String.format(Locale.US, "%.1f", it))) }
         val cur = st.currency
         st.cost?.takeIf { it > 0f && !cur.isNullOrEmpty() }?.let {
             parts.add(cur + if (it < 100f) String.format(Locale.US, "%.1f", it) else it.roundToInt().toString())
         }
-        st.score?.takeIf { it > 0 }?.let { parts.add("Score $it") }
+        st.score?.takeIf { it > 0 }?.let { parts.add(gs(R.string.glass_trip_score, it)) }
         while (parts.isNotEmpty() && text.status.measureText(text.statusLead + SEP + parts.joinToString(SEP)) > RX0 - X0 - 14f) parts.removeAt(parts.size - 1)
         return parts.joinToString(SEP)
     }
@@ -157,7 +158,7 @@ class GlassTripView(context: Context, env: GlassEnv, ticker: GlassTicker) : Glas
         text.setValue(if (decimal) "${key / 10}.${key % 10}" else v.roundToInt().toString(), GlassUnits.distUnit(env.miles))
     }
 
-    private fun duration(m: Int) = when { m < 1 -> "<1 min"; m < 60 -> "$m min"; m % 60 == 0 -> "${m / 60} h"; else -> "${m / 60} h ${m % 60} min" }
+    private fun duration(m: Int) = when { m < 1 -> gs(R.string.glass_dur_lt_min); m < 60 -> gs(R.string.glass_dur_min, m); m % 60 == 0 -> gs(R.string.glass_dur_h, m / 60); else -> gs(R.string.glass_dur_h_min, m / 60, m % 60) }
 
     override fun onThemeChanged() { meterColor = 0; knobShader = null; if (bound) bind(state, false, force = true) }
 
@@ -180,7 +181,7 @@ class GlassTripView(context: Context, env: GlassEnv, ticker: GlassTicker) : Glas
         for (i in 1 until 4) c.drawLine(X0 + cw * i, CELL_TOP, X0 + cw * i, CELL_BOT, s)
         caption.color = t.text2
         for (i in 0 until 4) c.drawText(CAPTIONS[i], cellX(i), CAPTION_Y, caption)
-        c.drawText("EFFICIENCY", RX0, EFF_CAPTION_Y, caption)
+        c.drawText(gs(R.string.glass_cap_efficiency), RX0, EFF_CAPTION_Y, caption)
         bands(c, t, if (t.night) 0.22f else 0.2f)
     }
 
@@ -266,7 +267,7 @@ class GlassTripView(context: Context, env: GlassEnv, ticker: GlassTicker) : Glas
         private const val CAPTION_Y = 139f
         private const val CELL_Y = 163f
         private const val CELL_PAD = 12f
-        private val CAPTIONS = arrayOf("AVG SPEED", "TOP SPEED", "ENERGY", "BATTERY")
+        private val CAPTIONS get() = arrayOf(gs(R.string.glass_cap_avg_speed), gs(R.string.glass_cap_top_speed), gs(R.string.glass_cap_energy), gs(R.string.glass_cap_battery))
         // the middle of the text column's label line, centred above the rule like the column
         private val LABEL_MID_Y = (RULE_Y - (GlassText.LABEL_H + GlassText.GAP * 2 + 38f + GlassText.STATUS_H)) / 2f + GlassText.LABEL_H / 2f
         private const val DASH = "—"

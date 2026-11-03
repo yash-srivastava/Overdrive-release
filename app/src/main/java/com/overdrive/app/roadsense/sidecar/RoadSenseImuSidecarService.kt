@@ -287,7 +287,7 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL_ID, "RoadSense IMU", NotificationManager.IMPORTANCE_LOW)
+            val ch = NotificationChannel(CHANNEL_ID, com.overdrive.app.util.AppLocaleContext.of(this).getString(R.string.notif_channel_roadsense_imu), NotificationManager.IMPORTANCE_LOW)
             ch.setShowBadge(false)
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(ch)
         }
@@ -300,7 +300,7 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
             @Suppress("DEPRECATION") Notification.Builder(this)
         }
         return b.setContentTitle("RoadSense")
-            .setContentText("Road sensing active")
+            .setContentText(com.overdrive.app.util.AppLocaleContext.of(this).getString(R.string.notif_roadsense_imu_text))
             .setSmallIcon(R.drawable.ic_diagnostics)
             .setOngoing(true)
             .setGroup(DaemonKeepaliveService.NOTIFICATION_GROUP_KEY)

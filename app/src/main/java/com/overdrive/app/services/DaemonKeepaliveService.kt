@@ -376,10 +376,10 @@ class DaemonKeepaliveService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Daemon Keepalive",
+                com.overdrive.app.util.AppLocaleContext.of(this).getString(R.string.notif_channel_keepalive),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Keeps daemons running in background"
+                description = com.overdrive.app.util.AppLocaleContext.of(this@DaemonKeepaliveService).getString(R.string.notif_channel_keepalive_desc)
                 setShowBadge(false)
             }
             
@@ -412,8 +412,9 @@ class DaemonKeepaliveService : Service() {
             PendingIntent.FLAG_IMMUTABLE
         )
 
-        val title = getString(R.string.daemon_keepalive_notif_title)
-        val text  = getString(R.string.daemon_keepalive_notif_text)
+        val strings = com.overdrive.app.util.AppLocaleContext.of(this)
+        val title = strings.getString(R.string.daemon_keepalive_notif_title)
+        val text  = strings.getString(R.string.daemon_keepalive_notif_text)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle(title)
@@ -447,10 +448,10 @@ class DaemonKeepaliveService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 SUMMARY_CHANNEL_ID,
-                "Overdrive Status",
+                com.overdrive.app.util.AppLocaleContext.of(this).getString(R.string.notif_channel_summary),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Combined status row for Overdrive's background services"
+                description = com.overdrive.app.util.AppLocaleContext.of(this@DaemonKeepaliveService).getString(R.string.notif_channel_summary_desc)
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
@@ -495,8 +496,8 @@ class DaemonKeepaliveService : Service() {
             Notification.Builder(this)
         }
         val notification = builder
-            .setContentTitle(getString(R.string.overdrive_status_summary_title))
-            .setContentText(getString(R.string.overdrive_status_summary_text))
+            .setContentTitle(com.overdrive.app.util.AppLocaleContext.of(this).getString(R.string.overdrive_status_summary_title))
+            .setContentText(com.overdrive.app.util.AppLocaleContext.of(this).getString(R.string.overdrive_status_summary_text))
             .setSmallIcon(R.drawable.ic_sentry)
             .setContentIntent(pendingIntent)
             .setOngoing(true)

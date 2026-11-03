@@ -666,8 +666,7 @@ public final class PositionsApiHandler {
                 // is unaffected — it acknowledges up front and already treats
                 // needsModelAck as a failure condition (seat-positions.js).
                 r.put("success", false);
-                r.put("error", "vehicle model not acknowledged for seat writes; "
-                        + "open the Seat Positions page once and confirm to enable applies");
+                r.put("error", Messages.get("errors.seatpos_model_not_acknowledged"));
                 r.put("modelId", model != null ? model : JSONObject.NULL);
                 r.put("appliedId", id);
                 HttpResponse.sendJson(out, r.toString());
@@ -725,10 +724,10 @@ public final class PositionsApiHandler {
         // Report the honest outcome: the HAL refusing the write, and the HAL accepting a write
         // the unpowered motors cannot act on, are both "the seat did not move".
         if (hasGeometry && !geometryOk && !res.has("error") && !res.has("skipped")) {
-            res.put("error", "the car did not confirm the seat write"
+            res.put("error", Messages.get("errors.seatpos_seat_write_unconfirmed")
                     + (res.has("exception") ? " (" + res.optString("exception") + ")" : ""));
         } else if (hasAmbient && !ambientOk && !res.has("error")) {
-            res.put("error", "the car did not confirm the ambient-light write");
+            res.put("error", Messages.get("errors.seatpos_ambient_write_unconfirmed"));
         } else if (res.optBoolean("inert", false)) {
             res.put("warning", res.optString("reason", "vehicle off: nothing moved"));
         }

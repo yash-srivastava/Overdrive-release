@@ -1186,7 +1186,7 @@ public final class RemoteVoiceService extends Service {
                 (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (manager == null || manager.getNotificationChannel(CHANNEL_ID) != null) return;
         NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID, "Remote voice", NotificationManager.IMPORTANCE_MIN);
+                CHANNEL_ID, com.overdrive.app.util.AppLocaleContext.INSTANCE.of(this).getString(com.overdrive.app.R.string.notif_channel_remote_voice), NotificationManager.IMPORTANCE_MIN);
         channel.setShowBadge(false);
         manager.createNotificationChannel(channel);
     }
@@ -1196,8 +1196,8 @@ public final class RemoteVoiceService extends Service {
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
         Notification notification = builder
-                .setContentTitle(getString(R.string.remote_voice_notification_title))
-                .setContentText(getString(R.string.remote_voice_notification_text))
+                .setContentTitle(com.overdrive.app.util.AppLocaleContext.INSTANCE.of(this).getString(com.overdrive.app.R.string.remote_voice_notification_title))
+                .setContentText(com.overdrive.app.util.AppLocaleContext.INSTANCE.of(this).getString(com.overdrive.app.R.string.remote_voice_notification_text))
                 .setSmallIcon(R.drawable.ic_volume_on)
                 .setPriority(Notification.PRIORITY_MIN)
                 .build();

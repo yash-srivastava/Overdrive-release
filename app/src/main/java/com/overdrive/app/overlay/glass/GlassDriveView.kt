@@ -1,5 +1,6 @@
 package com.overdrive.app.overlay.glass
 
+import com.overdrive.app.R
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
@@ -121,7 +122,7 @@ class GlassDriveView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
         // a new trip starts from its own distance, not counting down from the last one
         km.set(t.km, instant || newTrip)
         shownKm = Int.MIN_VALUE
-        text.labelText = if (t.live) "This trip" else "Last trip"
+        text.labelText = if (t.live) gs(R.string.glass_this_trip) else gs(R.string.glass_last_trip)
         text.statusText = duration(t.minutes)
         text.statusColor = 0
         updateKm()
@@ -130,8 +131,8 @@ class GlassDriveView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
             chipWh = t.whPerKm; chipRegen = t.regenPct; chipTop = t.topKmh
             chips.clear()
             t.whPerKm?.let { chips.add(GlassUnits.consumption(it, env.miles)) }
-            t.regenPct?.let { chips.add("Regen $it%") }
-            t.topKmh?.let { if (it > 0) chips.add("Top ${GlassUnits.speed(it.toFloat(), env.miles).roundToInt()} ${GlassUnits.speedUnit(env.miles)}") }
+            t.regenPct?.let { chips.add(gs(R.string.glass_chip_regen, it)) }
+            t.topKmh?.let { if (it > 0) chips.add(gs(R.string.glass_chip_top, GlassUnits.speed(it.toFloat(), env.miles).roundToInt(), GlassUnits.speedUnit(env.miles))) }
             layersChanged()
         }
         requestFrames()
@@ -285,7 +286,7 @@ class GlassDriveView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
         text.setValue(if (key >= 0) "${key / 10}.${key % 10}" else v.roundToInt().toString(), GlassUnits.distUnit(env.miles))
     }
 
-    private fun duration(min: Int) = if (min < 60) "$min min" else if (min % 60 == 0) "${min / 60} h" else "${min / 60} h ${min % 60} min"
+    private fun duration(min: Int) = if (min < 60) gs(R.string.glass_dur_min, min) else if (min % 60 == 0) gs(R.string.glass_dur_h, min / 60) else gs(R.string.glass_dur_h_min, min / 60, min % 60)
 
     override fun animate(nowMs: Long, dt: Float): Boolean {
         var busy = false
@@ -340,7 +341,7 @@ class GlassDriveView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
         drawLegend(c, t)
         if (count == 0) {
             note.color = t.text3
-            c.drawText("The live trace starts when you drive", (X0 + X1) / 2f, (Y_TOP + Y_ZERO) / 2f + 5f, note)
+            c.drawText(gs(R.string.glass_drive_trace_note), (X0 + X1) / 2f, (Y_TOP + Y_ZERO) / 2f + 5f, note)
             return
         }
         drawGrid(c, t)
@@ -412,9 +413,9 @@ class GlassDriveView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
         val live = streaming
         val base = 30f
         var x = X0
-        x = legendItem(c, x, base, t.glowAccent, false, "Power", if (live) legendPower else "", t.accent)
-        x = legendItem(c, x, base, t.regen, false, "Regen", if (live) legendRegen else "", t.regenText)
-        legendItem(c, x, base, GlassColor.alpha(t.text, 0.62f), true, "Speed", if (live) legendSpeed else "", t.text)
+        x = legendItem(c, x, base, t.glowAccent, false, gs(R.string.glass_power), if (live) legendPower else "", t.accent)
+        x = legendItem(c, x, base, t.regen, false, gs(R.string.glass_regen), if (live) legendRegen else "", t.regenText)
+        legendItem(c, x, base, GlassColor.alpha(t.text, 0.62f), true, gs(R.string.glass_speed), if (live) legendSpeed else "", t.text)
     }
 
     private fun legendItem(c: Canvas, x0: Float, base: Float, swatch: Int, line: Boolean, label: String, value: String, valueColor: Int): Float {
@@ -476,8 +477,9 @@ class GlassDriveView(context: Context, env: GlassEnv, ticker: GlassTicker) : Gla
         axis.color = t.text3
         val y = Y_BOT + 11f
         c.drawText("5 min ago", X0, y, axis)
-        val w = axis.measureText("now")
-        c.drawText("now", X1 - w, y, axis)
+        val nowLabel = gs(R.string.glass_now)
+        val w = axis.measureText(nowLabel)
+        c.drawText(nowLabel, X1 - w, y, axis)
     }
 
     /** Efficiency, regen share and top speed as small glass chips under the chart. */

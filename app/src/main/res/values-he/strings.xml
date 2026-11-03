@@ -49,7 +49,7 @@
     <string name="cd_step_completed">השלב הושלם</string>
     <string name="cd_permission_granted">ההרשאה ניתנה</string>
     <string name="overlay_rec_inactive_label">REC</string>
-    <string name="overlay_trip_inactive_label">TRIP</string>
+    <string name="overlay_trip_inactive_label">נסיעה</string>
     <string name="overlay_mic_inactive_label">MIC</string>
     <string name="overlay_mode_off_cd">עצור הקלטה</string>
     <string name="overlay_mode_continuous_cd">הקלטה רציפה</string>
@@ -365,13 +365,13 @@
     <string name="recording_lib_index_down_title">אינדקס ההקלטות אינו זמין</string>
     <string name="recording_lib_index_down_body">ההקלטות שלך שמורות ובטוחות באחסון, אך אינדקס הספרייה אינו זמין כעת. מתבצע ניסיון חוזר אוטומטי…</string>
     <string name="recording_lib_type_normal">CAM</string>
-    <string name="recording_lib_type_event">EVENT</string>
+    <string name="recording_lib_type_event">אירוע</string>
     <string name="recording_lib_type_proximity">PROX</string>
     <string name="recording_lib_type_oem">OEM</string>
-    <string name="recording_lib_type_replay">REPLAY</string>
+    <string name="recording_lib_type_replay">הילוך חוזר</string>
     <string name="recording_lib_storage_sd">SD</string>
     <string name="recording_lib_storage_usb">USB</string>
-    <string name="recording_lib_storage_internal">INT</string>
+    <string name="recording_lib_storage_internal">פנימי</string>
     <string name="recording_safekeep_saved">נשמר</string>
     <string name="recording_safekeep_queued">בתור</string>
     <string name="recording_safekeep_waiting">ממתין</string>

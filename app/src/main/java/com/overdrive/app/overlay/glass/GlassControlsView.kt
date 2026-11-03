@@ -1,5 +1,6 @@
 package com.overdrive.app.overlay.glass
 
+import com.overdrive.app.R
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
@@ -60,7 +61,7 @@ class GlassControlsView(context: Context, env: GlassEnv, ticker: GlassTicker) : 
     private var bakedParked = true
     private var bound = false
 
-    private val captions = arrayOf("Locked", "Climate", "Boot", "Flash")
+    private val captions = arrayOf(gs(R.string.glass_ctl_locked), gs(R.string.glass_ctl_climate), gs(R.string.glass_ctl_boot), gs(R.string.glass_ctl_flash))
     // every icon part's sprite, held here so drawing never builds a cache key
     private val shackleSlot = GlassGlyphs.Slot()
     private val lockSlot = GlassGlyphs.Slot()
@@ -145,9 +146,9 @@ class GlassControlsView(context: Context, env: GlassEnv, ticker: GlassTicker) : 
         bootS.set(if (st.boot == true) 1f else 0f, instant)
         // vent is the car's own small crack; the panes move slowly, like real glass
         dropS.set(when (st.windows) { Windows.VENT -> 0.28f; Windows.OPEN -> 0.92f; else -> 0f }, instant)
-        captions[0] = when (st.locked) { true -> "Locked"; false -> "Unlocked"; null -> if (st.driverLocked == true) "Unlock" else "Lock" }
-        captions[1] = when (st.climate) { true -> st.cabinC?.let { "Cooling · $it°" } ?: "Climate on"; else -> "Climate" }
-        captions[2] = when (st.boot) { null -> "Open boot"; true -> "Boot open"; false -> "Boot" }
+        captions[0] = when (st.locked) { true -> gs(R.string.glass_ctl_locked); false -> gs(R.string.glass_ctl_unlocked); null -> if (st.driverLocked == true) gs(R.string.glass_ctl_unlock) else gs(R.string.glass_ctl_lock) }
+        captions[1] = when (st.climate) { true -> st.cabinC?.let { gs(R.string.glass_ctl_cooling, it) } ?: gs(R.string.glass_ctl_climate_on); else -> gs(R.string.glass_ctl_climate) }
+        captions[2] = when (st.boot) { null -> gs(R.string.glass_ctl_open_boot); true -> gs(R.string.glass_ctl_boot_open); false -> gs(R.string.glass_ctl_boot) }
         syncLive(SystemClock.uptimeMillis())
         if (changed) layersChanged()
         requestFrames()
@@ -610,7 +611,7 @@ class GlassControlsView(context: Context, env: GlassEnv, ticker: GlassTicker) : 
         private const val PRESS_MS = 140L
         private const val PENDING_MS = 750L
         private const val BLINK_MS = 180L
-        private const val CHIP = "Park to use"
+        private val CHIP get() = gs(R.string.glass_ctl_park_to_use)
         private const val ROTOR_FRAMES = 12
         private const val K_SHACKLE = "ctl.shackle"
         private const val K_SHACKLE_OPEN = "ctl.shackle.open"
@@ -623,7 +624,7 @@ class GlassControlsView(context: Context, env: GlassEnv, ticker: GlassTicker) : 
         private const val K_LAMP = "ctl.lamp"
         private const val K_BEAMS = "ctl.beams"
         private const val K_CAR = "ctl.car"
-        private val SEG_LABELS = arrayOf("Close", "Vent", "Open")
+        private val SEG_LABELS get() = arrayOf(gs(R.string.glass_ctl_seg_close), gs(R.string.glass_ctl_seg_vent), gs(R.string.glass_ctl_seg_open))
         private val BOOT_WHEELS = floatArrayOf(8f, 21f)
         private val CAR_WHEELS = floatArrayOf(-0.3f, 0.3f)
 

@@ -1,5 +1,7 @@
 package com.overdrive.app.overlay
 
+import com.overdrive.app.overlay.glass.gs
+import com.overdrive.app.overlay.glass.GlassStrings
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -333,6 +335,7 @@ class GlassWidgetsOverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        GlassStrings.attach(this)
         createChannel()
         startForegroundCompat()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -344,6 +347,7 @@ class GlassWidgetsOverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        GlassStrings.attach(this)
         val s = loadSettings(force = true)
         if (s == null || !s.enabled) {
             Log.i(TAG, "glass widgets disabled - stopping")
@@ -370,6 +374,7 @@ class GlassWidgetsOverlayService : Service() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        GlassStrings.attach(this)
         val s = settings ?: return
         applyTheme(s)
         val dm = realMetrics()
@@ -1406,7 +1411,7 @@ class GlassWidgetsOverlayService : Service() {
         }
         val k = resources.displayMetrics.density * env.scale
         val failed = autos == null && autosFailed && autosInFlight == 0
-        val sheet = GlassPickerSheet(this, env, ticker, "Shortcut ${slot + 1}", autos, failed,
+        val sheet = GlassPickerSheet(this, env, ticker, gs(R.string.glass_shortcut_n, slot + 1), autos, failed,
             s.shortcuts.getOrNull(slot)?.id,
             onPick = { item -> setShortcut(slot, Shortcut(item.id, item.name, item.glyph)); closePicker() },
             onRemove = { setShortcut(slot, null); closePicker() })
@@ -2029,7 +2034,7 @@ class GlassWidgetsOverlayService : Service() {
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL, "Widgets overlay", NotificationManager.IMPORTANCE_LOW)
+            val ch = NotificationChannel(CHANNEL, gs(R.string.glass_channel_name), NotificationManager.IMPORTANCE_LOW)
             ch.setShowBadge(false)
             getSystemService(NotificationManager::class.java)?.createNotificationChannel(ch)
         }
@@ -2038,8 +2043,8 @@ class GlassWidgetsOverlayService : Service() {
     private fun buildNotification(): Notification {
         val b = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, CHANNEL)
         else @Suppress("DEPRECATION") Notification.Builder(this)
-        return b.setContentTitle("Widgets")
-            .setContentText("Widgets overlay active")
+        return b.setContentTitle(gs(R.string.glass_notif_title))
+            .setContentText(gs(R.string.glass_notif_text))
             .setSmallIcon(R.drawable.ic_widgets)
             .setOngoing(true)
             .setGroup(DaemonKeepaliveService.NOTIFICATION_GROUP_KEY)
@@ -2117,6 +2122,20 @@ class GlassWidgetsOverlayService : Service() {
         private val PEDAL_KEYS = setOf("accel_pct", "brake_pct", "motor_front_rpm", "motor_rear_rpm")
 
         @Volatile private var instance: GlassWidgetsOverlayService? = null
+
+        /** The app's language pick reaches activities only: re-resolve the widgets' strings now.
+         *  Labels fed by live data pick the new language up on the next poll. */
+        fun relocalizeIfRunning() {
+            val s = instance ?: return
+            s.main.post {
+                if (s.destroyed) return@post
+                GlassStrings.attach(s)
+                s.surface?.themeChanged()
+                s.customRow { it.themeChanged() }
+                s.orb?.themeChanged()
+                (s.picker?.getChildAt(0) as? GlassWidgetView)?.themeChanged()
+            }
+        }
 
         /** The app's theme pick reaches activities only: re-resolve the widgets' theme now. */
         fun refreshThemeIfRunning() {

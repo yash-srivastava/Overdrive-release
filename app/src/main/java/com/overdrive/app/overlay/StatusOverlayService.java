@@ -2242,7 +2242,7 @@ public class StatusOverlayService extends Service {
                 // continuous/drive recording; armed-but-idle proximity stays
                 // amber (see the isProximity branch below).
                 ivRecIcon.setImageResource(R.drawable.ic_overlay_rec_active);
-                tvRecLabel.setText(isProximity ? "PROX" : "REC");
+                tvRecLabel.setText(isProximity ? R.string.overlay_mode_proximity_label : R.string.overlay_rec_inactive_label);
                 tvRecLabel.setTextColor(getColor(R.color.status_success));
             } else if (isProximity) {
                 // Proximity guard is armed but not currently recording (no radar
@@ -2254,14 +2254,14 @@ public class StatusOverlayService extends Service {
                 // route the normal armed state into the red "problem" branch
                 // below and light the pill red for the whole drive.
                 ivRecIcon.setImageResource(R.drawable.ic_overlay_rec_inactive);
-                tvRecLabel.setText("PROX");
+                tvRecLabel.setText(R.string.overlay_mode_proximity_label);
                 tvRecLabel.setTextColor(getColor(R.color.status_warning));
             } else if (shouldBeRecording) {
                 // Problem — a continuous/drive mode should be recording but
                 // isn't. (Proximity is handled above: its not-recording state
                 // is armed/normal, not a fault.)
                 ivRecIcon.setImageResource(R.drawable.ic_overlay_rec_inactive);
-                tvRecLabel.setText("REC");
+                tvRecLabel.setText(R.string.overlay_rec_inactive_label);
                 tvRecLabel.setTextColor(getColor(R.color.status_danger));
             } else {
                 // Configured (e.g. drive mode) but standby — not recording is
@@ -2382,11 +2382,11 @@ public class StatusOverlayService extends Service {
             tripContainer.setVisibility(View.VISIBLE);
             if (tripActive) {
                 ivTripIcon.setImageResource(R.drawable.ic_overlay_trip_active);
-                tvTripLabel.setText("TRIP");
+                tvTripLabel.setText(R.string.overlay_trip_inactive_label);
                 tvTripLabel.setTextColor(getColor(R.color.status_success));
             } else {
                 ivTripIcon.setImageResource(R.drawable.ic_overlay_trip_inactive);
-                tvTripLabel.setText("TRIP");
+                tvTripLabel.setText(R.string.overlay_trip_inactive_label);
                 tvTripLabel.setTextColor(getColor(R.color.status_danger));
             }
         } else {
@@ -2549,8 +2549,8 @@ public class StatusOverlayService extends Service {
 
     private void createNotificationChannel() {
         NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID, "Status Overlay", NotificationManager.IMPORTANCE_LOW);
-        channel.setDescription("Recording and trip status overlay");
+                CHANNEL_ID, com.overdrive.app.util.AppLocaleContext.INSTANCE.of(this).getString(com.overdrive.app.R.string.notif_channel_status_overlay), NotificationManager.IMPORTANCE_LOW);
+        channel.setDescription(com.overdrive.app.util.AppLocaleContext.INSTANCE.of(this).getString(com.overdrive.app.R.string.notif_channel_status_overlay_desc));
         channel.setShowBadge(false);
         NotificationManager nm = getSystemService(NotificationManager.class);
         if (nm != null) nm.createNotificationChannel(channel);

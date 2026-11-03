@@ -131,7 +131,22 @@
     "tyres_persist_failed": "שמירת גבולות לחץ הצמיגים נכשלה",
     "bs_speed_range": "מהירות שטח מת חייבת להיות מספר שלם בין {0} ל-{1} קמ\"ש (0 = כל מהירות)",
     "bs_speed_order": "מהירות השטח המת המרבית אינה יכולה להיות נמוכה מהמינימלית",
-    "tyres_invalid_unit": "יחידת הלחץ (pressureUnit) חייבת להיות kpa, psi או bar"
+    "tyres_invalid_unit": "יחידת הלחץ (pressureUnit) חייבת להיות kpa, psi או bar",
+    "telegram_token_empty": "הטוקן ריק",
+    "telegram_token_invalid_format": "פורמט טוקן לא תקין",
+    "telegram_token_rejected_with_reason": "טלגרם דחה את הטוקן: {0}",
+    "telegram_token_rejected": "טלגרם דחה את הטוקן — ודא שהוא נכון ולא בוטל",
+    "telegram_unreachable": "לא ניתן להתחבר לטלגרם. בדוק את חיבור האינטרנט/הפרוקסי של מערכת המולטימדיה ונסה שוב.",
+    "telegram_token_required": "הגדר קודם את טוקן הבוט",
+    "trips_recovery_running": "השחזור כבר פועל…",
+    "trips_recovery_failed": "השחזור נכשל: {0}",
+    "seatpos_model_not_acknowledged": "דגם הרכב לא אושר לכתיבת מושבים; פתח את דף מצבי המושב פעם אחת ואשר כדי לאפשר החלה",
+    "seatpos_seat_write_unconfirmed": "הרכב לא אישר את כתיבת המושב",
+    "seatpos_ambient_write_unconfirmed": "הרכב לא אישר את כתיבת תאורת האווירה",
+    "automation_import_none_valid": "לא נמצאו אוטומציות תקינות בקובץ",
+    "automation_import_no_groups_valid": "לא נמצאו קבוצות פעולה תקינות בקובץ",
+    "performance_nominal_kwh_range": "הקיבולת הנומינלית (kWh) חייבת להיות בין 5 ל-120",
+    "keymap_persist_failed": "שמירת הגדרות מיפוי המקשים נכשלה"
   },
   "notifications": {
     "charging_started": "הטעינה החלה",

@@ -3123,7 +3123,7 @@ public class TelegramBotDaemon {
             case "DAEMON_CRASH": return tr("critical.type.daemon_crash");
             case "SYSTEM_REBOOT": return tr("critical.type.system_reboot");
             case "SYSTEM_ERROR": return tr("critical.type.system_error");
-            default: return TelegramMessages.isPortuguese()
+            default: return TelegramMessages.mapsTechnicalDetails()
                     ? tr("critical.type.unknown") : mdEscape(type);
         }
     }

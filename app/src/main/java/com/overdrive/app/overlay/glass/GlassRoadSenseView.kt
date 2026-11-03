@@ -1,5 +1,6 @@
 package com.overdrive.app.overlay.glass
 
+import com.overdrive.app.R
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
@@ -32,11 +33,11 @@ import kotlin.math.roundToInt
 @SuppressLint("ViewConstructor")
 class GlassRoadSenseView(context: Context, env: GlassEnv, ticker: GlassTicker) : GlassWidgetView(context, env, ticker, 400f, 184f) {
 
-    enum class Kind(val label: String, val picto: String) {
-        BREAKER("Speed breaker", "M-23 9 H-14 C-8 9 -6 -9 0 -9 C6 -9 8 9 14 9 H23 V14 H-23 Z"),
-        POTHOLE("Pothole", "M-23 7 H-11 L-8 15 H8 L11 7 H23 V12 H14 L11 20 H-11 L-14 12 H-23 Z M0 -8 A9 9 0 1 1 -0.01 -8 Z M0 -3 A3.4 3.4 0 1 0 0.01 -3 Z"),
-        ROUGH("Rough road", "M-23 9 C-20 9 -19 -5 -12.5 -5 C-6 -5 -6 9 0 9 C6 9 6 -5 12.5 -5 C19 -5 20 9 23 9 V14 H-23 Z"),
-        UNKNOWN("Road hazard", "M-3.2 -14 H3.2 L2.2 6 H-2.2 Z M0 9.5 A3.4 3.4 0 1 1 -0.01 9.5 Z"),
+    enum class Kind(@androidx.annotation.StringRes val labelRes: Int, val picto: String) {
+        BREAKER(R.string.glass_hz_breaker, "M-23 9 H-14 C-8 9 -6 -9 0 -9 C6 -9 8 9 14 9 H23 V14 H-23 Z"),
+        POTHOLE(R.string.glass_hz_pothole, "M-23 7 H-11 L-8 15 H8 L11 7 H23 V12 H14 L11 20 H-11 L-14 12 H-23 Z M0 -8 A9 9 0 1 1 -0.01 -8 Z M0 -3 A3.4 3.4 0 1 0 0.01 -3 Z"),
+        ROUGH(R.string.glass_hz_rough, "M-23 9 C-20 9 -19 -5 -12.5 -5 C-6 -5 -6 9 0 9 C6 9 6 -5 12.5 -5 C19 -5 20 9 23 9 V14 H-23 Z"),
+        UNKNOWN(R.string.glass_hz_unknown, "M-3.2 -14 H3.2 L2.2 6 H-2.2 Z M0 9.5 A3.4 3.4 0 1 1 -0.01 9.5 Z"),
     }
 
     /** Altitude and road grade while driving; [profile] holds the altitudes behind the car every [stepM] metres, oldest first. */
@@ -111,7 +112,7 @@ class GlassRoadSenseView(context: Context, env: GlassEnv, ticker: GlassTicker) :
 
     private val pillOnly get() = state.clear || !state.feed || !state.active
     private val terrainOn get() = pillOnly && state.active && state.terrain != null
-    private val pillLabel get() = when { !state.active -> "RoadSense off"; !state.feed -> "RoadSense on"; else -> "Road clear" }
+    private val pillLabel get() = when { !state.active -> gs(R.string.glass_rs_off); !state.feed -> gs(R.string.glass_rs_on); else -> gs(R.string.glass_rs_clear) }
     private val urgent get() = !pillOnly && (state.distanceM < 100f || state.severity >= 3)
 
     /** Unchanged data is a no-op. */
@@ -129,7 +130,7 @@ class GlassRoadSenseView(context: Context, env: GlassEnv, ticker: GlassTicker) :
         terrainS.set(if (terrainOn) 1f else 0f, instant)
         if (pillOnly && !terrainOn) setShellSize(PILL_W, PILL_H, true, instant) else setShellSize(baseW, baseH, false, instant)
         st.terrain?.let { bindTerrain(it, instant) }
-        text.labelText = st.kind.label + if (st.cluster > 1) " ×${st.cluster}" else ""
+        text.labelText = gs(st.kind.labelRes) + if (st.cluster > 1) " ×${st.cluster}" else ""
         refreshStatus()
         shownD = -1
         updateDistance()
@@ -139,7 +140,7 @@ class GlassRoadSenseView(context: Context, env: GlassEnv, ticker: GlassTicker) :
 
     private fun refreshStatus() {
         val t = env.theme
-        text.statusText = when (state.severity) { 3 -> "Severe"; 2 -> "Moderate"; else -> "Minor" }
+        text.statusText = when (state.severity) { 3 -> gs(R.string.glass_sev_severe); 2 -> gs(R.string.glass_sev_moderate); else -> gs(R.string.glass_sev_minor) }
         text.statusColor = if (state.severity >= 3) t.danger else t.warn
     }
 
@@ -404,8 +405,8 @@ class GlassRoadSenseView(context: Context, env: GlassEnv, ticker: GlassTicker) :
         pose(tr)
         poseAt = scroll.value
         tilt.set(slopeDeg(tr.gradePct), instant)
-        altText.labelText = if (tr.msl) "Altitude" else "GPS altitude"
-        slopeText.labelText = "Slope"
+        altText.labelText = if (tr.msl) gs(R.string.glass_altitude) else gs(R.string.glass_gps_altitude)
+        slopeText.labelText = gs(R.string.glass_slope)
         gradeText(tr)
         shownAlt = Int.MIN_VALUE
         updateAlt()
@@ -419,10 +420,10 @@ class GlassRoadSenseView(context: Context, env: GlassEnv, ticker: GlassTicker) :
         val t = env.theme
         val g = tr.gradePct
         when {
-            g == null -> { slopeText.setWord("—"); slopeText.statusText = "Measuring"; slopeText.statusColor = t.text3; slopeText.statusIcon = null }
-            abs(g) < LEVEL_PCT -> { slopeText.setValue(pct(abs(g)), "%"); slopeText.statusText = "Level"; slopeText.statusColor = t.text2; slopeText.statusIcon = null }
-            g > 0f -> { slopeText.setValue(pct(g), "%"); slopeText.statusText = "Climbing"; slopeText.statusColor = t.warn; slopeText.statusIcon = GlassPaths.svg(UP) }
-            else -> { slopeText.setValue(pct(-g), "%"); slopeText.statusText = "Descending"; slopeText.statusColor = t.regenText; slopeText.statusIcon = GlassPaths.svg(DOWN) }
+            g == null -> { slopeText.setWord("—"); slopeText.statusText = gs(R.string.glass_measuring); slopeText.statusColor = t.text3; slopeText.statusIcon = null }
+            abs(g) < LEVEL_PCT -> { slopeText.setValue(pct(abs(g)), "%"); slopeText.statusText = gs(R.string.glass_slope_level); slopeText.statusColor = t.text2; slopeText.statusIcon = null }
+            g > 0f -> { slopeText.setValue(pct(g), "%"); slopeText.statusText = gs(R.string.glass_slope_climbing); slopeText.statusColor = t.warn; slopeText.statusIcon = GlassPaths.svg(UP) }
+            else -> { slopeText.setValue(pct(-g), "%"); slopeText.statusText = gs(R.string.glass_slope_descending); slopeText.statusColor = t.regenText; slopeText.statusIcon = GlassPaths.svg(DOWN) }
         }
         // RoadSense keeps watching the road ahead
         altText.statusText = pillLabel

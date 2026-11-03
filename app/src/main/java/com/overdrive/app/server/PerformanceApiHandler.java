@@ -990,7 +990,7 @@ public class PerformanceApiHandler {
                 if (!Double.isFinite(kwh) || kwh < 5.0 || kwh > 120.0) {
                     JSONObject err = new JSONObject();
                     err.put("success", false);
-                    err.put("error", "nominalKwh must be between 5 and 120");
+                    err.put("error", Messages.get("errors.performance_nominal_kwh_range"));
                     HttpResponse.sendJson(out, err.toString());
                     return true;
                 }

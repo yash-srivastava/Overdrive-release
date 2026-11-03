@@ -375,7 +375,7 @@ public class TripApiHandler {
         if (!recoverRunning.compareAndSet(false, true)) {
             JSONObject busy = new JSONObject();
             try { busy.put("started", false); busy.put("running", true);
-                  busy.put("message", "Recovery is already running…"); } catch (Exception ignored) {}
+                  busy.put("message", com.overdrive.app.server.Messages.get("errors.trips_recovery_running")); } catch (Exception ignored) {}
             return busy;
         }
         lastRecoverResult = null;
@@ -399,7 +399,7 @@ public class TripApiHandler {
                 logger.error("Trips recovery worker failed", t);
                 JSONObject err = new JSONObject();
                 try { err.put("success", false); err.put("done", true);
-                      err.put("message", "Recovery failed: " + t.getMessage()); } catch (Exception ignored) {}
+                      err.put("message", com.overdrive.app.server.Messages.get("errors.trips_recovery_failed", String.valueOf(t.getMessage()))); } catch (Exception ignored) {}
                 lastRecoverResult = err;
             } finally {
                 recoverRunning.set(false);
