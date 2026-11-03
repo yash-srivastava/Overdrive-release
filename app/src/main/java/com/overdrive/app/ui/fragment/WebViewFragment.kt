@@ -74,9 +74,17 @@ class WebViewFragment : Fragment() {
         @JvmStatic
         fun isDaemonUrl(url: java.net.URL): Boolean =
             url.protocol == "http" &&
+                url.userInfo == null &&
                 (url.host == "127.0.0.1" || url.host == "localhost") &&
                 url.port == CameraDaemon.HTTP_PORT &&
-                url.path.startsWith("/")
+                (url.path.isEmpty() || url.path.startsWith("/"))
+
+        private fun isDaemonUrl(url: String): Boolean =
+            try {
+                isDaemonUrl(java.net.URL(url))
+            } catch (_: java.net.MalformedURLException) {
+                false
+            }
 
         // Hides the in-page PWA chrome before the first paint. INJECT_JS runs
         // on onPageFinished, which is late enough for the sidebar to flash.
@@ -656,8 +664,7 @@ class WebViewFragment : Fragment() {
                     val url = request?.url?.toString() ?: return null
 
                     // FILTER: Only intercept our local server and external map/CDN resources
-                    val isLocalServer = url.contains("127.0.0.1:${CameraDaemon.HTTP_PORT}") ||
-                        url.contains("localhost:${CameraDaemon.HTTP_PORT}")
+                    val isLocalServer = isDaemonUrl(url)
 
                     if (isLocalServer) {
                         interceptI18nCatalog(url)?.let { return it }
@@ -1092,9 +1099,10 @@ class WebViewFragment : Fragment() {
                     view: WebView?, request: WebResourceRequest?
                 ): Boolean {
                     val url = request?.url?.toString() ?: return false
+                    val isLocalServer = isDaemonUrl(url)
                     
                     // The widget builder is a phone/computer page; the car never opens it.
-                    if ((url.startsWith("http://127.0.0.1:") || url.startsWith("http://localhost:")) &&
+                    if (isLocalServer &&
                         request?.url?.path.orEmpty().trimEnd('/').substringAfterLast('/') in WIDGET_BUILDER_PAGES
                     ) {
                         context?.let {
@@ -1107,7 +1115,7 @@ class WebViewFragment : Fragment() {
 
                     // Intercept events page links — use native RecordingLibraryFragment
                     // which has reliable video playback via VideoView
-                    if (url.contains("/events.html") || url.endsWith("/events")) {
+                    if (isLocalServer && (url.contains("/events.html") || url.endsWith("/events"))) {
                         try {
                             // Extract filter / file params if present
                             // (e.g., events.html?filter=sentry&file=event_20260512_143022.mp4)
@@ -1140,7 +1148,7 @@ class WebViewFragment : Fragment() {
                         return true
                     }
                     
-                    if (url.startsWith("http://127.0.0.1:") || url.startsWith("http://localhost:")) {
+                    if (isLocalServer) {
                         return false
                     }
                     try {
