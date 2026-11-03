@@ -142,6 +142,24 @@ Other top-level locations:
 - `tools/`: scripts that build the bundled `libtailscale` and `libwireguard` libraries.
 - `stubs-bydauto/`: stub classes of the BYD vehicle SDK so the project compiles without the real SDK.
 
+### Companion launcher locale checks
+
+This public Gradle build contains `:app` and `:dilink-probe`; a separate companion
+launcher is not included. The app's Czech/Hebrew tests cover the resources and
+runtime wiring owned by `:app`. Launcher-specific assertions are retained in
+[`tools/tests/companion-launcher-locales`](tools/tests/companion-launcher-locales/README.md)
+and require a real, clean, versioned companion checkout:
+
+```bash
+java tools/tests/companion-launcher-locales/LauncherLocaleContract.java /path/to/actual/launcher-module
+```
+
+This command fails if the companion or a required input is missing; it does not
+skip the checks or create replacement sources. A release containing both apps
+must record both source revisions, this contract result, and the companion's
+own build/tests. A passing public app suite alone does not establish companion
+locale acceptance. See the tool's README for inputs and ownership boundaries.
+
 ## How to Contribute
 
 ### Good First Issues
