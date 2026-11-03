@@ -2339,6 +2339,8 @@ public final class RemoteAccessApiHandler {
             lastRecordedActionElapsed = now;
             lastAction = new JSONObject().put("action", action).put("status", result).put("reason", message)
                     .put("timestampMs", System.currentTimeMillis()).put("confirmationScope", "driver_door");
+            // Display-only translation code beside the unchanged English reason.
+            com.overdrive.app.remoteaccess.RemoteAccessMessageCodes.annotate(lastAction, "reason", message);
             event("action", message);
             EVENTS.peekFirst().put("action", action).put("result", result);
             com.overdrive.app.daemon.CameraDaemon.log("Proximity: action=" + action
@@ -2346,14 +2348,17 @@ public final class RemoteAccessApiHandler {
         }
     }
     private static void event(String type, String message) throws Exception {
-        EVENTS.addFirst(new JSONObject().put("timestampMs", System.currentTimeMillis()).put("type", type).put("message", message));
+        EVENTS.addFirst(com.overdrive.app.remoteaccess.RemoteAccessMessageCodes.annotate(new JSONObject().put("timestampMs", System.currentTimeMillis())
+                .put("type", type).put("message", message), "message", message));
         while (EVENTS.size() > 40) EVENTS.removeLast();
         if (!"action".equals(type))
             com.overdrive.app.daemon.CameraDaemon.log("Proximity: event=" + type + " reason=" + message);
         changed();
     }
     private static void changed() { sequence++; STATE.notifyAll(); }
-    private static JSONObject error(String message) throws Exception { return new JSONObject().put("success", false).put("error", message); }
+    private static JSONObject error(String message) throws Exception {
+        return com.overdrive.app.remoteaccess.RemoteAccessMessageCodes.annotate(new JSONObject().put("success", false).put("error", message), "error", message);
+    }
     private static long queryLong(String path, String key, long fallback) {
         String[] pieces = path.split("\\?", 2);
         if (pieces.length == 2) for (String part : pieces[1].split("&"))

@@ -40,7 +40,7 @@ public class RemoteAccessKeyFobUnlockTriggerAssetTest {
         assertTrue(row.contains("<strong data-i18n=\"remote_access.keyfob_unlock_on_detection\">" + LABEL + "</strong>"));
         assertTrue(row.contains("<span id=\"raKeyFobUnlockDetail\" data-i18n=\"remote_access.keyfob_unlock_on_detection_desc\">" + HINT + "</span>"));
         assertTrue(row.contains("<input type=\"checkbox\" id=\"raKeyFobUnlockNear\" aria-label=\"" + LABEL
-                + "\" aria-describedby=\"raKeyFobUnlockDetail\" disabled>"));
+                + "\" data-i18n-attr=\"aria-label:remote_access.keyfob_unlock_on_detection\" aria-describedby=\"raKeyFobUnlockDetail\" disabled>"));
         assertTrue(row.contains("<span class=\"ra-rule-icon\">") && row.contains("<span class=\"ra-rule-copy\">")
                 && row.contains("<span class=\"ra-switch\">"));
         // Not pre-checked in markup: the script sets it from the saved config (default near = on).

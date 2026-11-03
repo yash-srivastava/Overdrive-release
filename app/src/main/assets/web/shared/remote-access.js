@@ -37,17 +37,19 @@ var RemoteAccess = (function () {
     var KEYFOB_LOCK_DEFAULTS = { windowMs: 5000, samples: 1 };
 
     function el(id) { return document.getElementById(id); }
-    function text(id, value) { var node = el(id); if (node) node.textContent = value; }
+    // Once this script writes a node it owns the text; drop data-i18n so a locale
+    // re-hydrate cannot restore the placeholder over live state (see onChange in init).
+    function text(id, value) { var node = el(id); if (node) { node.removeAttribute('data-i18n'); node.textContent = value; } }
     function renderBluetoothStatus() {
         var node = el('raBluetoothStatus');
         if (!node) return;
         var extraAge = state.bluetoothReceivedAt ? Math.max(0, Date.now() - state.bluetoothReceivedAt) : 0;
         var value = window.BYD && BYD.utils && BYD.utils.bluetoothStatus
             ? BYD.utils.bluetoothStatus(state.bluetooth, extraAge, state.bluetoothTransportStale)
-            : { state: 'unknown', label: 'Unknown', detail: 'Waiting for car Bluetooth status' };
+            : { state: 'unknown', label: tr('state_unknown', 'Unknown'), detail: tr('bluetooth_status_waiting', 'Waiting for car Bluetooth status') };
         text('raBluetoothState', value.label);
         node.setAttribute('data-state', value.state);
-        node.setAttribute('aria-label', 'Car Bluetooth: ' + value.label + '. ' + value.detail);
+        node.setAttribute('aria-label', tr('bluetooth_status_aria', 'Car Bluetooth: {label}. {detail}', { label: value.label, detail: value.detail }));
         node.title = value.detail;
     }
     function updateBluetoothStatus(radio, transportStale) {
@@ -96,9 +98,50 @@ var RemoteAccess = (function () {
         if (!finite(value)) return '—';
         return String(Math.round(value * 10) / 10).replace('-', '−');
     }
-    function tr(key, fallback) {
-        var value = window.BYD && BYD.i18n ? BYD.i18n.t('remote_access.' + key) : null;
-        return !value || value === 'remote_access.' + key ? fallback : value;
+    function fill(template, vars) {
+        if (!vars || typeof template !== 'string') return template;
+        return template.replace(/\{(\w+)\}/g, function (match, name) {
+            return vars[name] != null ? String(vars[name]) : match;
+        });
+    }
+    function tr(key, fallback, vars) {
+        var value = window.BYD && BYD.i18n ? BYD.i18n.t('remote_access.' + key, vars) : null;
+        return typeof value !== 'string' || !value || value === 'remote_access.' + key ? fill(fallback, vars) : value;
+    }
+    var DOOR_KEYS = { 'front-left door': 'front_left', 'front-right door': 'front_right', 'rear-left door': 'rear_left',
+        'rear-right door': 'rear_right', hood: 'hood', trunk: 'trunk' };
+    function doorListText(value) {
+        return String(value).split(', ').map(function (item) {
+            var match = /^(.+) (open|unknown)$/.exec(item);
+            if (!match || !Object.prototype.hasOwnProperty.call(DOOR_KEYS, match[1])) return item;
+            return tr('server.door_' + DOOR_KEYS[match[1]] + '_' + match[2], item);
+        }).join(', ');
+    }
+    // The vehicle reports English texts plus an optional <field>Key/<field>Args/<field>ArgKeys code
+    // (RemoteAccessMessageCodes). Translate the code; anything without one stays as reported.
+    function serverText(item, field, fallback) {
+        var english = item && typeof item[field] === 'string' && item[field] ? item[field] : fallback || '';
+        var key = item && item[field + 'Key'];
+        if (typeof key !== 'string' || !/^[a-z0-9_]+$/.test(key)) return english;
+        var args = item[field + 'Args'] || {}, argKeys = item[field + 'ArgKeys'] || {}, vars = {};
+        Object.keys(args).forEach(function (name) {
+            var value = args[name] == null ? '' : String(args[name]);
+            if (name === 'doors') value = doorListText(value);
+            else if (typeof argKeys[name] === 'string' && /^[a-z0-9_]+$/.test(argKeys[name]))
+                value = tr('server.' + argKeys[name], value);
+            vars[name] = value;
+        });
+        var translated = window.BYD && BYD.i18n ? BYD.i18n.t('remote_access.server.' + key, vars) : null;
+        return typeof translated === 'string' && translated && translated !== 'remote_access.server.' + key ? translated : english;
+    }
+    function actionName(action) {
+        return action === 'lock' || action === 'lock_car' ? tr('action_lock', 'Lock') :
+            action === 'unlock' || action === 'unlock_car' ? tr('action_unlock', 'Unlock') : String(action).replace(/_/g, ' ');
+    }
+    function resultName(result) {
+        var names = { confirmed: 'confirmed', accepted: 'accepted', unconfirmed: 'unconfirmed',
+            cloud_acknowledged: 'cloud acknowledged', sent: 'sent', dry_run: 'dry run', blocked: 'blocked', failed: 'failed' };
+        return Object.prototype.hasOwnProperty.call(names, result) ? tr('result_' + result, names[result]) : String(result).replace(/_/g, ' ');
     }
     function error(message) {
         text('raError', message || '');
@@ -128,9 +171,10 @@ var RemoteAccess = (function () {
             options.body = JSON.stringify(body);
         }
         return fetch(path, options).then(function (response) {
-            if (response.status === 401) { redirectAuth(); throw new Error('Session expired'); }
+            if (response.status === 401) { redirectAuth(); throw new Error(tr('session_expired', 'Session expired')); }
             return response.json().then(function (data) {
-                if (!response.ok || data.success === false) throw new Error(data.error || 'Request failed (' + response.status + ')');
+                if (!response.ok || data.success === false)
+                    throw new Error(serverText(data, 'error', tr('request_failed', 'Request failed ({status})', { status: response.status })));
                 return data;
             });
         });
@@ -191,14 +235,14 @@ var RemoteAccess = (function () {
         while (select.firstChild) select.removeChild(select.firstChild);
         var placeholder = document.createElement('option');
         placeholder.value = '';
-        placeholder.textContent = state.phones.length ? 'Select an approved phone' : 'Add an approved phone';
+        placeholder.textContent = state.phones.length ? tr('select_approved_phone', 'Select an approved phone') : tr('add_approved_phone', 'Add an approved phone');
         select.appendChild(placeholder);
         var matched = false;
         state.phones.forEach(function (device) {
             var option = document.createElement('option');
             option.value = device.address || '';
-            option.textContent = (device.name || 'Approved phone') + ' · ' + (device.address || '').slice(-5) +
-                (device.enabled === false ? ' · Disabled' : '');
+            option.textContent = (device.name || tr('approved_phone', 'Approved phone')) + ' · ' + (device.address || '').slice(-5) +
+                (device.enabled === false ? ' · ' + tr('state_disabled', 'Disabled') : '');
             if (option.value.toUpperCase() === String(wanted).toUpperCase()) { matched = true; wanted = option.value; }
             select.appendChild(option);
         });
@@ -208,11 +252,11 @@ var RemoteAccess = (function () {
         select.disabled = !state.ready || state.saving;
         var add = el('raAddPhoneSelect'), addWanted = add.value;
         while (add.firstChild) add.removeChild(add.firstChild);
-        var option = document.createElement('option'); option.value = ''; option.textContent = 'Choose a paired phone'; add.appendChild(option);
+        var option = document.createElement('option'); option.value = ''; option.textContent = tr('choose_paired_phone', 'Choose a paired phone'); add.appendChild(option);
         state.devices.forEach(function (device) {
             if (!device.address || profileFor(device.address)) return;
             var item = document.createElement('option'); item.value = device.address;
-            item.textContent = (device.name || 'Paired device') + ' · ' + device.address.slice(-5);
+            item.textContent = (device.name || tr('paired_device', 'Paired device')) + ' · ' + device.address.slice(-5);
             add.appendChild(item);
         });
         add.value = addWanted;
@@ -324,12 +368,12 @@ var RemoteAccess = (function () {
     function refreshSafeZones() {
         if (state.safeZonesRequest) return state.safeZonesRequest;
         state.safeZonesRequest = requestJson('/api/surveillance/safe-locations').then(function (result) {
-            if (!Array.isArray(result.zones)) throw new Error('Saved locations unavailable');
+            if (!Array.isArray(result.zones)) throw new Error(tr('safe_zones_unavailable', 'Saved locations unavailable'));
             state.safeZones = result.zones.slice(0, 10);
             state.safeZonesReady = true; state.safeZonesError = '';
             renderSafeZoneChoices();
         }).catch(function (err) {
-            state.safeZonesError = err.message || 'Saved locations unavailable';
+            state.safeZonesError = err.message || tr('safe_zones_unavailable', 'Saved locations unavailable');
             renderSafeZoneChoices();
         }).then(function () { state.safeZonesRequest = null; });
         return state.safeZonesRequest;
@@ -444,8 +488,8 @@ var RemoteAccess = (function () {
         var advanced = el('raAdvancedMode').checked;
         el('remoteAccessPage').classList.toggle('ra-advanced-mode', advanced);
         text('raCalibrationDetail', advanced && !(state.config && state.config.advancedMode) ?
-            'Save Advanced mode before capturing your phone signal.' :
-            'Captures fill this phone\'s draft thresholds. Edit them as needed, then Save rules.');
+            tr('calibration_save_advanced', 'Save Advanced mode before capturing your phone signal.') :
+            tr('calibration_detail', 'Captures fill this phone\'s draft thresholds. Edit them as needed, then Save rules.'));
     }
     function toggleAdvanced() {
         var advanced = el('raAdvancedMode').checked;
@@ -508,43 +552,48 @@ var RemoteAccess = (function () {
         state.samples = []; state.lastSampleTime = null;
         renderDevices(device.address); loadProfileThresholds(); markDirty(); renderSignal();
     }
+    function proximityStateName(value) {
+        var stateName = String(value || 'UNKNOWN').toUpperCase();
+        return stateName === 'NEAR' ? tr('state_near', 'near') : stateName === 'AWAY' ? tr('state_away', 'away') :
+            tr('state_unknown_lower', 'unknown');
+    }
     function renderRoster() {
         var roster = el('raPhoneRoster');
         while (roster.firstChild) roster.removeChild(roster.firstChild);
         if (!state.phones.length) {
             var empty = document.createElement('div'); empty.className = 'ra-roster-empty';
-            empty.textContent = 'Add paired phones below. Nothing is monitored until the master switch is enabled.';
+            empty.textContent = tr('roster_empty', 'Add paired phones below. Nothing is monitored until the master switch is enabled.');
             roster.appendChild(empty); return;
         }
         var vehicleOn = vehicleOnPaused();
         state.phones.forEach(function (profile) {
             var row = document.createElement('div'); row.className = 'ra-roster-row' + (profile.address === state.viewAddress ? ' is-selected' : '');
             var name = document.createElement('button'); name.type = 'button'; name.className = 'ra-roster-name'; name.disabled = state.saving;
-            var title = document.createElement('strong'); title.textContent = profile.name || 'Approved phone';
+            var title = document.createElement('strong'); title.textContent = profile.name || tr('approved_phone', 'Approved phone');
             var signal = signalFor(profile.address);
             var detail = document.createElement('span');
             var proof = phoneSignalProof(signal);
-            detail.textContent = !profile.enabled ? 'Disabled' : !state.enabled ? 'Monitoring off' :
-                signal.reason === 'save_phone_first' ? 'Save to start monitoring' :
+            detail.textContent = !profile.enabled ? tr('state_disabled', 'Disabled') : !state.enabled ? tr('keyfob_monitoring_off', 'Monitoring off') :
+                signal.reason === 'save_phone_first' ? tr('phone_save_to_start', 'Save to start monitoring') :
                 vehicleOn ? tr('phone_vehicle_on', 'Paused · car is on') :
                 !proof.fresh ? tr('phone_reading_expired', 'Unknown · reading expired') :
                 proof.confirmedAway ? tr('phone_disconnection_away', 'Away · disconnection confirmed') :
                 proof.pendingDisconnect ? tr('phone_disconnection_pending', 'Disconnected · confirming departure') :
                 !proof.connectionUsable ? tr('phone_connection_unconfirmed', 'Unknown · connection unconfirmed') :
-                !signal.connected ? 'Disconnected / awaiting connection' :
-                !proof.rssi ? 'Unknown · reading unavailable' :
-                String(signal.state || 'UNKNOWN').toLowerCase() +
+                !signal.connected ? tr('phone_awaiting_connection', 'Disconnected / awaiting connection') :
+                !proof.rssi ? tr('phone_reading_unavailable', 'Unknown · reading unavailable') :
+                proximityStateName(signal.state) +
                     (el('raAdvancedMode').checked ? ' · ' + signalText(signal.filteredRssi) + ' RSSI' : '');
             name.appendChild(title); name.appendChild(detail); name.addEventListener('click', function () { selectPhone(profile.address); });
             var toggle = document.createElement('label'); toggle.className = 'ra-switch';
             var input = document.createElement('input'); input.type = 'checkbox'; input.checked = profile.enabled; input.disabled = state.saving;
-            input.setAttribute('aria-label', 'Enable ' + (profile.name || 'approved phone'));
+            input.setAttribute('aria-label', tr('phone_enable_aria', 'Enable {name}', { name: profile.name || tr('approved_phone', 'Approved phone') }));
             var track = document.createElement('span'); track.className = 'ra-switch-track';
             var thumb = document.createElement('span'); thumb.className = 'ra-switch-thumb'; track.appendChild(thumb);
             input.addEventListener('change', function () { profile.enabled = input.checked; markDirty(); renderRoster(); });
             toggle.appendChild(input); toggle.appendChild(track);
             var remove = document.createElement('button'); remove.type = 'button'; remove.className = 'ra-roster-remove'; remove.textContent = '×'; remove.disabled = state.saving;
-            remove.setAttribute('aria-label', 'Remove ' + (profile.name || 'approved phone'));
+            remove.setAttribute('aria-label', tr('phone_remove_aria', 'Remove {name}', { name: profile.name || tr('approved_phone', 'Approved phone') }));
             remove.addEventListener('click', function () {
                 storeProfileThresholds();
                 state.phones = state.phones.filter(function (item) { return item.address !== profile.address; });
@@ -620,37 +669,39 @@ var RemoteAccess = (function () {
         ['raNearThreshold', 'raAwayThreshold', 'raMedianSeconds', 'raDwellSeconds',
             'raNearWindowSeconds', 'raNearDwellSeconds', 'raCooldownSeconds', 'raKeyFobLockSeconds',
             'raRelockGraceSeconds', 'raPostLockQuietSeconds'].forEach(function (id) {
-            if (el(id).value.trim() === '') throw new Error('Enter all signal and timing values.');
+            if (el(id).value.trim() === '') throw new Error(tr('error_enter_all_values', 'Enter all signal and timing values.'));
         });
-        if (config.enabled && !config.keyFobEnabled && !config.phones.some(function (profile) { return profile.enabled; })) throw new Error('Enable keyfob detection or add and enable an approved phone before enabling proximity access.');
+        if (config.enabled && !config.keyFobEnabled && !config.phones.some(function (profile) { return profile.enabled; })) throw new Error(tr('error_needs_source', 'Enable keyfob detection or add and enable an approved phone before enabling proximity access.'));
         config.phones.forEach(function (profile) {
             if (!finite(profile.nearThreshold) || !finite(profile.awayThreshold) ||
                 Math.floor(profile.nearThreshold) !== profile.nearThreshold || Math.floor(profile.awayThreshold) !== profile.awayThreshold ||
                 profile.nearThreshold < -127 || profile.nearThreshold > 20 || profile.awayThreshold < -127 || profile.awayThreshold > 20 ||
-                profile.nearThreshold <= profile.awayThreshold) throw new Error('Check the saved signal thresholds for ' + (profile.name || 'each approved phone') + '. Nearby must be higher than away, within −127 to 20.');
+                profile.nearThreshold <= profile.awayThreshold) throw new Error(profile.name ?
+                    tr('error_phone_thresholds', 'Check the saved signal thresholds for {name}. Nearby must be higher than away, within −127 to 20.', { name: profile.name }) :
+                    tr('error_phone_thresholds_each', 'Check the saved signal thresholds for each approved phone. Nearby must be higher than away, within −127 to 20.'));
         });
         if (!finite(config.nearThreshold) || !finite(config.awayThreshold) ||
             Math.floor(config.nearThreshold) !== config.nearThreshold || Math.floor(config.awayThreshold) !== config.awayThreshold ||
             config.nearThreshold < -127 || config.nearThreshold > 20 || config.awayThreshold < -127 || config.awayThreshold > 20) {
-            throw new Error('Signal thresholds must be whole numbers between −127 and 20.');
+            throw new Error(tr('error_thresholds_range', 'Signal thresholds must be whole numbers between −127 and 20.'));
         }
-        if (config.nearThreshold <= config.awayThreshold) throw new Error('Nearby threshold must be higher than the away threshold.');
+        if (config.nearThreshold <= config.awayThreshold) throw new Error(tr('error_near_above_away', 'Nearby threshold must be higher than the away threshold.'));
         if (!finite(config.windowMs) || config.windowMs < 4000 || config.windowMs > 60000 ||
             !finite(config.dwellMs) || config.dwellMs < 1000 || config.dwellMs > 30000 ||
             !finite(config.nearWindowMs) || config.nearWindowMs < 2000 || config.nearWindowMs > 60000 ||
             !finite(config.nearDwellMs) || config.nearDwellMs < 1000 || config.nearDwellMs > 30000 ||
             !finite(config.cooldownMs) || config.cooldownMs < 5000 || config.cooldownMs > 300000) {
-            throw new Error('Use a 2–60 second unlock window, a 4–60 second departure window, 1–30 second confirmations, and a 5–300 second cooldown.');
+            throw new Error(tr('error_timing_range', 'Use a 2–60 second unlock window, a 4–60 second departure window, 1–30 second confirmations, and a 5–300 second cooldown.'));
         }
         if (!finite(config.relockGraceMs) || config.relockGraceMs < 3000 || config.relockGraceMs > 30000 ||
             !finite(config.postLockQuietMs) || config.postLockQuietMs < 3000 || config.postLockQuietMs > 30000) {
-            throw new Error('Use a 3–30 second relock grace and a 3–30 second keyfob quiet period.');
+            throw new Error(tr('error_grace_range', 'Use a 3–30 second relock grace and a 3–30 second keyfob quiet period.'));
         }
         if (!finite(config.keyFobLockWindowMs) || config.keyFobLockWindowMs < 5000 ||
             config.keyFobLockWindowMs > 300000 || config.keyFobLockWindowMs % 5000 !== 0)
-            throw new Error('Use a 5–300 second keyfob locking window in 5-second steps.');
+            throw new Error(tr('error_keyfob_window_range', 'Use a 5–300 second keyfob locking window in 5-second steps.'));
         if ([1, 2, 3].indexOf(config.keyFobLockSamples) < 0)
-            throw new Error('Choose 1, 2 or 3 keyfob absence results.');
+            throw new Error(tr('error_keyfob_samples', 'Choose 1, 2 or 3 keyfob absence results.'));
         if ((config.restrictLockToOutsideSafeZones || config.restrictUnlockToOutsideSafeZones) && !config.proximitySafeZoneIds.length) {
             var selectionError = new Error(tr('safe_zones_choose_required', 'Choose at least one safe location before saving a restriction.'));
             selectionError.field = 'safe_zones';
@@ -756,7 +807,8 @@ var RemoteAccess = (function () {
                 tr('keyfob_return_hint', 'Keyfob: confirm an Away event first, then unlock on a fresh detection event.'));
             if (unlock && fobOnly) label = (fobNear ?
                 tr('keyfob_near_hint', 'Keyfob: unlock on a fresh detection event; no prior Away event is required.') :
-                tr('keyfob_return_hint', 'Keyfob: confirm an Away event first, then unlock on a fresh detection event.')) + ' Power and closures are checked.';
+                tr('keyfob_return_hint', 'Keyfob: confirm an Away event first, then unlock on a fresh detection event.')) + ' ' +
+                tr('power_closures_checked', 'Power and closures are checked.');
             if (lock) label += (label ? ' ' : '') + lockRuleDetail(
                 phones, fobEnabled && supports('keyFobLock') && el('raKeyFobLockEnabled').checked,
                 fobEnabled);
@@ -825,7 +877,8 @@ var RemoteAccess = (function () {
             stopped: 'Phone reconnect stopped',
             unexpected_profile: 'Phone reconnect service is unavailable'
         };
-        return reasons[reason] || String(reason || 'Waiting for a fresh reading').replace(/_/g, ' ');
+        if (Object.prototype.hasOwnProperty.call(reasons, reason)) return tr('reason_' + reason, reasons[reason]);
+        return reason ? String(reason).replace(/_/g, ' ') : tr('reason_waiting_fresh_reading', 'Waiting for a fresh reading');
     }
     function currentSignal() {
         return signalFor(state.viewAddress);
@@ -876,10 +929,10 @@ var RemoteAccess = (function () {
     }
     function eventAgeText(age) {
         if (age === null) return '—';
-        if (age < 1000) return '<1s ago';
-        if (age < 60000) return Math.floor(age / 1000) + 's ago';
-        if (age < 3600000) return Math.floor(age / 60000) + 'm ago';
-        return Math.floor(age / 3600000) + 'h ago';
+        if (age < 1000) return tr('age_now', '<1s ago');
+        if (age < 60000) return tr('age_seconds', '{n}s ago', { n: Math.floor(age / 1000) });
+        if (age < 3600000) return tr('age_minutes', '{n}m ago', { n: Math.floor(age / 60000) });
+        return tr('age_hours', '{n}h ago', { n: Math.floor(age / 3600000) });
     }
     function keyFobView() {
         var fob = state.status && state.status.keyFob || {};
@@ -890,7 +943,7 @@ var RemoteAccess = (function () {
         var value = String(fob.state || 'UNKNOWN').toUpperCase();
         var label, detail, style;
         if (!supports('keyFob')) {
-            label = tr('keyfob_unavailable', 'Unavailable'); detail = 'Keyfob proximity is unsupported on this car.'; style = 'unavailable';
+            label = tr('keyfob_unavailable', 'Unavailable'); detail = tr('keyfob_unsupported', 'Keyfob proximity is unsupported on this car.'); style = 'unavailable';
         } else if (!el('raKeyFobEnabled').checked) {
             label = tr('keyfob_disabled', 'Disabled'); detail = tr('keyfob_disabled_detail', 'Keyfob detection is disabled.'); style = 'disabled';
         } else if (!configured) {
@@ -924,7 +977,7 @@ var RemoteAccess = (function () {
             detail = tr('keyfob_waiting_event', 'Waiting for a fresh keyfob approach event.'); style = 'listening';
         }
         if (supports('keyFob') && !supports('keyFobLock') && el('raKeyFobEnabled').checked)
-            detail += ' Keyfob departure locking is unsupported on this car.';
+            detail += ' ' + tr('keyfob_departure_unsupported', 'Keyfob departure locking is unsupported on this car.');
         return { fob: fob, age: age, active: active, fresh: fresh, state: value, label: label, detail: detail, style: style };
     }
     function keyFobReasonText(reason) {
@@ -957,7 +1010,8 @@ var RemoteAccess = (function () {
             event_stale: 'The last keyfob event expired. Waiting for a fresh event.',
             unknown_event: 'The vehicle event does not report keyfob presence.'
         };
-        return labels[reason] || tr('keyfob_waiting_source', 'Waiting for the vehicle keyfob receiver.');
+        if (Object.prototype.hasOwnProperty.call(labels, reason)) return tr('keyfob_reason_' + reason, labels[reason]);
+        return tr('keyfob_waiting_source', 'Waiting for the vehicle keyfob receiver.');
     }
     function renderKeyFobStatus() {
         var panel = el('raKeyFobPanel'), view = keyFobView();
@@ -967,12 +1021,12 @@ var RemoteAccess = (function () {
         text('raKeyFobMask', finite(view.fob.lastMask) && view.fob.lastMask >= 0 && Math.floor(view.fob.lastMask) === view.fob.lastMask ?
             '0x' + view.fob.lastMask.toString(16).toUpperCase() : '—');
         text('raKeyFobAge', eventAgeText(view.age));
-        text('raKeyFobSource', view.active ? 'Vehicle CAN · 0x180' : view.fob.sourceStatus ?
+        text('raKeyFobSource', view.active ? tr('keyfob_source_can', 'Vehicle CAN · 0x180') : view.fob.sourceStatus ?
             String(view.fob.sourceStatus).replace(/_/g, ' ') : '—');
         var lockDraft = el('raKeyFobEnabled').checked && el('raKeyFobLockEnabled').checked;
         el('raKeyFobDepartureRow').hidden = !lockDraft;
         var presence = view.fob.presence || {};
-        text('raKeyFobDeparture', !supports('keyFob') || !supports('keyFobLock') ? 'Unsupported on this car' :
+        text('raKeyFobDeparture', !supports('keyFob') || !supports('keyFobLock') ? tr('unsupported_on_car', 'Unsupported on this car') :
             !state.config || state.config.keyFobLockEnabled !== true ?
             tr('keyfob_lock_save_first', 'Save to apply') : !state.enabled ?
                 tr('keyfob_monitoring_off', 'Monitoring off') : pausedKeyFobPresence(presence) ?
@@ -1001,7 +1055,7 @@ var RemoteAccess = (function () {
     function renderKeyFobPresence(presence, lockDraft) {
         el('raKeyFobPresenceRow').hidden = !lockDraft;
         var label, fresh = freshKeyFobPresence(presence);
-        if (!supports('keyFob') || !supports('keyFobLock')) label = 'Unsupported on this car';
+        if (!supports('keyFob') || !supports('keyFobLock')) label = tr('unsupported_on_car', 'Unsupported on this car');
         else if (!state.config || state.config.keyFobLockEnabled !== true) label = tr('keyfob_lock_save_first', 'Save to apply');
         else if (!state.enabled) label = tr('keyfob_monitoring_off', 'Monitoring off');
         else if (pausedKeyFobPresence(presence)) label = tr('keyfob_presence_paused_locked', 'Paused while locked');
@@ -1017,7 +1071,7 @@ var RemoteAccess = (function () {
                 (finite(presence.sampleCount) && finite(presence.requiredSamples) ?
                     presence.sampleCount + '/' + presence.requiredSamples :
                     Math.floor(Math.max(0, presence.absentForMs || 0) / 1000) + '/' +
-                    Math.floor((presence.windowMs || KEYFOB_LOCK_DEFAULTS.windowMs) / 1000) + 's');
+                    tr('seconds_short', '{n}s', { n: Math.floor((presence.windowMs || KEYFOB_LOCK_DEFAULTS.windowMs) / 1000) }));
         else if (presence.state === 'ABSENT' && presence.reason === 'presence_vehicle_on')
             label = tr('keyfob_presence_absent_power_on', 'Absent · waiting for power off');
         else if (presence.state === 'ABSENT')
@@ -1052,12 +1106,12 @@ var RemoteAccess = (function () {
                 age > (state.config && state.config.staleMs || 5000) ||
                 !finite(signal.timestampMs) || !finite(signal.rawRssi) || !finite(signal.filteredRssi) ||
                 (signal.sampleCount || 0) < 3) return;
-            var slot = slots[index], name = String(phone.name || signal.deviceName || 'Phone ' + (index + 1));
+            var slot = slots[index], name = String(phone.name || signal.deviceName || tr('phone_number', 'Phone {n}', { n: index + 1 }));
             var shortName = name.replace(/\s+/g, ' ').trim();
             if (shortName.length > 9) shortName = shortName.slice(0, 8) + '…';
             var marker = svgNode('g', { 'class': 'ra-phone-marker', role: 'img',
-                'aria-label': name + ' · Nearby', transform: 'translate(' + slot[0] + ' ' + slot[1] + ')' });
-            marker.appendChild(svgNode('title', {}, name + ' · Nearby'));
+                'aria-label': name + ' · ' + tr('state_nearby', 'Nearby'), transform: 'translate(' + slot[0] + ' ' + slot[1] + ')' });
+            marker.appendChild(svgNode('title', {}, name + ' · ' + tr('state_nearby', 'Nearby')));
             marker.appendChild(svgNode('circle', { 'class': 'ra-phone-halo', r: '22' }));
             marker.appendChild(svgNode('circle', { 'class': 'ra-phone-disc', r: '16' }));
             marker.appendChild(svgNode('rect', { x: '-5.5', y: '-9', width: '11', height: '18',
@@ -1119,28 +1173,32 @@ var RemoteAccess = (function () {
         var reconnectReason = !connected && selectedDevice().enabled && signal.reason !== 'phone_disabled' && reconnect.reason;
         var proximity = !state.enabled ? 'DISABLED' : stale ? 'UNKNOWN' : disconnectedAway ? 'AWAY' :
             connected && proof.rssi ? String(signal.state || 'UNKNOWN').toUpperCase() : 'UNKNOWN';
-        var label = proximity === 'NEAR' ? 'Nearby' : proximity === 'AWAY' ? 'Away' : proximity === 'DISABLED' ? 'Disabled' : 'Unknown';
-        var detail = !state.enabled ? 'No background monitoring' :
+        var label = proximity === 'NEAR' ? tr('state_nearby', 'Nearby') : proximity === 'AWAY' ? tr('state_away_title', 'Away') :
+            proximity === 'DISABLED' ? tr('state_disabled', 'Disabled') : tr('state_unknown', 'Unknown');
+        var detail = !state.enabled ? tr('reason_disabled', 'No background monitoring') :
             stale ? reasonText('stale') :
             disconnectedAway ? tr('phone_disconnection_confirmed_detail', 'Phone disconnection confirmed · waiting for your return') + disconnectionProgress(signal) :
             pendingDisconnect ? tr('phone_disconnection_pending', 'Disconnected · confirming departure') + disconnectionProgress(signal) :
             !proof.connectionUsable ? signal.radioOn === false && signal.radioReadKnown !== false ?
                 reasonText('radio_off') : tr('phone_connection_unconfirmed_detail', 'Vehicle Bluetooth connection state is unconfirmed. Automatic actions are paused.') :
-            !connected ? reconnectReason === 'unsupported_platform' ? 'Phone reconnect is unsupported on this platform' :
+            !connected ? reconnectReason === 'unsupported_platform' ? tr('reconnect_unsupported', 'Phone reconnect is unsupported on this platform') :
                 reasonText(reconnectReason || signal.reason || 'disconnected') :
             reasonText(signal.reason);
         if (state.enabled && connected && proof.rssi && !stale && signal.candidate && signal.candidate !== signal.state && signal.candidate !== 'UNKNOWN') {
-            detail = 'Confirming ' + String(signal.candidate).toLowerCase() + ' · ' + Math.floor((signal.stableForMs || 0) / 1000) + 's stable';
+            detail = tr('confirming_candidate', 'Confirming {state} · {n}s stable',
+                { state: proximityStateName(signal.candidate), n: Math.floor((signal.stableForMs || 0) / 1000) });
         } else if (state.enabled && connected && !stale && proximity === 'NEAR') {
-            detail = state.config && state.config.unlockTrigger === 'near' ? 'Stable nearby signal' :
-                signal.armed ? 'Stable nearby signal · arrival armed' : 'Stable nearby signal · confirm departure to arm arrival';
+            detail = state.config && state.config.unlockTrigger === 'near' ? tr('reason_stable_near', 'Stable nearby signal') :
+                signal.armed ? tr('stable_near_armed', 'Stable nearby signal · arrival armed') :
+                    tr('stable_near_unarmed', 'Stable nearby signal · confirm departure to arm arrival');
         } else if (state.enabled && connected && !stale && proximity === 'AWAY') {
-            detail = signal.armed ? 'Stable away signal · waiting for your return' : 'Stable away signal';
+            detail = signal.armed ? tr('stable_away_armed', 'Stable away signal · waiting for your return') : tr('reason_stable_away', 'Stable away signal');
         }
         if (state.enabled && signal.reason === 'vehicle_ineligible') detail = reasonText(signal.reason);
         if (!el('raAdvancedMode').checked && state.enabled && connected && proof.rssi && !stale &&
             signal.candidate && signal.candidate !== signal.state && signal.candidate !== 'UNKNOWN') {
-            detail = 'Confirming the phone is ' + (signal.candidate === 'NEAR' ? 'nearby' : 'away');
+            detail = signal.candidate === 'NEAR' ? tr('confirming_phone_nearby', 'Confirming the phone is nearby') :
+                tr('confirming_phone_away', 'Confirming the phone is away');
         }
         if (vehicleOn) {
             label = tr('phone_proximity_paused', 'Paused');
@@ -1148,7 +1206,7 @@ var RemoteAccess = (function () {
             proximity = 'UNKNOWN';
         }
         if (!supports('bluetooth') && state.enabled) {
-            label = 'Unavailable'; detail = 'Phone proximity is unsupported on this car.'; proximity = 'UNKNOWN';
+            label = tr('keyfob_unavailable', 'Unavailable'); detail = tr('phone_proximity_unsupported', 'Phone proximity is unsupported on this car.'); proximity = 'UNKNOWN';
         } else if (state.enabled && bluetoothPaused) {
             label = tr('phone_proximity_paused', 'Paused');
             detail = tr('phone_proximity_bluetooth_off', 'Parked Bluetooth is disabled. Phone proximity actions are paused.');
@@ -1159,14 +1217,19 @@ var RemoteAccess = (function () {
             label = fob.label; detail = fob.detail;
             proximity = fob.fresh && fob.state === 'NEAR' ? 'NEAR' : 'UNKNOWN';
         }
-        text('raSignalTitle', !state.enabled ? 'Monitoring is disabled' : fobOnly ?
+        text('raSignalTitle', !state.enabled ? tr('monitoring_disabled_title', 'Monitoring is disabled') : fobOnly ?
             tr('keyfob_monitoring_title', 'Monitoring your keyfob') :
-            !supports('bluetooth') ? 'Phone proximity unavailable' : bluetoothPaused ?
+            !supports('bluetooth') ? tr('phone_proximity_unavailable_title', 'Phone proximity unavailable') : bluetoothPaused ?
                 tr('phone_proximity_paused_title', 'Phone proximity paused') :
                 vehicleOn ? tr('phone_vehicle_on_title', 'Paused while the car is on') :
                 disconnectedAway ? tr('phone_away_title', 'Your phone is away') :
                 pendingDisconnect ? tr('phone_departure_confirming_title', 'Confirming phone departure') :
-                !connected ? 'Waiting for your phone' : 'Your phone is ' + label.toLowerCase());
+                !connected ? tr('waiting_for_phone_title', 'Waiting for your phone') :
+                proximity === 'NEAR' ? tr('phone_nearby_title', 'Your phone is nearby') :
+                proximity === 'AWAY' ? tr('phone_away_title', 'Your phone is away') :
+                proximity === 'DISABLED' ? tr('phone_disabled_title', 'Your phone is disabled') :
+                vehicleOn || label === tr('phone_proximity_paused', 'Paused') ? tr('phone_paused_title', 'Your phone is paused') :
+                tr('phone_unknown_title', 'Your phone is unknown'));
         text('raProximityState', label);
         text('raProximityDetail', detail);
         el('raRadar').setAttribute('data-state', proximity.toLowerCase());
@@ -1176,30 +1239,34 @@ var RemoteAccess = (function () {
         var arrivalWindow = state.config && state.config.nearWindowMs || TIMING_DEFAULTS.nearWindowMs;
         var departureWindow = state.config && state.config.windowMs || TIMING_DEFAULTS.windowMs;
         text('raFilterDetail', disconnectedAway ? tr('phone_disconnect_lock_evidence', 'Lock · confirmed disconnection') : signal.filterKind === 'arrival' ?
-            'Unlock · last 3 / ' + arrivalWindow / 1000 + 's' :
-            'Lock · ' + departureWindow / 1000 + 's median');
+            tr('filter_unlock', 'Unlock · last 3 / {n}s', { n: arrivalWindow / 1000 }) :
+            tr('filter_lock', 'Lock · {n}s median', { n: departureWindow / 1000 }));
         // Two fresh Near readings in the window are the confirming floor (ProximityEvaluator.MIN_CONFIRMING_SAMPLES).
-        text('raArrivalDiagnostics', 'Unlock: ' + (showRssi ? signalText(signal.arrivalFilteredRssi) : '—') +
-            ' · ' + (showRssi ? signal.nearSampleCount || 0 : 0) + '/2 fresh Near readings' +
-            ' · ' + Math.floor((showRssi ? signal.nearStableForMs || 0 : 0) / 1000) + 's confirmed');
+        text('raArrivalDiagnostics', tr('diagnostics_unlock', 'Unlock: {signal} · {count}/2 fresh Near readings · {n}s confirmed', {
+            signal: showRssi ? signalText(signal.arrivalFilteredRssi) : '—',
+            count: showRssi ? signal.nearSampleCount || 0 : 0,
+            n: Math.floor((showRssi ? signal.nearStableForMs || 0 : 0) / 1000) }));
         text('raDepartureDiagnostics', disconnectedAway ?
             tr('phone_disconnect_lock_evidence', 'Lock · confirmed disconnection') + disconnectionProgress(signal) :
             pendingDisconnect ? tr('phone_disconnect_lock_pending', 'Lock · confirming disconnection') + disconnectionProgress(signal) :
-            'Lock: ' + (showRssi ? signalText(signal.departureFilteredRssi) : '—') + ' · ' + departureWindow / 1000 + 's median');
-        text('raAgeValue', !state.enabled || age === null ? '—' : age < 1000 ? '<1s' : Math.floor(age / 1000) + 's');
-        text('raFreshDetail', !state.enabled ? 'No reading' : vehicleOn ? tr('phone_vehicle_on', 'Paused · car is on') :
-            stale ? 'Expired / unavailable' :
+            tr('diagnostics_lock', 'Lock: {signal} · {n}s median',
+                { signal: showRssi ? signalText(signal.departureFilteredRssi) : '—', n: departureWindow / 1000 }));
+        text('raAgeValue', !state.enabled || age === null ? '—' : age < 1000 ? tr('seconds_under_one', '<1s') :
+            tr('seconds_short', '{n}s', { n: Math.floor(age / 1000) }));
+        text('raFreshDetail', !state.enabled ? tr('no_reading', 'No reading') : vehicleOn ? tr('phone_vehicle_on', 'Paused · car is on') :
+            stale ? tr('reading_expired', 'Expired / unavailable') :
             disconnectedAway || pendingDisconnect ? tr('phone_connection_evidence_fresh', 'Fresh connection evidence') :
             !proof.connectionUsable ? tr('phone_connection_unconfirmed', 'Unknown · connection unconfirmed') :
-            'Fresh · ' + (signal.sampleCount || 0) + ' samples');
+            tr('fresh_samples', 'Fresh · {count} samples', { count: signal.sampleCount || 0 }));
         text('raConnectionState', state.viewAddress ? vehicleOn ? tr('phone_proximity_paused', 'Paused') :
-            !proof.connectionUsable ? 'Unknown' : connected ? 'Connected' : 'Disconnected' : 'Not selected');
+            !proof.connectionUsable ? tr('state_unknown', 'Unknown') : connected ? tr('state_connected', 'Connected') :
+                tr('state_disconnected', 'Disconnected') : tr('state_not_selected', 'Not selected'));
         el('raConnectionDot').className = 'ra-status-dot' + (connected ? ' connected' : '');
         text('raDeviceAddress', state.viewAddress || '—');
         text('raArmedState', state.config && state.config.unlockTrigger === 'near' ?
             tr('departure_not_required', 'Prior departure not required') :
-            state.enabled && signal.armed && !stale && (connected || disconnectedAway) ? 'Armed for return' : 'Disarmed');
-        text('raModeLabel', state.config && state.config.dryRun === false ? 'Automatic actions' : 'Monitor preview');
+            state.enabled && signal.armed && !stale && (connected || disconnectedAway) ? tr('armed_for_return', 'Armed for return') : tr('disarmed', 'Disarmed'));
+        text('raModeLabel', state.config && state.config.dryRun === false ? tr('automatic_actions', 'Automatic actions') : tr('monitor_preview', 'Monitor preview'));
         renderPhoneMarkers();
         var captureReady = supports('bluetooth') && state.enabled && connected && proof.rssi && !stale && selectedDevice().enabled &&
             el('raAdvancedMode').checked && state.config && state.config.advancedMode &&
@@ -1208,30 +1275,31 @@ var RemoteAccess = (function () {
         el('raCaptureAway').disabled = !captureReady;
         var runtime = state.status && state.status.runtime || {};
         text('raMasterDetail', !state.enabled ?
-            runtime.cleanupPending ? 'Settings disabled · collector shutdown is awaiting confirmation from the car app.' :
-            'Proximity actions and sampling are stopped. The shared parked Bluetooth setting remains independent.' :
+            runtime.cleanupPending ? tr('master_cleanup_pending', 'Settings disabled · collector shutdown is awaiting confirmation from the car app.') :
+            tr('master_off_detail', 'Proximity actions and sampling are stopped. The shared parked Bluetooth setting remains independent.') :
             // Approved phones with no running phone collector: say so, even while the keyfob rail is
             // active; "Monitoring approved phones" must never describe a dead collector.
-            phonesActive && !runtime.active ? 'Enabled · ' + reasonText(runtime.reason || 'waiting_for_collector') :
+            phonesActive && !runtime.active ? tr('enabled_detail', 'Enabled · {detail}', { detail: reasonText(runtime.reason || 'waiting_for_collector') }) :
             runtime.active || fob.active ? supports('keyFob') && state.config && state.config.keyFobEnabled === true ?
-                fobOnly ? 'Monitoring keyfob events. Automatic actions require confirmed vehicle power off.' :
-                'Monitoring approved phones and keyfob events. Automatic actions require confirmed vehicle power off.' :
-                phonesActive ? 'Monitoring approved phones. Automatic actions require confirmed vehicle power off.' :
+                fobOnly ? tr('master_monitoring_keyfob', 'Monitoring keyfob events. Automatic actions require confirmed vehicle power off.') :
+                tr('master_monitoring_phones_keyfob', 'Monitoring approved phones and keyfob events. Automatic actions require confirmed vehicle power off.') :
+                phonesActive ? tr('master_monitoring_phones', 'Monitoring approved phones. Automatic actions require confirmed vehicle power off.') :
                 tr('proximity_sources_paused', 'No active proximity source. Enable parked Bluetooth or supported keyfob detection.') :
-            fobOnly ? 'Enabled · ' + fob.detail :
+            fobOnly ? tr('enabled_detail', 'Enabled · {detail}', { detail: fob.detail }) :
             bluetoothPaused ? tr('phone_proximity_bluetooth_off', 'Parked Bluetooth is disabled. Phone proximity actions are paused.') :
-            'Enabled · ' + reasonText(runtime.reason || signal.reason));
+            tr('enabled_detail', 'Enabled · {detail}', { detail: reasonText(runtime.reason || signal.reason) }));
         text('raRadioNote', !supports('bluetoothReconnect') ?
-            'Automatic phone reconnect is unsupported on this car. The shared parked Bluetooth setting remains available.' :
+            tr('radio_note_unsupported', 'Automatic phone reconnect is unsupported on this car. The shared parked Bluetooth setting remains available.') :
             state.config && state.config.keepBluetoothOn === true ?
             state.enabled ?
-                'Proximity makes limited reconnect attempts for saved, enabled paired phones while parked. It keeps any existing active phone connection. Signal strength is relative; it is not a distance measurement.' :
-                'The shared setting keeps Bluetooth on while parked. With Proximity off, it does not reconnect phones. Pair approved phones in the car\'s Bluetooth settings before enabling Proximity.' :
-            'The shared parked Bluetooth setting is off. Parked phone reconnect requires this setting and Proximity to be on. Pair approved phones in the car\'s Bluetooth settings first.');
+                tr('radio_note_active', 'Proximity makes limited reconnect attempts for saved, enabled paired phones while parked. It keeps any existing active phone connection. Signal strength is relative; it is not a distance measurement.') :
+                tr('radio_note_master_off', 'The shared setting keeps Bluetooth on while parked. With Proximity off, it does not reconnect phones. Pair approved phones in the car\'s Bluetooth settings before enabling Proximity.') :
+            tr('radio_note_bluetooth_off', 'The shared parked Bluetooth setting is off. Parked phone reconnect requires this setting and Proximity to be on. Pair approved phones in the car\'s Bluetooth settings first.'));
         renderRoster();
     }
-    function setStreamLabel(label, live) {
-        text('raStreamLabel', label);
+    function setStreamLabel(key, fallback, live) {
+        state.streamLabel = [key, fallback, live];
+        text('raStreamLabel', tr(key, fallback));
         el('raStreamState').className = 'ra-stream-state' + (live ? ' is-live' : '');
         el('remoteAccessPage').classList.toggle('ra-live', !!live && isLive());
     }
@@ -1273,29 +1341,31 @@ var RemoteAccess = (function () {
         el('raChartAway').setAttribute('d', 'M48 ' + y(away) + 'H886');
         el('raNearLabel').setAttribute('y', Math.max(16, y(near) - 5));
         el('raAwayLabel').setAttribute('y', Math.min(172, y(away) + 13));
-        text('raNearLabel', 'Near ' + signalText(near));
-        text('raAwayLabel', 'Away ' + signalText(away));
+        text('raNearLabel', tr('chart_near', 'Near {value}', { value: signalText(near) }));
+        text('raAwayLabel', tr('chart_away', 'Away {value}', { value: signalText(away) }));
         text('raChartMax', signalText(max)); text('raChartMin', signalText(min));
         el('raChartEmpty').hidden = samples.length > 0;
         text('raChartEmpty', state.enabled ? vehicleOnPaused() ? tr('phone_vehicle_on_title', 'Paused while the car is on') :
-            'Waiting for fresh readings from your selected phone.' : 'Enable proximity access to see live readings.');
-        text('raChartStatus', state.enabled ? samples.length + ' readings shown' : 'Monitoring off');
+            tr('chart_waiting', 'Waiting for fresh readings from your selected phone.') : tr('chart_enable', 'Enable proximity access to see live readings.'));
+        text('raChartStatus', state.enabled ? tr('chart_readings', '{count} readings shown', { count: samples.length }) : tr('keyfob_monitoring_off', 'Monitoring off'));
     }
     function eventLabel(event) {
-        if (event.message) return event.message;
+        if (event.message) return serverText(event, 'message');
         var labels = { arrival: 'Phone arrived', departure: 'Phone departed', dry_run: 'Learning observation',
             accepted: 'Command sent · awaiting confirmation', confirmed: 'Vehicle state confirmed',
             unconfirmed: 'Command sent · no state confirmation',
             cloud_acknowledged: 'Cloud command acknowledged · no local confirmation',
             sent: 'Command sent · vehicle confirmation off',
             blocked: 'Action blocked', failed: 'Action failed' };
-        return labels[event.type] || String(event.type || 'Activity').replace(/_/g, ' ');
+        if (Object.prototype.hasOwnProperty.call(labels, event.type)) return tr('event_' + event.type, labels[event.type]);
+        return event.type ? String(event.type).replace(/_/g, ' ') : tr('event_activity', 'Activity');
     }
     function renderEvents(events) {
         var list = el('raEventList');
         while (list.firstChild) list.removeChild(list.firstChild);
         events = Array.isArray(events) ? events.slice(0, 40) : [];
-        text('raEventCount', events.length + (events.length === 1 ? ' event' : ' events'));
+        text('raEventCount', events.length === 1 ? tr('event_count_one', '1 event') :
+            tr('event_count', '{count} events', { count: events.length }));
         if (!events.length) {
             var empty = document.createElement('div'); empty.className = 'ra-history-empty';
             empty.textContent = tr('history_empty', 'Detected transitions and action results will appear here.');
@@ -1312,7 +1382,8 @@ var RemoteAccess = (function () {
             content.appendChild(title);
             if (event.action || event.result) {
                 var detail = document.createElement('span');
-                detail.textContent = [event.action, event.result].filter(Boolean).join(' · ').replace(/_/g, ' ');
+                detail.textContent = [event.action ? actionName(event.action) : '', event.result ? resultName(event.result) : '']
+                    .filter(Boolean).join(' · ');
                 content.appendChild(detail);
             }
             var time = document.createElement('time');
@@ -1326,21 +1397,23 @@ var RemoteAccess = (function () {
         });
     }
     function renderLock(lastAction) {
-        if (!lastAction || !lastAction.status) { text('raLockState', 'Unknown'); return; }
-        var action = lastAction.action === 'lock' || lastAction.action === 'lock_car' ? 'Lock' : 'Unlock';
+        if (!lastAction || !lastAction.status) { text('raLockState', tr('state_unknown', 'Unknown')); return; }
+        var lock = lastAction.action === 'lock' || lastAction.action === 'lock_car';
         var status = lastAction.status;
-        var label = status === 'confirmed' ? action + ' confirmed' :
-            status === 'accepted' ? action + ' sent · awaiting readback' :
-            status === 'unconfirmed' ? action + ' sent · unconfirmed' :
-            status === 'cloud_acknowledged' ? action + ' sent · cloud acknowledged, unconfirmed locally' :
-            status === 'sent' ? action + ' sent · vehicle confirmation off' :
-            status === 'dry_run' ? action + ' observed · learning' :
-            status === 'blocked' ? action + ' blocked' : status === 'failed' ? action + ' failed' : 'Unknown';
+        var english = { confirmed: '{action} confirmed', accepted: '{action} sent · awaiting readback',
+            unconfirmed: '{action} sent · unconfirmed', cloud_acknowledged: '{action} sent · cloud acknowledged, unconfirmed locally',
+            sent: '{action} sent · vehicle confirmation off', dry_run: '{action} observed · learning',
+            blocked: '{action} blocked', failed: '{action} failed' };
+        var label = Object.prototype.hasOwnProperty.call(english, status) ?
+            tr((lock ? 'lock_status_' : 'unlock_status_') + status, english[status], { action: lock ? 'Lock' : 'Unlock' }) :
+            tr('state_unknown', 'Unknown');
         text('raLockState', label);
-        el('raLockState').title = [lastAction.reason, lastAction.confirmationScope].filter(Boolean).join(' · ');
+        el('raLockState').title = [serverText(lastAction, 'reason'),
+            lastAction.confirmationScope === 'driver_door' ? tr('scope_driver_door', 'driver door') : lastAction.confirmationScope]
+            .filter(Boolean).join(' · ');
     }
     function acceptStatus(data, forceConfig) {
-        if (!data || !data.config) throw new Error('Vehicle returned an incomplete proximity status.');
+        if (!data || !data.config) throw new Error(tr('status_incomplete', 'Vehicle returned an incomplete proximity status.'));
         if (typeof data.sessionId === 'string' && data.sessionId) {
             if (state.retiredSessions.indexOf(data.sessionId) !== -1) return;
             if (state.serverSessionId && state.serverSessionId !== data.sessionId) {
@@ -1382,7 +1455,8 @@ var RemoteAccess = (function () {
         el('raFastUnlockDefaults').disabled = state.saving;
         updateUnlockTrigger();
         el('remoteAccessPage').classList.toggle('ra-enabled', state.enabled);
-        text('raMasterBadge', state.enabled ? 'Enabled' : data.runtime && data.runtime.cleanupPending ? 'Cleanup pending' : 'Disabled');
+        text('raMasterBadge', state.enabled ? tr('state_enabled', 'Enabled') : data.runtime && data.runtime.cleanupPending ?
+            tr('state_cleanup_pending', 'Cleanup pending') : tr('state_disabled', 'Disabled'));
         el('raMasterBadge').className = 'ra-badge' + (state.enabled ? ' is-on' : '');
         appendSample(currentSignal());
         renderSignal(); drawChart(); renderEvents(data.events); renderLock(data.lastAction);
@@ -1491,7 +1565,7 @@ var RemoteAccess = (function () {
                 if (generation !== state.modelGeneration) return;
                 el('raVehicleCanvas').hidden = true;
                 if (!el('raVehiclePoster').src) {
-                    text('raVehiclePlaceholder', 'Loading your selected vehicle…');
+                    text('raVehiclePlaceholder', tr('vehicle_loading', 'Loading your selected vehicle…'));
                     el('raVehiclePlaceholder').hidden = false;
                 }
                 disposeVehiclePreview();
@@ -1524,7 +1598,7 @@ var RemoteAccess = (function () {
         if (state.liveRequest) { var request = state.liveRequest; state.liveRequest = null; request.abort(); }
         if (!state.enabled || !visible()) disposeVehiclePreview();
         if (!visible()) abortVehicleArt();
-        setStreamLabel(state.enabled ? 'Live view paused' : 'Monitoring off', false);
+        if (state.enabled) setStreamLabel('stream_paused', 'Live view paused', false); else setStreamLabel('keyfob_monitoring_off', 'Monitoring off', false);
         renderPhoneMarkers();
         renderKeyFobMarker();
     }
@@ -1559,11 +1633,11 @@ var RemoteAccess = (function () {
             if (state.liveRequest === request) state.liveRequest = null;
             if (generation !== state.generation || !isLive()) return;
             if (success) {
-                state.failures = 0; setStreamLabel('Live', true);
+                state.failures = 0; setStreamLabel('stream_live', 'Live', true);
                 schedulePoll(250, generation);
             } else {
                 state.failures++;
-                setStreamLabel('Reconnecting', false);
+                setStreamLabel('stream_reconnecting', 'Reconnecting', false);
                 renderSignal();
                 renderSafeZoneStatus();
                 schedulePoll(Math.min(10000, 1500 * state.failures), generation);
@@ -1597,7 +1671,7 @@ var RemoteAccess = (function () {
             if (mutation === state.mutation) acceptStatus(data, !state.dirty);
         }).catch(function (err) {
             if (mutation !== state.mutation) return;
-            error(err.message); setStreamLabel('Status unavailable', false);
+            error(err.message); setStreamLabel('stream_status_unavailable', 'Status unavailable', false);
         });
     }
     function refreshAll() {
@@ -1617,7 +1691,7 @@ var RemoteAccess = (function () {
         error(''); setBusy(true); state.mutation++;
         api('/config', config).then(function (data) {
             acceptStatus(data, true); state.dirty = false; state.advancedDraft = null;
-            text('raSaveState', 'Saved on the vehicle'); toast('Proximity rules saved');
+            text('raSaveState', tr('saved_on_vehicle', 'Saved on the vehicle')); toast(tr('rules_saved', 'Proximity rules saved'));
         }).catch(function (err) {
             state.dirty = true;
             saveError(err.message);
@@ -1653,14 +1727,14 @@ var RemoteAccess = (function () {
         var device = selectedDevice();
         if (requested && !el('raKeyFobEnabled').checked && !state.phones.some(function (profile) { return profile.enabled; })) {
             el('raMasterToggle').checked = state.enabled;
-            error('Enable keyfob detection or add and enable an approved phone before enabling proximity access.'); return;
+            error(tr('error_needs_source', 'Enable keyfob detection or add and enable an approved phone before enabling proximity access.')); return;
         }
         error(''); setBusy(true); state.mutation++;
         if (!requested) {
             stopLive();
             disposeVehiclePreview();
             el('remoteAccessPage').classList.remove('ra-live');
-            text('raMasterBadge', 'Stopping…');
+            text('raMasterBadge', tr('state_stopping', 'Stopping…'));
         }
         var changes = { enabled: requested };
         if (requested) {
@@ -1686,18 +1760,20 @@ var RemoteAccess = (function () {
                 var failure = '';
                 (data.events || []).some(function (event) {
                     if (event.type === 'error' || event.type === 'failed' || event.result === 'failed') {
-                        failure = event.message || ''; return true;
+                        failure = event.message ? serverText(event, 'message') : ''; return true;
                     }
                     return false;
                 });
-                error(failure || (requested ? 'Proximity access could not start and remains disabled.' :
-                    'Proximity access is still enabled. The disable request was not applied.'));
+                error(failure || (requested ? tr('master_start_failed', 'Proximity access could not start and remains disabled.') :
+                    tr('master_stop_failed', 'Proximity access is still enabled. The disable request was not applied.')));
             } else {
-                toast(enabled ? 'Proximity access enabled' :
-                    data.runtime && data.runtime.cleanupPending ? 'Settings disabled · collector cleanup pending' : 'Proximity access disabled');
+                toast(enabled ? tr('master_enabled_toast', 'Proximity access enabled') :
+                    data.runtime && data.runtime.cleanupPending ? tr('master_cleanup_toast', 'Settings disabled · collector cleanup pending') :
+                        tr('master_disabled_toast', 'Proximity access disabled'));
             }
         }).catch(function (err) {
-            error('Could not ' + (requested ? 'enable' : 'disable') + ' proximity access: ' + err.message);
+            error(requested ? tr('master_enable_error', 'Could not enable proximity access: {error}', { error: err.message }) :
+                tr('master_disable_error', 'Could not disable proximity access: {error}', { error: err.message }));
             el('raMasterToggle').checked = state.enabled;
             if (state.enabled && visible()) startLive();
         }).then(function () { setBusy(false); renderSignal(); });
@@ -1710,13 +1786,15 @@ var RemoteAccess = (function () {
         button.disabled = true; error('');
         api('/calibrate', { side: side, deviceAddress: address }).then(function (data) {
             if (mutation !== state.mutation) return;
-            if (!finite(data.value)) throw new Error('No valid fresh capture was returned.');
+            if (!finite(data.value)) throw new Error(tr('capture_invalid', 'No valid fresh capture was returned.'));
             if (!profileFor(address)) return;
             if (!state.captures[address]) state.captures[address] = {};
             state.captures[address][side] = data;
             profileFor(address)[side === 'near' ? 'nearThreshold' : 'awayThreshold'] = Math.round(data.value);
             if (address === state.viewAddress) loadProfileThresholds();
-            text('raCalibrationDetail', (side === 'near' ? 'Nearby' : 'Away') + ' capture added to the draft. Save rules to apply.');
+            text('raCalibrationDetail', side === 'near' ?
+                tr('capture_added_near', 'Nearby capture added to the draft. Save rules to apply.') :
+                tr('capture_added_away', 'Away capture added to the draft. Save rules to apply.'));
             markDirty();
         }).catch(function (err) { error(err.message); }).then(renderSignal);
     }
@@ -1725,7 +1803,8 @@ var RemoteAccess = (function () {
         ['near', 'away'].forEach(function (side) {
             var capture = captures[side];
             text(side === 'near' ? 'raNearCaptureValue' : 'raAwayCaptureValue',
-                capture ? signalText(capture.value) + ' · ' + capture.sampleCount + ' samples' : 'No saved capture');
+                capture ? tr('capture_value', '{value} · {count} samples', { value: signalText(capture.value), count: capture.sampleCount }) :
+                    tr('capture_none', 'No saved capture'));
         });
     }
     function pause() {
@@ -1735,6 +1814,17 @@ var RemoteAccess = (function () {
     function resume() {
         state.paused = false;
         if (visible()) { refresh(); if (state.enabled) refreshSafeZones(); }
+    }
+    function relocalize() {
+        renderBluetoothStatus();
+        if (state.streamLabel) setStreamLabel(state.streamLabel[0], state.streamLabel[1], state.streamLabel[2]);
+        if (!state.ready || !state.status) { drawChart(); return; }
+        var data = state.status;
+        text('raMasterBadge', state.enabled ? tr('state_enabled', 'Enabled') : data.runtime && data.runtime.cleanupPending ?
+            tr('state_cleanup_pending', 'Cleanup pending') : tr('state_disabled', 'Disabled'));
+        renderDevices(); updateAdvancedView(); updateUnlockTrigger(); renderCaptures();
+        renderSignal(); drawChart(); renderEvents(data.events); renderLock(data.lastAction);
+        renderSafeZoneStatus(); renderSafeZoneChoices();
     }
     function init() {
         state.paused = !!window.OverdriveNativePaused;
@@ -1762,6 +1852,8 @@ var RemoteAccess = (function () {
         });
         window.addEventListener('overdrive:pause', pause);
         window.addEventListener('overdrive:resume', resume);
+        // A locale switch re-hydrates the static markup; repaint everything this script renders.
+        if (window.BYD && BYD.i18n && typeof BYD.i18n.onChange === 'function') BYD.i18n.onChange(relocalize);
         window.addEventListener('focus', function () { if (visible() && state.ready && !state.saving) refresh(); });
         window.addEventListener('pagehide', pause);
         window.addEventListener('beforeunload', function () {
