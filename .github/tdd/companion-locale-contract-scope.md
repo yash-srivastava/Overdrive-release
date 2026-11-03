@@ -64,3 +64,25 @@ excerpt. Record the remaining independent resource-sync failure accurately.
 For a release containing the companion, also run its explicit command against
 the actual clean versioned module and its own build/device checks. Those
 inputs remain unavailable here, so companion acceptance remains unvalidated.
+
+## Independent-review follow-up
+
+The reviewer identified an extra prerequisite not present in the original
+contract: requiring English `values/strings.xml` would reject a valid bundle
+whose English keys are split among other XML files. The tool now discovers and
+tracks all actual XML inputs under `values` and `values-he`, matching the original
+directory-based parity check. Original Czech/Hebrew fixed-file assertions are
+retained. Pinned revision and clean tracked-source requirements remain.
+
+Documentation also narrows the execution claim: the tool has no explicit
+network client but invokes local Git. It must run with trusted checkout/config
+or in a network-disabled sandbox.
+
+After that correction the actual tool compiled and all three existing
+missing-input CLI controls failed clearly as intended. The bounded offline
+sandbox exited 0 in 2.165 s with no limit stop. Log SHA-256:
+`38531e9e5277a513d16827eb3a3fc03e23ffa5d7baee9911b6e028fb96ab112a`.
+Tool SHA-256:
+`bc3e65d83e6df7dffa227646ed1868d490c8141941ba99f0f85f82d38eb28cb6`.
+No real companion checkout was supplied, so no positive companion acceptance
+is claimed by these controls.

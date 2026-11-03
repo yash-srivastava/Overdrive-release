@@ -20,7 +20,14 @@ Use JDK 17 or newer and Git. Pass the module containing `build.gradle.kts`,
 resource directories; if the companion repository root is the module, pass
 that root. The tool checks required inputs are tracked, requires a clean
 module, prints the exact Git revision and fails on missing inputs or a failed
-assertion. It uses no network service and never creates companion files.
+assertion.
+English string keys are read from all XML files directly under `res/values`,
+as in the original parity contract; an English file named `strings.xml` is not
+required. Every XML input scanned in `values` and `values-he` must be tracked.
+
+The tool has no explicit network client, but it invokes local Git, which can be
+affected by checkout/configuration. Run it only against trusted checkout/config
+or within a network-disabled sandbox. It never creates companion source files.
 
 The three contract groups cover Czech selection/label, Hebrew English-key
 parity/labels/placeholders, and canonical Hebrew/legacy `iw` alias/picker/build

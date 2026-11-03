@@ -10,12 +10,12 @@ import org.w3c.dom.NodeList;
 
 /**
  * Checks the companion launcher contracts against a real, clean Git checkout.
- * This source-file launcher uses only the JDK and performs no network requests.
+ * This source-file launcher has no explicit network client, but invokes local
+ * Git. Use trusted checkout/configuration or a network-disabled sandbox.
  */
 public final class LauncherLocaleContract {
     private static final String[] INPUTS = {
         "src/main/java/com/overdrive/launcher/i18n/LocaleController.kt",
-        "src/main/res/values/strings.xml",
         "src/main/res/values-cs/strings.xml",
         "src/main/res/values-he/strings.xml",
         "src/main/res/xml/locales_config.xml",
@@ -38,12 +38,26 @@ public final class LauncherLocaleContract {
             require(Files.isRegularFile(module.resolve(input)),
                     "Missing real companion input: " + input);
         }
+        java.util.List<String> inputs = new java.util.ArrayList<>(java.util.Arrays.asList(INPUTS));
+        for (String resourceDirectory : new String[] {"src/main/res/values", "src/main/res/values-he"}) {
+            Path directory = module.resolve(resourceDirectory);
+            require(Files.isDirectory(directory), "Missing real companion directory: " + resourceDirectory);
+            // The original parity contract scans every XML file. English strings
+            // may be split across any filenames; strings.xml is not required.
+            try (java.util.stream.Stream<Path> files = Files.list(directory)) {
+                for (Path file : (Iterable<Path>) files
+                        .filter(path -> path.toString().endsWith(".xml")).sorted()::iterator) {
+                    require(Files.isRegularFile(file), "Missing real companion input: " + file);
+                    inputs.add(module.relativize(file).toString().replace('\\', '/'));
+                }
+            }
+        }
         Path repository = Path.of(git(module, "rev-parse", "--show-toplevel")).toRealPath();
         module = module.toRealPath();
         require(module.startsWith(repository), "Companion module is outside its Git checkout");
         String revision = git(module, "rev-parse", "--verify", "HEAD");
         String relative = repository.relativize(module).toString();
-        for (String input : INPUTS) {
+        for (String input : inputs) {
             String tracked = relative.isEmpty() ? input : relative + "/" + input;
             git(repository, "ls-files", "--error-unmatch", "--", tracked);
         }
