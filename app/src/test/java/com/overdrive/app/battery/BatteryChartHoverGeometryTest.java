@@ -1,6 +1,8 @@
 package com.overdrive.app.battery;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -25,12 +27,22 @@ public class BatteryChartHoverGeometryTest {
 
     @Test
     public void performanceScriptShipsOnce() throws Exception {
-        // web/local/shared was a symlinked second copy that the APK packaged in full.
-        assertFalse(java.nio.file.Files.exists(
-                java.nio.file.Paths.get("src/main/assets/web/local/shared"), java.nio.file.LinkOption.NOFOLLOW_LINKS)
-                || java.nio.file.Files.exists(
-                java.nio.file.Paths.get("app/src/main/assets/web/local/shared"), java.nio.file.LinkOption.NOFOLLOW_LINKS));
+        // Source consumers keep the documented compatibility symlink. The
+        // packaging task excludes that alias, not its canonical target.
+        Path root = repositoryRoot();
+        Path shared = root.resolve("app/src/main/assets/web/shared");
+        Path alias = root.resolve("app/src/main/assets/web/local/shared");
+        assertTrue(Files.isSymbolicLink(alias));
+        assertEquals(Paths.get("../shared"), Files.readSymbolicLink(alias));
+        assertTrue(Files.isSameFile(shared, alias));
         assertTrue(readRepositoryFile("app/src/main/assets/web/shared/performance.js").length() > 0);
+        String packagedDirectory = System.getProperty("overdrive.packagedMainAssetsDir");
+        assertNotNull("Run through Gradle so the asset producer is staged", packagedDirectory);
+        Path packaged = Paths.get(packagedDirectory);
+        assertFalse(Files.exists(packaged.resolve("web/local/shared"),
+                java.nio.file.LinkOption.NOFOLLOW_LINKS));
+        assertArrayEquals(Files.readAllBytes(shared.resolve("performance.js")),
+                Files.readAllBytes(packaged.resolve("web/shared/performance.js")));
     }
 
     @Test
@@ -57,6 +69,15 @@ public class BatteryChartHoverGeometryTest {
 
         assertTrue(js.contains("socPadLeft = 45, socPadRight = 15"));
         assertTrue(js.contains("padding = { top: 15, right: 15, bottom: 30, left: 45 }"));
+    }
+
+    private static Path repositoryRoot() {
+        Path current = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
+        while (current != null) {
+            if (Files.isRegularFile(current.resolve("app/build.gradle.kts"))) return current;
+            current = current.getParent();
+        }
+        throw new AssertionError("Could not locate repository root");
     }
 
     private static String readRepositoryFile(String relativePath) throws IOException {

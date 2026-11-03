@@ -337,6 +337,34 @@ tasks.register("downloadFastCam") {
 }
 
 
+// Keep the source compatibility symlink required by CONTRIBUTING, while packaging
+// the canonical web/shared tree once. Depending on the producer (rather than
+// another preBuild sibling) ensures fast_cam_capture is staged after extraction.
+val packagedMainAssetsDir = layout.buildDirectory.dir("generated/packaged-assets/main")
+val preparePackagedMainAssets = tasks.register<Sync>("preparePackagedMainAssets") {
+    dependsOn("downloadFastCam")
+    from("src/main/assets") {
+        exclude("web/local/shared", "web/local/shared/**")
+    }
+    into(packagedMainAssetsDir)
+}
+
+// AGP turns asset source directories into plain paths and does not retain a
+// TaskProvider's producer dependency. Order every variant's actual merge
+// explicitly, so packaging cannot run before Sync creates its input files.
+tasks.configureEach {
+    if (name.startsWith("merge") && name.endsWith("Assets")) {
+        dependsOn(preparePackagedMainAssets)
+    }
+}
+
+// Unit packaging contracts inspect the same staged bytes that Android consumes.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    dependsOn(preparePackagedMainAssets)
+    systemProperty("overdrive.packagedMainAssetsDir", packagedMainAssetsDir.get().asFile.absolutePath)
+}
+
+
 // Task to extract web assets to /data/local/tmp/web on device
 // Run: ./gradlew :app:extractWebAssets
 tasks.register("extractWebAssets") {
@@ -391,6 +419,9 @@ android {
     sourceSets {
         getByName("main") {
             res.srcDir(hebrewIwResDir)
+            // The merge-task dependency above produces this directory before
+            // AGP reads it; variant overlays remain unchanged.
+            assets.setSrcDirs(listOf(packagedMainAssetsDir))
         }
     }
     buildToolsVersion = "36.0.0"

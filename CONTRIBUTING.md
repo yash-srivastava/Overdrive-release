@@ -64,7 +64,8 @@ git clone -c core.autocrlf=false -c core.symlinks=true https://github.com/<your-
   and many tests fail because they no longer find the text they look for.
 - **Symlinks:** `app/src/main/assets/web/local/shared` is a symlink to `../shared`. Creating symlinks on
   Windows needs Developer Mode (or an elevated shell). Without it the link becomes a plain text file and
-  the tests that read through it fail.
+  the tests that read through it fail. The main-asset staging task preserves this source alias
+  while packaging only `web/shared`; the daemon still accepts legacy `/local/shared/` URLs.
 - **JDK:** the JDK bundled with Android Studio works for the build.
 
 ### Running on a Device
