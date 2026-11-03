@@ -42,7 +42,7 @@ public class BydCloudApiHandlerContractTest {
                 "boolean persisted = UnifiedConfigManager.updateSection(\"bydCloud\", delta);"));
         assertTrue(body.contains("JSONObject delta = new JSONObject();"));
         assertTrue(body.contains("if (!persisted)"));
-        assertTrue(body.contains("Could not save BYD Cloud settings"));
+        assertTrue(body.contains("Messages.get(\"errors.bydcloud_settings_save_failed\")"));
     }
 
     private static String readRepositoryFile(String relativePath) throws IOException {

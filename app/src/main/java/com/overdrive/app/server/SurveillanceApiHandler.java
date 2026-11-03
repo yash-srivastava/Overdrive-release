@@ -122,7 +122,7 @@ public class SurveillanceApiHandler {
                 if (error == null) HttpResponse.sendJsonSuccess(out);
                 else HttpResponse.sendJsonError(out, error);
             } catch (Exception e) {
-                HttpResponse.sendJsonError(out, "Failed to trigger screen deterrent: " + e.getMessage());
+                HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_deterrent_trigger_failed_with_detail", String.valueOf(e.getMessage())));
             }
             return true;
         }
@@ -305,13 +305,13 @@ public class SurveillanceApiHandler {
         // Reject 0-byte uploads — they'd pass the path-restriction checks
         // later but produce a "current asset" preview that's broken.
         if (data.length == 0) {
-            HttpResponse.sendJsonError(out, "Empty file");
+            HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_deterrent_empty_file"));
             return;
         }
         String ext = deterrentAssetExtension(data);
         if (ext == null) {
             HttpResponse.sendJsonError(out,
-                    "Unsupported or unreadable file (use PNG, JPG, WebP, GIF or MP4)");
+                    Messages.get("errors.surveillance_deterrent_unsupported_file"));
             return;
         }
         boolean isVideo = "mp4".equals(ext);
@@ -319,8 +319,7 @@ public class SurveillanceApiHandler {
                 ? SCREEN_DETERRENT_MAX_VIDEO_BYTES
                 : SCREEN_DETERRENT_MAX_IMAGE_BYTES;
         if (data.length > maxBytes) {
-            HttpResponse.sendJsonError(out, "File too large (max "
-                    + (maxBytes / (1024 * 1024)) + "MB)");
+            HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_deterrent_file_too_large", String.valueOf(maxBytes / (1024 * 1024))));
             return;
         }
 
@@ -332,7 +331,7 @@ public class SurveillanceApiHandler {
         synchronized (SCREEN_DETERRENT_ASSET_LOCK) {
             java.io.File dir = new java.io.File(SCREEN_DETERRENT_DIR);
             if (!dir.isDirectory() && !dir.mkdirs()) {
-                HttpResponse.sendJsonError(out, "Could not create deterrent asset directory");
+                HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_deterrent_dir_failed"));
                 return;
             }
             try {
@@ -388,7 +387,7 @@ public class SurveillanceApiHandler {
                                         outFile.getAbsolutePath()));
                 if (!persisted) {
                     try { outFile.delete(); } catch (Exception ignored) {}
-                    HttpResponse.sendJsonError(out, "Could not save deterrent asset");
+                    HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_deterrent_save_failed"));
                     return;
                 }
                 configCommitted = true;
@@ -411,7 +410,7 @@ public class SurveillanceApiHandler {
                     CameraDaemon.log("Screen deterrent asset committed but response failed: "
                             + t.getMessage());
                 } else {
-                    HttpResponse.sendJsonError(out, "Write failed: " + t.getMessage());
+                    HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_deterrent_write_failed_with_detail", String.valueOf(t.getMessage())));
                 }
             } finally {
                 if (tmpFile != null) {
@@ -441,7 +440,7 @@ public class SurveillanceApiHandler {
     private static String validateDeterrentVideo(java.io.File file) {
         if (SCREEN_DETERRENT_VIDEO_VALIDATOR.getActiveCount() > 0
                 || !SCREEN_DETERRENT_VIDEO_VALIDATOR.getQueue().isEmpty()) {
-            return "Video validation is busy; try again";
+            return Messages.get("errors.surveillance_deterrent_video_busy");
         }
 
         java.util.concurrent.FutureTask<String> task =
@@ -450,7 +449,7 @@ public class SurveillanceApiHandler {
         try {
             SCREEN_DETERRENT_VIDEO_VALIDATOR.execute(task);
         } catch (java.util.concurrent.RejectedExecutionException busy) {
-            return "Video validation is busy; try again";
+            return Messages.get("errors.surveillance_deterrent_video_busy");
         }
 
         try {
@@ -460,14 +459,14 @@ public class SurveillanceApiHandler {
             SCREEN_DETERRENT_VIDEO_VALIDATOR.remove(task);
             CameraDaemon.log("Deterrent video validation timed out — rejecting "
                     + file.getName());
-            return "Could not read that MP4 (validation timed out)";
+            return Messages.get("errors.surveillance_deterrent_video_timeout");
         } catch (InterruptedException interrupted) {
             task.cancel(true);
             SCREEN_DETERRENT_VIDEO_VALIDATOR.remove(task);
             Thread.currentThread().interrupt();
-            return "Video validation interrupted";
+            return Messages.get("errors.surveillance_deterrent_video_interrupted");
         } catch (java.util.concurrent.ExecutionException failed) {
-            return "Could not validate that MP4";
+            return Messages.get("errors.surveillance_deterrent_video_invalid");
         }
     }
 
@@ -480,40 +479,39 @@ public class SurveillanceApiHandler {
             android.graphics.BitmapFactory.decodeFile(
                     file.getAbsolutePath(), bounds);
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-                return "Could not decode that image";
+                return Messages.get("errors.surveillance_deterrent_image_decode");
             }
             if (animatedGif
                     && (bounds.outWidth > SCREEN_DETERRENT_MAX_GIF_DIM
                         || bounds.outHeight > SCREEN_DETERRENT_MAX_GIF_DIM
                         || (long) bounds.outWidth * bounds.outHeight
                             > SCREEN_DETERRENT_MAX_GIF_PIXELS)) {
-                return "GIF dimensions too large for this head unit";
+                return Messages.get("errors.surveillance_deterrent_gif_too_large");
             }
             return null;
         } catch (Throwable invalid) {
-            return "Could not decode that image";
+            return Messages.get("errors.surveillance_deterrent_image_decode");
         }
     }
 
     private static String validateDeterrentVideoNow(java.io.File file) {
         if (!com.overdrive.app.surveillance.ScreenDeterrentVideo
                 .isMp4File(file.getAbsolutePath())) {
-            return "That file is not a readable MP4";
+            return Messages.get("errors.surveillance_deterrent_not_mp4");
         }
         com.overdrive.app.surveillance.ScreenDeterrentVideo.Probe probe =
                 com.overdrive.app.surveillance.ScreenDeterrentVideo.probe(
                         file.getAbsolutePath());
-        if (probe == null) return "That MP4 has no readable video track";
-        if (probe.durationUs <= 0) return "Could not read the video duration";
+        if (probe == null) return Messages.get("errors.surveillance_deterrent_no_video_track");
+        if (probe.durationUs <= 0) return Messages.get("errors.surveillance_deterrent_no_duration");
 
         long durationMs = probe.durationUs / 1000L;
         if (durationMs > SCREEN_DETERRENT_MAX_VIDEO_MS) {
-            return "Video too long (" + (durationMs / 1000L)
-                    + "s, max 10s) — it loops, so keep it short";
+            return Messages.get("errors.surveillance_deterrent_video_too_long", String.valueOf(durationMs / 1000L));
         }
         if (probe.width <= 0 || probe.height <= 0
                 || probe.visibleWidth <= 0 || probe.visibleHeight <= 0) {
-            return "Could not read the video resolution";
+            return Messages.get("errors.surveillance_deterrent_no_resolution");
         }
         int codedMajor = Math.max(probe.width, probe.height);
         int codedMinor = Math.min(probe.width, probe.height);
@@ -523,13 +521,11 @@ public class SurveillanceApiHandler {
                 || codedMinor > SCREEN_DETERRENT_MAX_VIDEO_CODED_MINOR_DIM
                 || visibleMajor > SCREEN_DETERRENT_MAX_VIDEO_DIM
                 || visibleMinor > SCREEN_DETERRENT_MAX_VIDEO_MINOR_DIM) {
-            return "Video too large (" + probe.width + "x" + probe.height
-                    + ", max 1920x1080)";
+            return Messages.get("errors.surveillance_deterrent_video_too_large", String.valueOf(probe.width), String.valueOf(probe.height));
         }
         if (com.overdrive.app.surveillance.ScreenDeterrentVideo
                 .decoderForFormat(probe.format) == null) {
-            return "This head unit cannot decode " + probe.mime
-                    + " — re-encode as H.264 / AVC";
+            return Messages.get("errors.surveillance_deterrent_codec_unsupported", String.valueOf(probe.mime));
         }
         return null;
     }
@@ -1362,7 +1358,7 @@ public class SurveillanceApiHandler {
                             "surveillance", java.util.Collections.singletonMap("armMode", armMode));
                     if (!persisted) {
                         CameraDaemon.log("Failed to persist armMode=" + armMode);
-                        HttpResponse.sendJsonError(out, "Failed to save arm mode");
+                        HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_arm_mode_save_failed"));
                         return;
                     }
                     CameraDaemon.log("Arm mode set to: " + armMode);
@@ -1394,7 +1390,7 @@ public class SurveillanceApiHandler {
                             "surveillance", opModeVals);
                     if (!persisted) {
                         CameraDaemon.log("Failed to persist operatingMode=" + opMode);
-                        HttpResponse.sendJsonError(out, "Failed to save operating mode");
+                        HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_operating_mode_save_failed"));
                         return;
                     }
                     CameraDaemon.log("Operating mode set to: " + opMode);
@@ -1424,7 +1420,7 @@ public class SurveillanceApiHandler {
                         "surveillance", java.util.Collections.singletonMap("operatingModeSetByUser", setByUser));
                 if (!persisted) {
                     CameraDaemon.log("Failed to persist operatingModeSetByUser=" + setByUser);
-                    HttpResponse.sendJsonError(out, "Failed to save operating mode marker");
+                    HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_operating_mode_save_failed"));
                     return;
                 }
                 CameraDaemon.log("operatingModeSetByUser set to: " + setByUser);
@@ -1494,7 +1490,7 @@ public class SurveillanceApiHandler {
                 int dur = configJson.optInt("screenDeterrentDurationSeconds", 8);
                 if (dur < 3 || dur > 30) {
                     HttpResponse.sendJsonError(out,
-                            "Screen deterrent duration must be between 3 and 30 seconds");
+                            Messages.get("errors.surveillance_deterrent_duration_range"));
                     return;
                 }
                 screenDeterrentUpdates.put("screenDeterrentDurationSeconds", dur);
@@ -1512,7 +1508,7 @@ public class SurveillanceApiHandler {
                                 "surveillance", screenDeterrentUpdates);
                 if (!persisted) {
                     HttpResponse.sendJsonError(out,
-                            "Could not save screen deterrent settings");
+                            Messages.get("errors.surveillance_deterrent_settings_save_failed"));
                     return;
                 }
                 if (screenDeterrentEnabledValue != null) {
@@ -1546,7 +1542,7 @@ public class SurveillanceApiHandler {
                         // shows a "saved" toast. Surface the failure so the
                         // UI revert path runs.
                         CameraDaemon.log("Failed to persist accOffMode=" + mode);
-                        HttpResponse.sendJsonError(out, "Failed to save ACC-OFF mode");
+                        HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_accoff_mode_save_failed"));
                         return;
                     }
                     CameraDaemon.log("ACC-OFF mode set to: " + mode);
@@ -1664,7 +1660,7 @@ public class SurveillanceApiHandler {
                         "surveillance", java.util.Collections.singletonMap("keepUsbPowerOnAccOff", keepUsb));
                 if (!persisted) {
                     CameraDaemon.log("Failed to persist keepUsbPowerOnAccOff=" + keepUsb);
-                    HttpResponse.sendJsonError(out, "Failed to save USB-power setting");
+                    HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_usb_power_save_failed"));
                     return;
                 }
                 CameraDaemon.log("Keep USB powered while parked set to: " + keepUsb
@@ -1681,7 +1677,7 @@ public class SurveillanceApiHandler {
                         java.util.Collections.singletonMap("mobileDataKeepAlive", dataKeepAlive));
                 if (!persisted) {
                     CameraDaemon.log("Failed to persist mobileDataKeepAlive=" + dataKeepAlive);
-                    HttpResponse.sendJsonError(out, "Failed to save mobile-data setting");
+                    HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_mobile_data_save_failed"));
                     return;
                 }
                 CameraDaemon.log("Mobile-data keep-alive while parked set to: " + dataKeepAlive
@@ -1694,7 +1690,7 @@ public class SurveillanceApiHandler {
                 boolean bluetoothKeepAlive = configJson.getBoolean("bluetoothKeepAlive");
                 if (!com.overdrive.app.config.UnifiedConfigManager
                         .setBluetoothKeepAliveEnabled(bluetoothKeepAlive)) {
-                    HttpResponse.sendJsonError(out, "Failed to save Bluetooth setting");
+                    HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_bluetooth_save_failed"));
                     return;
                 }
                 boolean applied = RemoteAccessApiHandler.reconcileBluetoothKeepAlive(true);
@@ -1794,7 +1790,7 @@ public class SurveillanceApiHandler {
                         "power", java.util.Collections.singletonMap("lowSocCutoffPercent", pct));
                 if (!persisted) {
                     CameraDaemon.log("Failed to persist lowSocCutoffPercent=" + pct);
-                    HttpResponse.sendJsonError(out, "Failed to save low-battery cutoff");
+                    HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_low_soc_cutoff_save_failed"));
                     return;
                 }
                 CameraDaemon.log("Low-battery surveillance cutoff set to: "
@@ -1830,7 +1826,7 @@ public class SurveillanceApiHandler {
                         .updateValues("vehicle", assistOffValues);
                 if (!persisted) {
                     CameraDaemon.log("Failed to persist assistOff=" + assistOffValues);
-                    HttpResponse.sendJsonError(out, "Failed to save DI5 assist-off setting");
+                    HttpResponse.sendJsonError(out, Messages.get("errors.surveillance_assist_off_save_failed"));
                     return;
                 }
                 CameraDaemon.log("DI5 assist-off profile set to: " + assistOffValues
@@ -1849,7 +1845,7 @@ public class SurveillanceApiHandler {
                                             "screenDeterrentImagePath", ""));
                     if (!persisted) {
                         HttpResponse.sendJsonError(out,
-                                "Could not clear deterrent asset");
+                                Messages.get("errors.surveillance_deterrent_clear_failed"));
                         return;
                     }
                     java.io.File dir = new java.io.File(SCREEN_DETERRENT_DIR);

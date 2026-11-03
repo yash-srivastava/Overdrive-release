@@ -273,7 +273,7 @@ public class Di5ParkedCloudKeepAliveContractTest {
                 "id=\"survDi5CloudKeepAlive\" disabled "
                         + "onchange=\"SurvSettings.toggleDi5CloudKeepAlive()\""));
         assertTrue(html.contains(
-                "surveillance.js?v=survtoggle15"));
+                "surveillance.js?v=survtoggle16"));
         assertTrue(script.contains(
                 "toggleDi5CloudKeepAlive()"));
         assertTrue(script.contains(
