@@ -391,6 +391,23 @@ public class BluetoothRssiCallbacksTest {
         }
     }
 
+    @Test public void blockedOnDistinguishesTheExpectedMonitor() throws Exception {
+        Object expected = new Object();
+        Object unrelated = new Object();
+        CallbackThread callback = new CallbackThread(() -> {
+            synchronized (expected) { /* Wait for the test to release this monitor. */ }
+        });
+        synchronized (expected) {
+            callback.thread.start();
+            assertTrue("The monitor observer must work on the supported JVM", 
+                    blockedOn(callback.thread, expected));
+            assertFalse("A different monitor must not satisfy the lock assertion",
+                    blockedOn(callback.thread, unrelated));
+        }
+        callback.join();
+        assertFalse(blockedOn(callback.thread, expected));
+    }
+
     private static boolean blockedOn(Thread thread, Object lock) {
         try {
             Class<?> mfClass = Class.forName("java.lang.management.ManagementFactory");
