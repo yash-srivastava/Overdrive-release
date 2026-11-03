@@ -36,7 +36,8 @@ public class GenAiAssetContractTest {
         assertTrue(javascript.contains("/api/genai/automation/draft"));
         assertTrue(javascript.contains("/api/genai/automation/commit"));
         assertTrue(javascript.contains("draft.saved"));
-        assertTrue(javascript.contains("Saved as manual-only"));
+        assertTrue(javascript.contains("t('genai.draft_saved_manual')"));
+        assertTrue(javascript.contains("t('genai.saved_manual_only')"));
         assertTrue(handler.contains(
                 "saveManualAutomation("));
         assertTrue(handler.contains(
@@ -55,7 +56,7 @@ public class GenAiAssetContractTest {
         assertTrue(html.contains(
                 "data-mode=\"automation_diagnostics\""));
         assertTrue(javascript.contains(
-                "mode === 'automation_diagnostics'"));
+                "automation_diagnostics: 'genai.source_automation_diagnostics'"));
         assertTrue(html.contains("data-mode=\"vehicle_action\""));
         assertTrue(html.contains("data-mode=\"vehicle_history\""));
         assertTrue(html.contains("id=\"genAiRoutineSuggestions\""));
@@ -70,14 +71,14 @@ public class GenAiAssetContractTest {
                 "'/api/genai/routines/decision'"));
         assertTrue(javascript.contains(
                 "'/api/genai/incidents?limit=5'"));
-        assertTrue(javascript.contains("Confirm and run"));
+        assertTrue(javascript.contains("t('genai.confirm_run')"));
         assertTrue(javascript.contains("action_proposal"));
         assertTrue(javascript.contains(
                 "this.selectedMode = response.needsInput"));
         assertTrue(javascript.contains("context_request"));
         assertTrue(javascript.contains("confirm_context"));
-        assertTrue(javascript.contains("Share once"));
-        assertTrue(javascript.contains("Voice request:"));
+        assertTrue(javascript.contains("t('genai.share_once')"));
+        assertTrue(javascript.contains("t('genai.voice_request', {query: request.query})"));
         assertTrue(html.contains("class=\"assistant-page\""));
         assertTrue(html.contains("class=\"ai-composer-dock\""));
         assertTrue(javascript.contains(
@@ -86,7 +87,7 @@ public class GenAiAssetContractTest {
                 "document.createTextNode("));
         assertFalse(javascript.contains("bubble.innerHTML"));
         assertTrue(javascript.contains(
-                "Review or import them below."));
+                "t('genai.community_found', { count: resultCount })"));
         assertTrue(html.contains(
                 "<select class=\"md-input\" id=\"genAiModelPreset\""));
         assertTrue(html.contains(
@@ -125,7 +126,8 @@ public class GenAiAssetContractTest {
                 "bottom: calc(90px + var(--safe-bottom, 0px))"));
         assertTrue(runtime.contains(
                 "OverDrive is the app name, not the user's name"));
-        assertTrue(html.contains("genai.js?v=11"));
+        assertTrue(html.matches("(?s).*<script src=\"\\.\\./shared/genai\\.js"
+                + "(?:\\?[^\"<>]*)?\"\\s*>\\s*</script>.*"));
         assertTrue(javascript.contains("BYD.utils.confirmDialog"));
     }
 
@@ -216,7 +218,7 @@ public class GenAiAssetContractTest {
         assertTrue(javascript.contains(
                 "message.mode === 'community_search'"));
         assertTrue(javascript.contains(
-                "No matching community automations were found."));
+                "t('genai.no_community')"));
         assertTrue(insights.contains(
                 "\"overdrive_dashboard_insight\""));
         assertTrue(insights.contains(
