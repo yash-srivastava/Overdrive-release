@@ -148,7 +148,7 @@ tasks.matching { it.name.contains("CMake") || it.name.contains("ExternalNative")
 // ships a sparse values-iw, which WINS over our values-he and leaves the UI
 // in English. Mirror values-he into a generated values-iw overlay.
 val hebrewIwResDir = layout.buildDirectory.dir("generated/res/iwAlias")
-val syncHebrewIwResources by tasks.registering(Copy::class) {
+val syncHebrewIwResources by tasks.registering(Sync::class) {
     from("src/main/res/values-he")
     into(hebrewIwResDir.map { it.dir("values-iw") })
 }
