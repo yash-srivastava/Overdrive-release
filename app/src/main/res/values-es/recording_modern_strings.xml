@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="recording_library_loading">Cargando grabaciones</string>
+    <string name="recording_library_refreshing">Actualizando grabaciones</string>
+    <string name="recording_library_loading_more">Cargando más grabaciones</string>
+    <string name="recording_library_page_error">No se pudieron cargar más grabaciones.</string>
+    <string name="recording_library_page_unavailable">Hay más grabaciones, pero no están disponibles por el momento.</string>
+    <string name="recording_library_refresh_error">No se pudo actualizar. Se muestran las grabaciones ya cargadas.</string>
+    <string name="recording_library_fatal_title">No se pudieron abrir las grabaciones</string>
+    <string name="recording_library_fatal_body">Comprueba el servicio de grabación y el almacenamiento, y vuelve a intentarlo.</string>
+    <string name="recording_library_select">Seleccionar grabaciones</string>
+    <string name="recording_library_open_filters">Filtrar grabaciones</string>
+    <string name="recording_library_clear_search">Borrar la búsqueda de lugares</string>
+    <string name="recording_preview_details">Detalles de la grabación</string>
+    <string name="cd_expand_recording_details">Mostrar los detalles de la grabación</string>
+    <string name="cd_collapse_recording_details">Ocultar los detalles de la grabación</string>
+    <string name="recording_item_description">%1$s, %2$s, %3$s. Abrir grabación.</string>
+    <string name="recording_item_selection_description">%1$s, %2$s, %3$s. %4$s</string>
+    <string name="recording_item_selected_action">Seleccionada. Toca dos veces para deseleccionarla.</string>
+    <string name="recording_item_not_selected_action">No seleccionada. Toca dos veces para seleccionarla.</string>
+    <string name="recording_item_select">Seleccionar %1$s</string>
+    <string name="recording_item_deselect">Deseleccionar %1$s</string>
+    <string name="cd_pause">Pausar</string>
+    <string name="cd_player_unmute">Activar el audio</string>
+    <string name="cd_player_mute_audio">Silenciar el audio</string>
+    <string name="video_player_buffering">Cargando video</string>
+    <string name="video_player_error_title">No se puede reproducir esta grabación</string>
+    <string name="video_player_error_body">Puede que el archivo no esté disponible o que el dispositivo de almacenamiento se haya desconectado.</string>
+    <string name="video_player_retry">Reintentar</string>
+    <string name="video_player_next">Grabación siguiente</string>
+    <string name="video_timeline_empty">Cronología de eventos. No hay eventos detectados.</string>
+    <string name="video_timeline_events">Cronología de eventos. %1$d eventos detectados. Toca para ir al evento más cercano.</string>
+    <string name="video_timeline_selected">Evento de %1$s a las %2$s</string>
+</resources>
