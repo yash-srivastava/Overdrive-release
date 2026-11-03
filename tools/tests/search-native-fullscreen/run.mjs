@@ -7,16 +7,21 @@ import {parseArgs} from 'node:util';
 const {values: args} = parseArgs({options: {
   root: {type: 'string', default: process.cwd()},
   chromium: {type: 'string'}, playwright: {type: 'string', default: 'playwright'},
-  font: {type: 'string'}, source: {type: 'string', default: 'working-tree'},
+  font: {type: 'string'}, acorn: {type: 'string'}, source: {type: 'string', default: 'working-tree'},
   screenshot: {type: 'boolean', default: false}
 }});
+if (args.acorn) {
+  const {parse} = await import(args.acorn);
+  parse(fs.readFileSync(path.resolve(args.root, 'app/src/main/assets/web/shared/search.js'), 'utf8'), {ecmaVersion: 5});
+  console.log('CHECK search.js ES5 syntax PASS');
+}
 const {chromium} = await import(args.playwright);
 const assets = path.resolve(args.root, 'app/src/main/assets/web');
 const origin = 'http://fullscreen.invalid';
 const result = {source: args.source, scope: 'Actual shipped remote viewer, shell, core and search; dummy APIs/WebSocket only; browser compatibility, not vehicle acceptance', cases: [], assets: {}};
 const browser = await chromium.launch({executablePath: args.chromium, headless: true,
   args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-background-networking']});
-let screenshot;
+let screenshot, failureScreenshot = false;
 function apiBody(url) {
   if (url.pathname === '/status') return {success: true, deviceId: 'dummy-device', appVersion: 'braveheart-v58.0',
     soc: {value: 62}, range: {value: 280}, battery: {voltage: 12.5, available: true}, acc: false,
@@ -74,6 +79,7 @@ async function fixture(locale, width) {
     result.assets[relative] = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
     return route.fulfill({path: file});
   });
+  try {
   await page.goto(origin + '/local/remote-dev-view.html', {waitUntil: 'domcontentloaded'});
   if (args.font) {
     await page.addStyleTag({content: "@font-face{font-family:Fixture;src:url('/_fixture/font.ttf')} :root{--family-sans:Fixture,sans-serif;--family-mono:Fixture,monospace}"});
@@ -84,6 +90,7 @@ async function fixture(locale, width) {
   await page.waitForFunction(() => !document.getElementById('stopButton').disabled && window.__dummySockets.length === 1 && window.__dummySockets[0].readyState === 1);
   await page.evaluate(() => { window.__originalSocket = window.__dummySockets[0]; });
   return {context, page, data};
+  } catch (error) { await context.close(); throw error; }
 }
 async function painted(page, label) {
   await page.waitForTimeout(60);
@@ -99,6 +106,7 @@ async function painted(page, label) {
   assert.equal(state.open, true, label + ': open');
   assert.equal(state.painted, true, label + ': input must be topmost at its center: ' + JSON.stringify(state));
   assert.equal(state.focused, true, label + ': input must own focus: ' + JSON.stringify(state));
+  if (args.screenshot && !screenshot) screenshot = await page.screenshot({animations: 'disabled'});
   return state;
 }
 async function ownership(page, data) {
@@ -114,13 +122,21 @@ async function enter(page, id = 'viewerCard') {
   await page.waitForFunction(id => document.fullscreenElement && document.fullscreenElement.id === id, id);
 }
 async function exit(page) {
+  const previous = await page.evaluate(() => document.fullscreenElement && document.fullscreenElement.id);
   await page.evaluate(() => document.exitFullscreen());
-  await page.waitForFunction(() => !document.fullscreenElement);
+  await page.waitForFunction(previous => !document.fullscreenElement || document.fullscreenElement.id !== previous, previous);
 }
 async function matrix({page, data}) {
   const inputWrites = () => data.writes.filter(write => write.path === '/api/dev-view/input').length;
   await enter(page);
   await page.locator('#viewerCard').focus();
+  await page.evaluate(() => { OverdriveSearch.open(); OverdriveSearch.close(); });
+  await page.waitForTimeout(30);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'viewerCard', 'closed overlay must not steal focus in fullscreen');
+  await exit(page);
+  await enter(page);
+  await page.locator('#viewerCard').focus();
+  assert.equal(await page.evaluate(() => document.querySelector('.od-search-backdrop').hasAttribute('hidden')), true);
   const begin = inputWrites();
   await page.keyboard.press('Control+k');
   data.observations.push(await painted(page, 'open after native fullscreen entry'));
@@ -160,7 +176,15 @@ async function matrix({page, data}) {
   await page.evaluate(() => { OverdriveSearch.open(); OverdriveSearch.close(); });
   await page.waitForTimeout(40);
   assert.equal(await page.evaluate(() => document.activeElement.id), 'viewerCard', 'close cancels deferred input focus');
-  assert.equal(inputWrites(), begin, 'palette typing and transitions must not forward remote input');
+  await enter(page);
+  await page.locator('#viewerCard').focus(); await page.keyboard.press('Control+k');
+  await painted(page, 'native browser Escape precondition');
+  await page.keyboard.press('Escape'); await page.waitForTimeout(100);
+  const escaped = await page.evaluate(() => ({native: !!document.fullscreenElement, open: !document.querySelector('.od-search-backdrop').hasAttribute('hidden')}));
+  data.observations.push({browserEscape: escaped});
+  if (escaped.open) { await painted(page, 'palette remains usable after browser fullscreen exit'); await page.evaluate(() => OverdriveSearch.close()); }
+  if (escaped.native) await exit(page);
+  assert.equal(inputWrites(), begin, 'palette typing, Escape and transitions must not forward remote input');
   // Verify the collector sees intentional keyboard and pointer input.
   await page.locator('#keyboardButton').click();
   await page.keyboard.type('dummy'); await page.keyboard.press('Enter'); await page.waitForTimeout(140);
@@ -190,21 +214,44 @@ async function prefixed({page, data}) {
   assert.equal((await painted(page, 'WebKit exit')).host, 'BODY');
   await page.evaluate(() => OverdriveSearch.close()); await ownership(page, data);
 }
-async function replaced({page, data}, reject) {
+async function replaced({page, data}, mode) {
+  await page.evaluate(() => { document.getElementById('remoteFrame').style.display = 'block'; });
   await enter(page, 'remoteFrame');
-  await page.evaluate(() => { document.getElementById('remoteFrame').tabIndex = 0; document.getElementById('remoteFrame').focus(); });
-  if (reject) await page.evaluate(() => {
-    document.exitFullscreen = () => Promise.reject(new Error('Synthetic exit rejection'));
+  await page.evaluate(mode => {
+    const canvas = document.getElementById('remoteFrame'); canvas.tabIndex = 0; canvas.focus();
+    window.__realExit = document.exitFullscreen.bind(document);
+    if (mode === 'reject') document.exitFullscreen = () => Promise.reject(new Error('Synthetic exit rejection'));
+    if (mode === 'throw') document.exitFullscreen = () => { throw new Error('Synthetic exit exception'); };
+    if (mode === 'missing') document.exitFullscreen = undefined;
+    if (mode === 'pending-cancel' || mode === 'pending-complete') document.exitFullscreen = () => undefined;
+    if (mode === 'stale-reject') document.exitFullscreen = () => new Promise((resolve, reject) => { window.__rejectExit = reject; });
     document.webkitExitFullscreen = document.exitFullscreen;
-  });
+  }, mode);
   await page.evaluate(() => OverdriveSearch.open());
-  if (!reject) {
+  if (mode === 'normal') {
     await page.waitForFunction(() => !document.fullscreenElement);
     assert.equal((await painted(page, 'replaced canvas fullscreen fallback')).host, 'BODY');
     await page.evaluate(() => OverdriveSearch.close());
   } else {
-    await page.waitForTimeout(100);
-    assert.equal(await page.evaluate(() => document.querySelector('.od-search-backdrop').hasAttribute('hidden')), true, 'rejected exit leaves no invisible active palette');
+    await page.waitForTimeout(60);
+    assert.equal(await page.evaluate(() => document.querySelector('.od-search-backdrop').hasAttribute('hidden')), true, 'unsupported host must never expose an invisible active palette');
+    if (mode === 'pending-cancel' || mode === 'stale-reject') {
+      await page.evaluate(() => OverdriveSearch.close());
+      await page.evaluate(() => window.__realExit());
+      await page.waitForFunction(() => !document.fullscreenElement);
+      await page.waitForTimeout(60);
+      assert.equal(await page.evaluate(() => document.querySelector('.od-search-backdrop').hasAttribute('hidden') && !document.activeElement.classList.contains('od-search-input')), true, 'exit completion must not reopen canceled search');
+      if (mode === 'stale-reject') {
+        await page.evaluate(() => { document.getElementById('viewerCard').focus(); OverdriveSearch.open(); window.__rejectExit(new Error('Stale exit rejection')); });
+        await painted(page, 'old exit rejection must not close new open request');
+        await page.evaluate(() => OverdriveSearch.close());
+      }
+    } else if (mode === 'pending-complete') {
+      await page.evaluate(() => window.__realExit());
+      await page.waitForFunction(() => !document.fullscreenElement);
+      await painted(page, 'void-returning exit waits for actual fullscreen change');
+      await page.evaluate(() => OverdriveSearch.close());
+    }
   }
   await ownership(page, data);
 }
@@ -215,8 +262,8 @@ async function run(name, locale, width, action) {
     await action(f); f.data.status = 'PASS';
   } catch (error) {
     if (!f) f = {data: {name, locale, width}};
-    f.data.status = 'FAIL'; f.data.failure = String(error).slice(0, 1200);
-    if (args.screenshot && f.page && !screenshot) screenshot = await f.page.screenshot({animations: 'disabled'});
+    f.data.status = 'FAIL'; f.data.failure = String(error.stack || error).slice(0, 1600);
+    if (args.screenshot && f.page && !failureScreenshot) { screenshot = await f.page.screenshot({animations: 'disabled'}); failureScreenshot = true; }
   } finally {
     if (f.context) await f.context.close();
     result.cases.push(f.data); console.log('CASE ' + name + '/' + locale + '/' + width + ' ' + f.data.status + (f.data.failure ? ' ' + f.data.failure : ''));
@@ -225,8 +272,8 @@ async function run(name, locale, width, action) {
 try {
   for (const locale of ['en', 'fr', 'he']) for (const width of [360, 1280]) await run('native', locale, width, matrix);
   await run('prefixed-api-and-event', 'en', 1280, prefixed);
-  await run('replaced-canvas-exit', 'en', 1280, f => replaced(f, false));
-  await run('replaced-canvas-exit-rejected', 'en', 1280, f => replaced(f, true));
+  for (const mode of ['normal', 'reject', 'throw', 'missing', 'pending-cancel', 'pending-complete', 'stale-reject'])
+    await run('replaced-canvas-' + mode, 'en', 1280, f => replaced(f, mode));
 } finally { await browser.close(); }
 result.status = result.cases.every(item => item.status === 'PASS') ? 'PASS' : 'FAIL';
 result.pass = result.cases.filter(item => item.status === 'PASS').length;

@@ -20,8 +20,10 @@ node tools/tests/search-native-fullscreen/run.mjs \
 ```
 
 Optional `--font /case/DejaVuSans.ttf` supplies an existing local font;
-`--source <revision>` labels the source, and `--screenshot` emits one bounded
-failure screenshot as a base64 `SCREENSHOT` line. `CASE` and `RESULT` lines report
+`--source <revision>` labels the source; `--acorn /case/acorn.mjs` optionally
+checks production `search.js` with an existing Acorn parser in ES5 mode.
+`--screenshot` emits one bounded palette screenshot (the first failure takes
+priority) as a base64 `SCREENSHOT` line. `CASE` and `RESULT` lines report
 outcomes; any failure produces a nonzero exit. All HTTP requests are intercepted
 locally and external requests fail. Sessions, credentials and WebSockets are
 synthetic; no daemon, device, account, microphone or vehicle is contacted.

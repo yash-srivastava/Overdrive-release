@@ -473,6 +473,79 @@
     var currentResults = [];
     var activeIndex = -1;
     var prevFocus = null;
+    var openRequested = false;
+    var openRequest = 0;
+    var focusTimer = null;
+    var fullscreenExit = null;
+
+    function fullscreenElement() {
+        return document.fullscreenElement || document.webkitFullscreenElement || null;
+    }
+
+    function canHostOverlay(el) {
+        // Replaced elements (canvas/video/iframe, etc.) do not paint ordinary
+        // children. Use known HTML containers; leave other fullscreen hosts
+        // before showing search rather than opening an invisible modal.
+        return el.namespaceURI === 'http://www.w3.org/1999/xhtml' &&
+            /^(HTML|BODY|DIV|SECTION|MAIN|ARTICLE|ASIDE|HEADER|FOOTER|NAV)$/.test(el.tagName) &&
+            el !== dom.backdrop && !dom.backdrop.contains(el);
+    }
+
+    function cancelFocus() {
+        if (focusTimer !== null) clearTimeout(focusTimer);
+        focusTimer = null;
+    }
+
+    function syncOverlay(selectInput) {
+        if (!openRequested) return;
+        var fullscreen = fullscreenElement();
+        if (fullscreen && !canHostOverlay(fullscreen)) {
+            dom.backdrop.setAttribute('hidden', '');
+            cancelFocus();
+            if (fullscreenExit && fullscreenExit.element === fullscreen &&
+                    fullscreenExit.request === openRequest) return;
+            var exit = document.exitFullscreen || document.webkitExitFullscreen;
+            if (!exit) { close(); return; }
+            var pending = { element: fullscreen, request: openRequest };
+            fullscreenExit = pending;
+            var failed = function () {
+                if (fullscreenExit !== pending) return;
+                fullscreenExit = null;
+                if (openRequested && openRequest === pending.request) close();
+            };
+            try {
+                var result = exit.call(document);
+                if (result && typeof result.catch === 'function') result.catch(failed);
+                // Older WebKit may return void. Only expose search once the
+                // fullscreen element has actually cleared, here or on change.
+                if (fullscreenElement() !== fullscreen) syncOverlay(selectInput);
+            } catch (e) { failed(); }
+            return;
+        }
+        fullscreenExit = null;
+        var host = fullscreen || document.body;
+        var moved = dom.backdrop.parentNode !== host;
+        var wasHidden = dom.backdrop.hasAttribute('hidden');
+        var start = dom.input.selectionStart, end = dom.input.selectionEnd;
+        if (moved) host.appendChild(dom.backdrop);
+        dom.backdrop.removeAttribute('hidden');
+        if (selectInput || moved || wasHidden || document.activeElement === document.body) {
+            cancelFocus();
+            var request = openRequest;
+            focusTimer = setTimeout(function () {
+                focusTimer = null;
+                if (!openRequested || openRequest !== request || !isOpen()) return;
+                try {
+                    dom.input.focus();
+                    if (selectInput) dom.input.select();
+                    else dom.input.setSelectionRange(start, end);
+                } catch (e) {}
+            }, 0);
+        }
+    }
+
+    document.addEventListener('fullscreenchange', function () { syncOverlay(false); });
+    document.addEventListener('webkitfullscreenchange', function () { syncOverlay(false); });
 
     function iconSvg(type) {
         if (type === 'page') {
@@ -658,17 +731,28 @@
 
     function open() {
         buildOverlay();
-        dom.backdrop.removeAttribute('hidden');
-        prevFocus = document.activeElement;
+        if (!openRequested) {
+            prevFocus = document.activeElement;
+            openRequest++;
+        }
+        openRequested = true;
         runQuery(dom.input.value || '');
-        setTimeout(function () {
-            try { dom.input.focus(); dom.input.select(); } catch (e) {}
-        }, 0);
+        syncOverlay(true);
     }
     function close() {
-        if (!dom) return;
+        if (!dom || !openRequested) return;
+        openRequested = false;
+        openRequest++;
+        fullscreenExit = null;
+        cancelFocus();
         dom.backdrop.setAttribute('hidden', '');
-        try { if (prevFocus && prevFocus.focus) prevFocus.focus(); } catch (e) {}
+        if (dom.backdrop.parentNode !== document.body) document.body.appendChild(dom.backdrop);
+        var fullscreen = fullscreenElement();
+        try {
+            if (prevFocus && prevFocus.focus && document.documentElement.contains(prevFocus) &&
+                    (!fullscreen || fullscreen.contains(prevFocus))) prevFocus.focus();
+        } catch (e) {}
+        prevFocus = null;
     }
     function isOpen() { return !!(dom && !dom.backdrop.hasAttribute('hidden')); }
 
