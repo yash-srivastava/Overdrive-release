@@ -64,15 +64,22 @@ public class CloudflaredRecoveryContractTest {
     @Test
     public void failedStopsAreNotReportedAsStopped() throws Exception {
         String vm = read("app/src/main/java/com/overdrive/app/ui/viewmodel/DaemonsViewModel.kt");
-        String silent = between(vm, "private fun stopDaemonSilent(", "fun restartWireGuard(");
-        assertFalse(silent.contains("updateState(type, DaemonStatus.STOPPED, \"Stopped\")"));
-        assertTrue(silent.contains("DaemonStatus.ERROR"));
+        String stopDaemon = between(vm, "fun stopDaemon(", "fun refreshDaemonStatus(");
+        String vmError = stopDaemon.substring(stopDaemon.indexOf("override fun onError("));
+        assertTrue(vmError.contains("updateState(type, DaemonStatus.ERROR"));
+        assertFalse(vmError.contains("DaemonStatus.STOPPED"));
+        assertTrue(vmError.contains("refreshDaemonStatus(type)"));
 
         String controller = read("app/src/main/java/com/overdrive/app/ui/daemon/CloudflaredController.kt");
         String stop = between(controller, "override fun stop(", "override fun isRunning(");
         String onError = stop.substring(stop.indexOf("override fun onError("));
         // The tunnel may still be up after a failed stop: keep its URL.
         assertFalse(onError.contains("_tunnelUrl.postValue(null)"));
+        assertFalse(onError.contains("DaemonStatus.STOPPED"));
+        assertTrue(onError.contains("callback.onError(error)"));
+        String success = between(stop, "override fun onLaunched()", "override fun onError(");
+        assertTrue(success.contains("_tunnelUrl.postValue(null)"));
+        assertTrue(success.contains("callback.onStatusChanged(DaemonStatus.STOPPED"));
     }
 
     @Test

@@ -1,0 +1,7 @@
+package android.os
+
+class Looper { companion object { fun getMainLooper() = Looper() } }
+class Handler(ignored: Looper) {
+    fun postDelayed(callback: () -> Unit, delay: Long) { Clock.pending.add(Pair(delay, callback)) }
+}
+object Clock { val pending = mutableListOf<Pair<Long, () -> Unit>>() }
