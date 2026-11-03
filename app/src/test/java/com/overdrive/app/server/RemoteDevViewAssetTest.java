@@ -152,7 +152,8 @@ public class RemoteDevViewAssetTest {
         assertTrue(main.contains("if (remoteDevSession) return"));
         assertTrue(script.contains("frameContext.clearRect"));
         assertTrue(script.contains("data.pixelCopyResult === 'LOCKED'"));
-        assertTrue(script.contains("clearFrame('Return to this tab"));
+        assertTrue(script.contains("clearFrame(t('remote_dev.resume_tab',"
+            + " 'Return to this tab to resume the live view.'))"));
     }
 
     @Test
