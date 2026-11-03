@@ -6307,7 +6307,8 @@
       "Trip": "Trip",
       "Tyres": "Tyres",
       "RoadSense": "RoadSense",
-      "Body": "Body"
+      "Body": "Body",
+      "Other": "Other"
     },
     "sig": {
       "soc": "Battery level",

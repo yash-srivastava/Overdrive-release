@@ -2004,14 +2004,16 @@
   /** Everything the car would refuse on save, as HTML lines. Kinds it doesn't know are skipped, not refused. */
   function blockers() {
     const out = [];
+    // points from the layer to its field in reading order, so it flips under RTL
+    const arrow = document.documentElement.getAttribute('dir') === 'rtl' ? ' ← ' : ' → ';
     W.layers.forEach((L, i) => {
       if (L.error) return;
-      Object.keys(L.errors).forEach(k => out.push(esc(layerName(i)) + ' → ' + esc(propLabel(k)) + ': ' + friendlyError(L.errors[k])));
+      Object.keys(L.errors).forEach(k => out.push(esc(layerName(i)) + arrow + esc(propLabel(k)) + ': ' + friendlyError(L.errors[k])));
     });
     ODW.docProblems(ODW.cleanDoc(S.doc)).forEach(p => {
       if (p.code === 'prop') {
         const what = p.key === 'name' ? tr('layer_name') : propLabel(p.key);
-        out.push(esc(layerName(p.layer)) + ' → ' + esc(what) + ': ' + esc(tr('why_' + p.why, { n: p.why === 'text_long' ? ODW.MAX_TEXT : ODW.MAX_NAME })));
+        out.push(esc(layerName(p.layer)) + arrow + esc(what) + ': ' + esc(tr('why_' + p.why, { n: p.why === 'text_long' ? ODW.MAX_TEXT : ODW.MAX_NAME })));
       } else out.push(esc(tr('cap_' + p.code, { n: p.n == null ? (p.layer == null ? '' : p.layer + 1) : p.n })));
     });
     return out;

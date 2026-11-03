@@ -6307,7 +6307,8 @@
       "Trip": "מסלול",
       "Tyres": "צמיגים",
       "RoadSense": "RoadSense",
-      "Body": "מרכב"
+      "Body": "מרכב",
+      "Other": "אחר"
     },
     "sig": {
       "soc": "רמת הסוללה",

@@ -1,5 +1,6 @@
 package com.overdrive.app.community
 
+import com.overdrive.app.server.Messages
 import com.overdrive.app.community.config.CommunityConfig
 import com.overdrive.app.community.sync.CommunitySyncProvider
 import com.overdrive.app.community.sync.CommunityWidgetSync
@@ -86,7 +87,7 @@ object CommunityWidgetsApiHandler {
             reject(out, r.code, r.message ?: "Rejected")
         } catch (t: Throwable) {
             logger.error("community widgets handler error: " + t.message)
-            reject(out, 500, "Internal error")
+            reject(out, 500, Messages.get("errors.widgets_internal_error"))
         }
         return true
     }
@@ -102,7 +103,7 @@ object CommunityWidgetsApiHandler {
         p["category"]?.trim()?.lowercase()?.takeIf { it in CATEGORIES }?.let { fwd += "category=$it" }
         val cursor = p["cursor"]?.trim().orEmpty()
         if (cursor.isNotEmpty()) {
-            if (!CURSOR.matches(cursor)) throw Rejected(400, "Invalid cursor")
+            if (!CURSOR.matches(cursor)) throw Rejected(400, Messages.get("errors.community_widgets_invalid_cursor"))
             fwd += "cursor=$cursor"
         }
         p["pageSize"]?.trim()?.toIntOrNull()?.let { fwd += "pageSize=" + it.coerceIn(1, MAX_PAGE_SIZE) }
@@ -123,7 +124,7 @@ object CommunityWidgetsApiHandler {
 
     private fun getItem(id: String, out: OutputStream) {
         val row = rowOf(okBody(sync.get(id)))
-        val item = toItem(row, mineIds()) ?: throw Rejected(400, "This shared widget can't be used on this car")
+        val item = toItem(row, mineIds()) ?: throw Rejected(400, Messages.get("errors.community_widgets_unusable"))
         reply(out, JSONObject().put("success", true).put("item", item))
     }
 
@@ -133,19 +134,19 @@ object CommunityWidgetsApiHandler {
     private fun publish(body: String?, out: OutputStream) {
         val json = parseBody(body)
         val localId = str(json, "localId")
-        if (!CustomWidgetStore.isValidId(localId)) throw Rejected(400, "Invalid widget id")
+        if (!CustomWidgetStore.isValidId(localId)) throw Rejected(400, Messages.get("errors.widgets_invalid_id"))
 
         val result = synchronized(lockFor(localId)) {
-            val entry = CustomWidgetStore.get(localId) ?: throw Rejected(404, "No such widget")
+            val entry = CustomWidgetStore.get(localId) ?: throw Rejected(404, Messages.get("errors.widgets_not_found"))
             val canon = canonicalise(entry.doc)
             val name = clamp(str(json, "name"), MAX_NAME_LEN).ifEmpty { clamp(str(canon.obj, "name"), MAX_NAME_LEN) }
-            if (name.isEmpty()) throw Rejected(400, "Name required")
+            if (name.isEmpty()) throw Rejected(400, Messages.get("errors.community_widgets_name_required"))
             val description = clamp(str(json, "description"), MAX_DESC_LEN)
                 .ifEmpty { clamp(str(canon.obj, "about"), MAX_DESC_LEN) }
             val typed = clamp(str(json, "authorName"), MAX_AUTHOR_LEN)
             val remembered = rememberedAuthor()
             val author = typed.ifEmpty { clamp(remembered, MAX_AUTHOR_LEN) }
-            if (author.isEmpty()) throw Rejected(400, "Author name required")
+            if (author.isEmpty()) throw Rejected(400, Messages.get("errors.community_widgets_author_required"))
             rejectLinks(name, description, author)
             val fields = JSONObject().put("authorName", author).put("name", name).put("description", description)
                 .put("category", category(str(json, "category"))).put("widget", canon.obj)
@@ -167,10 +168,10 @@ object CommunityWidgetsApiHandler {
             }
             val created = okBody(sync.publish(publisherId, localId, fields))
             val id = str(created, "id")
-            if (!REMOTE_ID.matches(id)) throw Rejected(502, "Community server returned no id")
+            if (!REMOTE_ID.matches(id)) throw Rejected(502, Messages.get("errors.community_widgets_no_id"))
             when (claim(localId, id)) {
                 Claim.OK -> {}
-                Claim.GONE -> { discard(id, publisherId); throw Rejected(404, "No such widget") }
+                Claim.GONE -> { discard(id, publisherId); throw Rejected(404, Messages.get("errors.widgets_not_found")) }
                 Claim.FAILED -> { discard(id, publisherId); throw Rejected(503, LINK_FAILED) }
             }
             addOwnRow(id)
@@ -186,11 +187,11 @@ object CommunityWidgetsApiHandler {
     private fun updateItem(id: String, body: String?, out: OutputStream) {
         val json = parseBody(body)
         val localId = str(json, "localId")
-        if (localId.isNotEmpty() && !CustomWidgetStore.isValidId(localId)) throw Rejected(400, "Invalid widget id")
+        if (localId.isNotEmpty() && !CustomWidgetStore.isValidId(localId)) throw Rejected(400, Messages.get("errors.widgets_invalid_id"))
         val fields = JSONObject()
         if (json.has("name")) {
             val name = clamp(str(json, "name"), MAX_NAME_LEN)
-            if (name.isEmpty()) throw Rejected(400, "Name required")
+            if (name.isEmpty()) throw Rejected(400, Messages.get("errors.community_widgets_name_required"))
             fields.put("name", name)
         }
         if (json.has("description")) fields.put("description", clamp(str(json, "description"), MAX_DESC_LEN))
@@ -199,7 +200,7 @@ object CommunityWidgetsApiHandler {
         val remembered = rememberedAuthor()
         if (json.has("authorName")) {
             val author = typed.ifEmpty { clamp(remembered, MAX_AUTHOR_LEN) }
-            if (author.isEmpty()) throw Rejected(400, "Author name required")
+            if (author.isEmpty()) throw Rejected(400, Messages.get("errors.community_widgets_author_required"))
             fields.put("authorName", author)
         }
         rejectLinks(str(fields, "name"), str(fields, "description"), str(fields, "authorName"))
@@ -215,10 +216,10 @@ object CommunityWidgetsApiHandler {
 
     private fun applyUpdate(id: String, localId: String, fields: JSONObject) {
         if (localId.isNotEmpty()) {
-            val entry = CustomWidgetStore.get(localId) ?: throw Rejected(404, "No such widget")
+            val entry = CustomWidgetStore.get(localId) ?: throw Rejected(404, Messages.get("errors.widgets_not_found"))
             fields.put("widget", canonicalise(entry.doc).obj)
         }
-        if (fields.length() == 0) throw Rejected(400, "Nothing to update")
+        if (fields.length() == 0) throw Rejected(400, Messages.get("errors.community_widgets_nothing_to_update"))
         ensureOk(sync.update(id, CommunityConfig.publisherId(), fields))
         addOwnRow(id)
         if (localId.isNotEmpty() && claim(localId, id) == Claim.FAILED) throw Rejected(503, LINK_FAILED)
@@ -247,7 +248,7 @@ object CommunityWidgetsApiHandler {
 
     private fun rate(id: String, body: String?, out: OutputStream) {
         val v = (parseBody(body).opt("stars") as? Number)?.toDouble()
-        if (v == null || v != Math.floor(v) || v < 1 || v > 5) throw Rejected(400, "Stars must be a whole number from 1 to 5")
+        if (v == null || v != Math.floor(v) || v < 1 || v > 5) throw Rejected(400, Messages.get("errors.community_widgets_stars_range"))
         val res = okBody(sync.rate(id, CommunityConfig.publisherId(), v.toInt()))
         reply(out, JSONObject()
             .put("success", true)
@@ -267,7 +268,7 @@ object CommunityWidgetsApiHandler {
     /** POST import/{id} — canonical copy into the local store, not shown; a repeat import is a no-op. */
     private fun importWidget(id: String, out: OutputStream) {
         val row = rowOf(okBody(sync.get(id)))
-        val doc = JSONObject((docOf(row) ?: throw Rejected(502, "Shared widget has no content")).toString())
+        val doc = JSONObject((docOf(row) ?: throw Rejected(502, Messages.get("errors.community_widgets_no_content"))).toString())
         // The catalog row's name is what the user picked, so it names the local copy.
         val sharedName = clamp(str(row, "name"), MAX_NAME_LEN)
         if (sharedName.isNotEmpty() && !isLink(sharedName)) doc.put("name", sharedName)
@@ -313,18 +314,18 @@ object CommunityWidgetsApiHandler {
     /** [CustomDoc.canonical] is the authority; any `tap`, links and oversize are refused on top of it. */
     private fun canonicalise(doc: JSONObject): Canon {
         val raw = doc.toString()
-        if (utf8Size(raw) > CustomWidgetStore.MAX_BYTES) throw Rejected(413, "This widget is too big to share")
+        if (utf8Size(raw) > CustomWidgetStore.MAX_BYTES) throw Rejected(413, Messages.get("errors.community_widgets_too_big"))
         val canonical = try {
             CustomDoc.canonical(raw)
         } catch (e: CustomDoc.Invalid) {
-            throw Rejected(400, clamp(e.message ?: "Invalid widget", MAX_ERROR_LEN))
+            throw Rejected(400, clamp(e.message ?: Messages.get("errors.widgets_invalid"), MAX_ERROR_LEN))
         } catch (_: Throwable) {
-            throw Rejected(400, "Invalid widget")
+            throw Rejected(400, Messages.get("errors.widgets_invalid"))
         }
         val obj = JSONObject(canonical)
         val json = if (stripTap(obj)) obj.toString() else canonical
-        if (hasLink(obj)) throw Rejected(400, "Links aren't allowed in widgets")
-        if (utf8Size(json) > CustomWidgetStore.MAX_BYTES) throw Rejected(413, "This widget is too big to share")
+        if (hasLink(obj)) throw Rejected(400, Messages.get("errors.community_widgets_no_links_in_widgets"))
+        if (utf8Size(json) > CustomWidgetStore.MAX_BYTES) throw Rejected(413, Messages.get("errors.community_widgets_too_big"))
         return Canon(json, obj)
     }
 
@@ -364,7 +365,7 @@ object CommunityWidgetsApiHandler {
     private fun isLink(s: String): Boolean = s.isNotEmpty() && CustomDoc.hasLink(s)
 
     private fun rejectLinks(vararg texts: String) {
-        if (texts.any { isLink(it) }) throw Rejected(400, "Links aren't allowed")
+        if (texts.any { isLink(it) }) throw Rejected(400, Messages.get("errors.community_widgets_no_links"))
     }
 
     /** Rows this car published: the registry plus rows linked from entries made here, so browse needs no device id. */
@@ -451,7 +452,7 @@ object CommunityWidgetsApiHandler {
 
     /** The row of a `GET /widgets/{id}` response (`{item}`). */
     private fun rowOf(body: JSONObject): JSONObject =
-        body.optJSONObject("item") ?: throw Rejected(502, "Community server returned no widget")
+        body.optJSONObject("item") ?: throw Rejected(502, Messages.get("errors.community_widgets_no_widget"))
 
     private fun docOf(row: JSONObject): JSONObject? = row.optJSONObject("widget")
 
@@ -518,7 +519,7 @@ object CommunityWidgetsApiHandler {
     private fun idFrom(rest: String, prefix: String): String {
         val raw = rest.substring(prefix.length)
         val id = try { URLDecoder.decode(raw, "UTF-8") } catch (_: Throwable) { raw }
-        if (!REMOTE_ID.matches(id)) throw Rejected(400, "Invalid id")
+        if (!REMOTE_ID.matches(id)) throw Rejected(400, Messages.get("errors.community_widgets_invalid_id"))
         return id
     }
 
@@ -535,9 +536,9 @@ object CommunityWidgetsApiHandler {
     }
 
     private fun parseBody(body: String?): JSONObject {
-        if (body.isNullOrBlank()) throw Rejected(400, "Invalid JSON body")
-        if (body.length > MAX_BODY_CHARS) throw Rejected(413, "Request too large")
-        return try { JSONObject(body) } catch (_: Throwable) { throw Rejected(400, "Invalid JSON body") }
+        if (body.isNullOrBlank()) throw Rejected(400, Messages.get("errors.community_widgets_invalid_json"))
+        if (body.length > MAX_BODY_CHARS) throw Rejected(413, Messages.get("errors.community_widgets_request_too_large"))
+        return try { JSONObject(body) } catch (_: Throwable) { throw Rejected(400, Messages.get("errors.community_widgets_invalid_json")) }
     }
 
     /** String value of [key], trimmed; non-strings (including JSON null) read as empty. */
@@ -563,9 +564,9 @@ object CommunityWidgetsApiHandler {
 
     /** Transport failures map to 502; 401/403/407 too, so the page never reads them as its own session ending. */
     private fun upstream(res: CommunitySyncProvider.Result): Nothing = when (res.httpCode) {
-        401, 403, 407 -> throw Rejected(502, "The community server refused the request")
-        in 400..599 -> throw Rejected(res.httpCode, clamp(res.error ?: "Community server error", MAX_ERROR_LEN))
-        else -> throw Rejected(502, clamp(res.error ?: "Community server error", MAX_ERROR_LEN))
+        401, 403, 407 -> throw Rejected(502, Messages.get("errors.community_widgets_refused"))
+        in 400..599 -> throw Rejected(res.httpCode, clamp(res.error ?: Messages.get("errors.community_widgets_server_error"), MAX_ERROR_LEN))
+        else -> throw Rejected(502, clamp(res.error ?: Messages.get("errors.community_widgets_server_error"), MAX_ERROR_LEN))
     }
 
     private fun reply(out: OutputStream, json: JSONObject) {
