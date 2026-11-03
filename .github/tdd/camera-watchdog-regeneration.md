@@ -13,14 +13,27 @@ read `ApplicationInfo.sourceDir`; their callers supply the matching
 `ApplicationInfo.nativeLibraryDir`. Debug installs intentionally leave relaunch
 to the IDE. The application must not guess native paths from APK locations.
 
-The corrected contract exercises the actual generated shell script twice with
-different APK/native-directory pairs, retaining the old APK on disk. Only a
-dummy `app_process` runs; it records its classpath/arguments and writes the
-camera-disable marker. The two generations must use their supplied pair and
-retain the full system/vendor library search paths, and both must remove their
-watchdog ownership state on exit. Separate source contracts cover the release
-receiver/reset request and the use of ApplicationInfo metadata. Existing
-ownership, backoff and legacy/alternate mode tests remain in place.
+The mandatory JUnit contract compares two actual generator outputs using
+separate APK/native-directory pairs, requires the supplied metadata and vendor
+library paths, and rejects old metadata in the regenerated script. Its four
+methods also retain BMM classpath and lifecycle guards. It invokes no platform
+shell, chmod, or subprocess and contains no OS-dependent skip. Windows behavior
+is source-reviewed for portability; an actual Windows runner is not available.
+
+The actual POSIX execution scenario is maintained explicitly under
+`tools/tests/camera-watchdog-regeneration`. Its Java exporter invokes the real
+compiled generator using the actual Gradle Test runtime classpath, pins/restores
+ScratchRoot in its own JVM, and remaps both known production roots into the
+assigned disposable directory. A separate Linux tool runs both generations with
+a dummy `app_process`, retaining the old APK on disk, and checks paired metadata,
+fixed timeouts, isolated process-group cleanup and ownership-file removal. This
+tool is optional and explicit; default JUnit tests never execute it.
+
+The earlier exact commit `4407e5e0` did execute the same source generator's shell
+scenario successfully under Linux during canonical tests, but its mandatory
+`/bin/sh` dependency was rejected during independent portability review before
+publication. The new explicit tool must be executed again on the final source;
+that previous observation is not claimed as a new portable or tool result.
 
 This establishes generated-command behavior and source lifecycle wiring. It is
 not an installed-device update test and does not prove teardown succeeds in all
