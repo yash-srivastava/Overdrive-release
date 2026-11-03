@@ -21,8 +21,11 @@ not invalidate the separately completed APK observation and is not a test pass.
 `preparePackagedMainAssets` stages main assets with Gradle Sync, excluding only
 `web/local/shared` and its descendants. It depends on `downloadFastCam`, the
 only task that can produce a main-source asset, before copying. The task's
-output is the main asset source for Android variants, so asset merges must
-consume the task dependency rather than race a sibling `preBuild` action.
+output directory is the main asset source for Android variants. Every
+`merge*Assets` task depends explicitly on staging: AGP source-set directory
+conversion does not preserve a TaskProvider's producer dependency. A directory
+that appears only before unit tests is too late for APK packaging. This direct
+edge avoids a sibling `preBuild` race.
 Hebrew generation writes resources, not assets. Variant overlays remain their
 separate Android source sets. No HTTP, WebView, auth or camera code changes.
 
@@ -54,3 +57,10 @@ controls, rebuilt APK hashes and route checks are pending. Required
 Target execution remains bounded, network-disabled, read-only source/tools and
 scratch-only writes. Staged native/Maven qualifications from the matched public
 baseline apply. No installed BYD-device or fleet acceptance is established.
+
+An initial implementation relied on TaskProvider source notation for ordering.
+Real `assembleDebug` and the staged-output unit contract passed, but the mandatory
+APK byte oracle detected that asset merging had run too early and omitted all
+main assets. That revision was rejected before publication. The corrected
+implementation uses explicit merge dependencies plus the directory provider;
+fresh graph, canonical build/test and actual APK checks remain required.

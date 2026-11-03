@@ -349,6 +349,15 @@ val preparePackagedMainAssets = tasks.register<Sync>("preparePackagedMainAssets"
     into(packagedMainAssetsDir)
 }
 
+// AGP turns asset source directories into plain paths and does not retain a
+// TaskProvider's producer dependency. Order every variant's actual merge
+// explicitly, so packaging cannot run before Sync creates its input files.
+tasks.configureEach {
+    if (name.startsWith("merge") && name.endsWith("Assets")) {
+        dependsOn(preparePackagedMainAssets)
+    }
+}
+
 // Unit packaging contracts inspect the same staged bytes that Android consumes.
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     dependsOn(preparePackagedMainAssets)
@@ -410,9 +419,9 @@ android {
     sourceSets {
         getByName("main") {
             res.srcDir(hebrewIwResDir)
-            // TaskProvider source notation carries the staging dependency into
-            // each variant's asset merge; variant overlays remain unchanged.
-            assets.setSrcDirs(listOf(preparePackagedMainAssets))
+            // The merge-task dependency above produces this directory before
+            // AGP reads it; variant overlays remain unchanged.
+            assets.setSrcDirs(listOf(packagedMainAssetsDir))
         }
     }
     buildToolsVersion = "36.0.0"

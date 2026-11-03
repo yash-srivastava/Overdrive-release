@@ -17,8 +17,11 @@ APK files from dependencies may add assets; they do not replace this check of
 all main-source assets. Duplicate ZIP names are rejected independently.
 
 The staging task depends on `downloadFastCam` before copying its generated
-asset, and every Android variant consumes the task output as its main source.
-Variant-specific source directories remain separate Android overlays.
+asset. Every Android `merge*Assets` task explicitly depends on staging; the main
+source set consumes its directory provider. Merely passing a TaskProvider as a
+source directory loses the ordering in AGP and can produce an APK with no main
+assets even when the later unit staging test passes. The actual APK oracle is
+therefore required. Variant source directories remain separate Android overlays.
 
 The daemon already maps `/local/shared/...` onto `/shared/...`, including
 cache-busting query strings; this change does not alter HTTP/WebView routing,
