@@ -348,6 +348,11 @@ val preparePackagedMainAssets = tasks.register<Sync>("preparePackagedMainAssets"
     into(layout.buildDirectory.dir("generated/packaged-assets/main"))
 }
 
+// Unit packaging contracts inspect the same staged bytes that Android consumes.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    dependsOn(preparePackagedMainAssets)
+}
+
 
 // Task to extract web assets to /data/local/tmp/web on device
 // Run: ./gradlew :app:extractWebAssets

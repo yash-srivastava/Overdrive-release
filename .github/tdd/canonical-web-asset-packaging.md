@@ -26,8 +26,8 @@ consume the task dependency rather than race a sibling `preBuild` action.
 Hebrew generation writes resources, not assets. Variant overlays remain their
 separate Android source sets. No HTTP, WebView, auth or camera code changes.
 
-The source symlink remains `../shared`. The battery source contract now checks
-that identity and the packaging wiring; actual APK checks are supplied under
+The source symlink remains `../shared`. Unit packaging contracts depend on the staging task and check the real staged
+performance bytes and absence of the alias, in addition to source-link identity. Actual APK checks are supplied under
 `tools/tests/package-web-assets`, including all non-alias source asset bytes.
 The empty `models/.gitkeep` marker is already ignored by AAPT.
 
