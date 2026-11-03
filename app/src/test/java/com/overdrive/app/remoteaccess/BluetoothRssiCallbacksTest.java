@@ -428,7 +428,7 @@ public class BluetoothRssiCallbacksTest {
                 Thread.State state = (Thread.State) getThreadState.invoke(info);
                 if (state == Thread.State.BLOCKED && waiting != null) {
                     int hash = (int) getIdentityHashCode.invoke(waiting);
-                    return hash == System.identityHashCode(lock);
+                    if (hash == System.identityHashCode(lock)) return true;
                 }
                 Thread.yield();
             } while (System.nanoTime() < deadline);
