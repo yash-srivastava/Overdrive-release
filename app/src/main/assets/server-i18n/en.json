@@ -125,7 +125,11 @@
     "tyres_persist_failed": "Failed to save tyre limits",
     "bs_speed_range": "Blind-spot speed must be a whole number between {0} and {1} km/h (0 = any speed)",
     "bs_speed_order": "The maximum blind-spot speed must not be lower than the minimum",
-    "tyres_invalid_unit": "pressureUnit must be one of kpa, psi, bar"
+    "tyres_invalid_unit": "pressureUnit must be one of kpa, psi, bar",
+    "vehicle_ivi_reboot_guard_unavailable": "IVI reboot safety guard is unavailable",
+    "vehicle_ivi_reboot_cooldown": "IVI reboot cooldown active ({0} seconds remaining)",
+    "vehicle_ivi_reboot_guard_persist_failed": "Could not persist IVI reboot safety guard",
+    "audio_avas_unreachable": "Exterior speaker (AVAS) unreachable — the car may be asleep or this is not a BYD build"
   },
   "notifications": {
     "charging_started": "Charging started",
@@ -539,7 +543,10 @@
     "not_supported": "This control isn't available right now",
     "find_car_label": "Find car",
     "battery_heat_label": "Battery heat",
-    "close_all_windows_label": "Close all windows"
+    "close_all_windows_label": "Close all windows",
+    "ivi_reboot_requested": "IVI reboot requested",
+    "power_confirmed_by_car": "confirmed by the car",
+    "power_not_confirmed_by_car": "vehicle power change not confirmed by the car"
   },
   "automation": {
     "lock": "Lock Vehicle",

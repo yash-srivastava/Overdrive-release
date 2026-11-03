@@ -131,7 +131,11 @@
     "tyres_persist_failed": "שמירת גבולות לחץ הצמיגים נכשלה",
     "bs_speed_range": "מהירות שטח מת חייבת להיות מספר שלם בין {0} ל-{1} קמ\"ש (0 = כל מהירות)",
     "bs_speed_order": "מהירות השטח המת המרבית אינה יכולה להיות נמוכה מהמינימלית",
-    "tyres_invalid_unit": "יחידת הלחץ (pressureUnit) חייבת להיות kpa, psi או bar"
+    "tyres_invalid_unit": "יחידת הלחץ (pressureUnit) חייבת להיות kpa, psi או bar",
+    "vehicle_ivi_reboot_guard_unavailable": "מנגנון הבטיחות של אתחול ה-IVI אינו זמין",
+    "vehicle_ivi_reboot_cooldown": "יש להמתין לפני אתחול נוסף של ה-IVI (נותרו {0} שניות)",
+    "vehicle_ivi_reboot_guard_persist_failed": "לא ניתן לשמור את מנגנון הבטיחות של אתחול ה-IVI",
+    "audio_avas_unreachable": "הרמקול החיצוני (AVAS) אינו זמין — ייתכן שהרכב במצב שינה או שזו אינה גרסת BYD"
   },
   "notifications": {
     "charging_started": "הטעינה החלה",
@@ -549,7 +553,10 @@
     "not_supported": "פקד זה אינו זמין כעת",
     "find_car_label": "איתור רכב",
     "battery_heat_label": "חימום סוללה",
-    "close_all_windows_label": "סגירת כל החלונות"
+    "close_all_windows_label": "סגירת כל החלונות",
+    "ivi_reboot_requested": "נשלחה בקשה לאתחול ה-IVI",
+    "power_confirmed_by_car": "אושר על ידי הרכב",
+    "power_not_confirmed_by_car": "הרכב לא אישר את שינוי מצב ההפעלה"
   },
   "automation": {
     "lock": "נעילת הרכב",

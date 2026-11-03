@@ -58,7 +58,7 @@ public class VehicleControlAssetTest {
         String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
         String css = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.css");
 
-        assertTrue(html.contains("vehicle-control.css?v=51"));
+        assertTrue(html.contains("vehicle-control.css?v=52"));
         assertTrue(css.contains("order: 3;"));
         assertTrue(css.contains("flex: 0 0 100%;"));
         assertTrue(css.contains(".vc-bar { left: 0; right: 0; bottom: 0; }"));
@@ -636,7 +636,7 @@ public class VehicleControlAssetTest {
                 + count(html, "data-state=\"3\" disabled")
                 + count(html, "data-state=\"4\" disabled")
                 + count(html, "data-state=\"5\" disabled"));
-        assertTrue(html.contains("vehicle-control.js?v=vclite38"));
+        assertTrue(html.contains("vehicle-control.js?v=vclite39"));
         assertTrue(script.contains("fetch('/api/vehicle/ac-charge-current-limit')"));
         assertTrue(script.contains("self.apiPost('/api/vehicle/ac-charge-current-limit'"));
         assertTrue(script.contains("startAcChargeCurrentSync: function()"));

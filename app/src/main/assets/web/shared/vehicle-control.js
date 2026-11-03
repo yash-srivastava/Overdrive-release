@@ -125,12 +125,12 @@ var VC = {
     // pixel back at this hex on screen — without that step a saturated red
     // like #C8102E renders pinkish.
     colorPresets: [
-        { name: 'Aurora White', hex: '#E8E8EC' },
-        { name: 'Cosmos Black', hex: '#1A1A1E' },
-        { name: 'Atlantic Blue', hex: '#1E3A5F' },
-        { name: 'Deepsea Green', hex: '#1B4D3E' },
-        { name: 'Cherry Red',   hex: '#C8102E' },
-        { name: 'Storm Grey',   hex: '#5C5C66' }
+        { name: 'Aurora White', key: 'vehicle.paint_aurora_white', hex: '#E8E8EC' },
+        { name: 'Cosmos Black', key: 'vehicle.paint_cosmos_black', hex: '#1A1A1E' },
+        { name: 'Atlantic Blue', key: 'vehicle.paint_atlantic_blue', hex: '#1E3A5F' },
+        { name: 'Deepsea Green', key: 'vehicle.paint_deepsea_green', hex: '#1B4D3E' },
+        { name: 'Cherry Red',   key: 'vehicle.paint_cherry_red', hex: '#C8102E' },
+        { name: 'Storm Grey',   key: 'vehicle.paint_storm_grey', hex: '#5C5C66' }
     ],
 
     // Active 3D model id — populated from manifest in loadSavedModel().
@@ -158,6 +158,8 @@ var VC = {
         if (BYD.i18n && typeof BYD.i18n.onChange === 'function') {
             BYD.i18n.onChange(function() {
                 self.refreshModelPickerNames();
+                self.refreshPaintNames();
+                self._syncViewModeChip();
                 // These labels are live state, not static translated copy.
                 // Re-render after hydration so the i18n pass can never reset
                 // them to the HTML's initial "Checking" / "Unknown" text.
@@ -1448,7 +1450,7 @@ var VC = {
                 var swatch = document.createElement('div');
                 swatch.className = 'vc-swatch' + (idx === 0 ? ' active' : '');
                 swatch.style.backgroundColor = preset.hex;
-                swatch.title = preset.name;
+                swatch.title = self.paintName(preset);
                 swatch.setAttribute('data-hex', preset.hex);
                 swatch.addEventListener('click', function(e) {
                     e.stopPropagation();
@@ -1503,7 +1505,7 @@ var VC = {
                 cell.type = 'button';
                 cell.className = 'vc-color-cell';
                 cell.style.backgroundColor = preset.hex;
-                cell.title = preset.name;
+                cell.title = self.paintName(preset);
                 cell.setAttribute('data-hex', preset.hex);
                 cell.addEventListener('click', function(e) {
                     e.stopPropagation();
@@ -1857,7 +1859,11 @@ var VC = {
             var self = this;
             var entry = this.findEntry(manifest, id);
             if (!entry) {
-                onDone(null, 'Unknown model: ' + id);
+                var unknown = window.BYD && BYD.i18n && typeof BYD.i18n.t === 'function'
+                    ? BYD.i18n.t('vehicle.unknown_model', { id: id })
+                    : null;
+                onDone(null, unknown && unknown !== 'vehicle.unknown_model'
+                    ? unknown : 'Unknown model: ' + id);
                 return;
             }
             var url = this.modelUrl(entry.file);
@@ -1954,7 +1960,9 @@ var VC = {
                         return;
                     }
                     if (s.state === 'error') {
-                        onDone(null, s.error || BYD.i18n.t('vehicle.download_failed'));
+                        onDone(null, s.error
+                            ? BYD.i18n.t('vehicle.download_failed_with_detail', { detail: s.error })
+                            : BYD.i18n.t('vehicle.download_failed'));
                         return;
                     }
                     if (onProgress) {
@@ -2385,19 +2393,19 @@ var VC = {
         bindPower('btnPowerOff', false);
 
         this.bindBtn('btnIviReboot', function() {
-            var body =
-                'The display and OverDrive will be unavailable while the IVI restarts.';
+            var body = self.translatedText('vehicle.ivi_reboot_confirm_body',
+                'The display and OverDrive will be unavailable while the IVI restarts.');
+            var title = self.translatedText('vehicle.ivi_reboot_confirm_title', 'Reboot IVI?');
             var confirmation = window.BYD && BYD.utils
                     && BYD.utils.confirmDialog
                 ? BYD.utils.confirmDialog({
-                    title: 'Reboot IVI?',
+                    title: title,
                     body: body,
-                    confirmLabel: 'Reboot IVI',
-                    cancelLabel: 'Cancel',
+                    confirmLabel: self.translatedText('vehicle.ivi_reboot', 'Reboot IVI'),
+                    cancelLabel: self.translatedText('common.cancel', 'Cancel'),
                     danger: true
                 })
-                : Promise.resolve(window.confirm(
-                    'Reboot the IVI now? ' + body));
+                : Promise.resolve(window.confirm(title + ' ' + body));
             Promise.resolve(confirmation).then(function(confirmed) {
                 if (!confirmed) return;
                 self.setPending('btnIviReboot', true);
@@ -2407,8 +2415,8 @@ var VC = {
                     self.setPending('btnIviReboot', false);
                     self.toastFromResult(
                         result,
-                        'IVI reboot requested',
-                        'IVI reboot failed');
+                        self.translatedText('vehicle.ivi_reboot_requested', 'IVI reboot requested'),
+                        self.translatedText('vehicle.ivi_reboot_failed', 'IVI reboot failed'));
                 });
             });
         });
@@ -3811,12 +3819,17 @@ var VC = {
                     if (unsupported) {
                         coolBtn.setAttribute('disabled', 'true');
                         coolBtn.classList.add('disabled');
-                        coolBtn.title = 'Ventilated seat not available on this trim';
+                        // data-i18n-attr keeps the tooltip right across a live locale switch.
+                        coolBtn.setAttribute('data-i18n-attr', 'title:vehicle.seat_cool_unavailable');
+                        coolBtn.title = self.translatedText('vehicle.seat_cool_unavailable',
+                            'Ventilated seat not available on this trim');
                     } else {
                         coolBtn.removeAttribute('disabled');
                         coolBtn.classList.remove('disabled');
-                        coolBtn.title = ci === 0
-                            ? 'Driver Seat Cool' : 'Passenger Seat Cool';
+                        var coolKey = ci === 0 ? 'vehicle.driver_cool' : 'vehicle.passenger_cool';
+                        coolBtn.setAttribute('data-i18n-attr', 'title:' + coolKey);
+                        coolBtn.title = self.translatedText(coolKey,
+                            ci === 0 ? 'Driver Seat Cool' : 'Passenger Seat Cool');
                     }
                 }
             }
@@ -4398,6 +4411,25 @@ var VC = {
     },
 
     // ==================== UI UPDATES ====================
+
+    paintName: function(preset) {
+        return preset.key ? this.translatedText(preset.key, preset.name) : preset.name;
+    },
+
+    // Paint swatch tooltips are written once at build time; re-read them on a live
+    // locale switch so they follow the new language.
+    refreshPaintNames: function() {
+        var nodes = document.querySelectorAll('#colorPicker .vc-swatch[data-hex], .vc-color-cell[data-hex]');
+        for (var i = 0; i < nodes.length; i++) {
+            var hex = nodes[i].getAttribute('data-hex');
+            for (var j = 0; j < this.colorPresets.length; j++) {
+                if (this.colorPresets[j].hex === hex) {
+                    nodes[i].title = this.paintName(this.colorPresets[j]);
+                    break;
+                }
+            }
+        }
+    },
 
     translatedText: function(key, fallback) {
         var value = BYD.i18n && typeof BYD.i18n.t === 'function'

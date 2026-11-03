@@ -1808,8 +1808,9 @@ public class VehicleControlApiHandler {
             response.put("success", confirmed).put("commandSuccess", confirmed)
                     .put("confirmation", confirmed ? "local" : "none")
                     .put("outcome", confirmed ? "success" : "unconfirmed");
-            String message = r.displayMessage + (confirmed ? " · confirmed by the car"
-                    : " · vehicle power change not confirmed by the car");
+            String message = r.displayMessage + " · " + Messages.get(confirmed
+                    ? "vehicle_control.power_confirmed_by_car"
+                    : "vehicle_control.power_not_confirmed_by_car");
             response.put("message", message);
             if (!confirmed) response.put("error", message);
         }
@@ -3264,15 +3265,14 @@ public class VehicleControlApiHandler {
 
                         if (bootId == null || bootId.isEmpty()) {
                             response.put("success", false);
-                            response.put("error", "IVI reboot safety guard is unavailable");
+                            response.put("error", Messages.get("errors.vehicle_ivi_reboot_guard_unavailable"));
                         } else if (remainingMs > 0L) {
                             response.put("success", false);
-                            response.put("error", "IVI reboot cooldown active ("
-                                    + ((remainingMs + 999L) / 1000L)
-                                    + " seconds remaining)");
+                            response.put("error", Messages.get("errors.vehicle_ivi_reboot_cooldown",
+                                    String.valueOf((remainingMs + 999L) / 1000L)));
                         } else if (!persistIviRebootGuard(bootId, elapsedMs)) {
                             response.put("success", false);
-                            response.put("error", "Could not persist IVI reboot safety guard");
+                            response.put("error", Messages.get("errors.vehicle_ivi_reboot_guard_persist_failed"));
                         } else if (DrivingSafetyGuard.getIviRebootBlockReason() != null) {
                             // Re-check after persistence at the final actuation boundary.
                             response.put("success", false);
@@ -3284,7 +3284,7 @@ public class VehicleControlApiHandler {
                                             + "sleep 2; reboot >/dev/null 2>&1"))
                                     .start();
                             response.put("success", true);
-                            response.put("message", "IVI reboot requested");
+                            response.put("message", Messages.get("vehicle_control.ivi_reboot_requested"));
                             logger.info("IVI reboot requested from "
                                     + (automationRequest
                                     ? "automation/key mapping" : "Vehicle Control"));
@@ -4182,7 +4182,7 @@ public class VehicleControlApiHandler {
                         ? status.supported.booleanValue() : JSONObject.NULL);
                 response.put("available", false);
                 response.put("configState", status.configState);
-                response.put("error", Messages.get("vehicle_data_unavailable"));
+                response.put("error", Messages.get("errors.vehicle_data_unavailable"));
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }

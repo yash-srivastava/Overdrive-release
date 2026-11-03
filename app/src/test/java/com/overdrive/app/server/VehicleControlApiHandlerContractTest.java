@@ -155,7 +155,7 @@ public class VehicleControlApiHandlerContractTest {
         assertTrue(source.contains("collector.getAcChargingCurrentLimitStatus()"));
         assertTrue(source.contains("response.put(\"available\", status.available)"));
         assertTrue(source.contains("status.supported != null"));
-        assertTrue(source.contains("Messages.get(\"vehicle_data_unavailable\")"));
+        assertTrue(source.contains("Messages.get(\"errors.vehicle_data_unavailable\")"));
         String collector = readRepositoryFile(
                 "app/src/main/java/com/overdrive/app/byd/BydDataCollector.java");
         String bridge = readRepositoryFile(

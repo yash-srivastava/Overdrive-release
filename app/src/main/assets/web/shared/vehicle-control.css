@@ -1390,6 +1390,9 @@ html.vc-mode-immersive .vc-view-to-3d { display: none; }
 }
 .vc-climate-schedule .vc-seg:first-child { margin-left: 0; }
 .vc-climate-schedule .vc-seg:last-child { margin-right: 0; }
+/* RTL: the first segment sits on the right, so trim the outer (right) edge instead. */
+[dir="rtl"] .vc-climate-schedule .vc-seg:first-child { margin-left: 1px; margin-right: 0; }
+[dir="rtl"] .vc-climate-schedule .vc-seg:last-child { margin-right: 1px; margin-left: 0; }
 .vc-climate-actions {
     display: -webkit-flex; display: flex;
     -webkit-align-items: stretch; align-items: stretch;
