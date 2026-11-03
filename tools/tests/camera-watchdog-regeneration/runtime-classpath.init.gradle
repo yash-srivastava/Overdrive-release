@@ -1,0 +1,20 @@
+// Explicit opt-in metadata export for the standalone Linux probe. Default
+// project tests do not load this init script or execute a platform shell.
+def requestedOutput = gradle.startParameter.projectProperties['watchdogProbeClasspathFile']
+if (!requestedOutput) {
+    throw new GradleException('Pass -PwatchdogProbeClasspathFile=<scratch-local output file>')
+}
+gradle.beforeProject { project ->
+    if (project.path == ':app') {
+        project.tasks.withType(org.gradle.api.tasks.testing.Test).configureEach { test ->
+            if (test.name == 'testDebugUnitTest') {
+                def output = new File(requestedOutput).absoluteFile
+                test.outputs.file(output)
+                test.doFirst {
+                    output.parentFile.mkdirs()
+                    output.setText(test.classpath.asPath, 'UTF-8')
+                }
+            }
+        }
+    }
+}
