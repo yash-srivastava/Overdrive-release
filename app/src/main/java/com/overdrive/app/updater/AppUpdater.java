@@ -3581,8 +3581,29 @@ public class AppUpdater {
      * release in build.gradle.kts.
      */
     public static String getInstalledVersion() {
+        return getInstalledVersion((Context) null);
+    }
+
+    public static String getInstalledVersion(Context context) {
+        if (context == null) {
+            try {
+                context = com.overdrive.app.daemon.CameraDaemon.getAppContext();
+            } catch (Throwable ignored) {}
+        }
+        String ver = null;
+        if (context != null) {
+            try {
+                android.content.pm.PackageInfo pInfo = context.getPackageManager()
+                        .getPackageInfo(context.getPackageName(), 0);
+                if (pInfo != null && pInfo.versionName != null && !pInfo.versionName.trim().isEmpty()) {
+                    ver = pInfo.versionName.trim();
+                }
+            } catch (Throwable ignored) {}
+        }
+        if (ver == null || ver.isEmpty()) {
+            ver = BuildConfig.VERSION_NAME;
+        }
         String channel = BuildConfig.UPDATE_CHANNEL;
-        String ver = BuildConfig.VERSION_NAME;
         if (ver == null || ver.isEmpty()) return DISPLAY_VERSION_FALLBACK;
         if (channel == null || channel.isEmpty()) return "v" + ver;
         return channel + "-v" + ver;
@@ -3631,7 +3652,8 @@ public class AppUpdater {
         // doesn't parse as channel-prefix + dotted version is rejected → caller
         // falls back to the always-correct BuildConfig identity.
         String labelChannel = channelOfLabel(label);   // matches ^<channel>-v
-        if (labelChannel == null || numericVersion(label).isEmpty()) {
+        String labelNumeric = numericVersion(label);
+        if (labelChannel == null || labelNumeric.isEmpty()) {
             return "";   // malformed/legacy label — fall back to BuildConfig
         }
         // Only trust it for the channel we're actually running (a stale
@@ -3641,6 +3663,22 @@ public class AppUpdater {
                 && !labelChannel.equals(runningChannel)) {
             return "";   // stale cross-channel label — let the caller fall back
         }
+
+        // STALENESS GUARD (PackageManager / OS package as Source of Truth):
+        // If an update was installed (via pm install, OTA or background script)
+        // but the file in /data/local/tmp was not updated (e.g. due to SELinux
+        // isolation where the daemon wrote to ALT_DIR but the untrusted app UI reads
+        // LEGACY_DIR), the persisted label on disk is stale and must not mask the
+        // real running version. If the installed package in Android OS is equal or
+        // newer than the file label, the file label must not hold back the display version.
+        String installed = getInstalledVersion(context);
+        String installedNumeric = numericVersion(installed);
+        if (!installedNumeric.isEmpty() && !labelNumeric.equals(installedNumeric)) {
+            if (!isNewerVersion(installedNumeric, labelNumeric)) {
+                return "";   // installed package is newer or mismatching: file is stale
+            }
+        }
+
         return label;
     }
 
@@ -3669,7 +3707,7 @@ public class AppUpdater {
      */
     public static String getDisplayVersion(Context context) {
         String github = persistedGithubVersion(context);
-        return !github.isEmpty() ? github : getInstalledVersion();
+        return !github.isEmpty() ? github : getInstalledVersion(context);
     }
 
     /**
@@ -3678,6 +3716,10 @@ public class AppUpdater {
      * VERSION_FILE since the daemon has no SharedPreferences), else BuildConfig.
      */
     public static String getDisplayVersionFromFile() {
-        return getDisplayVersion(null);
+        Context ctx = null;
+        try {
+            ctx = com.overdrive.app.daemon.CameraDaemon.getAppContext();
+        } catch (Throwable ignored) {}
+        return getDisplayVersion(ctx);
     }
 }
