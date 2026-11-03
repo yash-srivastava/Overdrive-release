@@ -77,7 +77,7 @@
          they go through the NLLB pipeline like every other a11y string. -->
     <string name="overlay_mode_off_cd">Interrompi registrazione</string>
     <string name="overlay_mode_continuous_cd">Registrazione continua</string>
-    <string name="overlay_mode_drive_cd">Registrazione in modalità unità</string>
+    <string name="overlay_mode_drive_cd">Registrazione in modalità guida</string>
     <string name="overlay_mode_proximity_cd">Registrazione di prossimità</string>
     <!-- item_log_entry placeholders (timestamp/tag/message are runtime, but these are
          placeholder/preview text used at design time and visible in some empty states) -->
@@ -106,7 +106,7 @@
     <string name="tailscale_proxy_warning">Quando e attivo, MQTT verso broker pubblici (HiveMQ, AWS IoT, ecc.) non funzionera: Tailscale instrada solo verso la tua tailnet. Il salvataggio riavviera il daemon.</string>
     <!-- Camera ingestion mode selector (Default vs DiLink 4) -->
     <string name="camera_mode_title">Modalità di ingestione</string>
-    <string name="camera_mode_subtitle">Scegli il percorso che corrisponde alla tua unità di testa. In default si adatta alla maggior parte dei modelli BYD; DiLink 4 è richiesto su trim più recenti (Han / Tang 2024+) in cui l\'AVM HAL emette un mosaico 2x2 pre-stitito.</string>
+    <string name="camera_mode_subtitle">Scegli la modalità corrispondente al tuo sistema infotainment. Default è per telecamere panoramiche standard; DiLink 4 usa SurfaceTexture AVM; DiLink 5 usa il bridge SA8155P.</string>
     <string name="camera_mode_option_default">Funzioni predefinite  su Seal, Atto, Dolphin (la maggior parte delle auto)</string>
     <string name="camera_mode_option_dilink4">DiLink 4  nuove varianti Han / Tang</string>
     <string name="camera_mode_current_default">Attuale: predefinito</string>
@@ -265,7 +265,7 @@
     <string name="onboarding_expert_recordings_title">Le tue registrazioni</string>
     <string name="onboarding_expert_recordings_body">Passa tra Dashcam (continui + clip di prossimità) e Sorveglianza (eventi parcheggiati di sentra) con questa commutazione — ognuno mantiene la propria biblioteca. Tocca una clip per riprodurla.</string>
     <string name="onboarding_expert_live_title">Fotocamere live</string>
-    <string name="onboarding_expert_live_body">Aprire Live da qui per guardare tutte le telecamere in tempo reale. Handy per controllare la vista prima di un disco o mentre parcheggiato nelle vicinanze.</string>
+    <string name="onboarding_expert_live_body">Apri Live da qui per visualizzare tutte le telecamere in tempo reale. Utile per controllare l\'area circostante prima di partire o mentre l\'auto è parcheggiata.</string>
     <string name="onboarding_expert_trips_title">Storico dei viaggi</string>
     <string name="onboarding_expert_trips_body">Trips registra ogni unità — percorso, distanza, durata e consumo di energia — in modo da poter rivedere dove l\'auto è stata.</string>
     <string name="onboarding_expert_roadsense_title">RoadSense</string>
@@ -279,7 +279,7 @@
     <string name="onboarding_expert_bydcloud_title">BYD Cloud sblocca il telecomando</string>
     <string name="onboarding_expert_bydcloud_body">Collegando il tuo account BYD qui abilita blocco remoto, flash e corno dal tuo telefono. Tratta l\'account collegato e il codice di accesso come sensibile.</string>
     <string name="onboarding_expert_surveillance_title">Sorveglianza &amp; registrazione</string>
-    <string name="onboarding_expert_surveillance_body">Rilevamento, qualità e conservazione raffinati qui. Questi aprono come in-app config pagine servite dalla vostra auto — uno schermo vuoto significa solo che l\'aiutante è ancora avviato.</string>
+    <string name="onboarding_expert_surveillance_body">Ottimizza qui rilevamento, qualità e archiviazione. Sono pagine di configurazione interne fornite dall\'auto: uno schermo vuoto indica solo che il servizio si sta ancora avviando.</string>
     <string name="onboarding_expert_camprobe_title">Sonda della telecamera — attenta</string>
     <string name="onboarding_expert_camprobe_body">Questo ri-mappa che la fotocamera fisica alimenta ogni ruolo e riavvia le telecamere. Cambialo solo se un feed sembra sbagliato — hai impostato questo in precedenza nella guida.</string>
     <string name="onboarding_expert_traffic_title">Traffic Monitor — necessario per l\'accesso remoto</string>
@@ -522,7 +522,7 @@
     <string name="update_error_title">Aggiornamento non riuscito</string>
     <string name="update_error_daemon_down">Il demone della fotocamera non è in esecuzione. Avvialo dalla schermata Demoni, quindi riprova ad aggiornare.</string>
     <string name="update_error_start_failed">Impossibile avviare l\'aggiornamento: %1$s</string>
-    <string name="update_error_lost_headunit">Hai perso il contatto con l\'unità di testa prima dell\'installazione finita. In un tunnel? Controlla Telegram per il nuovo URL, o usa l\'IP locale.</string>
+    <string name="update_error_lost_headunit">Connessione con l\'infotainment interrotta prima del completamento dell\'installazione. Sei su tunnel? Controlla Telegram per il nuovo URL o usa l\'IP locale.</string>
     <string name="update_hide">Nascondi</string>
     <!-- Update channel selector (Settings → About) -->
     <string name="settings_update_channel_title">Aggiorna canale</string>
@@ -531,7 +531,7 @@
     <string name="settings_update_channel_alpha_desc">La versione stabile. Ogni versione pubblicata viene mantenuta: scegli qualsiasi da installare (i downgrades consentiti). Consigliato per l\'uso quotidiano.</string>
     <string name="settings_update_channel_braveheart_desc">Edifici di bordo, consegnati nel momento in cui vengono pubblicati. Otterrai prima nuove funzionalità, ma potrebbero essere instabili o buggy. Se qualcosa si rompe, apri la schermata Demoni, tocca il registro di un demone, scegli \"Upload &amp; prendi un codice\", e condividi il codice con noi sui canali della comunità.</string>
     <string name="settings_update_channel_save_failed">Impossibile salvare il canale di aggiornamento</string>
-    <string name="settings_update_channel_braveheart_toast">Passato a Coraggio. Le build possono essere instabili — se qualcosa si rompe, invia il log del demone e segnalalo su Discord/GitHub/WhatsApp.</string>
+    <string name="settings_update_channel_braveheart_toast">Passato al canale Braveheart. Le build potrebbero essere instabili: se qualcosa non va, invia il log del demone e segnalalo su Discord/GitHub/WhatsApp.</string>
     <!-- Community / report-a-bug links -->
     <string name="toast_storage_permission_required">Permesso storage richiesto per le registrazioni</string>
     <string name="toast_url_copied_short">URL copiato!</string>
@@ -566,7 +566,9 @@
     <string name="dialog_reset_soh_title">Reimpostare la stima SOH?</string>
     <string name="dialog_reset_soh_message">Questo cancella tutti i dati SOH e costringe la rivalutazione da zero.\n\nUtilizzare questo se:\n• Batteria è stata sostituita\n• La lettura SOH sembra sbagliata\n• Si desidera ricalibrare\n\nIl sistema si riproduce dalla prossima fonte di dati disponibile (OEM, calibrazione di carica o lettura istantanea).</string>
     <string name="dialog_reset_following_title">Reimpostare quanto segue?</string>
-    <string name="dialog_reset_following_message">This cannot be undone.\n\n%1$s</string>
+    <string name="dialog_reset_following_message">Questa operazione non può essere annullata.
+
+%1$s</string>
     <string name="dialog_reset_complete_title">Reimpostazione completata</string>
     <string name="dialog_traffic_cannot_check_title">Impossibile controllare lo stato</string>
     <string name="dialog_traffic_cannot_check_message">La connessione ADB non è ancora pronta.\n\nL\'app ha bisogno di accesso ADB per gestire i pacchetti di sistema. Si prega di assicurarsi che:\n\n• USB Debugging sia abilitato nelle Opzioni per gli sviluppatori\n• L\'invito di autorizzazione ADB è stato accettato\n\nLo stato verrà aggiornato automaticamente una volta collegato.</string>
@@ -679,7 +681,7 @@ Puoi ottenerne uno su: zrok.io</string>
     <string name="logs_uploading_title">Caricamento log…</string>
     <string name="logs_uploading_subtitle">Ridurre i segreti e inviare in modo sicuro</string>
     <string name="logs_uploaded_title">Log caricato</string>
-    <string name="logs_uploaded_instructions">Condividi questo codice con noi, insieme a una nota su quello che stavi facendo quando si è rotto. Pubblica su Discord, Problemi GitHub o WhatsApp — i link sono sullo schermo About .</string>
+    <string name="logs_uploaded_instructions">Condividi questo codice con noi insieme a una nota su cosa stavi facendo quando si è verificato l\'errore. Invialo su Discord, GitHub o WhatsApp (i link sono nella schermata Info).</string>
     <string name="logs_uploaded_privacy">Segreti redatti · il log auto-scade</string>
     <string name="logs_copy_code">Copia codice</string>
     <string name="logs_done">Fatto</string>
@@ -786,7 +788,7 @@ Questa azione non puo essere annullata.</string>
     <string name="settings_backup_export_title">Esporta impostazioni</string>
     <string name="settings_backup_export_value">Salva un file di backup delle impostazioni correnti. Tienilo privato — contiene le tue credenziali.</string>
     <string name="settings_backup_import_title">Ripristina impostazioni</string>
-    <string name="settings_backup_import_value">Carica un file di backup fatto su questa stessa unità di testa.</string>
+    <string name="settings_backup_import_value">Carica un file di backup creato su questo stesso sistema infotainment.</string>
     <string name="settings_backup_default_filename">overdrive-backup.json</string>
     <string name="settings_backup_exporting">Costruzione backup…</string>
     <string name="settings_backup_export_failed">Esportazione backup fallita</string>
@@ -802,7 +804,7 @@ Questa azione non puo essere annullata.</string>
     <string name="settings_backup_restore_failed">Ripristino fallito</string>
     <string name="settings_backup_daemon_down">Il servizio fotocamera deve essere in esecuzione per eseguire il backup o il ripristino. Avviarlo da Demoni, quindi riprovare.</string>
     <string name="settings_backup_restore_confirm_title">Ripristinare le impostazioni?</string>
-    <string name="settings_backup_restore_confirm_msg">Questo sostituisce le impostazioni attuali di Overdrive con i servizi di backup e ricarica. Funziona solo sulla stessa unità di testa su cui è stato effettuato il backup.</string>
+    <string name="settings_backup_restore_confirm_msg">Questa operazione sostituirà le impostazioni attuali di Overdrive con quelle del backup e riavvierà i servizi. Funziona solo sullo stesso infotainment su cui è stato creato.</string>
     <string name="settings_backup_restore_confirm_btn">Ripristina</string>
     <string name="settings_backup_restart_hint">Impostazioni ripristinate. Riavviare il demone della fotocamera (Daemons → Fotocamera → Riavvio) per assicurarsi che ogni impostazione ripristinata venga applicata.</string>
     <string name="settings_backup_trips_prompt">Includi la tua storia di viaggio (distanza, energia, costi, punteggi, luoghi di partenza/fine)? Il file conterrà la cronologia delle posizioni — mantienilo privato.</string>
@@ -1336,7 +1338,7 @@ Questa azione non puo essere annullata.</string>
     <string name="toast_cloudflared_saved_settings">Impostazioni Cloudflared salvate</string>
     <!-- Projection feature -->
     <string name="projection_hero_title">Proiezione</string>
-    <string name="projection_hero_subtitle">Trasmetti un\'app al gruppo di driver e specchiala qui.</string>
+    <string name="projection_hero_subtitle">Proietta un\'app sul quadro strumenti e visualizzane la replica qui.</string>
     <string name="projection_pick_app">Scegli un\'app per il progetto</string>
     <string name="projection_cast">Trasmetti al cluster</string>
     <string name="projection_stop">Ferma</string>
@@ -1376,7 +1378,7 @@ Questa azione non puo essere annullata.</string>
     <string name="recordings_segment_replays_count">Replay · %d</string>
     <string name="vehicle_model_seagull">BYD Seagull</string>
     <string name="projection_window_title">Finestra cluster</string>
-    <string name="projection_window_desc">Posiziona l\'app cast sul gruppo di driver. Preset lo aggancia ai layout comuni; Ridimensiona la finestra ti permette di trascinarla liberamente.</string>
+    <string name="projection_window_desc">Posiziona l\'app proiettata sul quadro strumenti. I preset la adattano ai layout standard; Ridimensiona finestra ti permette di posizionarla liberamente.</string>
     <string name="projection_preset_full">Pieno</string>
     <string name="projection_preset_left">Metà sinistra</string>
     <string name="projection_preset_right">Metà destra</string>
