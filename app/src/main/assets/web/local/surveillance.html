@@ -316,7 +316,7 @@
                     <div class="info-row r-hero-stat"><span class="label r-hero-stat-label" data-i18n="surveillance.status_label">Status</span><span class="value r-hero-stat-value" id="survState" data-i18n="common.idle">Idle</span></div>
                     <div class="info-row r-hero-stat surv-stat-link">
                         <span class="label r-hero-stat-label" data-i18n="surveillance.events_today">Events Today</span>
-                        <a href="events.html?filter=sentry" class="value link-value r-hero-stat-value num" id="eventsToday">0 →</a>
+                        <a href="events.html?filter=sentry" class="value link-value r-hero-stat-value num" id="eventsToday">0 <span class="rtl-flip-arrow" aria-hidden="true">→</span></a>
                     </div>
                 </div>
             </div>
@@ -397,7 +397,7 @@
                                 </label>
                             </div>
                         </div>
-                        <div class="setting-hint" id="survKeepUsbPowerCapabilityNote" style="display:none;">This mode can keep Android awake, but parked USB and SD-card power remains best-effort because the vehicle firmware controls the physical rail.</div>
+                        <div class="setting-hint" id="survKeepUsbPowerCapabilityNote" data-i18n="surveillance.keep_usb_wake_capability_note" style="display:none;">This mode can keep Android awake, but parked USB and SD-card power remains best-effort because the vehicle firmware controls the physical rail.</div>
 
                         <!-- Parked cellular keep-alive. Default OFF (opt-in): on some
                              models the data module sleeps a while after the car is
@@ -1540,7 +1540,7 @@
                             </div>
                             <div class="info-row surv-info-sm surv-info-dim">
                                 <span class="label" data-i18n="recording.native_resolution">Native</span>
-                                <span class="value">2560×1920 mosaic · 4 × 1280×960 cameras</span>
+                                <span class="value" data-i18n="surveillance.native_mosaic_spec">2560×1920 mosaic · 4 × 1280×960 cameras</span>
                             </div>
                             <div class="info-row surv-info-sm" id="survFpsClampRow" style="display: none;">
                                 <span class="label" data-i18n="recording.fps_actual">Measured FPS</span>
@@ -1823,7 +1823,7 @@
     <script src="../shared/update-flow.js?v=3"></script>
     <script src="../shared/storage-budget.js?v=8"></script>
     <script src="../shared/settings-hydration.js?v=1"></script>
-    <script src="../shared/surveillance.js?v=survtoggle15"></script>
+    <script src="../shared/surveillance.js?v=survtoggle16"></script>
     <script src="../shared/safe-locations.js?v=6"></script>
     <script src="../shared/roi-schedule.js?v=4"></script>
     <script src="../shared/parking-settings.js?v=5"></script>

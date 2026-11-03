@@ -40,7 +40,7 @@
       entirely when only one tab remains).
       The Telegram block reuses the legacy IDs (v2TelegramSendStartPing,
       v2TelegramTierGroup, v2TelegramNotices/Alerts/Critical) so the
-      SurvSettings bindings in shared/surveillance.js?v=survtoggle15 keep firing.
+      SurvSettings bindings in shared/surveillance.js?v=survtoggle16 keep firing.
     -->
     <script>
         var __OT_LOG_TAB = { id: 'log', label: 'Log', i18n: 'notif.tab_log', svg: '<line x1="8" y1="7" x2="18" y2="7"/><line x1="8" y1="12" x2="18" y2="12"/><line x1="8" y1="17" x2="14" y2="17"/><circle cx="4.5" cy="7" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="17" r="1"/>' };
@@ -1549,7 +1549,7 @@
          tier toggles. We load it here so the v2TelegramSendStartPing /
          v2TelegramTierGroup controls hooked into surveillance.js wiring
          keep firing without a per-page bridge. -->
-    <script src="../shared/surveillance.js?v=survtoggle15"></script>
+    <script src="../shared/surveillance.js?v=survtoggle16"></script>
     <script src="../shared/notif-log.js?v=3"></script>
     <script>
         function toggleSidebar() {
@@ -1606,7 +1606,7 @@
         }
 
         // ===== Telegram delivery preferences module =====
-        // Lives here (not in shared/surveillance.js?v=survtoggle15) because the four toggles
+        // Lives here (not in shared/surveillance.js?v=survtoggle16) because the four toggles
         // are notification-page-local — they don't bind to surveillance config
         // and don't need the heavier SurvSettings init flow. Load + save go
         // through /api/telegram/preferences (same endpoint telegram.html

@@ -112,7 +112,7 @@ public class BydCloudApiHandler {
             boolean persisted = UnifiedConfigManager.updateSection("bydCloud", delta);
             if (!persisted) {
                 response.put("success", false);
-                response.put("error", "Could not save BYD Cloud settings");
+                response.put("error", Messages.get("errors.bydcloud_settings_save_failed"));
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }
@@ -342,7 +342,7 @@ public class BydCloudApiHandler {
             if (!"find_car".equals(action) && !"flash_lights".equals(action)) {
                 response.put("success", false);
                 response.put("confirmed", false);
-                response.put("error", "Unsupported cloud test action");
+                response.put("error", Messages.get("errors.bydcloud_unsupported_test_action"));
                 HttpResponse.sendJson(out, response.toString());
                 return;
             }

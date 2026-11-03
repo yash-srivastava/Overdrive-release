@@ -541,15 +541,15 @@ public final class ScreenDeterrent {
      */
     public String previewNow() {
         if (previewBlocked()) {
-            return "Preview blocked until the vehicle is safely parked";
+            return com.overdrive.app.server.Messages.get("errors.surveillance_preview_blocked");
         }
         refreshHotCacheFromDisk();
         Context ctx = resolveContext();
         if (ctx == null) {
-            return "Screen preview unavailable until the camera daemon is ready";
+            return com.overdrive.app.server.Messages.get("errors.surveillance_preview_not_ready");
         }
         if (!inFlight.compareAndSet(false, true)) {
-            return "Screen deterrent is already active";
+            return com.overdrive.app.server.Messages.get("errors.surveillance_deterrent_already_active");
         }
 
         restorePanelAfterSession = false;
@@ -557,7 +557,7 @@ public final class ScreenDeterrent {
         if (terminalStopRequested.get()) {
             inFlight.set(false);
             terminalStopRequested.compareAndSet(true, false);
-            return "Screen deterrent is stopping";
+            return com.overdrive.app.server.Messages.get("errors.surveillance_deterrent_stopping");
         }
         final String inputToken = prepareInputCapture();
         previewDeadlineElapsedMs =
@@ -567,7 +567,7 @@ public final class ScreenDeterrent {
             clearSessionGate();
             inFlight.set(false);
             terminalStopRequested.set(false);
-            return "Could not publish the preview safety gate";
+            return com.overdrive.app.server.Messages.get("errors.surveillance_preview_gate_failed");
         }
 
         try {
@@ -586,7 +586,7 @@ public final class ScreenDeterrent {
             clearSessionGate();
             inFlight.set(false);
             terminalStopRequested.set(false);
-            return "Screen preview worker unavailable";
+            return com.overdrive.app.server.Messages.get("errors.surveillance_preview_worker_unavailable");
         }
     }
 

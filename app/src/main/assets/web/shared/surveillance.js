@@ -209,9 +209,17 @@ BYD.surveillance = {
         });
         const data = await resp.json();
         if (!resp.ok || !data || data.success !== true) {
-            throw new Error(data && data.error ? data.error : 'Request rejected');
+            throw new Error(data && data.error
+                ? data.error
+                : this._survT('surveillance.request_rejected', 'Request rejected'));
         }
         return data;
+    },
+
+    /** Catalog lookup with an English fallback for when the catalog is not loaded. */
+    _survT(key, fallback, vars) {
+        const v = BYD.i18n && BYD.i18n.t ? BYD.i18n.t(key, vars) : null;
+        return (v && v !== key) ? v : fallback;
     },
 
     _writeJson(url, body) {
@@ -703,7 +711,10 @@ BYD.surveillance = {
                 const eventsTodayEl = document.getElementById('eventsToday');
                 if (eventsTodayEl) {
                     const todayCount = counts.sentry.todayCount || 0;
-                    eventsTodayEl.textContent = todayCount + ' →';
+                    // Arrow lives in its own span so [dir="rtl"] .rtl-flip-arrow
+                    // mirrors it for Hebrew without a re-render on locale change.
+                    eventsTodayEl.innerHTML = (parseInt(todayCount, 10) || 0)
+                        + ' <span class="rtl-flip-arrow" aria-hidden="true">\u2192</span>';
                 }
 
                 // Daemon's recording index is still building — surface a
@@ -2276,8 +2287,10 @@ BYD.surveillance = {
                       const wakeOnly = self.config.keepUsbPowerControl === 'android_wake_only';
                       const msg = wakeOnly
                           ? (on
-                              ? 'Android wake requested while parked; hardware power remains best-effort'
-                              : 'The head unit may sleep while parked (next ACC-OFF)')
+                              ? t('surveillance.keep_usb_wake_saved_on',
+                                  'Android wake requested while parked; hardware power remains best-effort')
+                              : t('surveillance.keep_usb_wake_saved_off',
+                                  'The head unit may sleep while parked (next ACC-OFF)'))
                           : (on
                               ? t('surveillance.keep_usb_saved_on', 'USB will stay powered while parked')
                               : t('surveillance.keep_usb_saved_off', 'USB will sleep while parked (next ACC-OFF)'));
@@ -3614,23 +3627,26 @@ BYD.surveillance = {
         const keepUsbName = document.getElementById('survKeepUsbPowerName');
         const keepUsbDesc = document.getElementById('survKeepUsbPowerDesc');
         const keepUsbNote = document.getElementById('survKeepUsbPowerCapabilityNote');
-        if (keepUsbName) {
-            if (!keepUsbName.dataset.vehiclePowerText) {
-                keepUsbName.dataset.vehiclePowerText = keepUsbName.textContent;
+        // Swap the element's data-i18n key (not just its text) so a live
+        // locale change re-hydrates the variant that is actually showing.
+        const swapKeepUsbText = (el, wakeKey, wakeFallback) => {
+            if (!el) return;
+            if (!el.dataset.vehiclePowerText) {
+                el.dataset.vehiclePowerText = el.textContent;
+                el.dataset.vehiclePowerKey = el.getAttribute('data-i18n') || '';
             }
-            keepUsbName.textContent = wakeOnly
-                ? 'Keep head unit awake while parked'
-                : keepUsbName.dataset.vehiclePowerText;
-        }
-        if (keepUsbDesc) {
-            if (!keepUsbDesc.dataset.vehiclePowerText) {
-                keepUsbDesc.dataset.vehiclePowerText = keepUsbDesc.textContent;
-            }
-            keepUsbDesc.textContent = wakeOnly
-                ? 'Uses Android CPU and network locks after the car is switched off. '
-                    + 'The vehicle firmware may still remove USB or SD-card power.'
-                : keepUsbDesc.dataset.vehiclePowerText;
-        }
+            const key = wakeOnly ? wakeKey : el.dataset.vehiclePowerKey;
+            if (key) el.setAttribute('data-i18n', key);
+            const localized = key && BYD.i18n && BYD.i18n.t ? BYD.i18n.t(key) : null;
+            el.textContent = (localized && localized !== key)
+                ? localized
+                : (wakeOnly ? wakeFallback : el.dataset.vehiclePowerText);
+        };
+        swapKeepUsbText(keepUsbName, 'surveillance.keep_usb_wake_name',
+            'Keep head unit awake while parked');
+        swapKeepUsbText(keepUsbDesc, 'surveillance.keep_usb_wake_desc',
+            'Uses Android CPU and network locks after the car is switched off. '
+                + 'The vehicle firmware may still remove USB or SD-card power.');
         if (keepUsbNote) keepUsbNote.style.display = wakeOnly ? 'block' : 'none';
         // Reflect the "recording to Internal because USB power is off" notice.
         this.updateUsbPowerStorageNotice();
@@ -4297,7 +4313,8 @@ BYD.surveillance = {
                 this.updateDeterrentUI();
                 if (BYD.utils && BYD.utils.toast) {
                     BYD.utils.toast(
-                        (e && e.message) || 'Could not save deterrent action',
+                        (e && e.message) || this._survT('surveillance.deterrent_action_save_failed',
+                            'Could not save deterrent action'),
                         'error');
                 }
             });
@@ -4324,7 +4341,8 @@ BYD.surveillance = {
                 this.updateDeterrentUI();
                 if (BYD.utils && BYD.utils.toast) {
                     BYD.utils.toast(
-                        (e && e.message) || 'Could not save deterrent trigger',
+                        (e && e.message) || this._survT('surveillance.deterrent_trigger_save_failed',
+                            'Could not save deterrent trigger'),
                         'error');
                 }
             });
@@ -4352,7 +4370,8 @@ BYD.surveillance = {
                 this.updateImpactUI();
                 if (BYD.utils && BYD.utils.toast) {
                     BYD.utils.toast(
-                        (e && e.message) || 'Could not save impact detection',
+                        (e && e.message) || this._survT('surveillance.impact_save_failed',
+                            'Could not save impact detection'),
                         'error');
                 }
             });
@@ -4461,7 +4480,8 @@ BYD.surveillance = {
             self.updateScreenDeterrentUI();
             if (BYD.utils && BYD.utils.toast) {
                 BYD.utils.toast(
-                    (e && e.message) || 'Could not save screen deterrent settings',
+                    (e && e.message) || self._survT('surveillance.screen_deterrent_save_failed',
+                            'Could not save screen deterrent settings'),
                     'error');
             }
         });
@@ -4528,7 +4548,8 @@ BYD.surveillance = {
                 if (self.markChanged) self.markChanged();
                 if (BYD.utils && BYD.utils.toast) {
                     BYD.utils.toast(
-                        (e && e.message) || 'Could not save low-battery cutoff',
+                        (e && e.message) || self._survT('surveillance.low_soc_cutoff_save_failed',
+                            'Could not save low-battery cutoff'),
                         'error');
                 }
             });
@@ -4667,7 +4688,9 @@ BYD.surveillance = {
                 console.error('[deterrent] upload failed:', err && err.message);
                 var msg = err && err.message ? err.message : '';
                 if (msg.indexOf('HTTP ') === 0) {
-                    self._uploadToastError(null, 'Server returned ' + msg);
+                    self._uploadToastError(null, self._survT(
+                        'surveillance.screen_deterrent_server_status',
+                        'Server returned ' + msg, { status: msg }));
                 } else {
                     self._uploadToastError('surveillance.screen_deterrent_network_error',
                                            msg || 'Network error');
@@ -5718,6 +5741,11 @@ window.SurvSettings = BYD.surveillance;
 // ── BYD Cloud Account Setup ─────────────────────────────────────────────
 
 window.BydCloud = {
+    /** Catalog lookup with an English fallback for when the catalog is not loaded. */
+    _bydT(key, fallback, vars) {
+        const v = BYD && BYD.i18n && BYD.i18n.t ? BYD.i18n.t(key, vars) : null;
+        return (v && v !== key) ? v : fallback;
+    },
     isConfigured: false,
     _mergeReady: false,
     _mergeWriteQueue: Promise.resolve(),
@@ -5863,20 +5891,47 @@ window.BydCloud = {
         return this.regionLabels[region] ? region : 'eu';
     },
 
+    countryLabel(country) {
+        var key = 'byd_cloud.countries.' + country.code;
+        var localized = BYD && BYD.i18n && BYD.i18n.t ? BYD.i18n.t(key) : null;
+        return (localized && localized !== key) ? localized : country.name;
+    },
+
     ensureCountryOptions() {
         const select = document.getElementById('bydCountryCode');
-        if (!select || select.dataset.loaded === '1') return;
+        if (!select) return;
+        var lang = (BYD && BYD.i18n && BYD.i18n.getLang) ? (BYD.i18n.getLang() || '') : '';
+        if (!this._countryLocaleHooked && BYD && BYD.i18n
+                && typeof BYD.i18n.onChange === 'function') {
+            this._countryLocaleHooked = true;
+            var self = this;
+            BYD.i18n.onChange(function () { self.ensureCountryOptions(); });
+        }
+        // Rebuild when the language changes; country names are catalog keys
+        // because the head-unit WebView (Chrome 58) has no Intl.DisplayNames.
+        if (select.dataset.loaded === '1' && select.dataset.loadedLang === lang) return;
+        var previous = select.value;
         select.innerHTML = '';
         this.countryByCode = {};
+        var rows = [];
         for (var i = 0; i < this.countries.length; i++) {
             var country = this.countries[i];
             this.countryByCode[country.code] = country;
+            rows.push({ code: country.code, label: this.countryLabel(country) });
+        }
+        rows.sort(function (a, b) {
+            try { return a.label.localeCompare(b.label, lang || undefined); }
+            catch (_) { return a.label < b.label ? -1 : (a.label > b.label ? 1 : 0); }
+        });
+        for (var j = 0; j < rows.length; j++) {
             var opt = document.createElement('option');
-            opt.value = country.code;
-            opt.textContent = country.name + ' (' + country.code + ')';
+            opt.value = rows[j].code;
+            opt.textContent = rows[j].label + ' (' + rows[j].code + ')';
             select.appendChild(opt);
         }
+        if (previous) select.value = previous;
         select.dataset.loaded = '1';
+        select.dataset.loadedLang = lang;
     },
 
     getCountryMeta(countryCode) {
@@ -6286,7 +6341,8 @@ window.BydCloud = {
             });
             const data = await resp.json();
             if (!resp.ok || !data || data.success !== true) {
-                throw new Error((data && data.error) || 'Could not save setting');
+                throw new Error((data && data.error)
+                    || BydCloud._bydT('byd_cloud.setting_save_failed', 'Could not save setting'));
             }
             return data;
         };
@@ -6301,7 +6357,7 @@ window.BydCloud = {
             this._cloudDataMerge = previous;
             if (toggle) toggle.checked = previous;
             this.showStatus('\u2717 ' + (e && e.message
-                ? e.message : 'Could not save setting'), 'error');
+                ? e.message : this._bydT('byd_cloud.setting_save_failed', 'Could not save setting')), 'error');
         } finally {
             this._mergeWritesPending--;
             if (toggle) {

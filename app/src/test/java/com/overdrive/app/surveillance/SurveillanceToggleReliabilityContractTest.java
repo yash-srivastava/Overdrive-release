@@ -27,7 +27,7 @@ public class SurveillanceToggleReliabilityContractTest {
         assertTrue(html.contains(
                 "<main class=\"main-content\" aria-busy=\"true\" inert style=\"pointer-events:none\">"));
         assertTrue(html.contains("settings-hydration.js?v=1"));
-        assertTrue(html.contains("surveillance.js?v=survtoggle15"));
+        assertTrue(html.contains("surveillance.js?v=survtoggle16"));
         // The OEM dashcam (DVR) reserve controls moved to the Storage page.
         String storageHtml = readRepositoryFile("app/src/main/assets/web/local/storage.html");
         assertTrue(storageHtml.contains("id=\"cdrCleanupEnabled\" disabled"));

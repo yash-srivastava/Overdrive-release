@@ -1296,7 +1296,7 @@ public class OemDashcamApiHandler {
             // gets a structured answer instead of a confused pm error.
             response.put("success", false);
             response.put("state", "not_installed");
-            response.put("error", "package not installed");
+            response.put("error", com.overdrive.app.server.Messages.get("errors.oem_native_dvr_not_installed"));
             HttpResponse.sendJson(out, response.toString());
             return;
         }
@@ -1325,7 +1325,7 @@ public class OemDashcamApiHandler {
 
         response.put("success", ok);
         response.put("state", post);
-        if (!ok) response.put("error", "disable did not take effect: " + shellOut);
+        if (!ok) response.put("error", com.overdrive.app.server.Messages.get("errors.oem_native_dvr_disable_failed_with_detail", String.valueOf(shellOut)));
         HttpResponse.sendJson(out, response.toString());
     }
 
@@ -1337,7 +1337,7 @@ public class OemDashcamApiHandler {
         if ("not_installed".equals(pre)) {
             response.put("success", false);
             response.put("state", "not_installed");
-            response.put("error", "package not installed");
+            response.put("error", com.overdrive.app.server.Messages.get("errors.oem_native_dvr_not_installed"));
             HttpResponse.sendJson(out, response.toString());
             return;
         }
@@ -1363,7 +1363,7 @@ public class OemDashcamApiHandler {
 
         response.put("success", ok);
         response.put("state", post);
-        if (!ok) response.put("error", "enable did not take effect: " + shellOut);
+        if (!ok) response.put("error", com.overdrive.app.server.Messages.get("errors.oem_native_dvr_enable_failed_with_detail", String.valueOf(shellOut)));
         HttpResponse.sendJson(out, response.toString());
     }
 
