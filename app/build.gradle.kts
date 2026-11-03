@@ -1,4 +1,12 @@
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URI
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
 import java.util.Properties
+import javax.net.ssl.HttpsURLConnection
 
 plugins {
     alias(libs.plugins.android.application)
@@ -24,9 +32,38 @@ tasks.register("downloadOpenH264") {
     val openh264Dir = file("src/main/cpp/openh264")
     
     doLast {
-        // Cisco's official binary URLs - only arm64-v8a for BYD cars
+        // Pins are for Cisco's unmodified 2.6.0 Android ARM64 binary. Keep the
+        // download and cached build input tied to the same reviewed release.
+        val archiveSha256 = "c702d68c9c8db492a43c1d73a497cea5f31ae5d23e330dcb13bd28cab1dbbf2a"
+        val librarySha256 = "4d9bc54d2d38e53eb7bd551ec61acb8ad8320d8b957bda751cfdbdcbfabc3b07"
+        val archiveBytes = 496662L
+        val libraryBytes = 1276136L
+
+        fun verifyInput(input: File, expectedBytes: Long, expectedSha256: String) {
+            if (!Files.isRegularFile(input.toPath(), LinkOption.NOFOLLOW_LINKS)
+                || input.length() != expectedBytes) {
+                throw GradleException("Unexpected OpenH264 input type or size: ${input.name}")
+            }
+            val digest = MessageDigest.getInstance("SHA-256")
+            input.inputStream().use { stream ->
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val count = stream.read(buffer)
+                    if (count < 0) break
+                    digest.update(buffer, 0, count)
+                }
+            }
+            val actual = digest.digest().joinToString("") {
+                (it.toInt() and 0xff).toString(16).padStart(2, '0')
+            }
+            if (actual != expectedSha256) {
+                throw GradleException("OpenH264 SHA-256 mismatch: ${input.name}")
+            }
+        }
+
+        // Only arm64-v8a is packaged for BYD cars.
         val abiMap = mapOf(
-            "arm64-v8a" to "http://ciscobinary.openh264.org/libopenh264-${openh264Version}-android-arm64.8.so.bz2"
+            "arm64-v8a" to "https://ciscobinary.openh264.org/libopenh264-${openh264Version}-android-arm64.8.so.bz2"
             // Removed armeabi-v7a to reduce APK size
         )
         
@@ -35,19 +72,53 @@ tasks.register("downloadOpenH264") {
             libDir.mkdirs()
             
             val soFile = file("${libDir}/libopenh264.so")
-            if (!soFile.exists()) {
+            if (Files.exists(soFile.toPath(), LinkOption.NOFOLLOW_LINKS)) {
+                verifyInput(soFile, libraryBytes, librarySha256)
+            } else {
                 println("Downloading OpenH264 ${openh264Version} for ${abi}...")
-                val bzFile = file("${libDir}/temp.bz2")
-                
+                val stagingDir = Files.createTempDirectory(libDir.toPath(), ".openh264-").toFile()
                 try {
-                    ant.invokeMethod("get", mapOf("src" to url, "dest" to bzFile.absolutePath))
-                    if (bzFile.exists() && bzFile.length() > 1000) {
-                        ant.invokeMethod("bunzip2", mapOf("src" to bzFile.absolutePath))
-                        file("${libDir}/temp").renameTo(soFile)
-                        println("✓ OpenH264 downloaded for ${abi}")
+                    val bzFile = File(stagingDir, "download.so.bz2")
+                    val unpacked = File(stagingDir, "libopenh264.so")
+                    val connection = URI(url).toURL().openConnection() as HttpsURLConnection
+                    connection.instanceFollowRedirects = false
+                    connection.connectTimeout = 15000
+                    connection.readTimeout = 15000
+                    try {
+                        if (connection.responseCode != HttpURLConnection.HTTP_OK) {
+                            throw GradleException("OpenH264 download returned HTTP ${connection.responseCode}; redirects are not accepted")
+                        }
+                        connection.inputStream.use { input ->
+                            bzFile.outputStream().use { output ->
+                                val buffer = ByteArray(8192)
+                                var total = 0L
+                                while (true) {
+                                    val count = input.read(buffer)
+                                    if (count < 0) break
+                                    total += count
+                                    if (total > archiveBytes) {
+                                        throw GradleException("OpenH264 download exceeds the expected archive size")
+                                    }
+                                    output.write(buffer, 0, count)
+                                }
+                            }
+                        }
+                    } finally {
+                        connection.disconnect()
                     }
-                } catch (e: Exception) {
-                    println("⚠ Download failed: ${e.message}")
+                    verifyInput(bzFile, archiveBytes, archiveSha256)
+                    ant.invokeMethod("bunzip2", mapOf("src" to bzFile.absolutePath, "dest" to unpacked.absolutePath))
+                    verifyInput(unpacked, libraryBytes, librarySha256)
+                    Files.move(
+                        unpacked.toPath(), soFile.toPath(),
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING
+                    )
+                    println("✓ OpenH264 verified for ${abi}")
+                } finally {
+                    if (!stagingDir.deleteRecursively()) {
+                        throw GradleException("Could not clean OpenH264 staging directory: ${stagingDir.name}")
+                    }
                 }
             }
         }
