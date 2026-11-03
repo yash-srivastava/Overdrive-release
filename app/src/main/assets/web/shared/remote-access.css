@@ -17,7 +17,7 @@
 .ra-body { max-width: 1440px; }
 .ra-body .card { margin: 0; overflow: hidden; border: 1px solid var(--outline-variant); box-shadow: none; }
 .ra-body > .card, .ra-body > form, .ra-dashboard { margin-bottom: 16px; }
-.ra-body h2 { font-size: 19px; font-weight: 600; margin: 0; letter-spacing: -.025em; }
+.ra-body h2 { font-size: 19px; font-weight: 600; margin: 0; letter-spacing: normal; }
 .ra-body p { line-height: 1.6; }
 .ra-error { background: var(--error-container); color: var(--on-error-container); padding: 14px 18px; border-radius: var(--radius-md); margin-bottom: 16px; font-size: 13px; }
 .ra-error[hidden] { display: none; }
@@ -74,13 +74,13 @@
 .ra-radar:not([data-nearby-phones="0"]) .ra-orbit-glow, .ra-radar[data-keyfob-near="true"] .ra-orbit-glow { opacity: .8; }
 .ra-radar[data-nearby-phones="0"]:not([data-keyfob-near="true"]) .ra-orbit-pulse { animation: none; opacity: 0; }
 .ra-radar-caption { position: absolute; bottom: 17px; left: 24px; right: 24px; text-align: center; display: flex; flex-direction: column; --ra-column-space: 5px; }
-.ra-radar-caption > span:first-child { font-size: 27px; line-height: 1.2; font-weight: 650; letter-spacing: -.04em; color: var(--on-surface); }
+.ra-radar-caption > span:first-child { font-size: 27px; line-height: 1.2; font-weight: 650; letter-spacing: normal; color: var(--on-surface); }
 .ra-radar-caption > span:last-child { color: var(--on-surface-variant); font-size: 12px; }
 .ra-metric-row { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--outline-variant); padding: 18px 24px; background: var(--surface-container-low); margin-top: auto; }
 .ra-metric-row > div { display: flex; flex-direction: column; --ra-column-space: 5px; padding-left: 18px; border-left: 1px solid var(--outline-variant); }
 .ra-metric-row > div:first-child { padding-left: 0; border-left: 0; }
 .ra-metric-label { color: var(--on-surface-variant); font-size: 10px; }
-.ra-metric-value { color: var(--on-surface); font-size: 29px; line-height: 1.3; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.04em; }
+.ra-metric-value { color: var(--on-surface); font-size: 29px; line-height: 1.3; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: normal; }
 .ra-metric-text { font-size: 23px; line-height: 1.64; }
 .ra-metric-unit { color: var(--outline); font-size: 10px; }
 .ra-phone-card { padding-bottom: 18px; }
