@@ -475,7 +475,7 @@
                         </div>
                     </div>
 
-                    <div class="ai-quick-actions" aria-label="Grounded assistant actions">
+                    <div class="ai-quick-actions" aria-label="Grounded assistant actions" data-i18n-attr="aria-label:genai.aria_quick_actions">
                         <button class="ai-chip" type="button" data-mode="vehicle_history" data-i18n="genai.chip_vehicle_history" data-prompt="Find ">Search vehicle history</button>
                         <button class="ai-chip" type="button" data-mode="current_vehicle" data-i18n="genai.chip_current_vehicle" data-prompt="Explain the current vehicle state and call out anything unusual.">Current vehicle</button>
                         <button class="ai-chip" type="button" data-mode="latest_trip" data-i18n="genai.chip_latest_trip" data-prompt="Explain my latest trip, including efficiency and notable moments.">Explain latest trip</button>
@@ -520,22 +520,22 @@
                             <div class="card-header">
                                 <div class="card-title">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/><circle cx="12" cy="12" r="3"/></svg>
-                                    <span>Routine suggestions</span>
+                                    <span data-i18n="genai.routine_suggestions">Routine suggestions</span>
                                 </div>
                             </div>
                             <div class="card-body">
-                                <div class="ai-local-list" id="genAiRoutineSuggestions">Loading local routine learner…</div>
+                                <div class="ai-local-list" id="genAiRoutineSuggestions"><span data-i18n="genai.routine_loading">Loading local routine learner…</span></div>
                             </div>
                         </div>
                         <div class="card">
                             <div class="card-header">
                                 <div class="card-title">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h6"/></svg>
-                                    <span>Incident evidence packs</span>
+                                    <span data-i18n="genai.packs_title">Incident evidence packs</span>
                                 </div>
                             </div>
                             <div class="card-body">
-                                <div class="ai-local-list" id="genAiIncidentPacks">Create a pack from a recording on the Events page.</div>
+                                <div class="ai-local-list" id="genAiIncidentPacks"><span data-i18n="genai.packs_empty">Create a pack from a recording on the Events page.</span></div>
                             </div>
                         </div>
                     </div>
@@ -710,7 +710,7 @@
                                             <option value="openai">OpenAI</option>
                                             <option value="anthropic">Anthropic</option>
                                             <option value="gemini">Google Gemini</option>
-                                            <option value="openai_compatible">OpenAI-compatible</option>
+                                            <option value="openai_compatible" data-i18n="genai.provider_openai_compatible">OpenAI-compatible</option>
                                         </select>
                                         <label class="md-label" for="genAiProvider" data-i18n="genai.provider">Provider</label>
                                     </div>
@@ -1021,8 +1021,8 @@
                             </ul>
                             <div class="setting-row">
                                 <div class="setting-info">
-                                    <div class="setting-name">Learn my routines locally</div>
-                                    <div class="setting-desc">Opt-in. Stores only bounded climate and sunshade action patterns on this vehicle. No provider call is used, and accepted suggestions save as manual-only automations.</div>
+                                    <div class="setting-name" data-i18n="genai.routine_learn_title">Learn my routines locally</div>
+                                    <div class="setting-desc" data-i18n="genai.routine_learn_desc">Opt-in. Stores only bounded climate and sunshade action patterns on this vehicle. No provider call is used, and accepted suggestions save as manual-only automations.</div>
                                 </div>
                                 <div class="setting-control">
                                     <label class="toggle-switch">
@@ -1038,8 +1038,8 @@
                                 <div class="ai-runtime-item"><span data-i18n="genai.runtime_active">Active requests</span><strong id="genAiActiveRequests">0</strong></div>
                             </div>
                             <div class="ai-actions">
-                                <button class="btn btn-primary" id="genAiRoutineSaveBtn" type="button" onclick="GenAI.saveRoutineSettings()">Save routine setting</button>
-                                <button class="btn btn-secondary" id="genAiRoutineResetBtn" type="button" onclick="GenAI.resetRoutineLearning()">Reset learned patterns</button>
+                                <button class="btn btn-primary" id="genAiRoutineSaveBtn" type="button" onclick="GenAI.saveRoutineSettings()" data-i18n="genai.routine_save_setting">Save routine setting</button>
+                                <button class="btn btn-secondary" id="genAiRoutineResetBtn" type="button" onclick="GenAI.resetRoutineLearning()" data-i18n="genai.routine_reset_btn">Reset learned patterns</button>
                                 <button class="btn btn-danger" type="button" onclick="GenAI.clearCredentials()" data-i18n="genai.clear">Disable and clear API key</button>
                             </div>
                         </div>
@@ -1055,7 +1055,7 @@
     <script src="../shared/auth.js"></script>
     <script src="../shared/core.js?v=24"></script>
     <script src="../shared/update-flow.js?v=3"></script>
-    <script src="../shared/genai.js?v=14"></script>
+    <script src="../shared/genai.js?v=15"></script>
     <script src="../shared/voice-assistant.js?v=9"></script>
     <script>
         function toggleSidebar() {

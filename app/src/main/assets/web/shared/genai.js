@@ -192,10 +192,10 @@
             }
             return fetch(url, options || {}).then(function (response) {
                 return response.json().catch(function () {
-                    return { success: false, error: 'The daemon returned an invalid response.' };
+                    return { success: false, error: t('genai.invalid_daemon') };
                 }).then(function (data) {
                     if (!response.ok || data.success === false) {
-                        var error = new Error(data.error || ('Request failed (' + response.status + ')'));
+                        var error = new Error(data.error || t('genai.request_failed', { status: response.status }));
                         error.code = data.code || '';
                         throw error;
                     }
@@ -211,7 +211,7 @@
             }
             return Promise.resolve(window.confirm(
                 (options.title ? options.title + '\n\n' : '')
-                    + (options.body || 'Continue?')));
+                    + (options.body || t('genai.confirm_continue'))));
         },
 
         requestViaBridge: function (url, options) {
@@ -220,7 +220,7 @@
                 var id = 'genai-' + (++self.nativeRequestId);
                 var timer = window.setTimeout(function () {
                     delete self.nativeRequests[id];
-                    reject(new Error('The on-vehicle request timed out.'));
+                    reject(new Error(t('genai.request_timeout')));
                 }, 135000);
                 self.nativeRequests[id] = {
                     resolve: resolve,
@@ -238,7 +238,7 @@
                 } catch (error) {
                     window.clearTimeout(timer);
                     delete self.nativeRequests[id];
-                    reject(new Error('Could not start the on-vehicle request.'));
+                    reject(new Error(t('genai.request_start_failed')));
                 }
             });
         },
@@ -251,13 +251,13 @@
             var data;
             try { data = JSON.parse(raw || '{}'); }
             catch (error) {
-                pending.reject(new Error('The daemon returned an invalid response.'));
+                pending.reject(new Error(t('genai.invalid_daemon')));
                 return;
             }
             var status = Number(data._status || 200);
             delete data._status;
             if (status < 200 || status >= 300 || data.success === false) {
-                var failure = new Error(data.error || ('Request failed (' + status + ')'));
+                var failure = new Error(data.error || t('genai.request_failed', { status: status }));
                 failure.code = data.code || '';
                 pending.reject(failure);
                 return;
@@ -1318,7 +1318,7 @@
                 var host =
                     document.getElementById('genAiRoutineSuggestions');
                 if (host) host.textContent =
-                    'Routine suggestions are unavailable: ' + error.message;
+                    t('genai.routine_unavailable', { error: error.message });
             });
         },
 
@@ -1328,13 +1328,13 @@
             while (host.firstChild) host.removeChild(host.firstChild);
             if (!status.enabled) {
                 host.textContent =
-                    'Off by default. Enable local routine learning under Privacy.';
+                    t('genai.routine_off');
                 return;
             }
             var suggestions = status.suggestions || [];
             if (!suggestions.length) {
                 host.textContent =
-                    'Learning locally. A suggestion appears after the same action repeats across at least three days.';
+                    t('genai.routine_learning');
                 return;
             }
             for (var i = 0; i < suggestions.length && i < 2; i++) {
@@ -1349,18 +1349,20 @@
             var action = suggestion.action || {};
             var variables = action.variables || {};
             var time = String(suggestion.time || '');
-            var titleText = 'Suggested routine';
+            var titleText = t('genai.routine_suggested');
             if (suggestion.kind === 'climate') {
-                titleText = 'Set cabin to '
-                    + String(variables.temperature == null
-                        ? '' : variables.temperature)
-                    + '°C near ' + time;
+                titleText = t('genai.routine_climate_title', {
+                    temperature: String(variables.temperature == null
+                        ? '' : variables.temperature),
+                    time: time
+                });
             } else if (suggestion.kind === 'sunshade') {
-                titleText = String(variables.payload || 'Adjust')
-                    .replace(/^./, function (letter) {
-                        return letter.toUpperCase();
-                    })
-                    + ' sunshade near ' + time;
+                var payload = String(variables.payload || '');
+                titleText = payload === 'open'
+                    ? t('genai.routine_sunshade_open_title', { time: time })
+                    : (payload === 'close'
+                        ? t('genai.routine_sunshade_close_title', { time: time })
+                        : t('genai.routine_sunshade_title', { time: time }));
             }
             var title = document.createElement('strong');
             title.textContent = suggestion.title || titleText;
@@ -1370,16 +1372,16 @@
             detail.className = 'ai-result-detail';
             detail.textContent = suggestion.detail
                 || suggestion.summary
-                || (String(Number(suggestion.observationCount || 0))
-                    + ' matching actions across '
-                    + String(Number(suggestion.distinctDates || 0))
-                    + ' days.');
+                || t('genai.routine_observations', {
+                    count: String(Number(suggestion.observationCount || 0)),
+                    days: String(Number(suggestion.distinctDates || 0))
+                });
             card.appendChild(detail);
 
             var evidence = document.createElement('div');
             evidence.className = 'ai-draft-safety';
             evidence.textContent = suggestion.evidence
-                || 'Nothing will run automatically. Saving creates a manual-only automation for review.';
+                || t('genai.routine_evidence');
             card.appendChild(evidence);
 
             var controls = document.createElement('div');
@@ -1387,7 +1389,7 @@
             var save = document.createElement('button');
             save.type = 'button';
             save.className = 'btn btn-primary';
-            save.textContent = 'Save for review';
+            save.textContent = t('genai.routine_save_review');
             save.addEventListener('click', function () {
                 self.decideRoutine(suggestion.id, 'save');
             });
@@ -1396,7 +1398,7 @@
             var snooze = document.createElement('button');
             snooze.type = 'button';
             snooze.className = 'btn btn-secondary';
-            snooze.textContent = 'Snooze';
+            snooze.textContent = t('genai.routine_snooze');
             snooze.addEventListener('click', function () {
                 self.decideRoutine(suggestion.id, 'snooze');
             });
@@ -1405,7 +1407,7 @@
             var dismiss = document.createElement('button');
             dismiss.type = 'button';
             dismiss.className = 'btn btn-secondary';
-            dismiss.textContent = 'Not useful';
+            dismiss.textContent = t('genai.routine_not_useful');
             dismiss.addEventListener('click', function () {
                 self.decideRoutine(suggestion.id, 'dismiss');
             });
@@ -1419,10 +1421,10 @@
             if (decision === 'save' && !confirmed) {
                 var confirmSelf = this;
                 this.confirmAction({
-                    title: 'Save suggested routine?',
-                    body: 'OverDrive will save a disabled, manual-only automation for review. It will not run automatically.',
-                    confirmLabel: 'Save for review',
-                    cancelLabel: 'Cancel'
+                    title: t('genai.routine_save_confirm_title'),
+                    body: t('genai.routine_save_confirm_body'),
+                    confirmLabel: t('genai.routine_save_review'),
+                    cancelLabel: t('genai.cancel')
                 }).then(function (accepted) {
                     if (accepted) {
                         confirmSelf.decideRoutine(
@@ -1441,7 +1443,7 @@
                     decision: decision
                 })
             }).then(function (response) {
-                self.toast(response.message || 'Routine preference saved',
+                self.toast(response.message || t('genai.routine_pref_saved'),
                     'success');
             }).catch(function (error) {
                 self.toast(error.message, 'error');
@@ -1459,15 +1461,15 @@
             var self = this;
             this.routineBusy = true;
             this.setButtonBusy(
-                'genAiRoutineSaveBtn', true, 'Saving…');
+                'genAiRoutineSaveBtn', true, t('genai.saving'));
             this.request('/api/genai/routines/config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ enabled: enabled })
             }).then(function (response) {
                 self.toast(response.message ||
-                    (enabled ? 'Routine learning enabled'
-                        : 'Routine learning disabled'), 'success');
+                    (enabled ? t('genai.routine_enabled_toast')
+                        : t('genai.routine_disabled_toast')), 'success');
                 if (self.status) {
                     self.status.routineLearningEnabled = enabled;
                 }
@@ -1477,7 +1479,7 @@
                 self.routineBusy = false;
                 self.setButtonBusy(
                     'genAiRoutineSaveBtn', false,
-                    'Save routine setting');
+                    t('genai.routine_save_setting'));
                 self.loadRoutineStatus();
             });
         },
@@ -1487,10 +1489,10 @@
             if (!confirmed) {
                 var confirmSelf = this;
                 this.confirmAction({
-                    title: 'Reset learned routines?',
-                    body: 'OverDrive will erase learned action patterns. Saved automations will not be deleted.',
-                    confirmLabel: 'Reset patterns',
-                    cancelLabel: 'Cancel',
+                    title: t('genai.routine_reset_confirm_title'),
+                    body: t('genai.routine_reset_confirm_body'),
+                    confirmLabel: t('genai.routine_reset_confirm'),
+                    cancelLabel: t('genai.cancel'),
                     danger: true
                 }).then(function (accepted) {
                     if (accepted) {
@@ -1502,13 +1504,13 @@
             var self = this;
             this.routineBusy = true;
             this.setButtonBusy(
-                'genAiRoutineResetBtn', true, 'Resetting…');
+                'genAiRoutineResetBtn', true, t('genai.routine_resetting'));
             this.request('/api/genai/routines/reset', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: '{}'
             }).then(function (response) {
-                self.toast(response.message || 'Learned patterns reset',
+                self.toast(response.message || t('genai.routine_reset_toast'),
                     'success');
             }).catch(function (error) {
                 self.toast(error.message, 'error');
@@ -1516,7 +1518,7 @@
                 self.routineBusy = false;
                 self.setButtonBusy(
                     'genAiRoutineResetBtn', false,
-                    'Reset learned patterns');
+                    t('genai.routine_reset_btn'));
                 self.loadRoutineStatus();
             });
         },
@@ -1530,7 +1532,7 @@
                     var host =
                         document.getElementById('genAiIncidentPacks');
                     if (host) host.textContent =
-                        'Evidence packs are unavailable: ' + error.message;
+                        t('genai.packs_unavailable', { error: error.message });
                 });
         },
 
@@ -1540,7 +1542,7 @@
             while (host.firstChild) host.removeChild(host.firstChild);
             if (!packs.length) {
                 host.textContent =
-                    'Create a pack from a recording on the Events page.';
+                    t('genai.packs_empty');
                 return;
             }
             for (var i = 0; i < packs.length && i < 5; i++) {
@@ -1550,21 +1552,21 @@
                 var card = document.createElement('div');
                 card.className = 'ai-result-card';
                 var title = document.createElement('strong');
-                title.textContent = pack.title || 'Incident evidence pack';
+                title.textContent = pack.title || t('genai.pack_title');
                 card.appendChild(title);
                 var meta = document.createElement('div');
                 meta.className = 'ai-result-meta';
                 var created = Number(pack.createdAt || 0);
                 meta.textContent = created > 0
                     ? new Date(created).toLocaleString()
-                    : 'Saved on this vehicle';
+                    : t('genai.pack_saved_local');
                 card.appendChild(meta);
                 var controls = document.createElement('div');
                 controls.className = 'ai-result-actions';
                 var download = document.createElement('button');
                 download.type = 'button';
                 download.className = 'btn btn-secondary';
-                download.textContent = 'Download ZIP';
+                download.textContent = t('genai.pack_download');
                 (function (packId) {
                     download.addEventListener('click', function () {
                         window.location.href = '/api/genai/incidents/'
@@ -1575,7 +1577,7 @@
                 var remove = document.createElement('button');
                 remove.type = 'button';
                 remove.className = 'btn btn-secondary';
-                remove.textContent = 'Delete';
+                remove.textContent = t('genai.pack_delete');
                 (function (packId) {
                     remove.addEventListener('click', function () {
                         self.deleteIncidentPack(packId);
@@ -1593,10 +1595,10 @@
             if (!confirmed) {
                 var confirmSelf = this;
                 this.confirmAction({
-                    title: 'Delete evidence pack?',
-                    body: 'This removes the local OverDrive evidence pack. The source recording is not deleted.',
-                    confirmLabel: 'Delete pack',
-                    cancelLabel: 'Cancel',
+                    title: t('genai.pack_delete_confirm_title'),
+                    body: t('genai.pack_delete_confirm_body'),
+                    confirmLabel: t('genai.pack_delete_confirm'),
+                    cancelLabel: t('genai.cancel'),
                     danger: true
                 }).then(function (accepted) {
                     if (accepted) {
@@ -1610,7 +1612,7 @@
                     + encodeURIComponent(packId), {
                 method: 'DELETE'
             }).then(function () {
-                self.toast('Evidence pack deleted', 'success');
+                self.toast(t('genai.pack_deleted'), 'success');
                 self.loadIncidentPacks();
             }).catch(function (error) {
                 self.toast(error.message, 'error');
@@ -1722,8 +1724,8 @@
                 self.selectedMode = 'general';
                 self.messages.push({
                     role: 'assistant',
-                    content: 'I could not search vehicle history: '
-                        + error.message
+                    content: t('genai.history_search_failed',
+                        { error: error.message })
                 });
             }).then(function () {
                 self.busy = false;
@@ -1824,7 +1826,7 @@
                 } else if (message.type === 'error') {
                     completed = true;
                     self.finishChatFailure(
-                        message.error || 'The request failed.',
+                        message.error || t('genai.chat_request_failed'),
                         generation);
                 }
             };
@@ -1839,7 +1841,7 @@
                         messages, mode, requestId, generation);
                 } else {
                     self.finishChatFailure(
-                        'The streaming connection closed before completion.',
+                        t('genai.chat_stream_closed'),
                         generation);
                 }
             };
@@ -1905,7 +1907,7 @@
                 reply.pending = false;
                 if (!reply.content) {
                     reply.content =
-                        'I could not complete that request: ' + reason;
+                        t('genai.could_not_complete', { error: reason });
                 }
             }
             this.streamMessage = null;
@@ -2187,13 +2189,17 @@
             if (type === 'climate_temperature') {
                 var zone = Number(proposal.zone);
                 var zoneName = zone === 1
-                    ? 'driver zone' : (zone === 2
-                        ? 'passenger zone' : 'both zones');
+                    ? t('genai.zone_driver') : (zone === 2
+                        ? t('genai.zone_passenger') : t('genai.zone_both'));
                 detail.textContent = Number(proposal.temperatureC)
                     + ' °C · ' + zoneName;
             } else if (type === 'sunshade') {
-                detail.textContent =
-                    'Sunshade · ' + String(proposal.operation || '');
+                var operation = String(proposal.operation || '');
+                detail.textContent = operation === 'open'
+                    ? t('genai.open_sunshade')
+                    : (operation === 'close'
+                        ? t('genai.close_sunshade')
+                        : t('genai.proposal_sunshade', { operation: operation }));
             } else {
                 detail.textContent =
                     proposal.automationName || t('genai.saved_automation');
@@ -2444,13 +2450,14 @@
 
                 var title = document.createElement('strong');
                 if (kind === 'trip') {
-                    title.textContent = 'Trip';
+                    title.textContent = t('genai.history_trip');
                 } else if (kind === 'charging') {
-                    title.textContent = item.isDc ? 'DC charging session'
-                        : 'Charging session';
+                    title.textContent = item.isDc ? t('genai.history_dc_charging')
+                        : t('genai.history_charging');
                 } else {
                     title.textContent = item.type
-                        ? String(item.type) + ' event' : 'Recording event';
+                        ? t('genai.history_event', { type: String(item.type) })
+                        : t('genai.history_recording_event');
                 }
                 card.appendChild(title);
 
@@ -2459,20 +2466,20 @@
                     if (item.distanceKm != null) {
                         var distance = Number(item.distanceKm);
                         if (isFinite(distance)) {
-                            detailParts.push(distance.toFixed(1) + ' km');
+                            detailParts.push(t('genai.history_km', { value: distance.toFixed(1) }));
                         }
                     }
                     if (item.energyUsedKwh != null) {
                         var tripEnergy = Number(item.energyUsedKwh);
                         if (isFinite(tripEnergy)) {
                             detailParts.push(
-                                tripEnergy.toFixed(1) + ' kWh');
+                                t('genai.history_kwh', { value: tripEnergy.toFixed(1) }));
                         }
                     }
                     if (item.overallScore != null) {
                         var score = Number(item.overallScore);
                         if (isFinite(score)) {
-                            detailParts.push('Score ' + Math.round(score));
+                            detailParts.push(t('genai.history_score', { score: Math.round(score) }));
                         }
                     }
                 } else if (kind === 'charging') {
@@ -2480,14 +2487,14 @@
                         var chargeEnergy = Number(item.energyAdded);
                         if (isFinite(chargeEnergy)) {
                             detailParts.push(
-                                chargeEnergy.toFixed(1) + ' kWh');
+                                t('genai.history_kwh', { value: chargeEnergy.toFixed(1) }));
                         }
                     }
                     if (item.peakPower != null) {
                         var peakPower = Number(item.peakPower);
                         if (isFinite(peakPower)) {
                             detailParts.push(
-                                peakPower.toFixed(1) + ' kW peak');
+                                t('genai.history_kw_peak', { value: peakPower.toFixed(1) }));
                         }
                     }
                     if (item.startSoc != null && item.endSoc != null) {
@@ -2510,7 +2517,7 @@
                         + Number(item.vehicleCount || 0)
                         + Number(item.bikeCount || 0)
                         + Number(item.animalCount || 0);
-                    if (actors > 0) detailParts.push(actors + ' detected');
+                    if (actors > 0) detailParts.push(t('genai.history_detected', { count: actors }));
                 }
                 if (detailParts.length) {
                     var detail = document.createElement('div');
@@ -2555,7 +2562,7 @@
                     var open = document.createElement('button');
                     open.type = 'button';
                     open.className = 'btn btn-secondary';
-                    open.textContent = 'Open details';
+                    open.textContent = t('genai.history_open_details');
                     (function (target) {
                         open.addEventListener('click', function () {
                             window.location.href = target;
@@ -2570,7 +2577,7 @@
                 var note = document.createElement('div');
                 note.className = 'ai-result-meta';
                 note.textContent =
-                    'Results were capped; narrow the time range for an exact search.';
+                    t('genai.history_capped');
                 wrap.appendChild(note);
             }
             var warnings = meta && meta.warnings
@@ -2596,7 +2603,7 @@
                     var card = document.createElement('div');
                     card.className = 'ai-result-card';
                     var title = document.createElement('strong');
-                    title.textContent = item.name || 'Community automation';
+                    title.textContent = item.name || t('genai.community_automation');
                     card.appendChild(title);
                     if (item.description) {
                         var description = document.createElement('div');
@@ -2609,7 +2616,7 @@
                     var rating = Number(item.ratingAvg || 0);
                     meta.textContent = (isFinite(rating) && rating > 0
                         ? rating.toFixed(1) + '★ · ' : '')
-                        + (item.downloadCount || 0) + ' downloads';
+                        + t('genai.community_downloads', { count: item.downloadCount || 0 });
                     card.appendChild(meta);
                     var controls = document.createElement('div');
                     controls.className = 'ai-result-actions';
@@ -2697,16 +2704,16 @@
                     : usage.totalTokenCount);
             var parts = [];
             if (isFinite(input) && input >= 0) {
-                parts.push('Input ' + Math.round(input));
+                parts.push(t('genai.usage_input', { count: Math.round(input) }));
             }
             if (isFinite(output) && output >= 0) {
-                parts.push('Output ' + Math.round(output));
+                parts.push(t('genai.usage_output', { count: Math.round(output) }));
             }
             if (!parts.length && isFinite(total) && total >= 0) {
-                parts.push('Total ' + Math.round(total));
+                parts.push(t('genai.usage_total', { count: Math.round(total) }));
             }
             return parts.length
-                ? parts.join(' · ') + ' tokens' : '';
+                ? t('genai.usage_tokens', { parts: parts.join(' · ') }) : '';
         },
 
         setButtonBusy: function (id, busy, text) {
@@ -2724,7 +2731,7 @@
         providerLabel: function (provider) {
             if (provider === 'anthropic') return 'Anthropic';
             if (provider === 'gemini') return 'Google Gemini';
-            if (provider === 'openai_compatible') return 'OpenAI-compatible';
+            if (provider === 'openai_compatible') return t('genai.provider_openai_compatible');
             return 'OpenAI';
         },
 
