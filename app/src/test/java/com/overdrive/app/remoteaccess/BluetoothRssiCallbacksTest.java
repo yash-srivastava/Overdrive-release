@@ -391,28 +391,49 @@ public class BluetoothRssiCallbacksTest {
         }
     }
 
+    @Test public void blockedOnDistinguishesTheExpectedMonitor() throws Exception {
+        Object expected = new Object();
+        Object unrelated = new Object();
+        CallbackThread callback = new CallbackThread(() -> {
+            synchronized (expected) { /* Wait for the test to release this monitor. */ }
+        });
+        synchronized (expected) {
+            callback.thread.start();
+            assertTrue("The monitor observer must work on the supported JVM",
+                    blockedOn(callback.thread, expected));
+            assertFalse("A different monitor must not satisfy the lock assertion",
+                    blockedOn(callback.thread, unrelated));
+        }
+        callback.join();
+        assertFalse(blockedOn(callback.thread, expected));
+    }
+
     private static boolean blockedOn(Thread thread, Object lock) {
         try {
             Class<?> mfClass = Class.forName("java.lang.management.ManagementFactory");
             Object threads = mfClass.getMethod("getThreadMXBean").invoke(null);
-            Method getThreadInfo = threads.getClass().getMethod("getThreadInfo", long.class);
+            // Resolve through exported management types, not the JVM's internal bean class.
+            Method getThreadInfo = Class.forName("java.lang.management.ThreadMXBean")
+                    .getMethod("getThreadInfo", long.class);
+            Class<?> threadInfo = Class.forName("java.lang.management.ThreadInfo");
+            Method getLockInfo = threadInfo.getMethod("getLockInfo");
+            Method getThreadState = threadInfo.getMethod("getThreadState");
+            Method getIdentityHashCode = Class.forName("java.lang.management.LockInfo")
+                    .getMethod("getIdentityHashCode");
             long deadline = System.nanoTime() + 2_000_000_000L;
             do {
                 Object info = getThreadInfo.invoke(threads, thread.getId());
                 if (info == null) return false;
-                Method getLockInfo = info.getClass().getMethod("getLockInfo");
                 Object waiting = getLockInfo.invoke(info);
-                Method getThreadState = info.getClass().getMethod("getThreadState");
                 Thread.State state = (Thread.State) getThreadState.invoke(info);
                 if (state == Thread.State.BLOCKED && waiting != null) {
-                    Method getIdentityHashCode = waiting.getClass().getMethod("getIdentityHashCode");
                     int hash = (int) getIdentityHashCode.invoke(waiting);
                     if (hash == System.identityHashCode(lock)) return true;
                 }
                 Thread.yield();
             } while (System.nanoTime() < deadline);
-        } catch (Throwable t) {
-            return false;
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError("Could not inspect the callback monitor", error);
         }
         return false;
     }
