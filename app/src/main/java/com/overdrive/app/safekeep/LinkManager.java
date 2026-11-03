@@ -10,9 +10,11 @@ import java.net.URLEncoder;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -53,6 +55,9 @@ final class LinkManager {
         OAuthApps.App app;
         JSONObject params = new JSONObject();
         volatile ScheduledFuture<?> poller;
+        // Guarded by stateLock; a claimed commit is irrevocable, but stays publicly pending.
+        boolean commitClaimed;
+        boolean pasteInFlight;
 
         Session(String type) {
             this.type = type;
@@ -74,7 +79,12 @@ final class LinkManager {
     }
 
     private final Engine engine;
-    private final ConcurrentHashMap<String, Session> sessions = new ConcurrentHashMap<>();
+    // Linearizes cancellation against commit admission, never against storage or network I/O.
+    // In particular cancelAll is called under SafeKeep's lifecycle monitor and must not wait
+    // for a commit that can itself call SafeKeepAdmin -> SafeKeep.converge.
+    private final Object stateLock = new Object();
+    private final Map<String, Session> sessions = new HashMap<>();
+    private boolean closed;
 
     LinkManager(Engine engine) {
         this.engine = engine;
@@ -91,6 +101,9 @@ final class LinkManager {
      */
     JSONObject start(String type, JSONObject params, long deadlineMs) throws Exception {
         pruneSessions();
+        synchronized (stateLock) {
+            if (closed) throw new IllegalStateException("disabled");
+        }
         Session s = new Session(type);
         s.params = params == null ? new JSONObject() : params;
         reuseOwnApp(s);
@@ -116,10 +129,14 @@ final class LinkManager {
             default:
                 throw new IllegalStateException("unsupported_type");
         }
-        if (System.currentTimeMillis() > deadlineMs) throw new IllegalStateException("timeout");
-        sessions.put(s.id, s);
-        if (!"dropbox".equals(type)) schedulePoll(s);
-        return s.json();
+        synchronized (stateLock) {
+            // A start can complete its HTTP request after Engine.stop has closed this manager.
+            if (closed) throw new IllegalStateException("disabled");
+            if (System.currentTimeMillis() > deadlineMs) throw new IllegalStateException("timeout");
+            sessions.put(s.id, s);
+            if (!"dropbox".equals(type)) schedulePollLocked(s);
+            return s.json();
+        }
     }
 
     /** Reconnect keeps the user's own app registration: no need to paste the client ID again. */
@@ -135,38 +152,65 @@ final class LinkManager {
     }
 
     JSONObject status(String id) {
-        Session s = sessions.get(id);
-        if (s == null) {
-            JSONObject o = new JSONObject();
-            try {
-                o.put("linkId", id).put("state", "expired");
-            } catch (Exception ignored) {
+        synchronized (stateLock) {
+            Session s = sessions.get(id);
+            if (s == null) {
+                JSONObject o = new JSONObject();
+                try {
+                    o.put("linkId", id).put("state", "expired");
+                } catch (Exception ignored) {
+                }
+                return o;
             }
-            return o;
+            if (!s.commitClaimed && "pending".equals(s.state) && System.currentTimeMillis() > s.expiresAt) finishLocked(s, "expired", "code expired");
+            return s.json();
         }
-        if ("pending".equals(s.state) && System.currentTimeMillis() > s.expiresAt) finish(s, "expired", "code expired");
-        return s.json();
     }
 
     String qrText(String id) {
-        Session s = sessions.get(id);
-        return s == null ? null : (s.qrUrl != null ? s.qrUrl : s.verifyUrl);
+        synchronized (stateLock) {
+            Session s = sessions.get(id);
+            return s == null ? null : (s.qrUrl != null ? s.qrUrl : s.verifyUrl);
+        }
     }
 
-    void cancel(String id) {
-        Session s = sessions.remove(id);
-        if (s != null && s.poller != null) s.poller.cancel(false);
+    /** False means commit already won: callers must not report successful cancellation. */
+    boolean cancel(String id) {
+        synchronized (stateLock) {
+            Session s = sessions.get(id);
+            if (s == null) return true; // Idempotent cancellation of absent/revoked sessions.
+            if (s.commitClaimed || "done".equals(s.state)) return false;
+            sessions.remove(id);
+            finishLocked(s, "expired", null);
+            return true;
+        }
     }
 
     void cancelAll() {
-        for (Session s : sessions.values()) if (s.poller != null) s.poller.cancel(false);
-        sessions.clear();
+        synchronized (stateLock) {
+            closed = true;
+            Iterator<Session> it = sessions.values().iterator();
+            while (it.hasNext()) {
+                Session s = it.next();
+                if (s.commitClaimed || "done".equals(s.state)) continue;
+                finishLocked(s, "expired", null);
+                it.remove();
+            }
+            // Already accepted commits finish outside this lock; shutdown never waits for them.
+        }
     }
 
     private void pruneSessions() {
-        long now = System.currentTimeMillis();
-        for (Session s : sessions.values()) {
-            if (now > s.expiresAt + 10 * 60_000L) cancel(s.id);
+        synchronized (stateLock) {
+            long now = System.currentTimeMillis();
+            Iterator<Session> it = sessions.values().iterator();
+            while (it.hasNext()) {
+                Session s = it.next();
+                if (!s.commitClaimed && now > s.expiresAt + 10 * 60_000L) {
+                    if ("pending".equals(s.state)) finishLocked(s, "expired", "code expired");
+                    it.remove();
+                }
+            }
         }
     }
 
@@ -206,15 +250,30 @@ final class LinkManager {
 
     /** Dropbox: the user pastes the code shown by dropbox.com. */
     JSONObject finishPaste(String id, String code) throws Exception {
-        Session s = sessions.get(id);
-        if (s == null || !"dropbox".equals(s.type)) throw new IllegalStateException("link_expired");
         if (code == null || code.trim().isEmpty()) throw new IllegalStateException("code_required");
-        JSONObject j = postForm(http(s.params), "https://api.dropboxapi.com/oauth2/token",
-                new FormBody.Builder().add("code", code.trim()).add("grant_type", "authorization_code")
-                        .add("client_id", s.app.clientId).add("code_verifier", s.pkceVerifier).build());
-        JSONObject secrets = tokens(j, s);
-        created(s, "Dropbox", new JSONObject(), secrets);
-        return s.json();
+        Session s;
+        String verifier;
+        synchronized (stateLock) {
+            s = sessions.get(id);
+            if (s == null || !"dropbox".equals(s.type) || closed || !"pending".equals(s.state)) throw new IllegalStateException("link_expired");
+            if (s.commitClaimed || s.pasteInFlight) throw new IllegalStateException("link_in_progress");
+            if (System.currentTimeMillis() > s.expiresAt) {
+                finishLocked(s, "expired", "code expired");
+                throw new IllegalStateException("link_expired");
+            }
+            s.pasteInFlight = true;
+            verifier = s.pkceVerifier;
+        }
+        try {
+            JSONObject j = postForm(http(s.params), "https://api.dropboxapi.com/oauth2/token",
+                    new FormBody.Builder().add("code", code.trim()).add("grant_type", "authorization_code")
+                            .add("client_id", s.app.clientId).add("code_verifier", verifier).build());
+            JSONObject secrets = tokens(j, s);
+            created(s, "Dropbox", new JSONObject(), secrets);
+            synchronized (stateLock) { return s.json(); }
+        } finally {
+            synchronized (stateLock) { s.pasteInFlight = false; }
+        }
     }
 
     private void startNextcloud(Session s) throws Exception {
@@ -240,7 +299,9 @@ final class LinkManager {
         s.intervalMs = 2000;
     }
 
-    private void schedulePoll(Session s) {
+    /** Called only under stateLock, including slow_down rescheduling. */
+    private void schedulePollLocked(Session s) {
+        if (!pendingLocked(s)) return;
         try {
             s.poller = engine.aux.scheduleWithFixedDelay(() -> {
                 try {
@@ -250,20 +311,27 @@ final class LinkManager {
                 }
             }, s.intervalMs, s.intervalMs, TimeUnit.MILLISECONDS);
         } catch (Exception e) {
-            finish(s, "error", "could not start polling");
+            finishLocked(s, "error", "could not start polling");
         }
     }
 
     private void poll(Session s) throws Exception {
-        if (!"pending".equals(s.state)) return;
-        if (System.currentTimeMillis() > s.expiresAt) {
-            finish(s, "expired", "code expired");
-            return;
+        String deviceCode;
+        String pollToken;
+        synchronized (stateLock) {
+            if (!pendingLocked(s)) return;
+            if (System.currentTimeMillis() > s.expiresAt) {
+                finishLocked(s, "expired", "code expired");
+                return;
+            }
+            // Cancellation can clear the session while an already-started HTTP call completes.
+            deviceCode = s.deviceCode;
+            pollToken = s.pollToken;
         }
         OkHttpClient http = http(s.params);
         if ("nextcloud".equals(s.type)) {
             Request req = new Request.Builder().url(s.pollEndpoint)
-                    .post(new FormBody.Builder().add("token", s.pollToken).build()).build();
+                    .post(new FormBody.Builder().add("token", pollToken).build()).build();
             try (Response r = http.newCall(req).execute()) {
                 if (r.code() == 404) return;
                 String body = r.body() == null ? "" : r.body().string();
@@ -289,7 +357,7 @@ final class LinkManager {
         FormBody.Builder fb = new FormBody.Builder()
                 .add("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
                 .add("client_id", s.app.clientId)
-                .add("device_code", s.deviceCode);
+                .add("device_code", deviceCode);
         if ("gdrive".equals(s.type)) fb.add("client_secret", s.app.clientSecret);
         Request req = new Request.Builder().url(tokenUrl).post(fb.build()).build();
         try (Response r = http.newCall(req).execute()) {
@@ -310,9 +378,12 @@ final class LinkManager {
                 case "authorization_pending":
                     return;
                 case "slow_down":
-                    s.intervalMs += 5000;
-                    if (s.poller != null) s.poller.cancel(false);
-                    schedulePoll(s);
+                    synchronized (stateLock) {
+                        if (!pendingLocked(s)) return;
+                        s.intervalMs += 5000;
+                        if (s.poller != null) s.poller.cancel(false);
+                        schedulePollLocked(s);
+                    }
                     return;
                 case "access_denied":
                 case "authorization_declined":
@@ -349,38 +420,77 @@ final class LinkManager {
 
     /** Persists the new destination (secrets first, fail-closed) and wires default routes. */
     private void created(Session s, String name, JSONObject params, JSONObject secrets) throws Exception {
-        String relink = s.params.optString("relinkId", "");
-        if (!relink.isEmpty() && engine.cfg.destination(relink) != null) {
-            // Reconnect: new tokens for the existing destination; its queue and history stay.
-            if (!SafeKeepSecrets.put(relink, secrets)) {
-                finish(s, "error", "could not store credentials securely");
+        if (!claimCommit(s)) return;
+        try {
+            String relink = s.params.optString("relinkId", "");
+            if (!relink.isEmpty() && engine.cfg.destination(relink) != null) {
+                // Reconnect: new tokens for the existing destination; its queue and history stay.
+                if (!SafeKeepSecrets.put(relink, secrets)) {
+                    finishCommit(s, "error", "could not store credentials securely");
+                    return;
+                }
+                if (params.length() > 0) SafeKeepAdmin.updateDestination(relink, new JSONObject().put("params", params));
+                engine.runCtl(() -> engine.setDestState(relink, "ok", null, 0));
+                s.destId = relink;
+                finishCommit(s, "done", null);
                 return;
             }
-            if (params.length() > 0) SafeKeepAdmin.updateDestination(relink, new JSONObject().put("params", params));
-            engine.runCtl(() -> engine.setDestState(relink, "ok", null, 0));
-            s.destId = relink;
-            finish(s, "done", null);
-            return;
+            String destId = s.type + "-" + UUID.randomUUID().toString().substring(0, 6);
+            if (!SafeKeepSecrets.put(destId, secrets)) {
+                finishCommit(s, "error", "could not store credentials securely");
+                return;
+            }
+            String proxy = s.params.optString("proxyMode", "auto");
+            boolean ok = SafeKeepAdmin.addDestination(destId, s.type, s.params.optString("name", name), params, proxy);
+            if (!ok) {
+                SafeKeepSecrets.remove(destId);
+                finishCommit(s, "error", "could not save destination");
+                return;
+            }
+            s.destId = destId;
+            finishCommit(s, "done", null);
+        } finally {
+            // Also publish a terminal state for an unexpected storage/lifecycle exception.
+            synchronized (stateLock) {
+                if (s.commitClaimed) finishLocked(s, "error", "could not save destination");
+            }
         }
-        String destId = s.type + "-" + UUID.randomUUID().toString().substring(0, 6);
-        if (!SafeKeepSecrets.put(destId, secrets)) {
-            finish(s, "error", "could not store credentials securely");
-            return;
+    }
+
+    private boolean pendingLocked(Session s) {
+        return !closed && sessions.get(s.id) == s && "pending".equals(s.state) && !s.commitClaimed;
+    }
+
+    /** Cancellation and the first persistence operation have one admission decision. */
+    private boolean claimCommit(Session s) {
+        synchronized (stateLock) {
+            if (!pendingLocked(s)) return false;
+            if (System.currentTimeMillis() > s.expiresAt) {
+                finishLocked(s, "expired", "code expired");
+                return false;
+            }
+            s.commitClaimed = true;
+            if (s.poller != null) s.poller.cancel(false);
+            return true;
         }
-        String proxy = s.params.optString("proxyMode", "auto");
-        boolean ok = SafeKeepAdmin.addDestination(destId, s.type, s.params.optString("name", name), params, proxy);
-        if (!ok) {
-            SafeKeepSecrets.remove(destId);
-            finish(s, "error", "could not save destination");
-            return;
+    }
+
+    private void finishCommit(Session s, String state, String error) {
+        synchronized (stateLock) {
+            if (s.commitClaimed) finishLocked(s, state, error);
         }
-        s.destId = destId;
-        finish(s, "done", null);
     }
 
     private void finish(Session s, String state, String error) {
+        synchronized (stateLock) {
+            if (pendingLocked(s)) finishLocked(s, state, error);
+        }
+    }
+
+    private void finishLocked(Session s, String state, String error) {
         s.state = state;
         s.error = error;
+        s.commitClaimed = false;
         if (s.poller != null) s.poller.cancel(false);
         s.deviceCode = null;
         s.pkceVerifier = null;

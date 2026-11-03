@@ -778,18 +778,44 @@ window.SK = (function () {
         var link = null;
         var timer = null;
         var closed = false;
+        var cancelling = false;
+        var polling = false;
         var origClose = m.close;
-        m.close = function () {
+        function closeNow() {
             closed = true;
             if (timer) clearTimeout(timer);
-            if (link && link.state === 'pending') api('POST', '/api/safekeep/link/cancel', { id: link.linkId });
             origClose();
+        }
+        function cancelLink(id) {
+            return api('POST', '/api/safekeep/link/cancel', { id: id }).then(function (r) {
+                if (!r.success) toast(linkError(r), 'warning');
+                return r;
+            }, function () {
+                toast(t('safekeep.err_cancel', 'Could not confirm cancellation. Check the sign-in status.'), 'warning');
+                return { success: false };
+            });
+        }
+        m.close = function () {
+            if (closed || cancelling) return;
+            if (link && link.state === 'pending') {
+                cancelling = true;
+                cancelLink(link.linkId).then(function (r) {
+                    cancelling = false;
+                    if (r.success) closeNow();
+                    // A claimed commit cannot be revoked: retain the modal and its status poll.
+                    else poll(); // Paste mode also needs a status loop after a lost finish response.
+                });
+                return;
+            }
+            closeNow();
         };
         m.setActions([{ label: t('common.cancel', 'Cancel'), onClick: function (mm) { mm.close(); } }]);
         api('POST', '/api/safekeep/link/start', { type: type, params: params }).then(function (r) {
             // Cancelled while starting: stop the sign-in the daemon just opened, and never poll it.
             if (closed) {
-                if (r && r.success && r.linkId) api('POST', '/api/safekeep/link/cancel', { id: r.linkId });
+                if (r && r.success && r.linkId) cancelLink(r.linkId).then(function (c) {
+                    if (!c.success) load(); // A late accepted commit may appear in storage.
+                });
                 return;
             }
             if (!r.success) {
@@ -821,9 +847,15 @@ window.SK = (function () {
                         label: t('safekeep.connect', 'Connect'), cls: 'btn-primary', onClick: function (mm, btn) {
                             btn.disabled = true;
                             api('POST', '/api/safekeep/link/finish', { id: r.linkId, code: val('skPasteCode') }).then(function (f) {
+                                if (closed || link.state !== 'pending') return;
                                 btn.disabled = false;
                                 if (f.success) { link.state = 'done'; linked(mm, f.destId); }
-                                else toast(linkError(f), 'error');
+                                else { toast(linkError(f), 'error'); poll(); }
+                            }, function () {
+                                if (closed || link.state !== 'pending') return;
+                                btn.disabled = false;
+                                toast(t('safekeep.err_link_status', 'Could not confirm sign-in. Checking its status.'), 'warning');
+                                poll();
                             });
                         }
                     }
@@ -833,16 +865,24 @@ window.SK = (function () {
             }
         });
         function poll() {
-            if (closed) return;
+            if (closed || timer || polling || !link || link.state !== 'pending') return;
             timer = setTimeout(function () {
-                if (closed) return;
+                timer = null;
+                if (closed || link.state !== 'pending') return;
+                polling = true;
                 api('GET', '/api/safekeep/link/status?id=' + encodeURIComponent(link.linkId)).then(function (s) {
+                    polling = false;
+                    if (closed || link.state !== 'pending') return;
                     link.state = s.state;
                     if (s.state === 'done') return linked(m, s.destId);
                     if (s.state === 'pending') return poll();
                     m.body.innerHTML = '<p class="sk-queue-err">' + esc(s.state === 'expired' ? t('safekeep.code_expired', 'The code expired. Try again.') : linkError(s)) + '</p>';
                     m.setActions([{ label: t('common.close', 'Close'), onClick: function (mm) { mm.close(); } }]);
-                }, function () { poll(); });
+                }, function () {
+                    polling = false;
+                    if (closed || link.state !== 'pending') return;
+                    poll();
+                });
             }, 3000);
         }
     }
@@ -851,6 +891,8 @@ window.SK = (function () {
         var e = (r && (r.error || r.message)) || '';
         if (e === 'oauth_app_missing') return t('safekeep.err_app_missing', 'No sign-in app is configured for this provider.');
         if (e === 'access_denied') return t('safekeep.err_denied', 'Access was declined.');
+        if (e === 'link_commit_started') return t('safekeep.err_cancel_late', 'Sign-in is already being saved. Check its status before removing the storage.');
+        if (e === 'link_in_progress') return t('safekeep.err_link_busy', 'Sign-in is already in progress.');
         if (e === 'server_url_required') return t('safekeep.err_server', 'Enter your server address (https://…).');
         if (e.indexOf('provider_error:') === 0) return e.substring(15);
         return e || t('safekeep.err_generic', 'Something went wrong');
