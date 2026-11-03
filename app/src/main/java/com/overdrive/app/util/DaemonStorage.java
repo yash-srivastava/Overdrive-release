@@ -20,7 +20,7 @@ package com.overdrive.app.util;
 public final class DaemonStorage {
 
     /** Legacy, shell-writable on DiLink 3/4. */
-    public static final String LEGACY_BASE = "/data/local/tmp";
+    public static final String LEGACY_BASE = ScratchRoot.LEGACY_DIR;
 
     /**
      * The shell user's own device-encrypted data directory. Labelled
