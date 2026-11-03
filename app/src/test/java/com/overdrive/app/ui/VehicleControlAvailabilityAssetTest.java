@@ -19,12 +19,18 @@ public class VehicleControlAvailabilityAssetTest {
         String html = readRepositoryFile("app/src/main/assets/web/local/vehicle-control.html");
         String script = readRepositoryFile("app/src/main/assets/web/shared/vehicle-control.js");
 
-        assertTrue(html.contains("<span id=\"lockStatus\">NO DATA</span>"));
-        assertTrue(html.contains("<span id=\"cloudStatusText\">Checking...</span>"));
-        assertFalse(html.contains("id=\"lockStatus\" data-i18n="));
-        assertFalse(html.contains("id=\"cloudStatusText\" data-i18n="));
-        assertTrue(script.contains("self.updateCloudIndicator();"));
-        assertTrue(script.contains("self.updateCloudControlAvailability();"));
+        assertTrue(html.contains("<span id=\"lockStatus\""
+                + " data-i18n=\"vehicle.tyre_no_data\">NO DATA</span>"));
+        assertTrue(html.contains("<span id=\"cloudStatusText\""
+                + " data-i18n=\"vehicle.checking\">Checking...</span>"));
+        int listenerStart = script.indexOf("BYD.i18n.onChange(function()");
+        int listenerEnd = script.indexOf("if (this.liteMode)", listenerStart);
+        assertTrue("locale callback must be registered before boot", listenerStart >= 0);
+        assertTrue(listenerEnd > listenerStart);
+        String listener = script.substring(listenerStart, listenerEnd);
+        assertTrue(listener.contains("self.updateHUD();"));
+        assertTrue(listener.contains("self.updateCloudIndicator();"));
+        assertTrue(listener.contains("self.updateCloudControlAvailability();"));
         assertTrue(script.contains("cloudState = 'unavailable'"));
         assertTrue(script.contains("startCloudStatusSync"));
     }
