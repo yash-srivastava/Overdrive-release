@@ -23,7 +23,7 @@
 
         <main class="main-content">
             <div class="mobile-header" id="mobileHeader">
-                <button class="menu-toggle" onclick="toggleSidebar()" aria-label="Open menu">
+                <button class="menu-toggle" onclick="toggleSidebar()" aria-label="Open menu" data-i18n-attr="aria-label:dashboard.aria_open_menu">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
                     </svg>
@@ -245,7 +245,7 @@
                                 <span class="dash-card-kicker" data-i18n="dashboard.kicker_commands">Commands</span>
                                 <h2 data-i18n="dashboard.card_commands">Quick controls</h2>
                             </div>
-                            <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1">
+                            <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1" data-i18n-attr="aria-label:dashboard.drag_to_reorder">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>
                             </button>
                         </div>
@@ -325,7 +325,7 @@
                                 <span class="dash-card-kicker" data-i18n="charge.kicker">Energy</span>
                                 <h2 data-i18n="charge.card_title">Charging</h2>
                             </div>
-                            <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1">
+                            <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1" data-i18n-attr="aria-label:dashboard.drag_to_reorder">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>
                             </button>
                         </div>
@@ -357,7 +357,7 @@
                                 <span class="dash-card-kicker" data-i18n="dashboard.kicker_position">Position</span>
                                 <h2 data-i18n="dashboard.card_location">Vehicle location</h2>
                             </div>
-                            <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1">
+                            <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1" data-i18n-attr="aria-label:dashboard.drag_to_reorder">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>
                             </button>
                         </div>
@@ -378,7 +378,7 @@
                                 <span class="dash-card-kicker" data-i18n="dashboard.kicker_vehicle">Vehicle</span>
                                 <h2 data-i18n="dashboard.card_info">Main info</h2>
                             </div>
-                            <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1">
+                            <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1" data-i18n-attr="aria-label:dashboard.drag_to_reorder">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>
                             </button>
                         </div>
@@ -396,12 +396,12 @@
                                 <!-- Value = SSID / Mobile Data / Ethernet; small = IPv4 when known -->
                                 <div class="dash-metric"><span data-i18n="dashboard.metric_network"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/></svg>Network</span><strong id="dashNetwork">--</strong><small id="dashNetworkIp" style="display:none"></small></div>
                                 <div class="dash-metric dash-bluetooth-metric" id="dashBluetoothMetric" data-state="unknown">
-                                    <span><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7l10 10-5 4V3l5 4L7 17"/></svg>Bluetooth</span>
+                                    <span data-i18n="dashboard.metric_bluetooth"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7l10 10-5 4V3l5 4L7 17"/></svg>Bluetooth</span>
                                     <strong class="dash-radio-value" id="dashBluetoothValue" role="status" aria-live="polite" aria-label="Vehicle Bluetooth: Unknown">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 7l10 10-5 4V3l5 4L7 17"/></svg>
-                                        <span id="dashBluetooth">Unknown</span>
+                                        <span id="dashBluetooth"><span data-i18n="common.unknown">Unknown</span></span>
                                     </strong>
-                                    <small id="dashBluetoothDetail">Vehicle radio</small>
+                                    <small id="dashBluetoothDetail"><span data-i18n="dashboard.bluetooth_detail_initial">Vehicle radio</span></small>
                                 </div>
                             </div>
                             <div class="dash-metric" id="dashLockMetric"><span data-i18n="dashboard.metric_lock"><svg class="dash-metric-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Lock</span><strong id="dashLock">--</strong></div>
@@ -444,6 +444,7 @@
             padding: 20px 24px;
             padding-bottom: calc(32px + var(--safe-bottom));
         }
+        [dir="rtl"] .dashboard-page-body { margin-left: auto; margin-right: 0; }
 
         /* Page title above the bento (mock top bar). */
         .dash-hero-copy {
@@ -3935,11 +3936,21 @@
                 var value = document.getElementById('dashBluetoothValue');
                 var label = document.getElementById('dashBluetooth');
                 var detail = document.getElementById('dashBluetoothDetail');
+                function btText(key, fallback, vars) {
+                    var v = (window.BYD && BYD.i18n) ? BYD.i18n.t(key, vars) : null;
+                    if (v && v !== key) return v;
+                    return fallback.replace(/\{(\w+)\}/g, function (m, k) {
+                        return vars && vars[k] != null ? String(vars[k]) : m;
+                    });
+                }
                 if (metric) {
                     metric.setAttribute('data-state', radio.state);
-                    metric.title = 'Vehicle Bluetooth: ' + radio.label + '. ' + radio.detail;
+                    metric.title = btText('dashboard.bluetooth_title',
+                        'Vehicle Bluetooth: {state}. {detail}',
+                        { state: radio.label, detail: radio.detail });
                 }
-                if (value) value.setAttribute('aria-label', 'Vehicle Bluetooth: ' + radio.label);
+                if (value) value.setAttribute('aria-label', btText('dashboard.bluetooth_aria',
+                    'Vehicle Bluetooth: {state}', { state: radio.label }));
                 if (label) label.textContent = radio.label;
                 if (detail) detail.textContent = radio.detail;
             },

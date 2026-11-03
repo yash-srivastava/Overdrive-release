@@ -236,6 +236,7 @@
         }
         .notif-toggle.inactive.on { background: var(--well-2); box-shadow: inset 0 0 0 2px var(--outline); }
         .notif-toggle.inactive.on::after { top: 8px; left: 8px; width: 16px; height: 16px; background: var(--outline); }
+        [dir="rtl"] .notif-toggle.inactive.on::after { left: auto; right: 8px; }
         /* Pill buttons: tonal by default, filled primary for the main action. */
         .notif-btn {
             display: inline-flex; align-items: center; justify-content: center;
@@ -1045,7 +1046,7 @@
                                     <span class="nl-fchip-label" id="nlSevChipLabel" data-i18n="notiflog.filter_severity">Severity</span>
                                     <svg class="nl-fchip-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
                                 </button>
-                                <button class="nl-fchip nl-fchip-reset" id="nlResetChip" onclick="NOTIFLOG.resetFilters()" style="display:none;" title="Reset filters" aria-label="Reset filters">
+                                <button class="nl-fchip nl-fchip-reset" id="nlResetChip" onclick="NOTIFLOG.resetFilters()" style="display:none;" title="Reset filters" aria-label="Reset filters" data-i18n-attr="title:notiflog.reset_filters;aria-label:notiflog.reset_filters">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.36 2.64L3 8"/><path d="M3 3v5h5"/></svg>
                                 </button>
                             </div>
@@ -1054,10 +1055,10 @@
                             <div class="nl-header">
                                 <span class="nl-count" id="nlCount" data-i18n="notiflog.empty">No notifications yet</span>
                                 <div class="nl-actions">
-                                    <button class="nl-icon-btn" id="nlSelectToggle" onclick="NOTIFLOG.toggleSelectMode()" title="Select" aria-label="Select">
+                                    <button class="nl-icon-btn" id="nlSelectToggle" onclick="NOTIFLOG.toggleSelectMode()" title="Select" aria-label="Select" data-i18n-attr="title:notiflog.select;aria-label:notiflog.select">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
                                     </button>
-                                    <button class="nl-icon-btn danger" id="nlClearAllBtn" onclick="NOTIFLOG.clearAll()" title="Clear all" aria-label="Clear all">
+                                    <button class="nl-icon-btn danger" id="nlClearAllBtn" onclick="NOTIFLOG.clearAll()" title="Clear all" aria-label="Clear all" data-i18n-attr="title:notiflog.clear_all;aria-label:notiflog.clear_all">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                                     </button>
                                 </div>
@@ -1096,7 +1097,7 @@
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
                                     <span data-i18n="notiflog.prev">Prev</span>
                                 </button>
-                                <span class="pagination-info" id="nlPageInfo">Page 1 of 1</span>
+                                <span class="pagination-info" id="nlPageInfo"><span data-i18n="notiflog.page_initial">Page 1 of 1</span></span>
                                 <button class="pagination-btn next" id="nlNextBtn" onclick="NOTIFLOG.nextPage()" disabled>
                                     <span data-i18n="notiflog.next">Next</span>
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
@@ -1184,7 +1185,7 @@
                                     <div class="notif-row-label" data-i18n="notif.tyre_unit">Display unit</div>
                                     <div class="notif-row-note setting-desc" data-i18n="notif.tyre_unit_note">How pressure readings are shown across the dashboard and in alerts. Limits below are always set in kPa.</div>
                                 </div>
-                                <div class="notif-seg notif-seg-compact" id="tyreUnitSeg" role="radiogroup" aria-label="Pressure display unit">
+                                <div class="notif-seg notif-seg-compact" id="tyreUnitSeg" role="radiogroup" aria-label="Pressure display unit" data-i18n-attr="aria-label:notif.tyre_unit_aria">
                                     <button type="button" class="notif-seg-btn" data-unit="kpa" role="radio" aria-checked="false">kPa</button>
                                     <button type="button" class="notif-seg-btn" data-unit="psi" role="radio" aria-checked="true">PSI</button>
                                     <button type="button" class="notif-seg-btn" data-unit="bar" role="radio" aria-checked="false">bar</button>
@@ -1198,10 +1199,10 @@
                                 </div>
                                 <div class="notif-range">
                                     <input class="notif-num" id="tyreFrontLow" type="number" inputmode="numeric"
-                                           min="80" max="600" step="1" aria-label="Front minimum pressure in kPa">
+                                           min="80" max="600" step="1" aria-label="Front minimum pressure in kPa" data-i18n-attr="aria-label:notif.tyre_front_low_aria">
                                     <span class="notif-range-sep">–</span>
                                     <input class="notif-num" id="tyreFrontHigh" type="number" inputmode="numeric"
-                                           min="80" max="600" step="1" aria-label="Front maximum pressure in kPa">
+                                           min="80" max="600" step="1" aria-label="Front maximum pressure in kPa" data-i18n-attr="aria-label:notif.tyre_front_high_aria">
                                     <span class="notif-num-unit">kPa</span>
                                 </div>
                             </div>
@@ -1213,10 +1214,10 @@
                                 </div>
                                 <div class="notif-range">
                                     <input class="notif-num" id="tyreRearLow" type="number" inputmode="numeric"
-                                           min="80" max="600" step="1" aria-label="Rear minimum pressure in kPa">
+                                           min="80" max="600" step="1" aria-label="Rear minimum pressure in kPa" data-i18n-attr="aria-label:notif.tyre_rear_low_aria">
                                     <span class="notif-range-sep">–</span>
                                     <input class="notif-num" id="tyreRearHigh" type="number" inputmode="numeric"
-                                           min="80" max="600" step="1" aria-label="Rear maximum pressure in kPa">
+                                           min="80" max="600" step="1" aria-label="Rear maximum pressure in kPa" data-i18n-attr="aria-label:notif.tyre_rear_high_aria">
                                     <span class="notif-num-unit">kPa</span>
                                 </div>
                             </div>
@@ -1228,7 +1229,7 @@
                                 </div>
                                 <div class="notif-range">
                                     <input class="notif-num" id="tyreCriticalLow" type="number" inputmode="numeric"
-                                           min="80" max="600" step="1" aria-label="Critical low pressure in kPa">
+                                           min="80" max="600" step="1" aria-label="Critical low pressure in kPa" data-i18n-attr="aria-label:notif.tyre_critical_low_aria">
                                     <span class="notif-num-unit">kPa</span>
                                 </div>
                             </div>
@@ -1309,7 +1310,7 @@
                                  subscription is confirmed. Without this the control would
                                  look active + clickable during the load window and a tap
                                  would show a false "enable first" warning. -->
-                            <div class="notif-seg disabled" id="minSeveritySeg" role="radiogroup" aria-label="Minimum importance">
+                            <div class="notif-seg disabled" id="minSeveritySeg" role="radiogroup" aria-label="Minimum importance" data-i18n-attr="aria-label:notif.min_importance">
                                 <button type="button" class="notif-seg-btn" data-sev="info" role="radio" aria-checked="true" data-i18n="notif.min_info">Everything</button>
                                 <button type="button" class="notif-seg-btn" data-sev="warn" role="radio" aria-checked="false" data-i18n="notif.min_warn">Warn &amp; up</button>
                                 <button type="button" class="notif-seg-btn" data-sev="critical" role="radio" aria-checked="false" data-i18n="notif.min_critical">Critical only</button>
@@ -1500,7 +1501,7 @@
         <div class="calendar-panel nl-menu-panel">
             <div class="nl-menu-header">
                 <span class="nl-menu-title" id="nlMenuTitle"></span>
-                <button class="nl-menu-close" onclick="NOTIFLOG.closeFilterMenu()" aria-label="Close">
+                <button class="nl-menu-close" onclick="NOTIFLOG.closeFilterMenu()" aria-label="Close" data-i18n-attr="aria-label:common.close">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
             </div>
@@ -1515,7 +1516,7 @@
         <div class="calendar-panel nl-date-panel">
             <div class="nl-menu-header">
                 <span class="nl-menu-title" data-i18n="notiflog.filter_date">Date</span>
-                <button class="nl-menu-close" onclick="NOTIFLOG.closeDateMenu()" aria-label="Close">
+                <button class="nl-menu-close" onclick="NOTIFLOG.closeDateMenu()" aria-label="Close" data-i18n-attr="aria-label:common.close">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
             </div>
@@ -1527,10 +1528,10 @@
             <div class="nl-date-divider"><span data-i18n="notiflog.filter_custom">Custom range</span></div>
             <div class="nl-date-summary" id="nlDateSummary" data-i18n="notiflog.range_pick">Pick a start or end date</div>
             <div class="calendar-header">
-                <span class="calendar-title" id="nlCalendarTitle">Calendar</span>
+                <span class="calendar-title" id="nlCalendarTitle"><span data-i18n="events.calendar_title_initial">Calendar</span></span>
                 <div class="calendar-nav">
-                    <button onclick="NOTIFLOG.calPrevMonth()" aria-label="Previous month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></button>
-                    <button onclick="NOTIFLOG.calNextMonth()" aria-label="Next month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></button>
+                    <button onclick="NOTIFLOG.calPrevMonth()" aria-label="Previous month" data-i18n-attr="aria-label:notiflog.prev_month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></button>
+                    <button onclick="NOTIFLOG.calNextMonth()" aria-label="Next month" data-i18n-attr="aria-label:notiflog.next_month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></button>
                 </div>
             </div>
             <div class="calendar-grid" id="nlCalendarGrid"></div>
@@ -2506,24 +2507,40 @@
         // Keep the wording short and concrete — describes what triggers it
         // (the head unit's detection logic), not what it does (push it).
         function categoryDescription(id) {
-            switch (id) {
-                case 'surveillance.motion':
-                    return 'Fires when the surveillance engine detects motion near the parked car. Severity scales with detection confidence.';
-                case 'surveillance.proximity':
-                    return 'Fires when proximity radar detects an object close to the vehicle. RED (<0.5 m) is critical, YELLOW (<0.8 m) is warn.';
-                case 'surveillance.recording.finalized':
-                    return 'Fires after a recording is written to disk and is ready to view. Off by default.';
-                case 'vehicle.health.tyre.pressure':
-                    return 'Fires when the TPMS reports underpressure or overpressure on any wheel.';
-                case 'vehicle.health.tyre.leak':
-                    return 'Fires when the TPMS detects a slow or fast leak. Fast leaks are pushed as critical.';
-                case 'vehicle.security.door.opened':
-                    return 'Fires when a door, hood, or trunk is opened while the car is parked (ACC OFF).';
-                case 'vehicle.security.door.closed':
-                    return 'Fires when a door, hood, or trunk is closed while the car is parked (ACC OFF).';
-                default:
-                    return '';
-            }
+            var fallbacks = {
+                'surveillance.motion': 'Fires when the surveillance engine detects motion near the parked car. Severity scales with detection confidence.',
+                'surveillance.proximity': 'Fires when proximity radar detects an object close to the vehicle. RED (<0.5 m) is critical, YELLOW (<0.8 m) is warn.',
+                'surveillance.recording.finalized': 'Fires after a recording is written to disk and is ready to view. Off by default.',
+                'vehicle.health.tyre.pressure': 'Fires when the TPMS reports underpressure or overpressure on any wheel.',
+                'vehicle.health.tyre.leak': 'Fires when the TPMS detects a slow or fast leak. Fast leaks are pushed as critical.',
+                'vehicle.security.door.opened': 'Fires when a door, hood, or trunk is opened while the car is parked (ACC OFF).',
+                'vehicle.security.door.closed': 'Fires when a door, hood, or trunk is closed while the car is parked (ACC OFF).'
+            };
+            if (!fallbacks[id]) return '';
+            return categoryText('descriptions', id, fallbacks[id]);
+        }
+
+        // The registry (/api/notifications/categories) ships English label,
+        // group and note text. Translate them on the client by category id so
+        // the page follows the web UI language; unknown ids keep the raw text.
+        function i18nOr(key, fallback) {
+            var v = (window.BYD && BYD.i18n && BYD.i18n.t) ? BYD.i18n.t(key) : null;
+            return v && v !== key ? v : fallback;
+        }
+        function categorySlug(id) {
+            return String(id || '').replace(/[^A-Za-z0-9]+/g, '_');
+        }
+        function categoryText(kind, id, fallback) {
+            if (!id) return fallback;
+            return i18nOr('notif.category_' + kind + '.' + categorySlug(id), fallback);
+        }
+        function categoryGroupLabel(group) {
+            var raw = group || 'Other';
+            return i18nOr('notif.category_groups.' + categorySlug(raw).toLowerCase(), raw);
+        }
+        function severityName(sev) {
+            var raw = sev || 'info';
+            return i18nOr('notif.severity_names.' + categorySlug(raw), raw);
         }
 
         function renderCategories() {
@@ -2549,7 +2566,7 @@
             var groups = {};
             var order = [];
             visible.forEach(function (c) {
-                var g = c.group || 'Other';
+                var g = categoryGroupLabel(c.group);
                 if (!groups[g]) { groups[g] = []; order.push(g); }
                 groups[g].push(c);
             });
@@ -2577,15 +2594,15 @@
                     var enabled = hasSubscription && !muted;
                     var row = document.createElement('div');
                     row.className = 'notif-row';
-                    var description = c.note || categoryDescription(c.id);
+                    var description = categoryText('notes', c.id, c.note) || categoryDescription(c.id);
                     var toggleClasses = ['notif-toggle'];
                     if (enabled) toggleClasses.push('on');
                     if (!hasSubscription) toggleClasses.push('inactive');
                     row.innerHTML =
                         '<div class="notif-row-text setting-stack">' +
-                            '<div class="notif-row-label">' + escapeHtml(c.label) +
+                            '<div class="notif-row-label">' + escapeHtml(categoryText('labels', c.id, c.label || c.id)) +
                                 '<span class="notif-sev-pill ' + severityClass(c.severity) + '" tabindex="0">' +
-                                    escapeHtml(c.severity || 'info') +
+                                    escapeHtml(severityName(c.severity)) +
                                     '<span class="notif-sev-tooltip">' +
                                         escapeHtml(severityTooltip(c.severity)) +
                                     '</span>' +

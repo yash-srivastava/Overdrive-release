@@ -460,8 +460,8 @@ public final class NotificationApiHandler {
         NotificationEvent event = new NotificationEvent(
                 category,
                 severity,
-                "Test notification",
-                "If you're seeing this, push delivery works.",
+                text("notifications.test_title", "Test notification"),
+                text("notifications.test_body", "If you're seeing this, push delivery works."),
                 "test-" + System.currentTimeMillis(),
                 null,
                 new JSONObject().put("test", true));
@@ -480,5 +480,11 @@ public final class NotificationApiHandler {
         NotificationBus.get().publish(event);
         HttpResponse.sendJsonSuccess(out);
         return true;
+    }
+
+    /** Localized push text; falls back to English when the key is missing. */
+    private static String text(String key, String english) {
+        String v = Messages.get(key);
+        return v == null || v.isEmpty() || v.equals(key) ? english : v;
     }
 }
