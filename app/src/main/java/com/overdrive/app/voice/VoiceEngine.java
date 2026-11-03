@@ -401,6 +401,8 @@ final class VoiceEngine implements PcmSink {
         this.host = host;
         this.overlay = new VoiceOverlay(app);
         this.prompts = new VoicePrompts(app);
+        // Hebrew prompts are spoken by text-to-speech; start it now so the first reply is ready.
+        this.prompts.prepare(locale());
         this.audioManager = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
         this.io = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "VoiceIO");

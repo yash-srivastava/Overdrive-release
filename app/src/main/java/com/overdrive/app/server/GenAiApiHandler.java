@@ -67,7 +67,7 @@ public final class GenAiApiHandler {
             Object enabled = input.opt("enabled");
             if (!(enabled instanceof Boolean)) {
                 sendError(out, 400, "invalid_routine_config",
-                        "enabled must be true or false.");
+                        text("routine_enabled_invalid", "enabled must be true or false."));
                 return true;
             }
             GenAiConfig.SaveResult saved = GenAiConfig.save(
@@ -81,8 +81,8 @@ public final class GenAiApiHandler {
             JSONObject response = GenAiRoutineLearner.statusJson();
             response.put("success", true);
             response.put("message", Boolean.TRUE.equals(enabled)
-                    ? "Routine learning enabled."
-                    : "Routine learning disabled and observations cleared.");
+                    ? text("routine_enabled", "Routine learning enabled.")
+                    : text("routine_disabled", "Routine learning disabled and observations cleared."));
             HttpResponse.sendJsonNoCors(out, response.toString());
             return true;
         }
@@ -98,16 +98,16 @@ public final class GenAiApiHandler {
                 sendError(out, 400,
                         response.optString(
                                 "error", "routine_decision_failed"),
-                        response.optString(
-                                "message",
+                        routineError(response,
+                                "routine_decision_failed",
                                 "Could not apply the routine decision."));
                 return true;
             }
             if (!response.has("message")) {
                 response.put("message",
                         "save".equals(response.optString("decision"))
-                                ? "Manual-only automation saved for review."
-                                : "Routine preference saved.");
+                                ? text("routine_saved_for_review", "Manual-only automation saved for review.")
+                                : text("routine_preference_saved", "Routine preference saved."));
             }
             HttpResponse.sendJsonNoCors(out, response.toString());
             return true;
@@ -121,12 +121,12 @@ public final class GenAiApiHandler {
                 sendError(out, 500,
                         response.optString(
                                 "error", "routine_reset_failed"),
-                        response.optString(
-                                "message",
+                        routineError(response,
+                                "routine_reset_failed",
                                 "Could not reset routine learning."));
                 return true;
             }
-            response.put("message", "Learned routine patterns reset.");
+            response.put("message", text("routine_reset_done", "Learned routine patterns reset."));
             HttpResponse.sendJsonNoCors(out, response.toString());
             return true;
         }
@@ -139,7 +139,7 @@ public final class GenAiApiHandler {
             if (messages == null) return true;
             if (!GenAiConfig.fromUnifiedConfig().enabled) {
                 sendError(out, 409, "genai_disabled",
-                        "GenAI is disabled.");
+                        text("disabled", "GenAI is disabled."));
                 return true;
             }
             GenAiRuntime runtime = runtimeOrError(out);
@@ -228,7 +228,7 @@ public final class GenAiApiHandler {
                             out, GenAiIncidentPacks.delete(packId).toString());
                 } else {
                     sendError(out, 405, "method_not_allowed",
-                            "Unsupported incident-pack operation.");
+                            text("incident_pack_unsupported", "Unsupported incident-pack operation."));
                 }
             } catch (GenAiIncidentPacks.PackException e) {
                 sendError(out, e.status, e.code, e.getMessage());
@@ -318,7 +318,7 @@ public final class GenAiApiHandler {
                 && "DELETE".equals(method)) {
             if (!GenAiInsights.clear()) {
                 sendError(out, 500, "insights_clear_failed",
-                        "Could not clear AI insight history.");
+                        text("insight_clear_failed", "Could not clear AI insight history."));
             } else {
                 HttpResponse.sendJsonNoCors(out, new JSONObject()
                         .put("success", true)
@@ -429,7 +429,7 @@ public final class GenAiApiHandler {
             if (messages == null) return true;
             if (!GenAiConfig.fromUnifiedConfig().enabled) {
                 sendError(out, 409, "genai_disabled",
-                        "GenAI is disabled.");
+                        text("disabled", "GenAI is disabled."));
                 return true;
             }
 
@@ -502,7 +502,7 @@ public final class GenAiApiHandler {
         } catch (Exception e) {
             throw new GenAiRuntime.GenAiException(
                     500, "response_build_failed",
-                    "Could not build the action proposal.");
+                    text("proposal_build_failed", "Could not build the action proposal."));
         }
         return provider;
     }
@@ -511,7 +511,7 @@ public final class GenAiApiHandler {
             JSONObject input, OutputStream out) throws Exception {
         if (!GenAiConfig.fromUnifiedConfig().enabled) {
             sendError(out, 409, "genai_disabled",
-                    "GenAI is disabled.");
+                    text("disabled", "GenAI is disabled."));
             return;
         }
         final JSONObject action;
@@ -566,7 +566,7 @@ public final class GenAiApiHandler {
                     .put("accepted", true)
                     .put("action", type)
                     .put("automationId", id)
-                    .put("message", "Automation run accepted.");
+                    .put("message", text("automation_run_accepted", "Automation run accepted."));
             if (voicePath) accepted.put("status", "accepted");
             HttpResponse.sendJsonNoCors(out, accepted.toString());
             return;
@@ -586,7 +586,7 @@ public final class GenAiApiHandler {
             commandName = "sunshade";
         } else {
             sendError(out, 400, "invalid_action",
-                    "The proposed action is unsupported.");
+                    text("proposal_unsupported", "The proposed action is unsupported."));
             return;
         }
         CommandResult result =
@@ -660,7 +660,7 @@ public final class GenAiApiHandler {
                         draft.automation, requestId);
                 if (saved == null) {
                     sendError(out, 500, "automation_persist_failed",
-                            "The manual automation was added in memory but could not be written to storage.");
+                            text("automation_persist_failed", "The manual automation was added in memory but could not be written to storage."));
                     return;
                 }
                 provider.put("draft", new JSONObject()
@@ -684,7 +684,7 @@ public final class GenAiApiHandler {
             JSONObject input, OutputStream out) throws Exception {
         if (!GenAiConfig.fromUnifiedConfig().enabled) {
             sendError(out, 409, "genai_disabled",
-                    "GenAI is disabled.");
+                    text("disabled", "GenAI is disabled."));
             return;
         }
         JSONObject proposed = input.optJSONObject("automation");
@@ -693,7 +693,7 @@ public final class GenAiApiHandler {
                     proposed, requestId(input));
             if (response == null) {
                 sendError(out, 500, "automation_persist_failed",
-                        "The manual draft was added in memory but could not be written to storage.");
+                        text("draft_persist_failed", "The manual draft was added in memory but could not be written to storage."));
                 return;
             }
             HttpResponse.sendJsonNoCors(out, response.toString());
@@ -716,7 +716,7 @@ public final class GenAiApiHandler {
                 .put("name", parsed.getName())
                 .put("executionMode", Automation.MODE_MANUAL)
                 .put("message",
-                        "Created and saved as manual-only. Review it before enabling automatic execution.");
+                        text("draft_saved_manual", "Created and saved as manual-only. Review it before enabling automatic execution."));
     }
 
     private static String requestId(JSONObject input) {
@@ -731,7 +731,7 @@ public final class GenAiApiHandler {
         GenAiRuntime runtime = CameraDaemon.getGenAiRuntime();
         if (runtime == null) {
             sendError(out, 503, "runtime_unavailable",
-                    "GenAI runtime is not ready.");
+                    text("runtime_not_ready", "GenAI runtime is not ready."));
         }
         return runtime;
     }
@@ -739,13 +739,13 @@ public final class GenAiApiHandler {
     private static JSONObject parseBody(String body, OutputStream out)
             throws Exception {
         if (body == null || body.trim().isEmpty()) {
-            sendError(out, 400, "missing_body", "Missing JSON body.");
+            sendError(out, 400, "missing_body", text("missing_body", "Missing JSON body."));
             return null;
         }
         try {
             return new JSONObject(body);
         } catch (Exception e) {
-            sendError(out, 400, "invalid_json", "Malformed JSON body.");
+            sendError(out, 400, "invalid_json", text("invalid_json", "Malformed JSON body."));
             return null;
         }
     }
@@ -767,7 +767,7 @@ public final class GenAiApiHandler {
             String message = input.optString("message", "").trim();
             if (message.isEmpty()) {
                 throw new RequestValidationException(
-                        "message_required", "Enter a message.");
+                        "message_required", text("message_required", "Enter a message."));
             }
             try {
                 source = new JSONArray().put(new JSONObject()
@@ -775,7 +775,7 @@ public final class GenAiApiHandler {
                         .put("content", message));
             } catch (Exception e) {
                 throw new RequestValidationException(
-                        "invalid_message", "Could not read the message.");
+                        "invalid_message", text("message_unreadable", "Could not read the message."));
             }
         }
         if (source.length() == 0 || source.length() > MAX_MESSAGES) {
@@ -793,25 +793,25 @@ public final class GenAiApiHandler {
             if (message == null) {
                 throw new RequestValidationException(
                         "invalid_messages",
-                        "Every message must be an object.");
+                        text("message_not_object", "Every message must be an object."));
             }
             String role = message.optString("role", "").trim();
             if (!"user".equals(role) && !"assistant".equals(role)) {
                 throw new RequestValidationException(
                         "invalid_role",
-                        "Message role must be user or assistant.");
+                        text("message_bad_role", "Message role must be user or assistant."));
             }
             String content = message.optString("content", "").trim();
             if (content.isEmpty() || content.length() > MAX_MESSAGE_CHARS) {
                 throw new RequestValidationException(
                         "invalid_message",
-                        "A message is empty or too long.");
+                        text("message_bad_length", "A message is empty or too long."));
             }
             totalChars += content.length();
             if (totalChars > MAX_TOTAL_MESSAGE_CHARS) {
                 throw new RequestValidationException(
                         "conversation_too_long",
-                        "Conversation is too long.");
+                        text("conversation_too_long", "Conversation is too long."));
             }
             if ("user".equals(role)) hasUser = true;
             try {
@@ -820,13 +820,13 @@ public final class GenAiApiHandler {
                         .put("content", content));
             } catch (Exception e) {
                 throw new RequestValidationException(
-                        "invalid_message", "Could not read a message.");
+                        "invalid_message", text("message_unreadable_one", "Could not read a message."));
             }
         }
         if (!hasUser) {
             throw new RequestValidationException(
                     "user_message_required",
-                    "Conversation must contain a user message.");
+                    text("conversation_needs_user", "Conversation must contain a user message."));
         }
         return clean;
     }
@@ -927,13 +927,38 @@ public final class GenAiApiHandler {
         return "";
     }
 
+    /**
+     * Localized user-facing text from server-i18n ({@code genai.<key>}).
+     * Falls back to the English literal when the catalog has no entry (for
+     * example in JVM unit tests), so the English wording is unchanged.
+     */
+    private static String text(String key, String english) {
+        try {
+            String full = "genai." + key;
+            String value = Messages.get(full);
+            return value == null || value.isEmpty() || full.equals(value)
+                    ? english : value;
+        } catch (Throwable ignored) {
+            return english;
+        }
+    }
+
+    /** Localizes a GenAiRoutineLearner error by its stable error code. */
+    private static String routineError(
+            JSONObject response, String fallbackKey, String fallback) {
+        String english = response.optString("message", "");
+        String code = response.optString("error", "");
+        if (english.isEmpty()) return text(fallbackKey, fallback);
+        return code.isEmpty() ? english : text("routine_error_" + code, english);
+    }
+
     private static void sendError(
             OutputStream out, int status, String code, String message)
             throws Exception {
         JSONObject error = new JSONObject()
                 .put("success", false)
                 .put("code", code)
-                .put("error", message == null ? "GenAI request failed." : message);
+                .put("error", message == null ? text("request_failed", "GenAI request failed.") : message);
         HttpResponse.sendJsonNoCors(out, status, error.toString());
     }
 
