@@ -4,6 +4,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertThrows;
 
 import org.junit.Test;
 
@@ -11,6 +12,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.net.URI;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class RemoteDevViewAssetTest {
 
@@ -33,9 +37,9 @@ public class RemoteDevViewAssetTest {
     public void sidebarStartsSharedVehicleStatusPolling() throws Exception {
         String html = read("src/main/assets/web/local/remote-dev-view.html");
 
-        int auth = html.indexOf("../shared/auth.js");
-        int core = html.indexOf("../shared/core.js?v=24");
-        int view = html.indexOf("../shared/remote-dev-view.js?v=10");
+        int auth = scriptIndex(html, "../shared/auth.js");
+        int core = scriptIndex(html, "../shared/core.js");
+        int view = scriptIndex(html, "../shared/remote-dev-view.js");
         assertTrue(auth >= 0);
         assertTrue(core > auth);
         assertTrue(view > core);
@@ -60,7 +64,36 @@ public class RemoteDevViewAssetTest {
         assertTrue(script.contains("maxWidth: 960, quality: 55"));
         assertTrue(script.contains("Waiting for a stable app frame"));
         assertTrue(script.contains(": 100"));
-        assertTrue(html.contains("remote-dev-view.js?v=10"));
+        assertTrue(scriptIndex(html, "../shared/remote-dev-view.js") >= 0);
+    }
+
+    @Test
+    public void scriptAssetIdentitySurvivesCacheQueryChanges() throws Exception {
+        for (String query : new String[]{"", "?v=10", "?v=11", "?v=next&build=42"}) {
+            assertEquals(0, scriptIndex("<script src=\"../shared/remote-dev-view.js"
+                    + query + "\"></script>", "../shared/remote-dev-view.js"));
+        }
+    }
+
+    @Test
+    public void scriptAssetContractRejectsMissingExternalAndDuplicateReferences() {
+        String asset = "../shared/remote-dev-view.js";
+        for (String source : new String[]{"../shared/not-a-view.js", "https://foreign.invalid/"
+                + asset, asset + "#fragment"}) {
+            assertThrows(AssertionError.class, () -> scriptIndex(
+                    "<script src=\"" + source + "\"></script>", asset));
+        }
+        assertThrows(AssertionError.class, () -> scriptIndex(
+                "<script src=\"" + asset + "?v=11\"></script>"
+                        + "<script src=\"" + asset + "?v=12\"></script>", asset));
+        assertThrows(AssertionError.class, () -> scriptIndex("<!-- " + asset + " -->", asset));
+        assertThrows(AssertionError.class, () -> scriptIndex(
+                "<!-- <script src=\"" + asset + "\"></script> -->", asset));
+        assertThrows(AssertionError.class, () -> scriptIndex(
+                "<script data-src=\"" + asset + "\"></script>", asset));
+        assertThrows(AssertionError.class, () -> scriptIndex(
+                "<script src=\"../shared/not-a-real-file.js\"></script>",
+                "../shared/not-a-real-file.js"));
     }
 
     @Test
@@ -242,14 +275,39 @@ public class RemoteDevViewAssetTest {
     }
 
     private static String read(String moduleRelativePath) throws Exception {
+        return new String(Files.readAllBytes(locate(moduleRelativePath)), StandardCharsets.UTF_8);
+    }
+
+    private static int scriptIndex(String html, String asset) throws Exception {
+        String activeHtml = html.replaceAll("(?s)<!--.*?-->", "");
+        Matcher scripts = Pattern.compile("<script\\b[^>]*\\ssrc\\s*=\\s*(['\"])([^'\"]+)\\1[^>]*>",
+                Pattern.CASE_INSENSITIVE).matcher(activeHtml);
+        int position = -1;
+        while (scripts.find()) {
+            URI source = new URI(scripts.group(2));
+            if (!asset.equals(source.getRawPath())) continue;
+            assertFalse("Script must be a local asset", source.isAbsolute());
+            assertNull(source.getRawAuthority());
+            assertNull("Cache queries must not change asset identity", source.getRawFragment());
+            assertEquals("Script must be loaded exactly once: " + asset, -1, position);
+            Path page = locate("src/main/assets/web/local/remote-dev-view.html");
+            assertTrue("Missing script asset: " + asset,
+                    Files.isRegularFile(page.getParent().resolve(source.getPath()).normalize()));
+            position = scripts.start();
+        }
+        assertTrue("Missing script reference: " + asset, position >= 0);
+        return position;
+    }
+
+    private static Path locate(String moduleRelativePath) throws Exception {
         Path current = Paths.get("").toAbsolutePath();
         Path fromModule = current.resolve(moduleRelativePath);
         if (Files.exists(fromModule)) {
-            return new String(Files.readAllBytes(fromModule), StandardCharsets.UTF_8);
+            return fromModule;
         }
         Path fromRepository = current.resolve("app").resolve(moduleRelativePath);
         if (Files.exists(fromRepository)) {
-            return new String(Files.readAllBytes(fromRepository), StandardCharsets.UTF_8);
+            return fromRepository;
         }
         throw new AssertionError("Could not locate file: " + moduleRelativePath);
     }
