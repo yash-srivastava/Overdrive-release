@@ -272,7 +272,7 @@ tasks.register("verifyFastCam") {
     )
 
     fun sha256Of(f: File): String {
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val digest = MessageDigest.getInstance("SHA-256")
         f.inputStream().use { input ->
             val buffer = ByteArray(8192)
             while (true) {
