@@ -11,7 +11,7 @@ import org.junit.Test;
 /**
  * Regression test for run-2 finding
  * {@code exported-bootreceiver-forgeable-byd-actions}: forgeable vendor
- * actions (com.byd.*/com.htc.*) delivered to the exported BootReceiver must
+ * actions (com.byd.* and com.htc.*) delivered to the exported BootReceiver must
  * be rejected unless the broadcaster is system (1000), shell (2000) or the
  * app itself.
  */
