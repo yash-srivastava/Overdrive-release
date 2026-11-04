@@ -176,7 +176,7 @@ object CellularRelay {
      */
     fun isAllowedDestination(addr: InetAddress): Boolean {
         if (addr.isAnyLocalAddress || addr.isLoopbackAddress || addr.isLinkLocalAddress ||
-            addr.isLinkLocalMulticastAddress || addr.isMulticastAddress || addr.isSiteLocalAddress) {
+            addr.isMulticastAddress || addr.isSiteLocalAddress) {
             return false
         }
         if (addr is java.net.Inet6Address) {
@@ -420,7 +420,7 @@ object CellularRelay {
         // SECURITY: when a client token is configured, only username/password
         // (0x02) is acceptable — never fall back to no-auth.
         if (authToken != null) {
-            out.write(byteArrayOf(0x05, if (offeredUserPass) 0x02 else 0xFF))
+            out.write(byteArrayOf(0x05, if (offeredUserPass) 0x02 else 0xFF.toByte()))
             out.flush()
             if (!offeredUserPass) return null
             // RFC 1929 username/password sub-negotiation
