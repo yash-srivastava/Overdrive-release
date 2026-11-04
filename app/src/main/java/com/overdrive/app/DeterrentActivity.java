@@ -315,7 +315,7 @@ public class DeterrentActivity extends Activity {
                 JSONObject request = new JSONObject();
                 request.put("command", "DETERRENT_INPUT_CAPTURE");
                 request.put("token", token);
-                writer.println(request.toString());
+                writer.println(com.overdrive.app.remote.RemoteDevViewBridgeAuth.sign(request));
                 if (writer.checkError()) return;
                 String ack = reader.readLine();
                 if (ack == null || !new JSONObject(ack)

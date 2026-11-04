@@ -100,7 +100,7 @@ public class CameraDaemonClient {
         
         synchronized (this) {
             try {
-                writer.println(command.toString());
+                writer.println(com.overdrive.app.remote.RemoteDevViewBridgeAuth.sign(command));
                 writer.flush();
                 
                 String response = reader.readLine();

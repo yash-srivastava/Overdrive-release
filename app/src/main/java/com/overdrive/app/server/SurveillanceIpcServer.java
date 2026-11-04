@@ -26,6 +26,10 @@ import java.util.concurrent.Executors;
  * SOTA: Uses thread pool to prevent thread exhaustion under load.
  */
 public class SurveillanceIpcServer implements Runnable {
+    /** SECURITY (run-2 fix): commands allowed WITHOUT a signed envelope (read-only probes). */
+    private static final java.util.Set<String> READ_ONLY_COMMANDS = java.util.Collections.unmodifiableSet(
+            new java.util.HashSet<>(java.util.Arrays.asList("GET_STATUS", "PING")));
+
     private static final String TAG = "SurveillanceIPC";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
     private static final String DILINK5_INGRESS_SESSION = UUID.randomUUID().toString();
@@ -284,21 +288,28 @@ public class SurveillanceIpcServer implements Runnable {
                     JSONObject request = new JSONObject(line);
                     boolean diLink5Authenticated = false;
                     if (request.has("signature") && request.has("request")) {
+                        // SECURITY (run-2 fix): a signed envelope now authenticates
+                        // ANY command, not only vehicle ingress — the HMAC key is the
+                        // device secret, which only the app/daemon principals hold.
                         RemoteDevViewBridgeAuth.AuthenticatedRequest authenticated =
                                 RemoteDevViewBridgeAuth.verify(line);
                         if (!rememberNonce(
                                 authenticated.nonce,
                                 authenticated.timestampMs)) {
-                            throw new SecurityException("vehicle ingress replay rejected");
+                            throw new SecurityException("IPC replay rejected");
                         }
                         request = authenticated.request;
-                        String signedCommand = request.optString("command", "");
-                        if (!"DILINK5_TELEMETRY".equals(signedCommand)
-                                && !"DILINK5_VEHICLE_EVENT".equals(signedCommand)
-                                && !"DILINK5_HELLO".equals(signedCommand)) {
-                            throw new SecurityException("signed command is not a vehicle ingress");
-                        }
                         diLink5Authenticated = true;
+                    } else {
+                        // SECURITY (run-2 fix): unsigned loopback commands are limited
+                        // to read-only probes; everything else (config export/replace,
+                        // UPDATE_VALUES, INSTALL_UPDATE, vehicle identity, MQTT CRUD...)
+                        // requires a valid signed envelope.
+                        String unsignedCmd = request.optString("command", "");
+                        if (!READ_ONLY_COMMANDS.contains(unsignedCmd)) {
+                            throw new SecurityException(
+                                    "unsigned IPC command rejected: " + unsignedCmd);
+                        }
                     }
                     if ("DETERRENT_INPUT_CAPTURE".equals(
                             request.optString("command", ""))) {

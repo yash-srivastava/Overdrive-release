@@ -218,7 +218,8 @@ class RoadSenseImuSidecarService : Service(), SensorEventListener {
      * is all the server needs). Runs on ioHandler's thread only.
      */
     private fun sendLine(line: String) {
-        val payload = (line + "\n").toByteArray()  // newline-delimit so the server's readLine() frames it
+        // SECURITY (run-2 fix): sign the IPC line; the daemon rejects unsigned writes.
+        val payload = (com.overdrive.app.remote.RemoteDevViewBridgeAuth.sign(org.json.JSONObject(line)) + "\n").toByteArray()
         // First attempt on the existing connection; if the write fails (daemon
         // restarted / socket reset), reconnect once and retry. A failure after
         // reconnect just drops the batch — the next batch reconnects again.

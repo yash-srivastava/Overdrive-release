@@ -41,7 +41,10 @@ public final class DaemonIpcClient {
             socket.setSoTimeout(readTimeoutMs);
             PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
             BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            writer.println(request.toString());
+            // SECURITY (run-2 fix): every IPC command is wrapped in an HMAC-signed
+            // envelope (device secret) so the daemon can authenticate the peer's
+            // authority; the server rejects unsigned mutating commands.
+            writer.println(com.overdrive.app.remote.RemoteDevViewBridgeAuth.sign(request));
             String line = reader.readLine();
             if (line == null || line.isEmpty()) return null;
             return new JSONObject(line);

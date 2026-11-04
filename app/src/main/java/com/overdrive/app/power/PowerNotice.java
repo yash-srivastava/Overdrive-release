@@ -42,7 +42,7 @@ public final class PowerNotice {
             socket.setSoTimeout(2500);
             PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
             BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            writer.println(cmd.toString());
+            writer.println(com.overdrive.app.remote.RemoteDevViewBridgeAuth.sign(cmd));
             String reply = reader.readLine();
             logger.info("notice " + kind + " sent (reply=" + reply + ")");
             return reply != null && new JSONObject(reply).optBoolean("success", false);

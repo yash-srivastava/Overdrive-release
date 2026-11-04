@@ -758,7 +758,8 @@ public class LocationSidecarService extends Service implements LocationListener 
         } catch (Exception e) {
             return;
         }
-        final byte[] payload = (json.toString() + "\n").getBytes();
+        // SECURITY (run-2 fix): sign the IPC line; the daemon rejects unsigned writes.
+        final byte[] payload = (com.overdrive.app.remote.RemoteDevViewBridgeAuth.sign(json) + "\n").getBytes();
         android.os.Handler h = handler;
         if (h != null) {
             h.post(() -> writeGpsWithReconnect(payload, true));

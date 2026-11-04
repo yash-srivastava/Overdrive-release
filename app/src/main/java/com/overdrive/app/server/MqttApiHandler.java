@@ -167,7 +167,7 @@ public class MqttApiHandler {
                     request.put(key, extraFields.get(key));
                 }
             }
-            writer.println(request.toString());
+            writer.println(com.overdrive.app.remote.RemoteDevViewBridgeAuth.sign(request));
 
             String response = reader.readLine();
             socket.close();

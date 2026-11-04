@@ -3295,7 +3295,7 @@ public class TelegramBotDaemon {
             PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
             BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
-            writer.println(command.toString());
+            writer.println(com.overdrive.app.remote.RemoteDevViewBridgeAuth.sign(command));
             String response = reader.readLine();
 
             return response != null ? new JSONObject(response) : null;

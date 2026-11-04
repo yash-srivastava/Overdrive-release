@@ -100,6 +100,21 @@ public class TcpCommandServer {
                 
                 try {
                     JSONObject cmd = new JSONObject(line);
+                    // SECURITY (run-2 fix): signed envelope required for everything
+                    // except read-only probes; loopback alone is not authentication.
+                    if (cmd.has("signature") && cmd.has("request")) {
+                        com.overdrive.app.remote.RemoteDevViewBridgeAuth.AuthenticatedRequest auth =
+                                com.overdrive.app.remote.RemoteDevViewBridgeAuth.verify(line);
+                        if (!rememberNonce(auth.nonce, auth.timestampMs)) {
+                            throw new SecurityException("IPC replay rejected");
+                        }
+                        cmd = auth.request;
+                    } else {
+                        String action = cmd.optString("cmd", "");
+                        if (!"status".equals(action) && !"ping".equals(action)) {
+                            throw new SecurityException("unsigned IPC command rejected: " + action);
+                        }
+                    }
                     JSONObject response = processCommand(cmd);
                     writer.println(response.toString());
                 } catch (Exception e) {
@@ -114,6 +129,14 @@ public class TcpCommandServer {
         } finally {
             try { client.close(); } catch (Exception e) {}
         }
+    }
+
+    // SECURITY (run-2 fix): nonce replay cache for signed envelopes.
+    private static final java.util.Map<String, Long> NONCE_SEEN = new java.util.concurrent.ConcurrentHashMap<>();
+    private static boolean rememberNonce(String nonce, long timestampMs) {
+        long now = System.currentTimeMillis();
+        NONCE_SEEN.entrySet().removeIf(e -> now - e.getValue() > 60_000L);
+        return NONCE_SEEN.putIfAbsent(nonce, timestampMs) == null;
     }
 
     private JSONObject processCommand(JSONObject cmd) throws Exception {
