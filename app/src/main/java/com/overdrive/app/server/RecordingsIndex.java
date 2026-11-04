@@ -839,9 +839,24 @@ public final class RecordingsIndex {
      * @return true if the row was inserted/updated, false on parse failure or
      *         when the file was removed while we were parsing.
      */
+    /**
+     * SECURITY (run-2 fix): only filenames from the known recording grammar are
+     * indexable, so arbitrary on-disk names never reach the web UI (XSS vector).
+     */
+    static boolean isIndexableName(String name) {
+        return name != null && SAFE_MP4_NAME.matcher(name).matches();
+    }
+
+    private static final java.util.regex.Pattern SAFE_MP4_NAME =
+            java.util.regex.Pattern.compile("[A-Za-z0-9_\\-]+\\.mp4");
+
     public boolean upsert(File mp4) {
         if (mp4 == null || !mp4.isFile() || !mp4.canRead()) return false;
         if (!mp4.getName().endsWith(".mp4")) return false;
+        // SECURITY (run-2 fix): only index filenames from the known recording
+        // grammar. Arbitrary on-disk names must never reach the web UI, where a
+        // crafted name would be an HTML/JS injection vector (events.js XSS).
+        if (!isIndexableName(mp4.getName())) return false;
 
         // Sample BEFORE parsing so any remove() landing during the parse is
         // detected by upsertRow and the stale MERGE is refused.

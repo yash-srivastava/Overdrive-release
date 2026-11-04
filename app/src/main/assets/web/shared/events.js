@@ -88,8 +88,17 @@ BYD.events = {
     _quadrantHideTimer: null,
 
     recordingKey(rec) {
-        return rec && rec.id ? rec.id : (rec ? rec.filename : '');
+        // SECURITY (run-2 fix): the filename fallback must never carry markup or
+        // JS-string metacharacters into data-* attributes / onclick handlers.
+        if (rec && rec.id) return rec.id;
+        return rec ? String(rec.filename).replace(/[^a-zA-Z0-9_.\-]/g, '_') : '';
     },
+
+    /** Escape a value for embedding inside a single-quoted JS string in an HTML attribute. */
+    _jsStr(s) { return String(s).replace(/[\\'"\r\n<>&]/g, ''); },
+
+    /** HTML-escape for attribute/text interpolation (same technique as BYD.core._esc). */
+    _esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; },
 
     findRecording(key) {
         return this.recordings.find(rec => this.recordingKey(rec) === key)
@@ -1399,13 +1408,13 @@ BYD.events = {
         const fname = filename.length > 28 ? filename.substring(0, 25) + '...' : filename;
         const thumbUrl = '/thumb/' + encodeURIComponent(filename);
         return '' +
-            '<div class="recording-card recording-card-inflight" data-filename="' + filename + '">' +
+            '<div class="recording-card recording-card-inflight" data-filename="' + this._esc(filename) + '">' +
                 '<div class="recording-thumbnail" id="' + thumbId + '" data-thumb="' + thumbUrl + '">' +
                     '<div class="thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg></div>' +
                     '<span class="inflight-badge"><span class="inflight-dot"></span>' + BYD.i18n.t('events.recording_badge') + '</span>' +
                 '</div>' +
                 '<div class="recording-info">' +
-                    '<div class="clip-line"><span class="recording-badge live">' + BYD.i18n.t('events.live_badge') + '</span><span class="clip-time">' + fname + '</span></div>' +
+                    '<div class="clip-line"><span class="recording-badge live">' + BYD.i18n.t('events.live_badge') + '</span><span class="clip-time">' + this._esc(fname) + '</span></div>' +
                     '<div class="recording-meta"><span>' + BYD.i18n.t('events.available_in_seconds') + '</span></div>' +
                 '</div>' +
             '</div>';
@@ -1685,21 +1694,21 @@ BYD.events = {
             const thumbMeta = (rec.duration ? '<span class="duration-badge">' + rec.duration + '</span>' : '') +
                 (rec.sizeFormatted ? '<span>' + rec.sizeFormatted + '</span>' : '');
 
-            return dayHead + '<div class="recording-card' + (isSelected ? ' selected' : '') + (sevClass ? ' ' + sevClass : '') + '" data-recording-key="' + recordingKey + '" data-filename="' + rec.filename + '" onclick="' + cardClick + '">' +
+            return dayHead + '<div class="recording-card' + (isSelected ? ' selected' : '') + (sevClass ? ' ' + sevClass : '') + '" data-recording-key="' + this._esc(recordingKey) + '" data-filename="' + this._esc(rec.filename) + '" onclick="' + this._esc(cardClick) + '">' +
                 checkbox +
                 '<div class="recording-thumbnail" id="' + thumbId + '" data-thumb="' + thumbUrl + '">' +
                 '<div class="thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg></div>' +
                 '<div class="play-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>' +
                 '<span class="recording-badge clip-type ' + rec.type + '">' + badge + '</span>' +
                 (thumbMeta ? '<span class="thumb-meta">' + thumbMeta + '</span>' : '') +
-                '<span class="sk-badge" data-sk-file="' + rec.filename + '" hidden></span>' +
+                '<span class="sk-badge" data-sk-file="' + this._esc(rec.filename) + '" hidden></span>' +
                 '</div>' +
                 '<div class="recording-info">' +
                 '<div class="clip-line"><span class="clip-time">' + rec.timeFormatted + '</span>' + storageChip + '</div>' +
                 placeRow +
                 actorRow +
                 '<div class="recording-foot">' +
-                '<span class="recording-name" title="' + rec.filename + '">' + rec.filename + '</span>' +
+                '<span class="recording-name" title="' + this._esc(rec.filename) + '">' + this._esc(rec.filename) + '</span>' +
                 (this.selectMode ? '' : 
                 '<div class="recording-actions">' +
                 '<button class="action-btn" onclick="event.stopPropagation(); BYD.events.createIncidentPack(\'' + recordingKey + '\')" title="Create AI evidence pack"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18"/><path d="M5 5l14 14"/></svg></button>' +
