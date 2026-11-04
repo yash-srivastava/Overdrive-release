@@ -41,6 +41,21 @@ class BootReceiver : BroadcastReceiver() {
 
         Log.d(TAG, "Received broadcast: $action")
 
+        // SECURITY (run-2 fix): com.byd.* / com.htc.* actions are NOT protected
+        // broadcasts, so any installed app can forge them against this exported
+        // receiver and trigger the recovery path (parked-marker erase, daemon
+        // start, hotspot arming). Only the system (1000), the shell daemon
+        // (2000) or our own process may deliver them; protected system broadcasts
+        // arrive with callingUid == 1000 and keep working.
+        if (action.startsWith("com.byd.") || action.startsWith("com.htc.")) {
+            val callingUid = android.os.Binder.getCallingUid()
+            if (callingUid != android.os.Process.myUid()
+                    && callingUid != 1000 && callingUid != 2000) {
+                Log.w(TAG, "rejected forged vendor action $action from uid $callingUid")
+                return
+            }
+        }
+
         // Unambiguous ignition edge → publish the cross-process ignition hint FIRST,
         // before the debounce and the parked-marker recovery path below (both can
         // return early). acc_sentry_daemon cannot receive broadcasts; on DiLink 5 its
