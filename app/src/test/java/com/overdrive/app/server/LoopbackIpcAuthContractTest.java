@@ -31,7 +31,7 @@ public class LoopbackIpcAuthContractTest {
         assertTrue(s.contains("\"GET_STATUS\", \"PING\""));
         // signed envelopes authenticate any command now, with nonce replay cache
         assertTrue(s.contains("IPC replay rejected"));
-        assertTrue(s.contains("rememberNonce(authenticated.nonce"));
+        assertTrue(s.replaceAll("\\s+", "").contains("rememberNonce(authenticated.nonce"));
     }
 
     @Test
