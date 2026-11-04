@@ -133,7 +133,12 @@ public final class MediaPlaybackService extends Service {
             Log.w(TAG, "AudioManager unavailable: " + t.getMessage());
         }
         try {
-            registerReceiver(stopReceiver, new IntentFilter(ACTION_STOP));
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(stopReceiver, new IntentFilter(ACTION_STOP),
+                        Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(stopReceiver, new IntentFilter(ACTION_STOP));
+            }
             stopReceiverRegistered = true;
         } catch (Throwable t) {
             // Losing the stop receiver only costs remote-stop; playback and the
@@ -143,6 +148,14 @@ public final class MediaPlaybackService extends Service {
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        // SECURITY (run-2 fix): only the app itself, system or the shell daemon
+        // may drive playback (TTS speak / file playback / stop).
+        int callingUid = android.os.Binder.getCallingUid();
+        if (callingUid != android.os.Process.myUid()
+                && callingUid != 1000 && callingUid != 2000) {
+            Log.w(TAG, "rejected playback command from uid " + callingUid);
+            return START_NOT_STICKY;
+        }
         if (intent == null) return START_NOT_STICKY;
         latestStartId = startId;
         StartRequest request = readStartRequest(intent);
