@@ -106,10 +106,23 @@ public final class BydDeviceHelper {
         }
         try {
             com.overdrive.app.byd.dilink5.Dilink5SdkInjector.ensure(context);
-            Class<?> managerClass = Class.forName(
-                    "android.hardware.bydauto.TsManagerImpl",
-                    true,
-                    device.getClass().getClassLoader());
+            ClassLoader loader = device.getClass().getClassLoader();
+            Class<?> managerClass = null;
+            try {
+                managerClass = Class.forName(
+                        "android.hardware.bydauto.TsManagerImpl",
+                        true,
+                        loader);
+            } catch (Throwable notTs) {
+                try {
+                    managerClass = Class.forName(
+                            "com.ts.lib.caradapter.CarAdapterManager",
+                            true,
+                            loader);
+                } catch (Throwable ignored) {
+                }
+            }
+            if (managerClass == null) return false;
             Method getInstance =
                     managerClass.getMethod("getInstance", Context.class);
             Context application = context.getApplicationContext();
@@ -121,6 +134,48 @@ public final class BydDeviceHelper {
                     + adapterGetter + ": " + failure.getMessage());
             return false;
         }
+    }
+
+    public static Object getDiLink5Adapter(
+            Context context, Object device, String adapterGetter) {
+        if (context == null || adapterGetter == null || adapterGetter.isEmpty()
+                || VehicleActuatorBridge.isDiLink5RequestExpired()) {
+            return null;
+        }
+        try {
+            com.overdrive.app.byd.dilink5.Dilink5SdkInjector.ensure(context);
+            ClassLoader loader = device != null
+                    ? device.getClass().getClassLoader()
+                    : BydDeviceHelper.class.getClassLoader();
+            Class<?> managerClass = null;
+            try {
+                managerClass = Class.forName(
+                        "android.hardware.bydauto.TsManagerImpl",
+                        true,
+                        loader);
+            } catch (Throwable notTs) {
+                try {
+                    managerClass = Class.forName(
+                            "com.ts.lib.caradapter.CarAdapterManager",
+                            true,
+                            loader);
+                } catch (Throwable ignored) {
+                }
+            }
+            if (managerClass == null) return null;
+            Method getInstance =
+                    managerClass.getMethod("getInstance", Context.class);
+            Context application = context.getApplicationContext();
+            Object manager = getInstance.invoke(
+                    null, application != null ? application : context);
+            if (manager != null) {
+                return callGetter(manager, adapterGetter);
+            }
+        } catch (Throwable failure) {
+            logger.debug("DiLink 5 adapter retrieval failed for "
+                    + adapterGetter + ": " + failure.getMessage());
+        }
+        return null;
     }
 
     private static boolean registerRetainedListener(
