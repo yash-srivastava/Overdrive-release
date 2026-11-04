@@ -2181,7 +2181,12 @@ public class HttpServer {
                    .append("Content-Type: ").append(contentType).append("\r\n")
                    .append("Content-Length: ").append(file.length()).append("\r\n")
                    .append("ETag: ").append(etag).append("\r\n")
-                   .append("Cache-Control: ").append(cacheControl).append("\r\n");
+                   .append("Cache-Control: ").append(cacheControl).append("\r\n")
+                   // SECURITY (run-2 fix): CSP + XFO on every static response;
+                   // HTML pages get the full policy, other assets get nosniff/XFO.
+                   .append(relativePath.endsWith(".html")
+                           ? HttpResponse.SECURITY_HEADERS
+                           : "X-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\n");
             if (relativePath.endsWith(".html")) {
                 headers.append("Pragma: no-cache\r\n")
                        .append("Expires: 0\r\n");

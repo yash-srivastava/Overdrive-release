@@ -9,7 +9,30 @@ import java.util.Map;
  * HTTP Response utilities - shared by all handlers.
  */
 public class HttpResponse {
-    
+
+    /**
+     * SECURITY (run-2 fix): hardening headers for every response. The dashboard
+     * legitimately uses inline scripts (the app shell splices INJECT_JS) and
+     * inline styles, so script-src/style-src keep 'unsafe-inline'; everything
+     * else is locked down: no object/embed, no base-uri, no cross-origin framing.
+     * connect-src allows the CDN hosts the pages load (unpkg/jsdelivr/fonts/map
+     * tiles) plus ws:/wss: for the streaming WebSockets.
+     */
+    public static final String CSP =
+            "default-src 'self'; " +
+            "script-src 'self' 'unsafe-inline'; " +
+            "style-src 'self' 'unsafe-inline'; " +
+            "img-src 'self' data: blob: https:; " +
+            "media-src 'self' blob: data: https:; " +
+            "connect-src 'self' https: ws: wss: http:; " +
+            "font-src 'self' https: data:; " +
+            "object-src 'none'; base-uri 'none'; form-action 'self'; " +
+            "frame-ancestors 'none'";
+    public static final String SECURITY_HEADERS =
+            "Content-Security-Policy: " + CSP + "\r\n" +
+            "X-Frame-Options: DENY\r\n" +
+            "X-Content-Type-Options: nosniff\r\n";
+
     public static void sendError(OutputStream out, int code, String message) throws Exception {
         String response = "HTTP/1.1 " + code + " " + message + "\r\n" +
                          "Content-Type: text/plain\r\n" +
@@ -24,6 +47,7 @@ public class HttpResponse {
         String headers = "HTTP/1.1 200 OK\r\n" +
                         "Content-Type: text/html; charset=utf-8\r\n" +
                         "Content-Length: " + body.length + "\r\n" +
+                        SECURITY_HEADERS +
                         "Connection: close\r\n\r\n";
         out.write(headers.getBytes());
         out.write(body);
@@ -60,7 +84,7 @@ public class HttpResponse {
                     .append("Access-Control-Allow-Headers: Content-Type, Authorization\r\n");
         }
         headers.append("Cache-Control: no-cache, no-store\r\n")
-                .append("X-Content-Type-Options: nosniff\r\n")
+                .append(SECURITY_HEADERS)
                 .append("Content-Length: ").append(body.length).append("\r\n")
                 .append("Connection: close\r\n\r\n");
         out.write(headers.toString().getBytes(StandardCharsets.UTF_8));
