@@ -1735,8 +1735,11 @@ class WebViewFragment : Fragment() {
         @android.webkit.JavascriptInterface
         fun saveTextFile(filename: String?, text: String?): String {
             if (text == null) return ""
+            // SECURITY (run-2 fix): bridge-written text may carry secret material
+            // (the SafeKeep recovery kit's age private key). Never write it to the
+            // public shared Downloads directory — use app-private external storage.
             return try {
-                writeDownload(filename, text.toByteArray(Charsets.UTF_8))
+                writePrivate(filename, text.toByteArray(Charsets.UTF_8))
             } catch (_: Throwable) {
                 ""
             }
@@ -1785,6 +1788,35 @@ class WebViewFragment : Fragment() {
         }
 
         /** Temp file + rename so a half-written export never shows up under its real name. */
+        /** App-private storage (Android/data/<pkg>/files/...): not world-readable. */
+        private fun writePrivate(filename: String?, bytes: ByteArray): String {
+            val name = (filename ?: "")
+                .replace(Regex("[^A-Za-z0-9._-]"), "_")
+                .trimStart('.')
+                .take(96)
+                .ifEmpty { "download" }
+            val base = context?.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)
+                ?: context?.filesDir
+                ?: return ""
+            val dir = java.io.File(base, "OverDrive")
+            if (!dir.isDirectory && !dir.mkdirs()) return ""
+            val target = java.io.File(dir, name)
+            val tmp = java.io.File(dir, ".$name.part")
+            try {
+                java.io.FileOutputStream(tmp).use { out ->
+                    out.write(bytes)
+                    out.fd.sync()
+                }
+                if (!tmp.renameTo(target)) {
+                    target.delete()
+                    if (!tmp.renameTo(target)) return ""
+                }
+                return target.absolutePath
+            } finally {
+                if (tmp.exists()) tmp.delete()
+            }
+        }
+
         private fun writeDownload(filename: String?, bytes: ByteArray): String {
             val name = (filename ?: "")
                 .replace(Regex("[^A-Za-z0-9._-]"), "_")

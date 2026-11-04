@@ -1231,7 +1231,8 @@ window.SK = (function () {
             $('skKitCopy').onclick = function () { copyText(r.identity); };
             $('skKitSave').onclick = function () {
                 var text = '# OverDrive SafeKeep recovery kit\n# Keep this private. Decrypt with: age -d -i this-file backup.age\n# public key: ' + r.recipient + '\n' + r.identity + '\n';
-                // In the app a blob link does nothing: the bridge writes the file to Download/OverDrive.
+                // In the app a blob link does nothing: the bridge writes the file to the
+                // app-PRIVATE downloads dir (never the public shared /sdcard/Download).
                 if (window.AndroidBridge && typeof window.AndroidBridge.saveTextFile === 'function') {
                     var path = '';
                     try { path = window.AndroidBridge.saveTextFile('overdrive-safekeep-key.txt', text) || ''; } catch (e) { path = ''; }
