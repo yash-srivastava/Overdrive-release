@@ -337,7 +337,7 @@
       "install_service_unreachable": "⚠️ Impossibile avviare l'installazione perché il demone della fotocamera è irraggiungibile.",
       "install_rejected": "⚠️ Installazione rifiutata: {0}",
       "install_failed": "⚠️ *Aggiornamento overdrive fallito*\nIl dispositivo è ancora nella versione precedente.\nMotivo: {0}",
-      "unknown_reason": "sconosciuto (cfr. unità di testa)",
+      "unknown_reason": "sconosciuto (vedi schermo centrale)",
       "installed": "🔄 *Overdrive aggiornato a {0}*",
       "installed_new_tunnel": "🔄 *Overdrive aggiornato a {0}*\nNew tunnel URL:\n{1}\n\n_Il link cloudflared ruota dopo ogni installazione._",
       "installed_tunnel_online": "🔄 *Overdrive aggiornato a {0}*\nTunnel torna online:\n{1}"
@@ -350,10 +350,10 @@
       "failed": "⚠️ Backup fallito: {0}",
       "no_data": "⚠️ Il backup non ha restituito dati.",
       "write_failed": "⚠️ Impossibile scrivere il file di backup: {0}",
-      "document_settings": "💾 Backup delle impostazioni di Overdrive\n\n⚠️ Questo file contiene credenziali e la chiave del dispositivo. Tienilo privato. Ripristinalo su questa stessa unità di testa da Impostazioni → Backup & Ripristino.",
-      "document_settings_version": "💾 Backup delle impostazioni di Overdrive · {0}\n\n⚠️ Questo file contiene credenziali e la chiave del dispositivo. Tienilo privato. Ripristinalo su questa stessa unità di testa da Impostazioni → Backup & Ripristino.",
-      "document_with_trips": "💾 Overdrive backup (impostazioni + cronologia dei viaggi: {0})\n\n⚠️ Questo file contiene credenziali, la chiave del dispositivo e la cronologia delle posizioni. Tienilo privato. Ripristinalo su questa stessa unità di testa da Impostazioni → Backup & Ripristino.",
-      "document_with_trips_version": "💾 Overdrive backup (impostazioni + cronologia del viaggio: {0}) · {1}\n\n⚠️ Questo file contiene credenziali, la chiave del dispositivo e la cronologia delle posizioni. Tienilo privato. Ripristinalo su questa stessa unità di testa da Impostazioni → Backup & Ripristino.",
+      "document_settings": "💾 Backup delle impostazioni di Overdrive\n\n⚠️ Questo file contiene credenziali e la chiave del dispositivo. Mantienilo privato. Ripristinalo su questo stesso infotainment da Impostazioni → Backup & Ripristino.",
+      "document_settings_version": "💾 Backup delle impostazioni di Overdrive · {0}\n\n⚠️ Questo file contiene credenziali e la chiave del dispositivo. Mantienilo privato. Ripristinalo su questo stesso infotainment da Impostazioni → Backup & Ripristino.",
+      "document_with_trips": "💾 Backup di Overdrive (impostazioni + cronologia viaggi: {0})\n\n⚠️ Questo file contiene credenziali, la chiave del dispositivo e la cronologia posizioni. Mantienilo privato. Ripristinalo su questo stesso infotainment da Impostazioni → Backup & Ripristino.",
+      "document_with_trips_version": "💾 Backup di Overdrive (impostazioni + cronologia viaggi: {0}) · {1}\n\n⚠️ Questo file contiene credenziali, la chiave del dispositivo e la cronologia posizioni. Mantienilo privato. Ripristinalo su questo stesso infotainment da Impostazioni → Backup & Ripristino.",
       "upload_failed": "⚠️ Impossibile caricare il file di backup su Telegram."
     },
     "sendlog": {
@@ -363,7 +363,7 @@
       "uploading": "⏳ Caricamento del log *{0}*…",
       "service_unreachable": "⚠️ Impossibile raggiungere il servizio log. Il demone della fotocamera potrebbe non essere in esecuzione. Prova `/daemon camera start`.",
       "upload_failed": "⚠️ Caricamento log fallito: {0}",
-      "upload_success": "✅ *{0}* log caricato.\n\nCondividi questo codice con noi e include una nota che descrive cosa è andato storto:\n`{1}`\n\nSegnala su:\n• Discord: {2}\n• GitHub: {3}\n• WhatsApp: {4}\n\n_Secrets sono stati rimossi prima del caricamento. Il registro scade automaticamente._"
+      "upload_success": "✅ Log *{0}* caricato.\n\nCondividi questo codice con noi e includi una nota che descrive cosa è andato storto:\n`{1}`\n\nSegnalalo su:\n• Discord: {2}\n• GitHub: {3}\n• WhatsApp: {4}\n\n_I dati sensibili e le credenziali sono stati rimossi prima del caricamento. Il file scade automaticamente._"
     },
     "greeting": {
       "online": "🤖 *Surveillance Bot Online*\n\nIl demone Bot è stato avviato e pronto.\nUsa /help per i comandi disponibili."
@@ -502,7 +502,7 @@
     "windows_all": "Tutte Le Finestre",
     "windows_all_description": "Apri, chiudi o fermi tutte le finestre.",
     "tailgate": "Portellone",
-    "tailgate_description": "Apri, chiudi o fermi il portello/tronco.",
+    "tailgate_description": "Apri, chiudi o arresta il bagagliaio / portellone posteriore.",
     "child_lock": "Blocco Figlio",
     "child_lock_description": "Attivare o disattivare il serratura per bambini con porta posteriore.",
     "wireless_charging": "Caricabatterie Wireless Telefono",
@@ -678,7 +678,7 @@
     "open_app_split": "Apri App (Split Screen)",
     "open_app_split_description": "Avvia un'app installata ancorata a una metà dello schermo (schermo diviso) quando questa automazione si attiva.",
     "show_camera_view": "Mostra Vista Fotocamera",
-    "show_camera_view_description": "Mostra una vista fotocamera (anteriore/posteriore/sinistro/destra/tutto) sull'unità di testa o sul gruppo di driver nella posizione scelta. Condivide il display punto cieco; il punto cieco ha la priorità mentre è attivo.",
+    "show_camera_view_description": "Mostra la vista telecamera sull'infotainment o sul quadro strumenti nella posizione selezionata.",
     "hide_camera_view": "Nascondi Vista Fotocamera",
     "hide_camera_view_description": "Nascondi la vista della fotocamera.",
     "camera": "Fotocamera",
@@ -778,7 +778,7 @@
     "wifi_ssid": "Nome Rete WiFi",
     "wifi_ssid_description": "Il nome (SSID) della rete WiFi connessa. Vuoto quando non è connesso a WiFi.",
     "bt_state": "Stato Bluetooth",
-    "bt_state_description": "Se l'unità di testa ha un dispositivo Bluetooth (telefono) collegato.",
+    "bt_state_description": "Indica se all'infotainment è connesso un dispositivo Bluetooth (smartphone).",
     "bt_device_name": "Nome Del Dispositivo Bluetooth",
     "bt_device_name_description": "Il nome del dispositivo Bluetooth connesso. Vuoto quando non è connesso nulla.",
     "location_zone": "Posizione",
@@ -979,7 +979,7 @@
     "move_app_display": "Sposta l'app nella visualizzazione",
     "move_app_display_description": "Sposta un'app sul display head-unit o driver-cluster.",
     "stop_cluster_cast": "Interrompi trasmissione al quadro",
-    "stop_cluster_cast_description": "Smetti di lanciare un'app al gruppo di driver e ripristina i calibro.",
+    "stop_cluster_cast_description": "Interrompi la proiezione dell'app sul quadro strumenti e ripristina gli indicatori del cruscotto.",
     "call_state": "Chiamata Telefonica",
     "call_state_description": "Lo stato della chiamata: squillo (entrata/uscita), attivo o inattivo. Richiede il permesso del telefono.",
     "call_idle": "Nessuna chiamata",
