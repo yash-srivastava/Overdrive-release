@@ -162,16 +162,11 @@ public class GlobalProxyDaemon {
     }
 
     /**
-     * Inbound bind address. Loopback unless the user opted into letting tethered
-     * hotspot clients use the proxy — clients must still set it themselves, so a
-     * wider bind alone changes nothing for traffic that isn't pointed at it.
+     * Inbound bind address. Always loopback: SECURITY (run-2 fix) — the 8119
+     * mixed-in must never be widened to the wildcard address. Tethered clients
+     * use the dedicated, authenticated clients-in inbound on 8122 instead.
      */
     private static String inboundListen() {
-        try {
-            if (com.overdrive.app.config.UnifiedConfigManager.isHotspotProxyForClients()) {
-                return "0.0.0.0";
-            }
-        } catch (Throwable ignored) {}
         return LOCALHOST();
     }
 

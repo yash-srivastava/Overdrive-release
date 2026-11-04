@@ -182,6 +182,15 @@ public class HotspotApiHandler {
             status.put("proxyForClients", cfg.optBoolean("proxyForClients", false));
             status.put("clientTunnel", cfg.optBoolean("clientTunnel", false));
             status.put("relayPort", com.overdrive.app.network.CellularRelay.PORT);
+            // SECURITY (run-2 fix): the client relay/tunnel now binds the AP gateway
+            // and requires this per-install token (SOCKS5 user/pass or HTTP Bearer).
+            boolean proxyForClients = cfg.optBoolean("proxyForClients", false);
+            status.put("relayBind", "ap-gateway");
+            status.put("relayAuthRequired", proxyForClients);
+            if (proxyForClients) {
+                status.put("relayAuthUser", "odclient");
+                status.put("relayAuthToken", cfg.optString("clientProxyToken", ""));
+            }
             status.put("clientTunnelPort",
                     com.overdrive.app.daemon.proxy.ProxyConfiguration.CLIENT_TUNNEL_PORT);
             status.put("autoStartBoot", cfg.optBoolean("autoStartBoot", false));

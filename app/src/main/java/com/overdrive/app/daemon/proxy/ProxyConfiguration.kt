@@ -42,12 +42,9 @@ object ProxyConfiguration {
      */
     val DEFAULT_LISTEN: String get() = Enc.LOCALHOST
 
-    /**
-     * Bind address that also accepts tethered hotspot clients. Only used when the
-     * user opts into client proxying; clients must still set the proxy themselves
-     * (tethered traffic cannot be redirected transparently).
-     */
-    const val ANY_LISTEN = "0.0.0.0"
+    // SECURITY (run-2 fix): there is deliberately NO wildcard listen constant
+    // anymore. Client-facing inbounds bind the AP gateway address passed by the
+    // caller; a wildcard bind exposed the proxy to every interface.
 
     /**
      * Inbound port offered to tethered clients when they should be tunnelled.
@@ -80,6 +77,8 @@ object ProxyConfiguration {
     fun createConfig(
         listen: String = DEFAULT_LISTEN,
         clientRelaySocksPort: Int? = null,
+        clientListen: String? = null,
+        clientAuth: Pair<String, String>? = null,
     ): String {
         val listenAddress = if (listen.isBlank()) DEFAULT_LISTEN else listen
         val serverIp = SERVER_IP
@@ -93,13 +92,18 @@ object ProxyConfiguration {
         // Second inbound + its detoured outbound + the route rule that ties them
         // together. All three are emitted only when client tunnelling is asked for,
         // so a normal config is byte-identical to before.
+        // SECURITY (run-2 fix): bind the AP gateway (never the wildcard) and, when
+        // credentials are supplied, require them on the mixed inbound.
+        val clientBind = (clientListen ?: DEFAULT_LISTEN).ifBlank { DEFAULT_LISTEN }
+        val clientUsers = if (clientAuth != null) """,
+      "users": [ { "username": "${clientAuth.first}", "password": "${clientAuth.second}" } ]""" else ""
         val clientInbound = if (clientRelaySocksPort != null) """,
     {
       "type": "mixed",
       "tag": "$CLIENT_INBOUND_TAG",
-      "listen": "$ANY_LISTEN",
+      "listen": "$clientBind",
       "listen_port": $CLIENT_TUNNEL_PORT,
-      "sniff": true
+      "sniff": true$clientUsers
     }""" else ""
         // NOTE: deliberately NO "domain_strategy" here. It would make sing-box resolve
         // the destination locally before dialing, and the only DNS server detours via
