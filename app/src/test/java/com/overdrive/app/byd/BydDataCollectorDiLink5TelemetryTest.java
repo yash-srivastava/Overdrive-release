@@ -154,6 +154,35 @@ public class BydDataCollectorDiLink5TelemetryTest {
     }
 
     @Test
+    public void normalizesPolledDiLink5TyreTemperatures() {
+        assertEquals(31, BydDataCollector.normalizeDiLink5TyreTemperatureC(31));
+        assertEquals(-5, BydDataCollector.normalizeDiLink5TyreTemperatureC(-5));
+        assertEquals(BydVehicleData.UNAVAILABLE,
+                BydDataCollector.normalizeDiLink5TyreTemperatureC(126));
+        assertEquals(BydVehicleData.UNAVAILABLE,
+                BydDataCollector.normalizeDiLink5TyreTemperatureC(65535));
+        assertEquals(BydVehicleData.UNAVAILABLE,
+                BydDataCollector.normalizeDiLink5TyreTemperatureC(-10011));
+
+        int[] unavailable = {
+                BydVehicleData.UNAVAILABLE,
+                BydVehicleData.UNAVAILABLE,
+                BydVehicleData.UNAVAILABLE,
+                BydVehicleData.UNAVAILABLE
+        };
+        assertArrayEquals(unavailable,
+                BydDataCollector.filterDiLink5TyreTemperaturePlaceholder(
+                        new int[] { 0, 0, 0, 0 }));
+        assertArrayEquals(new int[] { 0, 1, 0, 0 },
+                BydDataCollector.filterDiLink5TyreTemperaturePlaceholder(
+                        new int[] { 0, 1, 0, 0 }));
+        assertArrayEquals(
+                new int[] { 28, BydVehicleData.UNAVAILABLE, 29, 30 },
+                BydDataCollector.filterDiLink5TyreTemperaturePlaceholder(
+                        new int[] { 28, BydVehicleData.UNAVAILABLE, 29, 30 }));
+    }
+
+    @Test
     public void missingDiLink5TyreDeviceClearsEveryPreviousValue() {
         BydVehicleData.Builder builder = new BydVehicleData.Builder()
                 .tyrePressure(new int[] { 250, 251, 252, 253 })

@@ -11120,6 +11120,58 @@ public class BydDataCollector {
                 : BydVehicleData.UNAVAILABLE;
     }
 
+    // DI5 per-wheel temperature getters, tried in order. Some DI5 firmwares
+    // (Sealion 7) never fire onTyreTemperatureValueChanged, so a polled
+    // getter is the only channel. Areas follow the other DI5 tyre getters.
+    private static final String[] DILINK5_TYRE_TEMPERATURE_GETTERS = {
+            "getTyreTemperatureValue", "getTyreTemperature"
+    };
+    private final boolean[] loggedDiLink5TyreTempPoll = new boolean[4];
+
+    private int readDiLink5TyreTemperatureC(int area) {
+        for (String getter : DILINK5_TYRE_TEMPERATURE_GETTERS) {
+            Object value = BydDeviceHelper.callGetter(tyreDevice, getter, area);
+            if (!(value instanceof Number)) continue;
+            int tempC = normalizeDiLink5TyreTemperatureC(((Number) value).intValue());
+            if (!loggedDiLink5TyreTempPoll[area - 1]) {
+                loggedDiLink5TyreTempPoll[area - 1] = true;
+                logger.info("Tyre temp poll FIRST (DI5): area=" + area + " via "
+                        + getter + " raw=" + value + " -> " + tempC);
+            }
+            return tempC;
+        }
+        return BydVehicleData.UNAVAILABLE;
+    }
+
+    // Sub-zero readings are real; the -40..125 range already rejects the DI5
+    // unavailable rails (-10011, 65534, 65535).
+    static int normalizeDiLink5TyreTemperatureC(int raw) {
+        return isValidTyreTemperatureC(raw) ? raw : BydVehicleData.UNAVAILABLE;
+    }
+
+    /**
+     * Drop a polled cycle where every wheel reads exactly 0 °C. Older builds
+     * published that on DI5 for every update, including after long drives in
+     * hot weather, so it is a placeholder rather than a measurement.
+     */
+    static int[] filterDiLink5TyreTemperaturePlaceholder(int[] polled) {
+        for (int v : polled) {
+            if (v != 0) return polled;
+        }
+        return fourWheelValues(null);
+    }
+
+    private void storeDiLink5PolledTyreTemperatures(int[] polled, long nowElapsed) {
+        int[] values = filterDiLink5TyreTemperaturePlaceholder(polled);
+        synchronized (tyreTemperatureCache) {
+            for (int i = 0; i < values.length; i++) {
+                if (values[i] == BydVehicleData.UNAVAILABLE) continue;
+                tyreTemperatureCache[i] = values[i];
+                diLink5TyreTemperatureAt.set(i, nowElapsed);
+            }
+        }
+    }
+
     private static int[] fourWheelValues(int[] current) {
         if (current != null && current.length >= 4) return current.clone();
         int[] values = new int[4];
@@ -11179,6 +11231,7 @@ public class BydDataCollector {
             int[] signalStates = dilink5
                     ? fourWheelValues(b.tyreSignalState)
                     : new int[4];
+            int[] polledTemperatures = fourWheelValues(null);
             for (int i = 0; i < 4; i++) {
                 if (dilink5) {
                     int pressure = adapterReady
@@ -11258,8 +11311,13 @@ public class BydDataCollector {
                 // answer getTyreBatteryValue(area) with the same temperature
                 // value the cluster reads. callGetter is null-safe so this
                 // is a no-op on firmwares that don't expose the getter.
-                if (!dilink5) pollPerWheelTyreTemp(i);
+                if (!dilink5) {
+                    pollPerWheelTyreTemp(i);
+                } else if (adapterReady) {
+                    polledTemperatures[i] = readDiLink5TyreTemperatureC(i + 1);
+                }
             }
+            if (dilink5) storeDiLink5PolledTyreTemperatures(polledTemperatures, nowElapsed);
             b.tyrePressure(pressures);
             b.tyrePressureState(pressureStates);
             b.tyreAirLeakState(airLeakStates);
@@ -11302,9 +11360,10 @@ public class BydDataCollector {
                 b.tyreTemperatureState(temperatureState);
             }
 
-            // DI5 per-wheel temperature is event-backed through
-            // onTyreTemperatureValueChanged (0-based wheel index). Older SDKs
-            // additionally use the battery callback/getter and instrument IDs.
+            // DI5 per-wheel temperature comes from onTyreTemperatureValueChanged
+            // (0-based wheel index) or, on firmwares where that event never
+            // fires, from the polled getter above. Older SDKs additionally use
+            // the battery callback/getter and instrument IDs.
 
             logTyreAlertsIfChanged(pressures, pressureStates, airLeakStates, signalStates,
                     dilink5 || sys instanceof Number ? systemState : Integer.MIN_VALUE,
