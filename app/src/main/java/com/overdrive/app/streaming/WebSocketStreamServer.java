@@ -56,18 +56,33 @@ public class WebSocketStreamServer extends WebSocketServer
     private static final int MAX_REUSABLE_FRAME_BYTES = 4 * 1024 * 1024;
     private byte[] reusableFrameBuffer = null;
 
+    // SECURITY (run-2 finding streaming/WebSocketStreamServer.java:onOpen-8887-no-auth):
+    // the raw H.264 port must never be reachable from the network. Bind loopback
+    // only — the supported remote path is the authenticated /ws relay on 8080
+    // (HttpServer), which forwards frames via registerExternalClient().
+    private static final InetAddress LOOPBACK;
+    static {
+        InetAddress lb;
+        try {
+            lb = InetAddress.getByName("127.0.0.1");
+        } catch (java.net.UnknownHostException e) {
+            lb = InetAddress.getLoopbackAddress();
+        }
+        LOOPBACK = lb;
+    }
+
     public WebSocketStreamServer() {
-        super(new InetSocketAddress(PORT));
+        super(new InetSocketAddress(LOOPBACK, PORT));
         setReuseAddr(true);
         setConnectionLostTimeout(30);
-        logger.info("WebSocketStreamServer created on port " + PORT);
+        logger.info("WebSocketStreamServer created on " + LOOPBACK.getHostAddress() + ":" + PORT);
     }
 
     public WebSocketStreamServer(int port) {
-        super(new InetSocketAddress(port));
+        super(new InetSocketAddress(LOOPBACK, port));
         setReuseAddr(true);
         setConnectionLostTimeout(30);
-        logger.info("WebSocketStreamServer created on port " + port);
+        logger.info("WebSocketStreamServer created on " + LOOPBACK.getHostAddress() + ":" + port);
     }
 
     public void setIdleShutdownCallback(Runnable callback) {
