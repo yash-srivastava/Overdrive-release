@@ -111,7 +111,7 @@ public class UpdateApiHandler {
             JSONObject r = new JSONObject();
             r.put("available", false);
             r.put("channel", channel);
-            r.put("currentVersion", AppUpdater.getDisplayVersionFromFile());
+            r.put("currentVersion", AppUpdater.getDisplayVersion(ctx));
             r.put("catalogEndpoint", "/api/update/versions");
             HttpResponse.sendJson(out, r.toString());
             return;
@@ -161,7 +161,7 @@ public class UpdateApiHandler {
                     r.put("available", false);
                     r.put("channel", channel);
                     r.put("error", error != null ? error : "unknown");
-                    r.put("currentVersion", AppUpdater.getDisplayVersionFromFile());
+                    r.put("currentVersion", AppUpdater.getDisplayVersion(ctx));
                 } catch (Exception ignored) {}
                 resultRef[0] = r;
                 signal(lock, done);
@@ -286,7 +286,7 @@ public class UpdateApiHandler {
                         try {
                             r.put("channel", channel);
                             r.put("error", error != null ? error : "unknown");
-                            r.put("currentVersion", AppUpdater.getDisplayVersionFromFile());
+                            r.put("currentVersion", AppUpdater.getDisplayVersion(ctx));
                         } catch (Exception ignored) {}
                         resultRef[0] = r;
                         signal(lock, done);
@@ -309,7 +309,7 @@ public class UpdateApiHandler {
                         try {
                             r.put("channel", channel);
                             r.put("error", error != null ? error : "unknown");
-                            r.put("currentVersion", AppUpdater.getDisplayVersionFromFile());
+                            r.put("currentVersion", AppUpdater.getDisplayVersion(ctx));
                         } catch (Exception ignored) {}
                         resultRef[0] = r;
                         signal(lock, done);
