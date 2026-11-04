@@ -8,7 +8,11 @@ import android.net.NetworkRequest
 import com.overdrive.app.logging.LogManager
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.Inet4Address
+import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.NetworkInterface
+import java.security.MessageDigest
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URI
