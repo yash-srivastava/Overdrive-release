@@ -1625,13 +1625,13 @@ BYD.events = {
             
             // Checkbox for select mode
             const checkbox = this.selectMode 
-                ? '<label class="select-checkbox-wrap" onclick="event.stopPropagation()"><input type="checkbox" class="select-checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="BYD.events.toggleFileSelection(\'' + recordingKey + '\', event)"></label>'
+                ? '<label class="select-checkbox-wrap" onclick="event.stopPropagation()"><input type="checkbox" class="select-checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="BYD.events.toggleFileSelection(\'' + this._jsStr(recordingKey) + '\', event)"></label>'
                 : '';
             
             // Card click handler depends on mode
             const cardClick = this.selectMode 
-                ? 'BYD.events.toggleFileSelection(\'' + recordingKey + '\')'
-                : 'BYD.events.playVideo(\'' + recordingKey + '\')';
+                ? 'BYD.events.toggleFileSelection(\'' + this._jsStr(recordingKey) + '\')'
+                : 'BYD.events.playVideo(\'' + this._jsStr(recordingKey) + '\')';
             
             // v3 enrichment (item 6): use hero JPEG when present, sev badge, actor summary
             const sev = (rec.peakSeverity || '').toUpperCase();
@@ -1711,9 +1711,9 @@ BYD.events = {
                 '<span class="recording-name" title="' + this._esc(rec.filename) + '">' + this._esc(rec.filename) + '</span>' +
                 (this.selectMode ? '' : 
                 '<div class="recording-actions">' +
-                '<button class="action-btn" onclick="event.stopPropagation(); BYD.events.createIncidentPack(\'' + recordingKey + '\')" title="Create AI evidence pack"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18"/><path d="M5 5l14 14"/></svg></button>' +
-                '<button class="action-btn" onclick="event.stopPropagation(); BYD.events.downloadVideo(\'' + recordingKey + '\')" title="' + BYD.i18n.t('common.download') + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>' +
-                '<button class="action-btn delete" onclick="event.stopPropagation(); BYD.events.deleteRecording(\'' + recordingKey + '\')" title="' + BYD.i18n.t('common.delete') + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>' +
+                '<button class="action-btn" onclick="event.stopPropagation(); BYD.events.createIncidentPack(\'' + this._jsStr(recordingKey) + '\')" title="Create AI evidence pack"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18"/><path d="M5 5l14 14"/></svg></button>' +
+                '<button class="action-btn" onclick="event.stopPropagation(); BYD.events.downloadVideo(\'' + this._jsStr(recordingKey) + '\')" title="' + BYD.i18n.t('common.download') + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>' +
+                '<button class="action-btn delete" onclick="event.stopPropagation(); BYD.events.deleteRecording(\'' + this._jsStr(recordingKey) + '\')" title="' + BYD.i18n.t('common.delete') + '"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>' +
                 '</div>') +
                 '</div>' +
                 '</div>' +
@@ -2019,7 +2019,7 @@ BYD.events = {
     },
     
     updateCardSelection(recordingKey) {
-        const card = document.querySelector('[data-recording-key="' + recordingKey + '"]');
+        const card = document.querySelector('[data-recording-key="' + this._esc(recordingKey) + '"]');
         if (card) {
             card.classList.toggle('selected', this.selectedFiles.has(recordingKey));
             const checkbox = card.querySelector('.select-checkbox');
