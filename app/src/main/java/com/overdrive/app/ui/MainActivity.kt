@@ -1601,8 +1601,17 @@ open class MainActivity : AppCompatActivity() {
     private fun handleLocationStartIntent(intent: android.content.Intent) {
         val action = intent.action
         val startLocation = intent.getBooleanExtra("start_location", false)
-        
+
+        // SECURITY (run-2 fix): the location-start actions exist for the shell
+        // daemon (SentryDaemon, UID 2000) and the system. Reject any other caller
+        // so a third-party app cannot silently start 1 Hz GPS collection.
         if (action == "com.overdrive.app.START_LOCATION_ACTIVITY" || startLocation) {
+            val callingUid = android.os.Binder.getCallingUid()
+            if (callingUid != android.os.Process.myUid()
+                    && callingUid != 1000 /* system */ && callingUid != 2000 /* shell */) {
+                android.util.Log.w("MainActivity", "rejected START_LOCATION from uid $callingUid")
+                return
+            }
             logsViewModel.info("Location", "Received Location start intent from SentryDaemon")
             
             // Start LocationSidecarService directly

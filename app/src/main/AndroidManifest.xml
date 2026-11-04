@@ -458,6 +458,7 @@
         <activity
             android:name="com.overdrive.app.ui.LocationStarterActivity"
             android:exported="true"
+            android:permission="android.permission.DUMP"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:excludeFromRecents="true"
             android:noHistory="true"
@@ -530,7 +531,8 @@
         <service
             android:name="com.overdrive.app.services.LocationSidecarService"
             android:foregroundServiceType="location|dataSync"
-            android:exported="true" />
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
 
         <!-- Daemon Keepalive Service - Keeps app alive and monitors SCREEN_OFF.
              exported=true is REQUIRED: the CameraDaemon (shell uid 2000) respawns

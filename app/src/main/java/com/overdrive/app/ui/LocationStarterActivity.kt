@@ -28,7 +28,18 @@ class LocationStarterActivity : Activity() {
         super.onCreate(savedInstanceState)
         
         Log.i(TAG, "Location starter activity launched")
-        
+
+        // SECURITY (run-2 fix): only the shell daemon / system / ourselves may
+        // trigger the location sidecar through this activity (the manifest also
+        // requires DUMP, which third-party apps cannot hold).
+        val callingUid = android.os.Binder.getCallingUid()
+        if (callingUid != android.os.Process.myUid()
+                && callingUid != 1000 && callingUid != 2000) {
+            Log.w(TAG, "rejected START_LOCATION_SILENT from uid $callingUid")
+            finish()
+            return
+        }
+
         // Start location sidecar service
         try {
             val serviceIntent = Intent(this, LocationSidecarService::class.java)
