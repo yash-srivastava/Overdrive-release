@@ -759,7 +759,13 @@ public class LocationSidecarService extends Service implements LocationListener 
             return;
         }
         // SECURITY (run-2 fix): sign the IPC line; the daemon rejects unsigned writes.
-        final byte[] payload = (com.overdrive.app.remote.RemoteDevViewBridgeAuth.sign(json) + "\n").getBytes();
+        final String signedLine;
+        try {
+            signedLine = com.overdrive.app.remote.RemoteDevViewBridgeAuth.sign(json);
+        } catch (Exception signFailed) {
+            return; // fail closed: never send an unsigned mutating command
+        }
+        final byte[] payload = (signedLine + "\n").getBytes();
         android.os.Handler h = handler;
         if (h != null) {
             h.post(() -> writeGpsWithReconnect(payload, true));
