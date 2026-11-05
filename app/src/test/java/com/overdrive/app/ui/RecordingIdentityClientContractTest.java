@@ -33,7 +33,9 @@ public class RecordingIdentityClientContractTest {
         byte[] shared = readRepositoryBytes("app/src/main/assets/web/shared/events.js");
 
         String script = new String(shared, StandardCharsets.UTF_8);
-        assertTrue(script.contains("return rec && rec.id ? rec.id"));
+        // run-2 fix: the filename fallback is sanitized before use as a key
+        assertTrue(script.contains("if (rec && rec.id) return rec.id;"));
+        assertTrue(script.contains("replace(/[^a-zA-Z0-9_.\\-]/g, '_')"));
         assertTrue(script.contains("data-recording-key="));
         assertTrue(script.contains("const deleteUrl = rec.deleteUrl"));
         assertTrue(script.contains("const eventUrl = recording.eventUrl"));
