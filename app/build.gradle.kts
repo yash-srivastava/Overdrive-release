@@ -163,6 +163,15 @@ tasks.configureEach {
 // OpenCV-mobile version for surveillance module (minimal build, ~3MB vs ~20MB)
 // https://github.com/nihui/opencv-mobile
 val opencvMobileVersion = "4.10.0"
+
+// SECURITY (run-2 fix): SHA-256 pin for the opencv-mobile android zip. Any
+// successfully downloaded zip MUST match this digest before extraction —
+// a substituted artifact would be statically linked into libsurveillance.so.
+// The upstream v4.10.0 asset is currently absent (404), in which case the build
+// keeps its existing no-OpenCV fallback; a *successful* download with an empty
+// or mismatching pin fails closed instead of building unverified code.
+// Maintainers: set this to the SHA-256 of the reviewed opencv-mobile release zip.
+val opencvMobileZipSha256 = ""
 tasks.register("downloadOpenCV") {
     val opencvDir = file("src/main/cpp/opencv")
     
@@ -190,6 +199,28 @@ tasks.register("downloadOpenCV") {
                 ))
                 
                 if (zipFile.exists() && zipFile.length() > 100000) {
+                    // SECURITY (run-2 fix): digest gate before any byte is extracted.
+                    val digest = MessageDigest.getInstance("SHA-256")
+                    zipFile.inputStream().use { input ->
+                        val buffer = ByteArray(8192)
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            digest.update(buffer, 0, count)
+                        }
+                    }
+                    val actual = digest.digest().joinToString("") {
+                        (it.toInt() and 0xff).toString(16).padStart(2, '0')
+                    }
+                    if (opencvMobileZipSha256.isBlank() || actual != opencvMobileZipSha256) {
+                        zipFile.delete()
+                        throw GradleException(
+                            "SECURITY: opencv-mobile zip SHA-256 mismatch (got $actual). " +
+                            "Refusing to link unverified native code. Set opencvMobileZipSha256 " +
+                            "to the reviewed artifact's digest or restore a vendored copy."
+                        )
+                    }
+                    println("✓ opencv-mobile zip digest verified")
                     println("Extracting opencv-mobile (${zipFile.length() / 1024 / 1024}MB)...")
                     
                     ant.invokeMethod("unzip", mapOf(
