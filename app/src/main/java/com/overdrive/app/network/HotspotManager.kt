@@ -345,11 +345,36 @@ object HotspotManager {
         val apUp = synchronized(lock) { apState == AP_ENABLED || apState == AP_ENABLING }
         val ctx = appContext
         if (wanted && apUp && ctx != null) {
-            if (!CellularRelay.isRunning()) CellularRelay.start(ctx)
+            if (!CellularRelay.isRunning()) CellularRelay.start(ctx, ensureClientProxyToken())
         } else if (CellularRelay.isRunning()) {
             CellularRelay.stop()
         }
     }
+
+    /**
+     * SECURITY (run-2 fix): the client-facing relay/tunnel ports require a
+     * per-install credential. Generated once, persisted in the hotspot config
+     * section, and surfaced to the owner via GET /api/hotspot so tethered clients
+     * can be configured with it. Returns the existing token when already set.
+     */
+    private fun ensureClientProxyToken(): String {
+        val existing = try {
+            UnifiedConfigManager.getHotspot().optString("clientProxyToken", "")
+        } catch (t: Throwable) { "" }
+        if (existing.length >= 24) return existing
+        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+        val rnd = java.security.SecureRandom()
+        val token = (1..24).map { chars[rnd.nextInt(chars.length)] }.joinToString("")
+        try {
+            UnifiedConfigManager.updateHotspot(mapOf("clientProxyToken" to token))
+        } catch (t: Throwable) {
+            log.warn(TAG, "could not persist clientProxyToken: ${t.message}")
+        }
+        return token
+    }
+
+    /** AP gateway address string for binding client-facing listeners. */
+    internal fun apGateway(): String = apSubnetPrefix()?.let { "$it.1" } ?: AP_GATEWAY
 
     /**
      * Rewrite the sing-box config so the tethered-client tunnel inbound is present
@@ -372,9 +397,15 @@ object HotspotManager {
         val enable = wanted && apUp && CellularRelay.isRunning()
         if (enable == clientTunnelApplied) return
         val relayPort = if (enable) CellularRelay.PORT else null
+        // SECURITY (run-2 fix): the clients-in inbound binds the AP gateway only
+        // (never the wildcard) and requires the per-install client credential.
+        val clientListen = if (enable) apGateway() else null
+        val clientAuth = if (enable) ("odclient" to ensureClientProxyToken()) else null
         val cfg = try {
             com.overdrive.app.daemon.proxy.ProxyConfiguration.createConfig(
-                clientRelaySocksPort = relayPort
+                clientRelaySocksPort = relayPort,
+                clientListen = clientListen,
+                clientAuth = clientAuth
             )
         } catch (t: Throwable) {
             log.warn(TAG, "client tunnel config build failed: ${t.message}")
