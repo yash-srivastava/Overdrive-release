@@ -23860,7 +23860,7 @@ public class BydDataCollector {
         return false;
     }
 
-    private static final long DRIVE_MODE_APPLY_TIMEOUT_MS = 1500L;
+    private static final long DRIVE_MODE_APPLY_TIMEOUT_MS = 4500L;
     private static final long DRIVE_MODE_APPLY_POLL_MS = 50L;
 
     /** Public setter enum -> the same normalized live axis used by triggers. */

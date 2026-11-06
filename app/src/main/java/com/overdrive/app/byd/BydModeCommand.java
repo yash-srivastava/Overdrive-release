@@ -15,7 +15,7 @@ public final class BydModeCommand {
             "android.hardware.bydauto.energy.BYDAutoEnergyDevice";
     private static final String SETTING_DEVICE =
             "android.hardware.bydauto.setting.BYDAutoSettingDevice";
-    private static final long APPLY_TIMEOUT_MS = 2000L;
+    private static final long APPLY_TIMEOUT_MS = 5000L;
 
     private BydModeCommand() {}
 
