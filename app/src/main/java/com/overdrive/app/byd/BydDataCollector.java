@@ -380,7 +380,7 @@ public class BydDataCollector {
 
     private BydDataCollector() {}
 
-    private static boolean isDiLink5Vehicle() {
+    public static boolean isDiLink5Vehicle() {
         return com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
     }
 
@@ -18994,9 +18994,15 @@ public class BydDataCollector {
         boolean valid = isValidAcChargingCurrentLimitState(rawState);
         Boolean supported = resolveAcChargingCurrentLimitSupport(
                 BydVehicleData.UNAVAILABLE, rawState, acChargingCurrentLimitSupported);
-        if (valid) acChargingCurrentLimitSupported = supported;
+        if (supported == null && chargingDevice != null) {
+            supported = Boolean.TRUE;
+            acChargingCurrentLimitSupported = Boolean.TRUE;
+        } else if (valid) {
+            acChargingCurrentLimitSupported = supported;
+        }
+        boolean available = Boolean.TRUE.equals(supported) && (chargingDevice != null || valid);
         return new AcChargingCurrentLimitStatus(
-                supported, valid, BydVehicleData.UNAVAILABLE,
+                supported, available, BydVehicleData.UNAVAILABLE,
                 valid ? rawState : BydVehicleData.UNAVAILABLE);
     }
 
@@ -19032,14 +19038,17 @@ public class BydDataCollector {
             return false;
         }
         int before = readDiLink5AcChargingLimit();
-        if (!isValidAcChargingCurrentLimitState(before)) {
-            logger.warn("setAcChargingCurrentLimitState: DI5 limit unreadable (" + before + ")");
-            return false;
+        if (isValidAcChargingCurrentLimitState(before)) {
+            acChargingCurrentLimitSupported = Boolean.TRUE;
+            if (before == state) return true;
+        } else {
+            logger.debug("setAcChargingCurrentLimitState: DI5 limit initially unreadable (" + before + "), proceeding with command");
         }
-        acChargingCurrentLimitSupported = Boolean.TRUE;
-        if (before == state) return true;
         if (VehicleActuatorBridge.isDiLink5RequestExpired()) return false;
         Object rc = BydDeviceHelper.callMethod(chargingDevice, "setACChargingLimit", state);
+        if (rc == null) {
+            rc = BydDeviceHelper.callMethod(chargingDevice, "setAcChargingLimit", state);
+        }
         if (!(rc instanceof Number) || ((Number) rc).intValue() < 0) {
             logger.warn("setACChargingLimit(" + state + ") refused: rc=" + rc);
             return false;
@@ -19052,6 +19061,9 @@ public class BydDataCollector {
             if (readBack == state) break;
         }
         boolean confirmed = readBack == state;
+        if (confirmed) {
+            acChargingCurrentLimitSupported = Boolean.TRUE;
+        }
         logger.info("DI5 AC charge current limit: requested=" + state
                 + " (" + acChargingCurrentLimitLabel(state) + ") rc=" + rc
                 + " before=" + before + " readBack=" + readBack + " confirmed=" + confirmed);

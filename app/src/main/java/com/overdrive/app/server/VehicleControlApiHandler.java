@@ -4176,7 +4176,7 @@ public class VehicleControlApiHandler {
             BydDataCollector collector = BydDataCollector.getInstance();
             BydDataCollector.AcChargingCurrentLimitStatus status =
                     collector.getAcChargingCurrentLimitStatus();
-            if (status.supported == null || !status.available) {
+            if (status.supported == null || (!status.available && !collector.isDiLink5Vehicle())) {
                 response.put("success", false);
                 response.put("supported", status.supported != null
                         ? status.supported.booleanValue() : JSONObject.NULL);
