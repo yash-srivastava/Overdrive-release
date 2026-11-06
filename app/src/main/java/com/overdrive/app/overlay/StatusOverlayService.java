@@ -93,12 +93,15 @@ public class StatusOverlayService extends Service {
     private ImageView ivRecIcon;
     private ImageView ivTripIcon;
     private ImageView ivMicIcon;
+    private View pillContainer;
     /** Last icon opacity/size painted onto the pill. -1 forces a reapply after reinflate. */
     private int appliedIconOpacity = -1;
     private int appliedIconSizeDp = -1;
+    private int appliedChipOpacity = -1;
     private static final int ICON_OPACITY_MIN = 20;
     private static final int ICON_OPACITY_MAX = 100;
     private static final int ICON_OPACITY_DEFAULT = 100;
+    private static final int CHIP_OPACITY_DEFAULT = 100;
     private static final int ICON_SIZE_MIN_DP = 12;
     private static final int ICON_SIZE_MAX_DP = 32;
     private static final int ICON_SIZE_DEFAULT_DP = 18;
@@ -868,6 +871,13 @@ public class StatusOverlayService extends Service {
         }
     }
 
+    /** Fade the entire status pill (background + labels + icons) together. */
+    private void applyChipOpacity(int opacity) {
+        if (pillContainer == null || opacity == appliedChipOpacity) return;
+        appliedChipOpacity = opacity;
+        pillContainer.setAlpha(opacity / 100f);
+    }
+
     // ── Blind-spot close button (parallel to the camera-view one above) ─────
 
     /** Register the blind-spot-state broadcast receiver once. Same exported contract as
@@ -1187,6 +1197,8 @@ public class StatusOverlayService extends Service {
             overlayView = null;
             appliedIconOpacity = -1;
             appliedIconSizeDp = -1;
+            appliedChipOpacity = -1;
+            pillContainer = null;
         }
         // Cancel any pending auto-collapse and reset the expanded flag —
         // the View references it tracked are gone, and a stale "true"
@@ -1196,6 +1208,7 @@ public class StatusOverlayService extends Service {
     }
 
     private void bindViews() {
+        pillContainer = overlayView.findViewById(R.id.pillContainer);
         recContainer = overlayView.findViewById(R.id.recContainer);
         tripContainer = overlayView.findViewById(R.id.tripContainer);
         micContainer = overlayView.findViewById(R.id.micContainer);
@@ -2017,6 +2030,7 @@ public class StatusOverlayService extends Service {
         boolean replayOverlayEnabled = true;
         int iconOpacity = ICON_OPACITY_DEFAULT;
         int iconSizeDp = ICON_SIZE_DEFAULT_DP;
+        int chipOpacity = CHIP_OPACITY_DEFAULT;
         try {
             // FIX M4: pollStatus() forceReloads once at the top of the
             // tick; the cache is hot here so loadConfig() is free.
@@ -2031,6 +2045,8 @@ public class StatusOverlayService extends Service {
                         ICON_OPACITY_MIN, ICON_OPACITY_MAX);
                 iconSizeDp = clamp(statusOverlayCfg.optInt("iconSizeDp", ICON_SIZE_DEFAULT_DP),
                         ICON_SIZE_MIN_DP, ICON_SIZE_MAX_DP);
+                chipOpacity = clamp(statusOverlayCfg.optInt("chipOpacity", CHIP_OPACITY_DEFAULT),
+                        ICON_OPACITY_MIN, ICON_OPACITY_MAX);
             }
         } catch (Exception e) {
             Log.w(TAG, "Failed to read statusOverlay prefs: " + e.getMessage());
@@ -2180,6 +2196,7 @@ public class StatusOverlayService extends Service {
         if (overlayView == null) return;
         
         overlayView.setVisibility(View.VISIBLE);
+        applyChipOpacity(chipOpacity);
         applyIconAppearance(iconOpacity, iconSizeDp);
 
         // Recording pill. The pill is the ONLY entry point to the mode

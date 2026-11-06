@@ -1065,6 +1065,8 @@
     <string name="settings_overlay_replay_subtitle">Show the CLIP badge: green while a replay records, blue for 5s once saved, red when it fails. Appears only when a replay binding or automation exists.</string>
     <string name="settings_overlay_roadsense_title">RoadSense overlay</string>
     <string name="settings_overlay_roadsense_subtitle">Show the floating RoadSense pill and hazard card while RoadSense is enabled.</string>
+    <string name="settings_overlay_chip_opacity">Chip transparency</string>
+    <string name="settings_overlay_chip_opacity_value">%1$d%%</string>
     <string name="settings_overlay_icon_opacity">Icon transparency</string>
     <string name="settings_overlay_icon_opacity_value">%1$d%%</string>
     <string name="settings_overlay_icon_size">Icon size</string>
