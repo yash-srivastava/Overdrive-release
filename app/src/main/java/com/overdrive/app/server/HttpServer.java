@@ -972,7 +972,9 @@ public class HttpServer {
      * /api/update/, /api/telegram/, /api/oem-dashcam/, /api/logs and /api/keymap.
      */
     private static final String[] AUTOMATION_ALLOWED_PREFIXES = {
-        "/api/vehicle/",       // vehicle controls: setting, window, climate, seat
+        // SECURITY (V60-08): /api/vehicle/ REMOVED — MQTT-triggered automations
+        // must not reach vehicle actuators without a JWT (an unauthenticated
+        // broker publish on <base>/automation/<channel> used to reach them).
         "/api/recording/mode", // recording mode
         "/api/apps/launch",    // open-app action: launch a user-selected app (NOT /api/apps/list)
         "/api/camview/",       // camera-view show/hide (native lane, shares blind-spot pipeline)
