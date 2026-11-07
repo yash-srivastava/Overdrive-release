@@ -60,15 +60,32 @@
         #cdrRecommendBanner .info-row > .label { display: block; color: inherit; font-weight: 600; }
         #cdrRecommendBanner .info-row > .value { display: block; margin-top: 2px; font-weight: 400; }
 
-        /* Apply bar: room under the last tile, bar surface, toasts above it. */
-        .st-page .page-body { padding-bottom: 128px; }
+        /* Apply bar: room under the last tile, bar surface, toasts above it.
+           Car WebView injects .page-body { padding-bottom: 24px !important; } — st-page must win.
+           Footer stack: styles.css .footer-bar (mobile padding-bottom calc(12px + 40px + safe)),
+           revamp has-bottom-nav lifts the bar by --bottom-nav-h. +12px matches theme.js sticky clearance. */
+        .st-page .page-body { padding-bottom: calc(92px + var(--safe-bottom, 0px)) !important; }
+        :root[data-android-embed="1"] .st-page .page-body { padding-bottom: calc(100px + var(--safe-bottom, 0px)) !important; }
         .st-page .footer-bar { border-top-color: var(--hairline); background-color: var(--bar); box-shadow: none; }
         [dir="rtl"] .st-page .footer-bar { left: 0; right: var(--sidebar-width); }
-        .st-page .toast-container { bottom: 104px; }
+        .st-page .toast-container { bottom: calc(88px + var(--safe-bottom, 0px)); }
         :root[data-android-embed="1"] .st-page .footer-bar .btn { min-height: 56px; }
+        :root[data-android-embed="1"] .st-page .toast-container { bottom: calc(96px + var(--safe-bottom, 0px)); }
         @media (max-width: 768px) {
+            .st-page .page-body { padding-bottom: calc(124px + var(--safe-bottom, 0px)) !important; }
+            :root[data-android-embed="1"] .st-page .page-body { padding-bottom: calc(132px + var(--safe-bottom, 0px)) !important; }
+            .st-page .toast-container { bottom: calc(120px + var(--safe-bottom, 0px)); }
+            :root[data-android-embed="1"] .st-page .toast-container { bottom: calc(128px + var(--safe-bottom, 0px)); }
             [dir="rtl"] .st-page .footer-bar { right: 0; }
-            html.has-bottom-nav body.st-page .toast-container { bottom: 164px; }
+            html.has-bottom-nav body.st-page .page-body {
+                padding-bottom: calc(var(--bottom-nav-h, 76px) + 84px + var(--safe-bottom, 0px)) !important;
+            }
+            :root[data-android-embed="1"] html.has-bottom-nav body.st-page .page-body {
+                padding-bottom: calc(var(--bottom-nav-h, 76px) + 92px + var(--safe-bottom, 0px)) !important;
+            }
+            html.has-bottom-nav body.st-page .toast-container {
+                bottom: calc(var(--bottom-nav-h, 76px) + 88px + var(--safe-bottom, 0px));
+            }
         }
     </style>
 </head>
