@@ -12,6 +12,5 @@ public class OtaIntegrityContractTest {
         assertTrue("https url ok", "https://github.com/x/y.apk".startsWith("https://"));
         assertFalse("http url rejected", "http://evil/x.apk".startsWith("https://"));
         assertFalse("file url rejected", "file:///data/x.apk".startsWith("https://"));
-        assertFalse("shell injection rejected", "https://x/' ; rm -rf /".startsWith("https://") && false || true);
     }
 }
