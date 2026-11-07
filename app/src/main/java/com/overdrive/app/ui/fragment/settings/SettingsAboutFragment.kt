@@ -513,7 +513,7 @@ class SettingsAboutFragment : Fragment() {
             val bundle = resp?.optJSONObject("bundle")
             val ok = resp != null && resp.optBoolean("success", false) && bundle != null
             if (ok && !safAvailable(Intent.ACTION_CREATE_DOCUMENT)) {
-                // Direct path: write to /sdcard/Overdrive/backups/<name>.json.
+                // Direct path: write to app-private external storage (not public /sdcard).
                 val name = suggestedBackupName(bundle)
                 val savedPath = writeBundleToPublicDir(bundle!!.toString(2), name)
                 mainHandler.post {
@@ -590,14 +590,14 @@ class SettingsAboutFragment : Fragment() {
     }
 
     /**
-     * Public directory where backups are written when SAF is unavailable:
-     * {@code /sdcard/Overdrive/backups}. Same external root the app already
-     * uses for recordings/trips, so it's user-reachable from the BYD file
-     * manager. Created on demand.
+     * Directory where backups are written when SAF is unavailable. SECURITY
+     * (V60-04): app-private external storage (Android/data/<pkg>/files/...),
+     * NOT public /sdcard — export bundles used to be written to
+     * /sdcard/Overdrive/backups and carried the plaintext deviceSecret + DID.
      */
     private fun publicBackupDir(): File {
-        val base = File(android.os.Environment.getExternalStorageDirectory(), "Overdrive")
-        val dir = File(base, "backups")
+        val ctx = context ?: return File(android.os.Environment.getExternalStorageDirectory(), "Overdrive/backups")
+        val dir = File(ctx.getExternalFilesDir(null), "backups")
         if (!dir.exists()) dir.mkdirs()
         return dir
     }

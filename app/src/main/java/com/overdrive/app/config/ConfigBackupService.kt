@@ -84,6 +84,12 @@ object ConfigBackupService {
         "__overdriveMutationClocks",
     )
 
+    // Secret-bearing sections never leave the car in a local export bundle:
+    // `auth` holds the plaintext deviceSecret (JWT/HMAC root key) and the DID,
+    // `pinLock` holds the lock PIN. Mirrors Staging.CLOUD_DENY_SECTIONS so the
+    // local-export boundary matches the cloud-upload boundary (V60-04).
+    private val SECRET_SECTIONS = listOf("auth", "pinLock")
+
     // Sections whose secret fields are device-bound `ENC:` blobs. If the DID
     // could NOT be restored (writeDid failed), overlaying these would replace
     // the user's CURRENTLY-WORKING credentials with blobs that can no longer
@@ -208,6 +214,7 @@ object ConfigBackupService {
             val unified = JSONObject(
                 UnifiedConfigManager.readDurableConfigStrict().toString())
             for (sec in EXCLUDED_SECTIONS) unified.remove(sec)
+            for (sec in SECRET_SECTIONS) unified.remove(sec)
             stripEphemeral(unified)
             ExportSnapshot(unified, readDidSnapshotStrict())
         }
@@ -228,10 +235,10 @@ object ConfigBackupService {
             .put("manifest", manifest)
             .put("settings", JSONObject().put("unified", snapshot.unified))
 
-        // Snapshot the DID so the ENC: secrets remain decryptable after a
-        // factory reset. Best-effort: absent DID just means secrets fall back
-        // to re-entry on a reset (they still decrypt on a non-reset restore).
-        didValue(snapshot.did)?.let { bundle.put("did", it) }
+        // SECURITY (V60-04): the DID is the CredentialCipher key seed — never
+        // include it in an export bundle (it was previously embedded as `did`,
+        // letting any reader of the bundle decrypt every ENC: credential blob).
+        // Restore without the DID simply falls back to credential re-entry.
 
         // Opt-in trips category (stats only — no telemetry files). The trips DB
         // lives in the daemon; pulled via the manager. Best-effort: if the
