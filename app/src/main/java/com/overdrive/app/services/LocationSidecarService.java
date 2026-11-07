@@ -822,6 +822,17 @@ public class LocationSidecarService extends Service implements LocationListener 
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // SECURITY (V60-11): exported service — in onStartCommand a binder call IS in
+        // flight, so getCallingUid() is reliable here (unlike onCreate/onReceive).
+        // Only our own app UID or the shell daemon (2000) may drive this service.
+        final int callingUid = android.os.Binder.getCallingUid();
+        final int myUid = android.os.Process.myUid();
+        if (callingUid != myUid && callingUid != 2000) {
+            android.util.Log.w(TAG, "Rejecting start from foreign UID " + callingUid);
+            stopSelf();
+            return android.app.Service.START_NOT_STICKY;
+        }
+
         Log.i(TAG, "Service started");
         // "Vehicle ON only" parked-shutdown gate: if the stack was terminated for the
         // parked window, this sidecar (1Hz GPS→IPC loop to the now-dead CameraDaemon)
