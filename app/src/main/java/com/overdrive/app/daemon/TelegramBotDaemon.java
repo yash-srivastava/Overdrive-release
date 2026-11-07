@@ -2472,6 +2472,8 @@ public class TelegramBotDaemon {
         }
     }
     
+    private static int pairFailedAttempts = 0;
+
     private static void handlePairCommand(long chatId, String username, String firstName, String pin) {
         if (ownerChatId > 0) {
             sendMessage(chatId, tr("pair.already_paired"));
@@ -2509,10 +2511,27 @@ public class TelegramBotDaemon {
             return;
         }
         
-        if (!pin.equals(expectedPin)) {
+        // SECURITY (V60-07): compare against the stored HASH (raw PIN is never
+        // persisted), and lock out after repeated failures (invalidates the PIN).
+        String expectedHash = "";
+        try {
+            expectedHash = com.overdrive.app.telegram.config.UnifiedTelegramConfig.getPairPinHash();
+        } catch (Exception e) { }
+        if (expectedHash.isEmpty()) expectedHash = com.overdrive.app.telegram.config.UnifiedTelegramConfig.pairPinHash(expectedPin);
+        if (!com.overdrive.app.telegram.config.UnifiedTelegramConfig.pairPinHash(pin).equals(expectedHash)) {
+            int attempts = pairFailedAttempts + 1;
+            pairFailedAttempts = attempts;
+            log("pair attempt failed from " + chatId + " (" + attempts + "/5)");
+            if (attempts >= 5) {
+                clearPairPinFromConfig();
+                pairFailedAttempts = 0;
+                sendMessage(chatId, tr("pair.invalid") + " (PIN invalidated after 5 failures)");
+                return;
+            }
             sendMessage(chatId, tr("pair.invalid"));
             return;
         }
+        pairFailedAttempts = 0;
         
         // PIN valid — pair owner
         // Persist to disk BEFORE the in-memory set. freshSnapshotForIpc() runs
