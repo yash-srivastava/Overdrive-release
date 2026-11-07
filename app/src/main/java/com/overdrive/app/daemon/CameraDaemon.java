@@ -10155,7 +10155,7 @@ public class CameraDaemon {
                 // repairs older devices automatically.
                 try {
                     idFile.setReadable(true, false);
-                    idFile.setWritable(true, false);
+                    idFile.setWritable(true, true); // owner-only: DID is the credential-cipher key seed
                 } catch (Exception ignored) {}
                 java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader(idFile));
                 String fileId = reader.readLine();
@@ -10204,7 +10204,7 @@ public class CameraDaemon {
             // the same key. setWritable too so the app can update the DID
             // if a future migration ever needs to.
             idFile.setReadable(true, false);
-            idFile.setWritable(true, false);
+            idFile.setWritable(true, true); // owner-only: DID is the credential-cipher key seed
         } catch (Exception e) {
             log("WARN: Could not save device ID to file: " + e.getMessage());
         }
