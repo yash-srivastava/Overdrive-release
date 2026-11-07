@@ -1603,6 +1603,15 @@ open class MainActivity : AppCompatActivity() {
         val startLocation = intent.getBooleanExtra("start_location", false)
         
         if (action == "com.overdrive.app.START_LOCATION_ACTIVITY" || startLocation) {
+            // SECURITY (V60-11): MainActivity is the exported launcher, so any app can
+            // start it by class name with this action/extra. For activity starts,
+            // getCallingPackage() IS reliable in onCreate (unlike getCallingUid) —
+            // only allow ourselves or the adb shell to trigger the location start.
+            val caller = callingPackage
+            if (caller != null && caller != packageName && caller != "com.android.shell") {
+                logsViewModel.warn("Security", "Ignoring location-start intent from foreign package: $caller")
+                return
+            }
             logsViewModel.info("Location", "Received Location start intent from SentryDaemon")
             
             // Start LocationSidecarService directly
