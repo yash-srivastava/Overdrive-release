@@ -263,6 +263,8 @@ public class AppUpdater {
     private com.overdrive.app.launcher.AdbDaemonLauncher adbLauncher; // For daemon management
 
     private String latestDownloadUrl;
+    // SECURITY (V60-09): sha256 digest of the resolved release asset, when the API provides one.
+    private String latestAssetDigest;
     private long latestApkSizeBytes;
     private String releaseNotes;
     private String remoteVersion;
@@ -751,11 +753,13 @@ public class AppUpdater {
             if (name.endsWith(".apk")) {
                 String url = asset.optString("browser_download_url", "");
                 if (url.isEmpty()) continue;
+                String digest = asset.optString("digest", ""); // "sha256:..." when the API provides it
                 return new String[]{
                         url,
                         name,
                         asset.optString("updated_at", ""),
-                        String.valueOf(Math.max(0L, asset.optLong("size", 0L)))
+                        String.valueOf(Math.max(0L, asset.optLong("size", 0L))),
+                        digest
                 };
             }
         }
@@ -865,6 +869,7 @@ public class AppUpdater {
 
                     latestDownloadUrl = apkUrl;
                     latestApkSizeBytes = Long.parseLong(apk[3]);
+                    latestAssetDigest = apk.length > 4 ? apk[4] : "";
                     remoteUpdatedAt = updatedAt;
                     // Bind the pending install to THIS channel at the seed
                     // point so downloadAndInstall advances the right baseline
@@ -1200,6 +1205,30 @@ public class AppUpdater {
 
                 long fileSize = 0;
                 try { fileSize = Long.parseLong(szResult[0].trim()); } catch (Exception ignored) {}
+                // SECURITY (V60-09): verify the staged APK against the release asset
+                // digest when the API provided one (GitHub assets carry sha256).
+                if (latestAssetDigest != null && latestAssetDigest.startsWith("sha256:")) {
+                    final String expected = latestAssetDigest.substring("sha256:".length()).toLowerCase();
+                    final boolean[] hDone = {false};
+                    final String[] hResult = {null};
+                    runShell("sha256sum " + APK_PATH + " 2>/dev/null || echo 0",
+                            new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
+                        @Override public void onLog(String message) { hResult[0] = message.trim(); }
+                        @Override public void onLaunched() { hDone[0] = true; synchronized (hDone) { hDone.notify(); } }
+                        @Override public void onError(String error) { hResult[0] = "0"; hDone[0] = true; synchronized (hDone) { hDone.notify(); } }
+                    });
+                    synchronized (hDone) { if (!hDone[0]) hDone.wait(15000); }
+                    String actual = hResult[0] == null ? "" : hResult[0].split("\\s+")[0].toLowerCase();
+                    if (!expected.equals(actual)) {
+                        runShell("rm -f " + APK_PATH, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
+                            @Override public void onLog(String m) {}
+                            @Override public void onLaunched() {}
+                            @Override public void onError(String e) {}
+                        });
+                        postInstallError(callback, "Invalid APK (sha256 mismatch)");
+                        return;
+                    }
+                }
                 if (fileSize < 1_000_000) {
                     runShell("rm -f " + APK_PATH, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
                         @Override public void onLog(String m) {}
@@ -1590,6 +1619,30 @@ public class AppUpdater {
                 synchronized (szDone) { if (!szDone[0]) szDone.wait(10000); }
                 long fileSize = 0;
                 try { fileSize = Long.parseLong(szResult[0].trim()); } catch (Exception ignored) {}
+                // SECURITY (V60-09): verify the staged APK against the release asset
+                // digest when the API provided one (GitHub assets carry sha256).
+                if (latestAssetDigest != null && latestAssetDigest.startsWith("sha256:")) {
+                    final String expected = latestAssetDigest.substring("sha256:".length()).toLowerCase();
+                    final boolean[] hDone = {false};
+                    final String[] hResult = {null};
+                    runShell("sha256sum " + APK_PATH + " 2>/dev/null || echo 0",
+                            new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
+                        @Override public void onLog(String message) { hResult[0] = message.trim(); }
+                        @Override public void onLaunched() { hDone[0] = true; synchronized (hDone) { hDone.notify(); } }
+                        @Override public void onError(String error) { hResult[0] = "0"; hDone[0] = true; synchronized (hDone) { hDone.notify(); } }
+                    });
+                    synchronized (hDone) { if (!hDone[0]) hDone.wait(15000); }
+                    String actual = hResult[0] == null ? "" : hResult[0].split("\\s+")[0].toLowerCase();
+                    if (!expected.equals(actual)) {
+                        runShell("rm -f " + APK_PATH, new com.overdrive.app.launcher.AdbDaemonLauncher.LaunchCallback() {
+                            @Override public void onLog(String m) {}
+                            @Override public void onLaunched() {}
+                            @Override public void onError(String e) {}
+                        });
+                        postInstallError(callback, "Invalid APK (sha256 mismatch)");
+                        return;
+                    }
+                }
                 if (fileSize < 1_000_000) {
                     runShell("rm -f " + COMPANION_APK_PATH, NOOP_SHELL);
                     postInstallError(callback, "Invalid APK (size: " + fileSize + ")");
@@ -1634,6 +1687,11 @@ public class AppUpdater {
      * Uses Java's URL class via a shell one-liner (no curl/wget dependency).
      */
     private String buildDownloadCommand(String url, String outputPath) {
+        // SECURITY (V60-09): the URL is interpolated into a sh -c string — only
+        // allow https URLs from the release API.
+        if (url == null || !url.startsWith("https://")) {
+            throw new IllegalArgumentException("Refusing non-https update URL");
+        }
         // Shell-tunnel path (app process). Direct download in the daemon
         // process goes through downloadApkOkHttp instead.
         //
