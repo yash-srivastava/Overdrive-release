@@ -143,6 +143,17 @@ public final class MediaPlaybackService extends Service {
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        // SECURITY (V60-11): exported service — in onStartCommand a binder call IS in
+        // flight, so getCallingUid() is reliable here (unlike onCreate/onReceive).
+        // Only our own app UID or the shell daemon (2000) may drive this service.
+        final int callingUid = android.os.Binder.getCallingUid();
+        final int myUid = android.os.Process.myUid();
+        if (callingUid != myUid && callingUid != 2000) {
+            android.util.Log.w(TAG, "Rejecting start from foreign UID " + callingUid);
+            stopSelf();
+            return android.app.Service.START_NOT_STICKY;
+        }
+
         if (intent == null) return START_NOT_STICKY;
         latestStartId = startId;
         StartRequest request = readStartRequest(intent);
