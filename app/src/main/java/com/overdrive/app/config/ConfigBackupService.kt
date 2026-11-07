@@ -968,7 +968,7 @@ object ConfigBackupService {
         writeAtomicFile(
             f,
             bytes,
-            worldAccessible = true,
+            worldAccessible = false, // DID is the credential-cipher key seed: owner-only
             sequence = didTempSequence.incrementAndGet(),
         )
     }

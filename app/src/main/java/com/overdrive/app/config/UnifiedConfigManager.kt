@@ -276,6 +276,11 @@ object UnifiedConfigManager {
             // SOTA: Always re-assert 666 if we're the daemon. If the app
             // process wrote the file during the update window, it might
             // have different permissions than we expect on some builds (DiLink 3).
+            // NOTE(sec): the config must stay world-writable because the app UID
+            // writes it directly in the daemon-down window; the secret-read
+            // exposure this creates is tracked with the wider loopback-IPC /
+            // secret-storage rework (dev-deferred on #477) — do not "fix" this
+            // by chmod 0644 here, it breaks app-side config writes.
             if (android.os.Process.myUid() == SHELL_DAEMON_UID) {
                 try {
                     configFile.setReadable(true, false)
