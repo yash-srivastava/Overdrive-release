@@ -1000,6 +1000,26 @@ public class MqttPublisherService implements MqttCallback {
             if (slash >= 0) { key = inner.substring(0, slash); sub = inner.substring(slash + 1); }
             else { key = inner; sub = null; }
             String payload = new String(message.getPayload());
+            // SECURITY (V60-08): a broker publish is not an authenticated principal.
+            // Require sig = HMAC-SHA256(deviceSecret, topic + "\n" + payload) in the
+            // payload JSON; the key never leaves the device, so a broker client with
+            // only publish rights cannot forge vehicle commands.
+            try {
+                org.json.JSONObject obj = new org.json.JSONObject(payload);
+                String sig = obj.optString("sig", "");
+                String body = obj.optString("payload", payload);
+                if (!com.overdrive.app.mqtt.MqttCommandAuth.verify(topic, body, sig)) {
+                    logger.warn("Ignoring MQTT control command on " + topic + " — missing/invalid sig");
+                    return;
+                }
+                payload = body;
+            } catch (Exception parse) {
+                // legacy plain-string payload: reject unless it carries a valid sig wrapper
+                if (!com.overdrive.app.mqtt.MqttCommandAuth.verify(topic, payload, "")) {
+                    logger.warn("Ignoring MQTT control command on " + topic + " — unsigned payload rejected (V60-08)");
+                    return;
+                }
+            }
             // ensureCommandRouter() is synchronized and returns the (volatile)
             // router so we don't race on the field read against disconnect().
             MqttCommandRouter router = ensureCommandRouter();

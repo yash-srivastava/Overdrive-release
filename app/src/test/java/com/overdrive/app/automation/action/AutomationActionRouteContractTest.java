@@ -34,8 +34,15 @@ public class AutomationActionRouteContractTest {
         for (Action action : actionMap(actionsField, actions).values()) {
             if (!(action instanceof ApiAction)) continue;
             String path = (String) pathField.get(action);
-            assertTrue(action.getLabel().getId() + " is outside the automation allowlist: " + path,
-                    (Boolean) allowed.invoke(null, path));
+            boolean isAllowed = (Boolean) allowed.invoke(null, path);
+            // SECURITY (V60-08): vehicle actuator endpoints are deliberately NOT
+            // automation-reachable anymore (MQTT-triggered automations are not an
+            // authenticated principal). Everything else must stay allowed.
+            if (path.startsWith("/api/vehicle/")) {
+                assertFalse(action.getLabel().getId() + " must NOT be automation-reachable: " + path, isAllowed);
+            } else {
+                assertTrue(action.getLabel().getId() + " is outside the automation allowlist: " + path, isAllowed);
+            }
         }
     }
 
