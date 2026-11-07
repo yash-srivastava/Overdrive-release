@@ -62,6 +62,8 @@ public final class UnifiedTelegramConfig {
     public static final String K_OWNER_FIRST_NAME = "ownerFirstName";
     public static final String K_OWNER_PAIRED_AT  = "ownerPairedAt";
     public static final String K_PAIR_PIN         = "pairPin";
+    public static final String K_PAIR_PIN_HASH    = "pairPinHash";
+    public static final String K_PAIR_ATTEMPTS    = "pairAttempts";
     public static final String K_PAIR_PIN_EXPIRY  = "pairPinExpiry";
     public static final String K_VIDEO_UPLOADS    = "videoUploads";
     public static final String K_AUTO_START       = "autoStartAccOff";
@@ -221,6 +223,25 @@ public final class UnifiedTelegramConfig {
         return load().optString(K_PAIR_PIN, "");
     }
 
+    /** SECURITY (V60-07): SHA-256(DID + pin) — the raw PIN is never persisted. */
+    public static String pairPinHash(String pin) {
+        try {
+            String did = com.overdrive.app.auth.AuthManager.getState() != null
+                    ? com.overdrive.app.auth.AuthManager.getState().deviceId : "";
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] h = md.digest(("overdrive-pairpin-v1:" + did + ":" + pin).getBytes("UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : h) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    public static String getPairPinHash() {
+        return load().optString(K_PAIR_PIN_HASH, "");
+    }
+
     public static long getPairPinExpiry() {
         return load().optLong(K_PAIR_PIN_EXPIRY, 0);
     }
@@ -359,6 +380,8 @@ public final class UnifiedTelegramConfig {
             delta.put(K_OWNER_FIRST_NAME, "");
             delta.put(K_OWNER_PAIRED_AT, 0);
             delta.put(K_PAIR_PIN, "");
+            delta.put(K_PAIR_PIN_HASH, "");
+            delta.put(K_PAIR_ATTEMPTS, 0);
             delta.put(K_PAIR_PIN_EXPIRY, 0);
         } catch (Exception e) {
             return false;
@@ -369,7 +392,8 @@ public final class UnifiedTelegramConfig {
     public static boolean setPairPin(String pin, long expiryMs) {
         JSONObject delta = new JSONObject();
         try {
-            delta.put(K_PAIR_PIN, pin == null ? "" : pin);
+            delta.put(K_PAIR_PIN, ""); // never persist the raw PIN (V60-07)
+            delta.put(K_PAIR_PIN_HASH, pin == null || pin.isEmpty() ? "" : pairPinHash(pin));
             delta.put(K_PAIR_PIN_EXPIRY, expiryMs);
         } catch (Exception e) {
             return false;
@@ -416,6 +440,8 @@ public final class UnifiedTelegramConfig {
             delta.put(K_OWNER_FIRST_NAME, "");
             delta.put(K_OWNER_PAIRED_AT, 0);
             delta.put(K_PAIR_PIN, "");
+            delta.put(K_PAIR_PIN_HASH, "");
+            delta.put(K_PAIR_ATTEMPTS, 0);
             delta.put(K_PAIR_PIN_EXPIRY, 0);
         } catch (Exception e) {
             return false;
@@ -440,6 +466,8 @@ public final class UnifiedTelegramConfig {
             delta.put(K_OWNER_FIRST_NAME, "");
             delta.put(K_OWNER_PAIRED_AT, 0);
             delta.put(K_PAIR_PIN, "");
+            delta.put(K_PAIR_PIN_HASH, "");
+            delta.put(K_PAIR_ATTEMPTS, 0);
             delta.put(K_PAIR_PIN_EXPIRY, 0);
         } catch (Exception e) {
             return false;
