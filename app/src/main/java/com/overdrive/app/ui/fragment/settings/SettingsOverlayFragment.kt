@@ -39,10 +39,13 @@ class SettingsOverlayFragment : Fragment() {
     // unguarded revert would re-enter persist() with the stale value —
     // ping-ponging forever if the write keeps failing.
     private var applyingStatusOverlayConfig = false
+    private var chipOpacitySlider: Slider? = null
     private var opacitySlider: Slider? = null
     private var sizeSlider: Slider? = null
+    private var chipOpacityValue: TextView? = null
     private var opacityValue: TextView? = null
     private var sizeValue: TextView? = null
+    private var persistedChipOpacity = 100
     private var persistedOpacity = 100
     private var persistedSize = 18
 
@@ -115,33 +118,45 @@ class SettingsOverlayFragment : Fragment() {
         remoteCommunicationBinder = null
         roadSenseSwitch = null
         roadSenseRow = null
+        chipOpacitySlider = null
         opacitySlider = null
         sizeSlider = null
+        chipOpacityValue = null
         opacityValue = null
         sizeValue = null
         super.onDestroyView()
     }
 
     private fun bindIconSliders(view: View, cfg: org.json.JSONObject) {
+        val chipOpacity = view.findViewById<Slider>(R.id.sliderOverlayChipOpacity) ?: return
         val opacity = view.findViewById<Slider>(R.id.sliderOverlayIconOpacity) ?: return
         val size = view.findViewById<Slider>(R.id.sliderOverlayIconSize) ?: return
+        chipOpacitySlider = chipOpacity
         opacitySlider = opacity
         sizeSlider = size
+        chipOpacityValue = view.findViewById(R.id.tvOverlayChipOpacity)
         opacityValue = view.findViewById(R.id.tvOverlayIconOpacity)
         sizeValue = view.findViewById(R.id.tvOverlayIconSize)
 
+        val chipOpacityPct = cfg.optInt("chipOpacity", 100).coerceIn(20, 100)
         val opacityPct = cfg.optInt("iconOpacity", 100).coerceIn(20, 100)
         val sizeDp = cfg.optInt("iconSizeDp", 18).coerceIn(12, 32)
+        persistedChipOpacity = chipOpacityPct
         persistedOpacity = opacityPct
         persistedSize = sizeDp
         applyingStatusOverlayConfig = true
         // Material Slider throws on an off-step value; snap whatever is stored.
+        chipOpacity.value = ((100 - chipOpacityPct) / 5 * 5).toFloat()
         opacity.value = ((100 - opacityPct) / 5 * 5).toFloat()
         size.value = (12 + (sizeDp - 12) / 2 * 2).toFloat()
         applyingStatusOverlayConfig = false
+        renderChipOpacity(100 - chipOpacityPct)
         renderOpacity(100 - opacityPct)
         renderSize(sizeDp)
 
+        chipOpacity.addOnChangeListener { _, value, fromUser ->
+            if (fromUser) renderChipOpacity(value.toInt())
+        }
         opacity.addOnChangeListener { _, value, fromUser ->
             if (fromUser) renderOpacity(value.toInt())
         }
@@ -153,19 +168,35 @@ class SettingsOverlayFragment : Fragment() {
 
             override fun onStopTrackingTouch(slider: Slider) {
                 if (applyingStatusOverlayConfig) return
-                if (slider === opacitySlider) {
-                    val next = (100 - slider.value.toInt()).coerceIn(20, 100)
-                    if (next == persistedOpacity) return
-                    persistInt("iconOpacity", next, persistedOpacity) { persistedOpacity = it }
-                } else {
-                    val next = slider.value.toInt().coerceIn(12, 32)
-                    if (next == persistedSize) return
-                    persistInt("iconSizeDp", next, persistedSize) { persistedSize = it }
+                when (slider) {
+                    chipOpacitySlider -> {
+                        val next = (100 - slider.value.toInt()).coerceIn(20, 100)
+                        if (next == persistedChipOpacity) return
+                        persistInt("chipOpacity", next, persistedChipOpacity) {
+                            persistedChipOpacity = it
+                        }
+                    }
+                    opacitySlider -> {
+                        val next = (100 - slider.value.toInt()).coerceIn(20, 100)
+                        if (next == persistedOpacity) return
+                        persistInt("iconOpacity", next, persistedOpacity) { persistedOpacity = it }
+                    }
+                    else -> {
+                        val next = slider.value.toInt().coerceIn(12, 32)
+                        if (next == persistedSize) return
+                        persistInt("iconSizeDp", next, persistedSize) { persistedSize = it }
+                    }
                 }
             }
         }
+        chipOpacity.addOnSliderTouchListener(touch)
         opacity.addOnSliderTouchListener(touch)
         size.addOnSliderTouchListener(touch)
+    }
+
+    private fun renderChipOpacity(transparency: Int) {
+        chipOpacityValue?.text =
+            getString(R.string.settings_overlay_chip_opacity_value, transparency)
     }
 
     private fun renderOpacity(transparency: Int) {
@@ -186,12 +217,19 @@ class SettingsOverlayFragment : Fragment() {
                 }
             } else if (view != null) {
                 applyingStatusOverlayConfig = true
-                if (key == "iconOpacity") {
-                    opacitySlider?.value = (100 - previous).toFloat()
-                    renderOpacity(100 - previous)
-                } else {
-                    sizeSlider?.value = previous.toFloat()
-                    renderSize(previous)
+                when (key) {
+                    "chipOpacity" -> {
+                        chipOpacitySlider?.value = (100 - previous).toFloat()
+                        renderChipOpacity(100 - previous)
+                    }
+                    "iconOpacity" -> {
+                        opacitySlider?.value = (100 - previous).toFloat()
+                        renderOpacity(100 - previous)
+                    }
+                    else -> {
+                        sizeSlider?.value = previous.toFloat()
+                        renderSize(previous)
+                    }
                 }
                 applyingStatusOverlayConfig = false
             }
