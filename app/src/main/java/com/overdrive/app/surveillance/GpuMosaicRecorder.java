@@ -1107,10 +1107,16 @@ public class GpuMosaicRecorder {
             consecutiveSurfaceErrors = 0;  // Reset on success
         } catch (RuntimeException e) {
             consecutiveSurfaceErrors++;
-            if (consecutiveSurfaceErrors >= SURFACE_ERROR_REINIT_THRESHOLD) {
-                logger.error("Encoder surface dead after " + consecutiveSurfaceErrors +
-                    " consecutive errors, requesting reinit");
+            boolean isBadSurface = e.getMessage() != null && e.getMessage().contains("0x300d");
+            if (isBadSurface || consecutiveSurfaceErrors >= SURFACE_ERROR_REINIT_THRESHOLD) {
+                logger.error("Encoder surface dead (" + (isBadSurface ? "EGL_BAD_SURFACE" : consecutiveSurfaceErrors + " consecutive errors") +
+                    "), requesting reinit");
                 needsReinit = true;
+                if (encoderSurface != null && eglCore != null) {
+                    try {
+                        eglCore.destroySurface(encoderSurface);
+                    } catch (Throwable ignored) {}
+                }
                 encoderSurface = null;  // Prevent further attempts
                 return;
             }

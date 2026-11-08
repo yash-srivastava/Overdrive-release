@@ -69,7 +69,7 @@ public class BatteryPowerMonitor extends BaseDeviceMonitor<BatteryPowerData> {
             bindDeniedOnDi5Daemon = isSecurityDenial(e)
                     && com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
                     && android.os.Process.myUid() < android.os.Process.FIRST_APPLICATION_UID;
-            markUnavailable();
+            markUnavailable(!bindDeniedOnDi5Daemon);
         }
     }
 
