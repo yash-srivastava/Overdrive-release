@@ -721,6 +721,35 @@
         }).observe(main, { childList: true, subtree: true });
     }
 
+    // Keep persistent About / update actions visible inside a scrollable sidebar.
+    // Used on phone sheets where revealActiveNav starts at scrollTop 0 — without
+    // this pass, "Check for Updates" sits below the fold after visiting another
+    // destination and reopening More (עוד).
+    function revealPersistentAboutActions(aside, pad) {
+        if (!aside) return;
+        pad = pad == null ? 12 : pad;
+        var actions = aside.querySelector('#navUpdateLink') ||
+            aside.querySelector('.nav-link-update');
+        if (!actions || actions.hasAttribute('hidden')) {
+            actions = aside.querySelector('.nav-link[href="about.html"]');
+        }
+        if (!actions || actions.hasAttribute('hidden')) return;
+        var asideRect = aside.getBoundingClientRect();
+        var actionRect = actions.getBoundingClientRect();
+        if (actionRect.top >= asideRect.top + pad &&
+            actionRect.bottom <= asideRect.bottom - pad) {
+            return;
+        }
+        if (actionRect.bottom > asideRect.bottom - pad) {
+            aside.scrollTop += actionRect.bottom - asideRect.bottom + pad;
+        } else if (actionRect.top < asideRect.top + pad) {
+            aside.scrollTop -= asideRect.top + pad - actionRect.top;
+        }
+        var maxScroll = Math.max(0, aside.scrollHeight - aside.clientHeight);
+        if (aside.scrollTop < 0) aside.scrollTop = 0;
+        else if (aside.scrollTop > maxScroll) aside.scrollTop = maxScroll;
+    }
+
     // A freshly built sidebar always starts at scroll 0, so picking a link
     // near the bottom and opening the menu again hid that link above the
     // fold. Bring the current page's row into view. No-op when it is
@@ -730,6 +759,7 @@
         // The phone menu sheet opens at the top: vehicle status first, then the page grid.
         if (window.matchMedia && window.matchMedia('(max-width: 768px)').matches && !embeddedInNativeApp) {
             aside.scrollTop = 0;
+            revealPersistentAboutActions(aside);
             return;
         }
         var link = aside.querySelector('.nav-link.active, .nav-link[aria-current="page"]');
