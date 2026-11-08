@@ -102,6 +102,9 @@ public class StatusOverlayService extends Service {
     private static final int ICON_OPACITY_MAX = 100;
     private static final int ICON_OPACITY_DEFAULT = 100;
     private static final int CHIP_OPACITY_DEFAULT = 100;
+    /** Live chip slider preview; when >= 0 overrides config until cleared. */
+    private volatile int chipOpacityPreview = -1;
+    private static volatile StatusOverlayService activeInstance;
     private static final int ICON_SIZE_MIN_DP = 12;
     private static final int ICON_SIZE_MAX_DP = 32;
     private static final int ICON_SIZE_DEFAULT_DP = 18;
@@ -559,6 +562,7 @@ public class StatusOverlayService extends Service {
         if (windowManager == null) {
             windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         }
+        activeInstance = this;
 
         // Arm the camera-view close-button receiver once (idempotent across restarts).
         registerCamCloseReceiver();
@@ -991,6 +995,8 @@ public class StatusOverlayService extends Service {
 
     @Override
     public void onDestroy() {
+        activeInstance = null;
+        chipOpacityPreview = -1;
         // Order matters here:
         //  1. Flip running BEFORE we touch the executor or the controller.
         //     Any in-flight reconcile that's already on the executor reads
@@ -2045,11 +2051,14 @@ public class StatusOverlayService extends Service {
                         ICON_OPACITY_MIN, ICON_OPACITY_MAX);
                 iconSizeDp = clamp(statusOverlayCfg.optInt("iconSizeDp", ICON_SIZE_DEFAULT_DP),
                         ICON_SIZE_MIN_DP, ICON_SIZE_MAX_DP);
-                chipOpacity = clamp(statusOverlayCfg.optInt("chipOpacity", CHIP_OPACITY_DEFAULT),
-                        ICON_OPACITY_MIN, ICON_OPACITY_MAX);
+                chipOpacity = StatusOverlayChipOpacity.clampStored(
+                        statusOverlayCfg.optInt("chipOpacity", CHIP_OPACITY_DEFAULT));
             }
         } catch (Exception e) {
             Log.w(TAG, "Failed to read statusOverlay prefs: " + e.getMessage());
+        }
+        if (chipOpacityPreview >= 0) {
+            chipOpacity = chipOpacityPreview;
         }
 
         boolean recConfigured = !"NONE".equals(configuredMode) && !"UNKNOWN".equals(configuredMode);
@@ -2638,4 +2647,34 @@ public class StatusOverlayService extends Service {
 
     public static final String ACTION_REFRESH_THEME =
             "com.overdrive.app.overlay.REFRESH_THEME";
+
+    /** In-memory chip visibility while the settings slider moves (no config write). */
+    public static void previewChipOpacity(int opacityPct) {
+        StatusOverlayService svc = activeInstance;
+        if (svc == null) return;
+        int opacity = StatusOverlayChipOpacity.clampStored(opacityPct);
+        svc.runOnOverlayMain(() -> {
+            if (activeInstance != svc) return;
+            svc.chipOpacityPreview = opacity;
+            svc.applyChipOpacity(opacity);
+        });
+    }
+
+    public static void clearChipOpacityPreview() {
+        StatusOverlayService svc = activeInstance;
+        if (svc == null) return;
+        svc.runOnOverlayMain(() -> {
+            if (activeInstance != svc) return;
+            svc.chipOpacityPreview = -1;
+            svc.appliedChipOpacity = -1;
+        });
+    }
+
+    private void runOnOverlayMain(Runnable action) {
+        if (Looper.myLooper() == handler.getLooper()) {
+            action.run();
+        } else {
+            handler.post(action);
+        }
+    }
 }
