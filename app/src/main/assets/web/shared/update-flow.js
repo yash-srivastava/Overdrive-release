@@ -188,6 +188,15 @@
         if (window.OverdriveAppShell && typeof window.OverdriveAppShell.rewireNavGroups === 'function') {
             window.OverdriveAppShell.rewireNavGroups();
         }
+        var sidebar = document.getElementById('sidebar');
+        if (sidebar && sidebar.classList.contains('open') &&
+            window.OverdriveAppShell &&
+            typeof window.OverdriveAppShell.revealAboutMenuActions === 'function') {
+            window.OverdriveAppShell.revealAboutMenuActions(sidebar);
+            requestAnimationFrame(function () {
+                window.OverdriveAppShell.revealAboutMenuActions(sidebar);
+            });
+        }
     }
 
     // ─────────────────────── Check + Modal ───────────────────────

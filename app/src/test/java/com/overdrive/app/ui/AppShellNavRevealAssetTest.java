@@ -17,6 +17,7 @@ public class AppShellNavRevealAssetTest {
         String shell = read("app/src/main/assets/web/shared/app-shell.js");
         assertTrue(shell.contains("function revealPersistentAboutActions(aside"));
         assertTrue(shell.contains("revealPersistentAboutActions(aside);"));
+        assertTrue(shell.contains("revealAboutMenuActions"));
         assertTrue(shell.contains("#navUpdateLink") || shell.contains(".nav-link-update"));
     }
 

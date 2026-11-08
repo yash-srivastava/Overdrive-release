@@ -728,26 +728,75 @@
     function revealPersistentAboutActions(aside, pad) {
         if (!aside) return;
         pad = pad == null ? 12 : pad;
-        var actions = aside.querySelector('#navUpdateLink') ||
-            aside.querySelector('.nav-link-update');
-        if (!actions || actions.hasAttribute('hidden')) {
-            actions = aside.querySelector('.nav-link[href="about.html"]');
-        }
-        if (!actions || actions.hasAttribute('hidden')) return;
-        var asideRect = aside.getBoundingClientRect();
-        var actionRect = actions.getBoundingClientRect();
-        if (actionRect.top >= asideRect.top + pad &&
-            actionRect.bottom <= asideRect.bottom - pad) {
-            return;
-        }
-        if (actionRect.bottom > asideRect.bottom - pad) {
-            aside.scrollTop += actionRect.bottom - asideRect.bottom + pad;
-        } else if (actionRect.top < asideRect.top + pad) {
-            aside.scrollTop -= asideRect.top + pad - actionRect.top;
-        }
         var maxScroll = Math.max(0, aside.scrollHeight - aside.clientHeight);
-        if (aside.scrollTop < 0) aside.scrollTop = 0;
-        else if (aside.scrollTop > maxScroll) aside.scrollTop = maxScroll;
+
+        function offsetWithin(el, root) {
+            var y = 0;
+            var node = el;
+            while (node && node !== root) {
+                y += node.offsetTop || 0;
+                node = node.offsetParent;
+            }
+            return y;
+        }
+
+        function pickTarget() {
+            var actions = aside.querySelector('#navUpdateLink') ||
+                aside.querySelector('.nav-link-update');
+            if (!actions || actions.hasAttribute('hidden')) {
+                actions = aside.querySelector('.nav-link[href="about.html"]');
+            }
+            return actions && !actions.hasAttribute('hidden') ? actions : null;
+        }
+
+        function fullyVisible(actions) {
+            var asideRect = aside.getBoundingClientRect();
+            var actionRect = actions.getBoundingClientRect();
+            return actionRect.top >= asideRect.top + pad &&
+                actionRect.bottom <= asideRect.bottom - pad;
+        }
+
+        function alignOnce() {
+            var actions = pickTarget();
+            if (!actions) return true;
+            if (fullyVisible(actions)) return true;
+            var asideRect = aside.getBoundingClientRect();
+            var actionRect = actions.getBoundingClientRect();
+            if (actionRect.bottom > asideRect.bottom - pad) {
+                var relTop = offsetWithin(actions, aside);
+                if (!relTop) relTop = actionRect.top - asideRect.top + aside.scrollTop;
+                aside.scrollTop = Math.min(
+                    maxScroll,
+                    Math.max(0, relTop + actions.offsetHeight - aside.clientHeight + pad)
+                );
+            } else if (actionRect.top < asideRect.top + pad) {
+                var relTop2 = actionRect.top - asideRect.top + aside.scrollTop;
+                aside.scrollTop = Math.max(0, relTop2 - pad);
+            }
+            if (aside.scrollTop < 0) aside.scrollTop = 0;
+            else if (aside.scrollTop > maxScroll) aside.scrollTop = maxScroll;
+            actionRect = actions.getBoundingClientRect();
+            asideRect = aside.getBoundingClientRect();
+            if (actionRect.bottom > asideRect.bottom - pad) {
+                aside.scrollTop += actionRect.bottom - asideRect.bottom + pad;
+                if (aside.scrollTop > maxScroll) aside.scrollTop = maxScroll;
+            } else if (actionRect.top < asideRect.top + pad) {
+                aside.scrollTop -= asideRect.top + pad - actionRect.top;
+                if (aside.scrollTop < 0) aside.scrollTop = 0;
+            }
+            return fullyVisible(actions);
+        }
+
+        var actions = pickTarget();
+        if (!actions) return;
+        for (var i = 0; i < 4; i++) {
+            maxScroll = Math.max(0, aside.scrollHeight - aside.clientHeight);
+            if (alignOnce()) return;
+        }
+        requestAnimationFrame(function () {
+            maxScroll = Math.max(0, aside.scrollHeight - aside.clientHeight);
+            alignOnce();
+        });
     }
 
     // A freshly built sidebar always starts at scroll 0, so picking a link
@@ -1829,6 +1878,11 @@
                     document.getElementById('sidebar') ||
                     document.querySelector('.sidebar');
         if (aside) wireGroupCollapse(aside);
+    };
+
+    // Exposed for update-flow.js after a late sidebar inject while the sheet is open.
+    window.OverdriveAppShell.revealAboutMenuActions = function (aside) {
+        revealPersistentAboutActions(aside || document.getElementById('sidebar'));
     };
 
     // Auto-load the collapsible-card script so every page that includes
