@@ -104,8 +104,8 @@ public class StatusOverlayService extends Service {
     private static final int CHIP_OPACITY_MIN = 10;
     private static final int CHIP_OPACITY_MAX = 100;
     private static final int CHIP_OPACITY_DEFAULT = 100;
-    /** Live slider preview; when >= 0 overrides config until cleared. */
-    private int chipOpacityPreview = -1;
+    /** Live slider preview; when >= 0 overrides config until cleared. Main-thread only. */
+    private volatile int chipOpacityPreview = -1;
     private static volatile StatusOverlayService activeInstance;
     private static final int ICON_SIZE_MIN_DP = 12;
     private static final int ICON_SIZE_MAX_DP = 32;
@@ -2649,22 +2649,36 @@ public class StatusOverlayService extends Service {
             "com.overdrive.app.overlay.REFRESH_THEME";
 
     /**
-     * Apply chip visibility while the settings slider is held — no config write,
-     * no service restart, no poll reschedule. UI-thread only.
+     * Apply chip visibility while the settings slider moves — no config write,
+     * no service restart, no poll reschedule. Posts to the overlay main looper.
      */
     public static void previewChipOpacity(int opacityPct) {
         StatusOverlayService svc = activeInstance;
         if (svc == null) return;
         int opacity = StatusOverlayChipOpacity.clampStored(opacityPct);
-        svc.chipOpacityPreview = opacity;
-        svc.applyChipOpacity(opacity);
+        svc.runOnOverlayMain(() -> {
+            if (activeInstance != svc) return;
+            svc.chipOpacityPreview = opacity;
+            svc.applyChipOpacity(opacity);
+        });
     }
 
     /** Drop the in-memory preview override so poll/config values apply again. */
     public static void clearChipOpacityPreview() {
         StatusOverlayService svc = activeInstance;
         if (svc == null) return;
-        svc.chipOpacityPreview = -1;
-        svc.appliedChipOpacity = -1;
+        svc.runOnOverlayMain(() -> {
+            if (activeInstance != svc) return;
+            svc.chipOpacityPreview = -1;
+            svc.appliedChipOpacity = -1;
+        });
+    }
+
+    private void runOnOverlayMain(Runnable action) {
+        if (Looper.myLooper() == handler.getLooper()) {
+            action.run();
+        } else {
+            handler.post(action);
+        }
     }
 }

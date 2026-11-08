@@ -1066,7 +1066,7 @@
     <string name="settings_overlay_roadsense_title">RoadSense overlay</string>
     <string name="settings_overlay_roadsense_subtitle">Show the floating RoadSense pill and hazard card while RoadSense is enabled.</string>
     <string name="settings_overlay_chip_opacity">Chip visibility</string>
-    <string name="settings_overlay_chip_opacity_subtitle">Higher = more prominent. Minimum 10%%, maximum 100%%.</string>
+    <string name="settings_overlay_chip_opacity_subtitle">Higher = more prominent. Range 10 to 100 (percent shown at right).</string>
     <string name="settings_overlay_chip_opacity_value">%1$d%%</string>
     <string name="settings_overlay_icon_size">Icon size</string>
     <string name="settings_overlay_icon_size_value">%1$d</string>

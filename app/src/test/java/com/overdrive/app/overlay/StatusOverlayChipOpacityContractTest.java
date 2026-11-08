@@ -15,6 +15,13 @@ import org.junit.Test;
 public class StatusOverlayChipOpacityContractTest {
 
     @Test
+    public void chipOpacitySnapMatchesMaterialStepGrid() {
+        assertEquals(10f, StatusOverlayChipOpacity.snapSliderValue(10), 0f);
+        assertEquals(100f, StatusOverlayChipOpacity.snapSliderValue(100), 0f);
+        assertEquals(35f, StatusOverlayChipOpacity.snapSliderValue(37), 0f);
+    }
+
+    @Test
     public void chipOpacityRangeIsTenToOneHundred() {
         assertEquals(10, StatusOverlayChipOpacity.MIN);
         assertEquals(100, StatusOverlayChipOpacity.MAX);
@@ -23,6 +30,14 @@ public class StatusOverlayChipOpacityContractTest {
         assertEquals(35, StatusOverlayChipOpacity.clampStored(35));
         // Legacy floor from the first release (20) remains valid.
         assertEquals(20, StatusOverlayChipOpacity.clampStored(20));
+    }
+
+    @Test
+    public void settingsFragmentGuardsStaleChipSaveFromClearingPreview() throws Exception {
+        String fragment = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/ui/fragment/settings/SettingsOverlayFragment.kt");
+        assertTrue(fragment.contains("chipOpacitySaveGeneration"));
+        assertTrue(fragment.contains("chipOpacityDragInProgress"));
     }
 
     @Test
@@ -44,6 +59,7 @@ public class StatusOverlayChipOpacityContractTest {
                 "app/src/main/java/com/overdrive/app/overlay/StatusOverlayService.java");
         assertTrue(service.contains("previewChipOpacity"));
         assertTrue(service.contains("clearChipOpacityPreview"));
+        assertTrue(service.contains("runOnOverlayMain"));
         assertTrue(service.contains("CHIP_OPACITY_MIN = 10"));
         assertTrue(service.contains(
                 "applyIconAppearance(ICON_OPACITY_DEFAULT, iconSizeDp)"));
@@ -57,7 +73,9 @@ public class StatusOverlayChipOpacityContractTest {
         String he = readRepositoryFile("app/src/main/res/values-he/strings.xml");
         assertTrue(en.contains("Chip visibility"));
         assertFalse(en.contains("settings_overlay_icon_opacity\">Icon transparency"));
+        assertFalse(en.contains("10%%"));
         assertTrue(he.contains("נראות הצ"));
+        assertFalse(he.contains("10%%"));
     }
 
     private static String readRepositoryFile(String relativePath) throws Exception {

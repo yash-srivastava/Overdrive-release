@@ -47,6 +47,9 @@ class SettingsOverlayFragment : Fragment() {
     private var sizeValue: TextView? = null
     private var persistedChipOpacity = StatusOverlayChipOpacity.DEFAULT
     private var persistedSize = 18
+    /** Guards async save completion vs a newer drag / fragment teardown. */
+    private var chipOpacitySaveGeneration = 0
+    private var chipOpacityDragInProgress = false
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -113,6 +116,7 @@ class SettingsOverlayFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        chipOpacitySaveGeneration++
         StatusOverlayService.clearChipOpacityPreview()
         remoteCommunicationBinder?.destroy()
         remoteCommunicationBinder = null
@@ -151,27 +155,27 @@ class SettingsOverlayFragment : Fragment() {
             renderChipOpacity(opacity)
             if (fromUser) {
                 StatusOverlayService.previewChipOpacity(opacity)
+                // Keyboard / accessibility: no touch-stop callback — commit when thumb
+                // is not actively held.
+                if (!chipOpacity.isPressed) {
+                    commitChipOpacity(opacity)
+                }
             }
         }
         size.addOnChangeListener { _, value, fromUser ->
             if (fromUser) renderSize(value.toInt())
         }
         val touch = object : Slider.OnSliderTouchListener {
-            override fun onStartTrackingTouch(slider: Slider) = Unit
+            override fun onStartTrackingTouch(slider: Slider) {
+                if (slider === chipOpacitySlider) chipOpacityDragInProgress = true
+            }
 
             override fun onStopTrackingTouch(slider: Slider) {
                 if (applyingStatusOverlayConfig) return
                 when (slider) {
                     chipOpacitySlider -> {
-                        val next = StatusOverlayChipOpacity.clampStored(slider.value.toInt())
-                        if (next == persistedChipOpacity) {
-                            StatusOverlayService.clearChipOpacityPreview()
-                            return
-                        }
-                        persistInt("chipOpacity", next, persistedChipOpacity) {
-                            persistedChipOpacity = it
-                            StatusOverlayService.clearChipOpacityPreview()
-                        }
+                        chipOpacityDragInProgress = false
+                        commitChipOpacity(slider.value.toInt())
                     }
                     else -> {
                         val next = slider.value.toInt().coerceIn(12, 32)
@@ -185,6 +189,23 @@ class SettingsOverlayFragment : Fragment() {
         size.addOnSliderTouchListener(touch)
     }
 
+    private fun commitChipOpacity(rawOpacity: Int) {
+        val next = StatusOverlayChipOpacity.clampStored(rawOpacity)
+        if (next == persistedChipOpacity) {
+            if (!chipOpacityDragInProgress) {
+                StatusOverlayService.clearChipOpacityPreview()
+            }
+            return
+        }
+        val saveGeneration = ++chipOpacitySaveGeneration
+        persistInt("chipOpacity", next, persistedChipOpacity, saveGeneration) {
+            persistedChipOpacity = it
+            if (saveGeneration == chipOpacitySaveGeneration && !chipOpacityDragInProgress) {
+                StatusOverlayService.clearChipOpacityPreview()
+            }
+        }
+    }
+
     private fun renderChipOpacity(opacityPct: Int) {
         chipOpacityValue?.text =
             getString(R.string.settings_overlay_chip_opacity_value, opacityPct)
@@ -194,7 +215,13 @@ class SettingsOverlayFragment : Fragment() {
         sizeValue?.text = getString(R.string.settings_overlay_icon_size_value, sizeDp)
     }
 
-    private fun persistInt(key: String, value: Int, previous: Int, onOk: (Int) -> Unit) {
+    private fun persistInt(
+        key: String,
+        value: Int,
+        previous: Int,
+        saveGeneration: Int = 0,
+        onOk: (Int) -> Unit = {}
+    ) {
         val appContext = context?.applicationContext
         StatusOverlayUiWriter.writeInt(key, value) { ok ->
             if (ok) {
@@ -204,10 +231,14 @@ class SettingsOverlayFragment : Fragment() {
                 applyingStatusOverlayConfig = true
                 when (key) {
                     "chipOpacity" -> {
+                        if (saveGeneration != chipOpacitySaveGeneration) {
+                            applyingStatusOverlayConfig = false
+                            return@writeInt
+                        }
                         chipOpacitySlider?.value =
                             StatusOverlayChipOpacity.snapSliderValue(previous)
                         renderChipOpacity(previous)
-                        StatusOverlayService.previewChipOpacity(previous)
+                        StatusOverlayService.clearChipOpacityPreview()
                     }
                     else -> {
                         sizeSlider?.value = previous.toFloat()
