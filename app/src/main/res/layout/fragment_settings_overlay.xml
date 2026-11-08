@@ -322,51 +322,23 @@
                         android:textColor="?attr/colorPrimary" />
                 </LinearLayout>
 
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/settings_overlay_chip_opacity_subtitle"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+
                 <com.google.android.material.slider.Slider
                     android:id="@+id/sliderOverlayChipOpacity"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:contentDescription="@string/settings_overlay_chip_opacity"
                     android:stepSize="5"
-                    android:value="0"
-                    android:valueFrom="0"
-                    android:valueTo="80"
-                    app:labelBehavior="gone" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="@string/settings_overlay_icon_opacity"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                        android:textColor="?attr/colorOnSurface" />
-
-                    <TextView
-                        android:id="@+id/tvOverlayIconOpacity"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:gravity="end"
-                        android:minWidth="44dp"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                        android:textColor="?attr/colorPrimary" />
-                </LinearLayout>
-
-                <com.google.android.material.slider.Slider
-                    android:id="@+id/sliderOverlayIconOpacity"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:contentDescription="@string/settings_overlay_icon_opacity"
-                    android:stepSize="5"
-                    android:value="0"
-                    android:valueFrom="0"
-                    android:valueTo="80"
+                    android:value="100"
+                    android:valueFrom="10"
+                    android:valueTo="100"
                     app:labelBehavior="gone" />
 
                 <LinearLayout

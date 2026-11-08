@@ -101,7 +101,12 @@ public class StatusOverlayService extends Service {
     private static final int ICON_OPACITY_MIN = 20;
     private static final int ICON_OPACITY_MAX = 100;
     private static final int ICON_OPACITY_DEFAULT = 100;
+    private static final int CHIP_OPACITY_MIN = 10;
+    private static final int CHIP_OPACITY_MAX = 100;
     private static final int CHIP_OPACITY_DEFAULT = 100;
+    /** Live slider preview; when >= 0 overrides config until cleared. */
+    private int chipOpacityPreview = -1;
+    private static volatile StatusOverlayService activeInstance;
     private static final int ICON_SIZE_MIN_DP = 12;
     private static final int ICON_SIZE_MAX_DP = 32;
     private static final int ICON_SIZE_DEFAULT_DP = 18;
@@ -559,6 +564,7 @@ public class StatusOverlayService extends Service {
         if (windowManager == null) {
             windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         }
+        activeInstance = this;
 
         // Arm the camera-view close-button receiver once (idempotent across restarts).
         registerCamCloseReceiver();
@@ -991,6 +997,8 @@ public class StatusOverlayService extends Service {
 
     @Override
     public void onDestroy() {
+        activeInstance = null;
+        chipOpacityPreview = -1;
         // Order matters here:
         //  1. Flip running BEFORE we touch the executor or the controller.
         //     Any in-flight reconcile that's already on the executor reads
@@ -2028,7 +2036,6 @@ public class StatusOverlayService extends Service {
         boolean cameraOverlayEnabled = true;
         boolean tripOverlayEnabled = true;
         boolean replayOverlayEnabled = true;
-        int iconOpacity = ICON_OPACITY_DEFAULT;
         int iconSizeDp = ICON_SIZE_DEFAULT_DP;
         int chipOpacity = CHIP_OPACITY_DEFAULT;
         try {
@@ -2041,15 +2048,16 @@ public class StatusOverlayService extends Service {
                 cameraOverlayEnabled = statusOverlayCfg.optBoolean("cameraVisible", true);
                 tripOverlayEnabled = statusOverlayCfg.optBoolean("tripVisible", true);
                 replayOverlayEnabled = statusOverlayCfg.optBoolean("replayVisible", true);
-                iconOpacity = clamp(statusOverlayCfg.optInt("iconOpacity", ICON_OPACITY_DEFAULT),
-                        ICON_OPACITY_MIN, ICON_OPACITY_MAX);
                 iconSizeDp = clamp(statusOverlayCfg.optInt("iconSizeDp", ICON_SIZE_DEFAULT_DP),
                         ICON_SIZE_MIN_DP, ICON_SIZE_MAX_DP);
-                chipOpacity = clamp(statusOverlayCfg.optInt("chipOpacity", CHIP_OPACITY_DEFAULT),
-                        ICON_OPACITY_MIN, ICON_OPACITY_MAX);
+                chipOpacity = StatusOverlayChipOpacity.clampStored(
+                        statusOverlayCfg.optInt("chipOpacity", CHIP_OPACITY_DEFAULT));
             }
         } catch (Exception e) {
             Log.w(TAG, "Failed to read statusOverlay prefs: " + e.getMessage());
+        }
+        if (chipOpacityPreview >= 0) {
+            chipOpacity = chipOpacityPreview;
         }
 
         boolean recConfigured = !"NONE".equals(configuredMode) && !"UNKNOWN".equals(configuredMode);
@@ -2197,7 +2205,8 @@ public class StatusOverlayService extends Service {
         
         overlayView.setVisibility(View.VISIBLE);
         applyChipOpacity(chipOpacity);
-        applyIconAppearance(iconOpacity, iconSizeDp);
+        // Legacy statusOverlay.iconOpacity is ignored — whole-chip alpha is the only dimming control.
+        applyIconAppearance(ICON_OPACITY_DEFAULT, iconSizeDp);
 
         // Recording pill. The pill is the ONLY entry point to the mode
         // action bar (tap → expand → OFF/CONT/DRIVE/PROX chips), so while
@@ -2638,4 +2647,24 @@ public class StatusOverlayService extends Service {
 
     public static final String ACTION_REFRESH_THEME =
             "com.overdrive.app.overlay.REFRESH_THEME";
+
+    /**
+     * Apply chip visibility while the settings slider is held — no config write,
+     * no service restart, no poll reschedule. UI-thread only.
+     */
+    public static void previewChipOpacity(int opacityPct) {
+        StatusOverlayService svc = activeInstance;
+        if (svc == null) return;
+        int opacity = StatusOverlayChipOpacity.clampStored(opacityPct);
+        svc.chipOpacityPreview = opacity;
+        svc.applyChipOpacity(opacity);
+    }
+
+    /** Drop the in-memory preview override so poll/config values apply again. */
+    public static void clearChipOpacityPreview() {
+        StatusOverlayService svc = activeInstance;
+        if (svc == null) return;
+        svc.chipOpacityPreview = -1;
+        svc.appliedChipOpacity = -1;
+    }
 }

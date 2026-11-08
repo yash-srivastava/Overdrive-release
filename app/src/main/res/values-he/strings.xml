@@ -746,10 +746,9 @@
     <string name="settings_overlay_replay_subtitle">הצג תגית CLIP: ירוק בעת הקלטת שידור חוזר, כחול למשך 5 שנ׳ לאחר השמירה, ואדום במקרה של כשל. מופיע רק כאשר מוגדר קיצור מקשים או אוטומציה לשידור חוזר.</string>
     <string name="settings_overlay_roadsense_title">שכבת RoadSense</string>
     <string name="settings_overlay_roadsense_subtitle">הצג את התגית הצפה וכרטיס המפגעים של RoadSense כאשר RoadSense מופעל.</string>
-    <string name="settings_overlay_chip_opacity">שקיפות הצ\'יפ</string>
+    <string name="settings_overlay_chip_opacity">נראות הצ\'יפ</string>
+    <string name="settings_overlay_chip_opacity_subtitle">ערך גבוה = בולט יותר. מינימום 10%%, מקסימום 100%%.</string>
     <string name="settings_overlay_chip_opacity_value">%1$d%%</string>
-    <string name="settings_overlay_icon_opacity">שקיפות האייקונים</string>
-    <string name="settings_overlay_icon_opacity_value">%1$d%%</string>
     <string name="settings_overlay_icon_size">גודל האייקונים</string>
     <string name="settings_overlay_icon_size_value">%1$d</string>
     <string name="remote_voice_overlay_title">שמע קולי מרחוק</string>
