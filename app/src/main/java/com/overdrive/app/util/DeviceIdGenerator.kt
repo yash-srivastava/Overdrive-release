@@ -179,7 +179,7 @@ object DeviceIdGenerator {
             command = "echo '$id' > $ID_FILE",
             callback = object : AdbShellExecutor.ShellCallback {
                 override fun onSuccess(output: String) {
-                    Log.d(TAG, "Device ID saved to file via ADB: $id")
+                    Log.d(TAG, "Device ID saved to file via ADB: " + redactDeviceIdForLog(id))
                 }
                 override fun onError(error: String) {
                     Log.w(TAG, "Failed to save device ID via ADB: $error")
@@ -205,7 +205,7 @@ object DeviceIdGenerator {
         return try {
             val result = executor.executeSync("echo '$id' > $ID_FILE")
             if (result.exitCode == 0) {
-                Log.i(TAG, "Device ID synced to file (sync): $id")
+                Log.i(TAG, "Device ID synced to file (sync): " + redactDeviceIdForLog(id))
                 true
             } else {
                 Log.w(TAG, "Failed to sync device ID: ${result.output}")
@@ -226,3 +226,7 @@ object DeviceIdGenerator {
         }
     }
 }
+
+/** SECURITY (V60-05): never log the raw device ID — it is the credential-cipher key seed. */
+fun redactDeviceIdForLog(did: String?): String =
+    if (did.isNullOrEmpty() || did.length <= 8) "****" else did.take(4) + "…" + did.takeLast(4) + " (redacted)"
