@@ -5227,7 +5227,7 @@
     "notify_auth": "פג תוקף ההתחברות",
     "notify_quota": "האחסון כמעט מלא",
     "notify_mobile": "מכסת הנתונים הסלולריים נוצלה",
-    "notify_saved": "כל קליף שנשמר",
+    "notify_saved": "כל קליפ שנשמר",
     "notify_saved_desc": "כולל קישור פרטי כשהאחסון תומך בכך.",
     "webhooks_title": "Webhooks",
     "webhooks_desc": "שולח הודעת JSON ב־POST כשנסיעה מסתיימת או קליף נשמר — ל־Home Assistant,‏ n8n,‏ Zapier וחברים. חתום ב־HMAC-SHA256 כשמגדירים סוד.",
