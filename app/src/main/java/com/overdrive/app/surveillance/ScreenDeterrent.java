@@ -405,11 +405,11 @@ public final class ScreenDeterrent {
      * volatile reads + atomic CAS only. NO I/O, NO locks, NO allocations.
      * The hot cache is kept fresh by cacheScheduler on a separate thread.
      */
-    public void onMotionDetected() {
-        if (!hotCacheEnabled) return;
+    public boolean onMotionDetected() {
+        if (!hotCacheEnabled) return false;
         // DI5 owner present: surveillance keeps running there, so stay quiet (logged on the edge).
-        if (diLink5CarAwake) return;
-        if (diLink5OwnerAtCar) return;
+        if (diLink5CarAwake) return false;
+        if (diLink5OwnerAtCar) return false;
 
         // SAFETY (deterrent-while-driving): the deterrent renders a full-screen
         // SurfaceControl layer at z=Integer.MAX_VALUE that occludes the ENTIRE
@@ -418,12 +418,13 @@ public final class ScreenDeterrent {
         // gate for every motion-pipeline caller; manual preview has its own
         // movement guard. Do not rely on the edge-driven
         // screenDeterrentForceStop flag, which is only asserted on the ACC
+        return true;  // Accepted for rendering; the worker may still abort on a safety edge.
         // OFF→ON transition and is false during steady-state driving.
         // isAccUnsafe() requires an authoritative ACC reading and ACC OFF, so
         // an unknown or stale state fails closed.
         if (isAccUnsafe()) {
             logger.warn("Screen deterrent suppressed — ACC is ON or unknown");
-            return;
+            return false;
         }
 
         long durationMs = hotCacheDurationSec * 1000L;
@@ -435,7 +436,7 @@ public final class ScreenDeterrent {
             if (extendDeadlineElapsedMs.compareAndSet(current, newDeadline)) break;
         }
 
-        if (!inFlight.compareAndSet(false, true)) return;
+        if (!inFlight.compareAndSet(false, true)) return false;
 
         restorePanelAfterSession = false;
         cancelled.set(false);
@@ -443,7 +444,7 @@ public final class ScreenDeterrent {
             extendDeadlineElapsedMs.set(0);
             inFlight.set(false);
             terminalStopRequested.compareAndSet(true, false);
-            return;
+            return false;
         }
         executor.execute(() -> {
             renderThread = Thread.currentThread();

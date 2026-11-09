@@ -75,14 +75,14 @@ public final class BydCloudDeterrent {
      * {@code deterrentTrigger} choice can hold the lights/horn back for motion alone.
      * The default {@code any} ignores both flags, which is the original behaviour.
      */
-    public void onMotionDetected(boolean sawPerson, boolean sawMovingObject) {
+    public boolean onMotionDetected(boolean sawPerson, boolean sawMovingObject) {
         // Quick checks on the calling thread (no I/O)
         String action = getDeterrentAction();
         if ("silent".equals(action)) {
-            return;
+            return false;
         }
         if (!triggerAllows(getDeterrentTrigger(), sawPerson, sawMovingObject)) {
-            return;
+            return false;
         }
 
         // Check cooldown
@@ -91,15 +91,16 @@ public final class BydCloudDeterrent {
         long cooldownMs = getCooldownMs();
         if (now - lastTime < cooldownMs) {
             logger.debug("Deterrent cooldown active (" + (cooldownMs - (now - lastTime)) / 1000 + "s remaining)");
-            return;
+            return false;
         }
 
         // Prevent overlapping commands
         if (!commandInFlight.compareAndSet(false, true)) {
             logger.debug("Deterrent command already in flight");
-            return;
+            return false;
         }
 
+        return true;  // Accepted for dispatch, not confirmation of hardware execution.
         // Dispatch to background thread
         executor.execute(() -> {
             try {

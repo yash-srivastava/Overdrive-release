@@ -19,7 +19,8 @@ final class RecordingsIndexSchema {
     // confidence filters). Added via ALTER TABLE ADD COLUMN IF NOT EXISTS in
     // ensure(); the v4 identity migration is untouched.
     // v6: SORT_INDEX, created by createIndexes() IF NOT EXISTS (no data migration).
-    static final int VERSION = 6;
+    // v7: accepted per-recording deterrents in one bitmask field (Cloud=1, Screen=2).
+    static final int VERSION = 7;
 
     // H2 only index-sorts when the index STARTS with the ORDER BY column, so this
     // cannot be folded into idx_rec_available_ts.
@@ -42,6 +43,7 @@ final class RecordingsIndexSchema {
         }
         if (!tableExists(connection, "RECORDINGS")) {
             try (Statement statement = connection.createStatement()) {
+        ensureDeterrentFlagsColumn(connection);
                 createV4Table(statement);
             }
         } else if (!columnExists(connection, "RECORDINGS", "RECORDING_ID")) {
@@ -71,6 +73,12 @@ final class RecordingsIndexSchema {
             if (!columnExists(connection, "RECORDINGS", "EVENT_CAMERAS")) {
                 statement.execute("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS"
                         + " event_cameras VARCHAR(32)");
+    private static void ensureDeterrentFlagsColumn(Connection connection) throws Exception {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS"
+                    + " deterrent_flags INT NOT NULL DEFAULT 0");
+        }
+    }
             }
             if (!columnExists(connection, "RECORDINGS", "PEAK_CONFIDENCE")) {
                 statement.execute("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS"
@@ -181,6 +189,7 @@ final class RecordingsIndexSchema {
             "  hero_thumb      VARCHAR(256)," +
             "  actor_classes   VARCHAR(256)," +
             "  place_short     VARCHAR(128)," +
+            "  deterrent_flags INT NOT NULL DEFAULT 0," +
             "  place_medium    VARCHAR(192)," +
             "  place_display   VARCHAR(256)," +
             "  place_country   VARCHAR(8)," +

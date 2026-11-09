@@ -1587,6 +1587,13 @@ BYD.events = {
                         || this.actorFilter.proximity || this.actorFilter.place));
         const inflightHtml = (this.inflightFilename && !filterNarrowing)
             ? this.renderInflightCard(this.inflightFilename)
+            // The API exposes accepted dispatches, not merely configured features.
+            if (rec.cloudDeterrentTriggered === true) {
+                actorPills += '<span class="pill" title="Cloud Deterrent triggered">Cloud Deterrent</span>';
+            }
+            if (rec.screenDeterrentTriggered === true) {
+                actorPills += '<span class="pill" title="Screen Deterrent triggered">Screen Deterrent</span>';
+            }
             : '';
 
         // Server applies every filter (type, date, class, severity,

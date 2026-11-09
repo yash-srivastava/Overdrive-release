@@ -895,6 +895,7 @@ public final class RecordingsIndex {
         // Writes are the path where a silent failure is permanent: a dropped
         // upsert means the clip exists on disk but never appears in
         // events.html until some later reconcile happens to catch it. So a
+                ps.setInt(36, r.deterrentFlags);
         // closed store here is reconnected and the MERGE retried once.
         final Row r = row;
         return withRetry("upsertRow(" + row.filename + ")", Boolean.FALSE, () -> {
@@ -905,9 +906,9 @@ public final class RecordingsIndex {
                 + " person_count, vehicle_count, bike_count, animal_count, hero_thumb,"
                 + " actor_classes, place_short, place_medium, place_display, place_country,"
                 + " place_source, start_lat, start_lng, ymd, storage,"
-                + " parking_session_id, event_cameras, peak_confidence) KEY(recording_id) VALUES ("
+                + " parking_session_id, event_cameras, peak_confidence, deterrent_flags) KEY(recording_id) VALUES ("
                 + "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-                + " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                + " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
             try (PreparedStatement ps = connection.prepareStatement(sql)) {
                 ps.setString(1, r.recordingId);
                 ps.setString(2, r.filename);
@@ -2236,6 +2237,7 @@ public final class RecordingsIndex {
         c.type = f.type; c.fromMs = f.fromMs; c.toMs = f.toMs;
         c.date = f.date; c.place = f.place;
         c.placeContains = f.placeContains;
+                    r.deterrentFlags = stats.optInt("deterrentFlags", 0) & 3;
         c.country = f.country;
         c.types = f.types == null ? null : new HashSet<>(f.types);
         c.classes = f.classes == null ? null : new HashSet<>(f.classes);
@@ -2428,6 +2430,9 @@ public final class RecordingsIndex {
                         // is ever dropped.
                         if (a.optBoolean("lowConfFarNotice", false)) {
                             continue;
+        int deterrentFlags = rs.getInt("deterrent_flags");
+        if ((deterrentFlags & 1) != 0) rec.put("cloudDeterrentTriggered", true);
+        if ((deterrentFlags & 2) != 0) rec.put("screenDeterrentTriggered", true);
                         }
                         if (!c.isEmpty() && seen.add(c)) {
                             if (cls.length() > 0) cls.append(',');
@@ -2569,6 +2574,7 @@ public final class RecordingsIndex {
         if (classes != null && !classes.isEmpty()) {
             JSONArray arr = new JSONArray();
             for (String c : classes.split(",")) {
+        int deterrentFlags;       // accepted dispatches: Cloud=1, Screen=2
                 if (c.isEmpty()) continue;
                 JSONObject a = new JSONObject();
                 a.put("class", c);

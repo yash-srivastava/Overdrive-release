@@ -4746,9 +4746,11 @@ public class SurveillanceEngineGpu {
                         // background threads and never block the surveillance pipeline.
                         // Each one independently honors its own enabled flag and cooldown.
                         try {
-                            com.overdrive.app.byd.cloud.BydCloudDeterrent.getInstance()
+                            boolean cloudTriggered = com.overdrive.app.byd.cloud.BydCloudDeterrent.getInstance()
                                     .onMotionDetected(eventEverSawPerson, eventEverSawMovingObject);
-                            ScreenDeterrent.getInstance().onMotionDetected();
+                            timelineCollector.markDeterrentTriggered(cloudTriggered, false);
+                            boolean screenTriggered = ScreenDeterrent.getInstance().onMotionDetected();
+                            timelineCollector.markDeterrentTriggered(false, screenTriggered);
                             deterrentFiredTime = now;  // Track when deterrent was dispatched
                         } catch (Exception e) {
                             logger.debug("Deterrent dispatch failed: " + e.getMessage());
@@ -4765,9 +4767,11 @@ public class SurveillanceEngineGpu {
                     // SOTA: Recurring deterrent — re-trigger while motion continues.
                     // Per-deterrent cooldowns prevent spamming.
                     try {
-                        com.overdrive.app.byd.cloud.BydCloudDeterrent.getInstance()
+                        boolean cloudTriggered = com.overdrive.app.byd.cloud.BydCloudDeterrent.getInstance()
                                 .onMotionDetected(eventEverSawPerson, eventEverSawMovingObject);
-                        ScreenDeterrent.getInstance().onMotionDetected();
+                        timelineCollector.markDeterrentTriggered(cloudTriggered, false);
+                        boolean screenTriggered = ScreenDeterrent.getInstance().onMotionDetected();
+                        timelineCollector.markDeterrentTriggered(false, screenTriggered);
                         deterrentFiredTime = now;  // Track latest deterrent dispatch
                     } catch (Exception e) {
                         // Fail silently — never block surveillance
@@ -4935,9 +4939,11 @@ public class SurveillanceEngineGpu {
                             }
                         }
                         try {
-                            com.overdrive.app.byd.cloud.BydCloudDeterrent.getInstance()
+                            boolean cloudTriggered = com.overdrive.app.byd.cloud.BydCloudDeterrent.getInstance()
                                     .onMotionDetected(eventEverSawPerson, eventEverSawMovingObject);
-                            ScreenDeterrent.getInstance().onMotionDetected();
+                            timelineCollector.markDeterrentTriggered(cloudTriggered, false);
+                            boolean screenTriggered = ScreenDeterrent.getInstance().onMotionDetected();
+                            timelineCollector.markDeterrentTriggered(false, screenTriggered);
                             deterrentFiredTime = now;
                         } catch (Exception e) {
                             logger.debug("Deterrent dispatch failed: " + e.getMessage());

@@ -101,6 +101,8 @@ public class EventTimelineCollector {
     private final byte[]  spanCameras     = new byte[SPAN_CAPACITY];
     private int spanCount = 0;
 
+    // Accepted dispatches for this recording segment: Cloud=1, Screen=2.
+    private int deterrentFlags = 0;
     // In-flight span for the active path
     private long   inflightStart = -1;
     private long   inflightEnd   = 0;
@@ -125,6 +127,12 @@ public class EventTimelineCollector {
     // successor's collection survives intact.
     private int collectionGen = 0;
 
+    /** Latch accepted deterrent dispatches only while a clip is collecting. */
+    public synchronized void markDeterrentTriggered(boolean cloud, boolean screen) {
+        if (!collecting) return;
+        if (cloud) deterrentFlags |= 1;
+        if (screen) deterrentFlags |= 2;
+    }
     /**
      * Wall-clock timestamp (ms) of the start of the current recording (with
      * pre-record offset already applied). Returns 0 when not collecting.
@@ -186,6 +194,7 @@ public class EventTimelineCollector {
      */
     public synchronized int startCollecting(long preRecordMs) {
         return startCollecting(preRecordMs, /*flushPreRing=*/true);
+        deterrentFlags = 0;
     }
 
     /**
@@ -301,6 +310,7 @@ public class EventTimelineCollector {
     }
 
     /**
+        final int acceptedDeterrents = deterrentFlags;
      * Generation-checked stop (audit R11-4 / ExtD-5). No-ops — leaving the
      * live collection UNTOUCHED — when {@code expectedGen} is non-negative
      * and a newer {@code startCollecting*} has run since the caller's
@@ -329,7 +339,7 @@ public class EventTimelineCollector {
         commitInflight();
 
         final int count = spanCount;
-        if (count == 0 && (actors == null || actors.isEmpty())) {
+        if (count == 0 && (actors == null || actors.isEmpty()) && acceptedDeterrents == 0) {
             logger.info("No events collected, skipping sidecar write");
             return;
         }
@@ -416,7 +426,8 @@ public class EventTimelineCollector {
 
         writeExecutor.execute(() -> {
             writeJsonSidecar(mp4File, starts, ends, types, confs, counts, cams, count,
-                    durationMs, actorsCopy, heroThumb, startG, peakG, endG, parkingSessionId);
+                    durationMs, actorsCopy, heroThumb, startG, peakG, endG,
+                    parkingSessionId, acceptedDeterrents);
             // SRT subtitle sidecar — localized prose so VLC / video.js / ExoPlayer
             // can show "Person detected close range" / "Charging started · 4.3 kW"
             // without re-encoding the burned-in English overlay. Wrapped so an
@@ -947,7 +958,7 @@ public class EventTimelineCollector {
                                    com.overdrive.app.geo.GeoSnapshot peakGeo,
                                    com.overdrive.app.geo.GeoSnapshot endGeo) {
         writeJsonSidecar(mp4File, starts, ends, types, confs, counts, cameras, count,
-                durationMs, actors, heroThumbnail, startGeo, peakGeo, endGeo, null);
+                durationMs, actors, heroThumbnail, startGeo, peakGeo, endGeo, null, 0);
     }
 
     private void writeJsonSidecar(File mp4File, long[] starts, long[] ends,
@@ -957,7 +968,7 @@ public class EventTimelineCollector {
                                    com.overdrive.app.geo.GeoSnapshot startGeo,
                                    com.overdrive.app.geo.GeoSnapshot peakGeo,
                                    com.overdrive.app.geo.GeoSnapshot endGeo,
-                                   String parkingSessionId) {
+                                   String parkingSessionId, int acceptedDeterrents) {
         final String[] CAMERA_NAMES = {"front", "right", "rear", "left"};
 
         try {
@@ -1100,6 +1111,7 @@ public class EventTimelineCollector {
                     }
 
                     actorsArr.put(ao);
+            if (acceptedDeterrents != 0) stats.put("deterrentFlags", acceptedDeterrents);
 
                     // Counts + peak fields exclude static actors. The classic
                     // failure to prevent: a parked car next to ours dominates
