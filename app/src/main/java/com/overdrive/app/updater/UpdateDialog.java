@@ -22,6 +22,11 @@ public class UpdateDialog {
     public static void showUpdateAvailable(Context context, String currentVersion,
                                            String newVersion, String releaseNotes,
                                            Runnable onUpdate, Runnable onDismiss) {
+        if (currentVersion != null && newVersion != null && currentVersion.trim().equals(newVersion.trim())) {
+            android.util.Log.w("UpdateDialog", "Suppressed update dialog offering the same version: " + currentVersion);
+            if (onDismiss != null) onDismiss.run();
+            return;
+        }
         View view = LayoutInflater.from(context).inflate(R.layout.dialog_update_available, null);
         // currentVersion (getDisplayVersion) and newVersion (extractVersion) are
         // already self-prefixed labels like "alpha-v26.1" / "v26.1" — do NOT add

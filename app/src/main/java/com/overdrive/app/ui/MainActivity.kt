@@ -1000,6 +1000,11 @@ open class MainActivity : AppCompatActivity() {
         appUpdater = updater
         updater.checkForUpdate(object : com.overdrive.app.updater.AppUpdater.UpdateCallback {
             override fun onUpdateAvailable(currentVersion: String, newVersion: String, releaseNotes: String) {
+                if (currentVersion.trim() == newVersion.trim()) {
+                    logsViewModel.debug("Update", "Suppressed update offer with identical version ($currentVersion)")
+                    updater.close()
+                    return
+                }
                 // Don't close updater here — performAppUpdate will use it.
                 com.overdrive.app.updater.UpdateDialog.showUpdateAvailable(
                     this@MainActivity, currentVersion, newVersion, releaseNotes,
@@ -1092,6 +1097,12 @@ open class MainActivity : AppCompatActivity() {
         updater.checkForUpdate(object : com.overdrive.app.updater.AppUpdater.UpdateCallback {
             override fun onUpdateAvailable(currentVersion: String, newVersion: String, releaseNotes: String) {
                 if (!isCurrentManualUpdateCheck(checkGeneration)) {
+                    updater.close()
+                    return
+                }
+                if (currentVersion.trim() == newVersion.trim()) {
+                    logsViewModel.debug("Update", "Suppressed manual update offer with identical version ($currentVersion)")
+                    Toast.makeText(this@MainActivity, getString(R.string.toast_app_up_to_date, currentVersion), Toast.LENGTH_LONG).show()
                     updater.close()
                     return
                 }
