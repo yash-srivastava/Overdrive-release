@@ -18994,13 +18994,16 @@ public class BydDataCollector {
         boolean valid = isValidAcChargingCurrentLimitState(rawState);
         Boolean supported = resolveAcChargingCurrentLimitSupport(
                 BydVehicleData.UNAVAILABLE, rawState, acChargingCurrentLimitSupported);
-        if (supported == null && chargingDevice != null) {
+        if (supported == null) {
             supported = Boolean.TRUE;
             acChargingCurrentLimitSupported = Boolean.TRUE;
         } else if (valid) {
             acChargingCurrentLimitSupported = supported;
         }
-        boolean available = Boolean.TRUE.equals(supported) && (chargingDevice != null || valid);
+        // In the daemon process that serves the web UI / status API, chargingDevice is null
+        // because BYD HAL singletons are only acquired in the main app process. On DiLink 5,
+        // availability must remain true so driver selection controls are unblocked.
+        boolean available = Boolean.TRUE.equals(supported);
         return new AcChargingCurrentLimitStatus(
                 supported, available, BydVehicleData.UNAVAILABLE,
                 valid ? rawState : BydVehicleData.UNAVAILABLE);
