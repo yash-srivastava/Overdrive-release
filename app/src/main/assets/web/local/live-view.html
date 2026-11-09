@@ -106,6 +106,16 @@
                                             <path d="M18.5 5.5a9 9 0 0 1 0 13"/>
                                         </svg>
                                     </button>
+                                    <button type="button" class="top-bar-btn vehicle-actions-trigger" id="vehicleActionsTrigger"
+                                            onclick="BYD.stream.toggleVehicleActions()" aria-haspopup="true"
+                                            aria-controls="deterrentControls" aria-expanded="false"
+                                            data-i18n-attr="title:liveview.actions;aria-label:liveview.actions"
+                                            title="Actions" aria-label="Actions">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                            <path d="m6 9 6 6 6-6"/>
+                                        </svg>
+                                        <span data-i18n="liveview.actions">Actions</span>
+                                    </button>
                                     <button class="top-bar-btn" onclick="BYD.stream.toggleFullscreen()" aria-label="Fullscreen" data-i18n-attr="aria-label:events.player_fullscreen;title:events.player_fullscreen" title="Fullscreen">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/>
@@ -139,29 +149,35 @@
                                     <span id="currentCameraLabel" data-i18n="stream.front_camera">Front Camera</span>
                                 </div>
 
-                                <!-- Deterrent controls — manual horn + light triggers so the
-                                     camera view is an active security tool, not just a passive
-                                     monitor (see issue #118). Both route to cloud-only vehicle
-                                     commands (FINDCAR = horn+lights, FLASHLIGHT = lights only),
-                                     so the whole cluster stays display:none until the cloud
-                                     status probe below confirms the account is configured +
-                                     verified. Each fire is gated behind a themed confirm dialog
-                                     to prevent accidental activation. -->
+                                <!-- Popover hidden until Actions is opened. Keep issue #425
+                                     Lock/Unlock behavior and issue #118 deterrent handlers. -->
                                 <div class="deterrent-controls" id="deterrentControls" style="display:none;"
-                                     role="group" data-i18n-attr="aria-label:liveview.deterrent_group_label"
-                                     aria-label="Vehicle deterrent controls">
-                                    <button type="button" class="deterrent-btn deterrent-horn" id="deterrentHornBtn"
-                                            onclick="BYD.stream.fireDeterrent('horn')"
-                                            data-i18n-attr="title:liveview.deterrent_horn;aria-label:liveview.deterrent_horn"
-                                            title="Horn" aria-label="Horn">
-                                        <!-- Lucide megaphone -->
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                            <path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>
-                                        </svg>
-                                        <span class="deterrent-label" data-i18n="liveview.deterrent_horn">Horn</span>
-                                    </button>
-                                    <button type="button" class="deterrent-btn deterrent-flash" id="deterrentFlashBtn"
-                                            onclick="BYD.stream.fireDeterrent('flash')"
+                                     role="group" data-i18n-attr="aria-label:liveview.actions" aria-label="Actions">
+                                    <!-- Door lock / unlock. Unlike horn + flash these have a local
+                                         rail (SDK_FIRST, cloud as fallback), so the row is shown
+                                         when either cloud or the local remote key is available. -->
+                                    <div class="vehicle-lock-row" id="vehicleLockRow" style="display:none;">
+                                        <button type="button" class="deterrent-btn deterrent-lock" id="vehicleLockBtn"
+                                                onclick="BYD.stream.fireLiveAction('lock')"
+                                                data-i18n-attr="title:dashboard.cmd_lock;aria-label:dashboard.cmd_lock"
+                                                title="Lock" aria-label="Lock">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                                            </svg>
+                                            <span class="deterrent-label" data-i18n="dashboard.cmd_lock">Lock</span>
+                                        </button>
+                                        <button type="button" class="deterrent-btn deterrent-unlock" id="vehicleUnlockBtn"
+                                                onclick="BYD.stream.fireLiveAction('unlock')"
+                                                data-i18n-attr="title:dashboard.cmd_unlock;aria-label:dashboard.cmd_unlock"
+                                                title="Unlock" aria-label="Unlock">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                                <rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>
+                                            </svg>
+                                            <span class="deterrent-label" data-i18n="dashboard.cmd_unlock">Unlock</span>
+                                        </button>
+                                    </div>
+                                    <button type="button" class="deterrent-btn deterrent-flash" id="deterrentFlashBtn" style="display:none;"
+                                            onclick="BYD.stream.fireLiveAction('flash')"
                                             data-i18n-attr="title:liveview.deterrent_flash;aria-label:liveview.deterrent_flash"
                                             title="Flash" aria-label="Flash">
                                         <!-- Lucide lightbulb -->
@@ -170,6 +186,24 @@
                                         </svg>
                                         <span class="deterrent-label" data-i18n="liveview.deterrent_flash">Flash</span>
                                     </button>
+                                    <button type="button" class="deterrent-btn deterrent-horn" id="deterrentHornBtn" style="display:none;"
+                                            onclick="BYD.stream.fireLiveAction('horn')"
+                                            data-i18n-attr="title:liveview.deterrent_horn;aria-label:liveview.deterrent_horn"
+                                            title="Horn" aria-label="Horn">
+                                        <!-- Lucide megaphone -->
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>
+                                        </svg>
+                                        <span class="deterrent-label" data-i18n="liveview.deterrent_horn">Horn</span>
+                                    </button>
+                                    <button type="button" class="deterrent-btn" id="vehiclePowerOnBtn" style="display:none;"
+                                            onclick="BYD.stream.fireLiveAction('powerOn')"><span class="deterrent-label" data-i18n="vehicle.power_on">Power on</span></button>
+                                    <button type="button" class="deterrent-btn" id="vehiclePowerOffBtn" style="display:none;"
+                                            onclick="BYD.stream.fireLiveAction('powerOff')"><span class="deterrent-label" data-i18n="vehicle.power_off">Power off</span></button>
+                                    <button type="button" class="deterrent-btn" id="vehicleTrunkOpenBtn"
+                                            onclick="BYD.stream.fireLiveAction('trunkOpen')"><span class="deterrent-label" data-i18n="dashboard.cmd_trunk_open">Open trunk</span></button>
+                                    <button type="button" class="deterrent-btn" id="vehicleTrunkCloseBtn"
+                                            onclick="BYD.stream.fireLiveAction('trunkClose')"><span class="deterrent-label" data-i18n="dashboard.cmd_trunk_close">Close trunk</span></button>
                                 </div>
                             </div>
                             </div>
@@ -670,37 +704,40 @@
             z-index: 10;
         }
 
-        /* Deterrent controls — bottom-right buttons layered over the video
-           stage. Anchored to the video-display-area (not the top bar) so they
-           sit within reach of the thumb over the live feed and never collide
-           with the connection pill / quality select up top or the camera label
-           overlay (top-centre). z-index 15 keeps them above the decoded video
-           (z 10) and idle state, below the top-bar chrome (z 20) so a
-           quality-select dropdown still overlays them.
-
-           Chrome-58 (BYD in-app WebView) notes:
-             - No flex `gap` in this old engine; buttons are spaced with a
-               sibling margin instead.
-             - safe-bottom inset keeps the cluster clear of the gesture bar
-               in fullscreen / notched displays. */
+        /* Fixed popover escapes the clipped video stage like the quality menu.
+           It remains display:none unless explicitly opened via Actions. */
         .deterrent-controls {
-            position: absolute;
-            right: 16px;
-            bottom: calc(16px + var(--safe-bottom, 0px));
+            position: fixed;
+            left: 0;
+            top: 0;
+            box-sizing: border-box;
+            width: 220px;
+            max-width: calc(100vw - 16px);
+            max-height: 70vh;
+            overflow-y: auto;
+            padding: 6px;
+            background: var(--tile-raised);
+            border: 1px solid var(--lv-pill-border);
+            border-radius: var(--radius-lg);
+            box-shadow: 0 12px 32px rgba(0,0,0,0.32);
             display: flex;
             flex-direction: column;
             align-items: stretch;
-            z-index: 15;
+            z-index: 120;
         }
-        .deterrent-controls .deterrent-btn + .deterrent-btn { margin-top: 10px; }
-        [dir="rtl"] .deterrent-controls { right: auto; left: 16px; }
+        .deterrent-controls .deterrent-btn { box-sizing: border-box; width: 100%; min-width: 0; }
+        .deterrent-controls .deterrent-btn + .deterrent-btn { margin-top: 6px; }
 
-        /* In the browser the theme picker sits bottom-right, over both the
-           deterrent stack and the expand-map button. The app never mounts the
-           picker, so reserve room for it outside the WebView only. */
-        html:not(.is-app-webview) .deterrent-controls {
-            bottom: calc(76px + var(--safe-bottom, 0px));
-        }
+        .deterrent-controls .vehicle-lock-row { display: flex; flex-direction: column; }
+        .deterrent-controls .vehicle-lock-row .deterrent-btn + .deterrent-btn { margin-top: 6px; margin-left: 0; margin-right: 0; }
+        .deterrent-controls .vehicle-lock-row + .deterrent-btn { margin-top: 6px; }
+
+        .vehicle-actions-trigger { width: auto; padding: 0 12px; font-size: var(--fs-label); }
+        .vehicle-actions-trigger span { margin-left: 6px; }
+        [dir="rtl"] .vehicle-actions-trigger span { margin-left: 0; margin-right: 6px; }
+
+        /* In the browser the theme picker sits bottom-right over the
+           expand-map button. The app never mounts the picker. */
         html:not(.is-app-webview) .location-expand-button {
             margin-right: 60px;
         }
@@ -1349,13 +1386,10 @@
             .idle-icon { width: 48px; height: 48px; }
             .idle-icon svg { width: 24px; height: 24px; }
             .idle-text { font-size: var(--fs-label); }
-            /* Narrower deterrent pills on phones so the pair doesn't crowd
-               the bottom-right of a small video stage; height stays 44px. */
-            .deterrent-controls { right: 12px; bottom: calc(12px + var(--safe-bottom, 0px)); }
-            [dir="rtl"] .deterrent-controls { left: 12px; }
+            .vehicle-actions-trigger { width: 34px; padding: 0; }
+            .vehicle-actions-trigger span { display: none; }
             .deterrent-btn { min-width: 104px; padding: 0 16px 0 12px; }
             [dir="rtl"] .deterrent-btn { padding: 0 12px 0 16px; }
-            .deterrent-controls .deterrent-btn + .deterrent-btn { margin-top: 8px; }
 
             /* On narrow/portrait screens keep the same information
                architecture but stack the utility cards below the cameras. */
@@ -1634,7 +1668,9 @@
         }
         :root[data-android-embed="1"][dir="rtl"] .deterrent-btn { padding: 0 18px 0 22px; }
         :root[data-android-embed="1"] .deterrent-btn svg { width: 20px; height: 20px; flex-basis: 20px; }
-        :root[data-android-embed="1"] .deterrent-controls .deterrent-btn + .deterrent-btn { margin-top: 12px; }
+        :root[data-android-embed="1"] .deterrent-controls .deterrent-btn + .deterrent-btn { margin-top: 8px; }
+        :root[data-android-embed="1"] .deterrent-controls .vehicle-lock-row .deterrent-btn + .deterrent-btn { margin-top: 8px; margin-left: 0; margin-right: 0; }
+        :root[data-android-embed="1"] .deterrent-controls .vehicle-lock-row + .deterrent-btn { margin-top: 8px; }
         :root[data-android-embed="1"] .camera-label-overlay { padding: 10px 18px; }
         :root[data-android-embed="1"] .idle-text { font-size: var(--fs-body); }
         :root[data-android-embed="1"] .quality-menu__list { max-height: 440px; }
@@ -1654,9 +1690,6 @@
            the bar: header + top-bar row (46) + gap (6) + 8 + bar (76) = 136 + header. */
         @media (max-width: 768px) {
             html.has-bottom-nav .seamless-camera-view { --safe-bottom: 0px; }
-            html.has-bottom-nav:not(.is-app-webview) .deterrent-controls {
-                bottom: calc(12px + var(--safe-bottom, 0px));
-            }
             html.has-bottom-nav:not(.is-app-webview) .location-expand-button {
                 margin-right: 12px;
                 margin-left: 12px;
@@ -2448,7 +2481,173 @@
             }
         };
 
+        // Door lock / unlock from the live view. Same endpoints and routing as
+        // the dashboard Quick controls and Vehicle Control page:
+        //   POST /api/vehicle/lock | /api/vehicle/unlock
+        // (SDK_FIRST on the local rail, BYD Cloud as the confirmed fallback).
+        // Unlock is gated behind a themed confirm dialog so a stray tap on a
+        // live feed can't open the car; lock fires immediately. The pressed
+        // button shows the pending state, and both buttons are blocked while a
+        // request is in flight so lock + unlock can't race each other.
+        BYD.stream.fireDoorLock = async function(kind) {
+            const isUnlock = kind === 'unlock';
+            const lockBtn = document.getElementById('vehicleLockBtn');
+            const unlockBtn = document.getElementById('vehicleUnlockBtn');
+            const btn = isUnlock ? unlockBtn : lockBtn;
+            if ((lockBtn && lockBtn.classList.contains('pending')) ||
+                (unlockBtn && unlockBtn.classList.contains('pending'))) return;
+
+            if (isUnlock) {
+                const confirmed = await BYD.utils.confirmDialog({
+                    title: BYD.i18n.t('liveview.unlock_confirm_title'),
+                    body: BYD.i18n.t('liveview.unlock_confirm_body'),
+                    confirmLabel: BYD.i18n.t('dashboard.cmd_unlock'),
+                    cancelLabel: BYD.i18n.t('common.cancel'),
+                    danger: true
+                });
+                if (!confirmed) return;
+            }
+
+            if (lockBtn) lockBtn.classList.add('pending');
+            if (unlockBtn) unlockBtn.classList.add('pending');
+            if (btn) btn.setAttribute('aria-busy', 'true');
+            let result;
+            try {
+                // fetch() (not XHR) — POST bodies are dropped by the BYD WebView's XHR path.
+                const resp = await fetch(isUnlock ? '/api/vehicle/unlock' : '/api/vehicle/lock', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: '{}'
+                });
+                result = await resp.json();
+            } catch (e) {
+                result = { success: false };
+            } finally {
+                if (lockBtn) lockBtn.classList.remove('pending');
+                if (unlockBtn) unlockBtn.classList.remove('pending');
+                if (btn) btn.removeAttribute('aria-busy');
+            }
+
+            if (BYD.utils && BYD.utils.toast) {
+                const fallbackOk = isUnlock ? BYD.i18n.t('vehicle.car_unlocked')
+                                            : BYD.i18n.t('vehicle.car_locked');
+                const fallbackErr = isUnlock ? BYD.i18n.t('vehicle.unlock_failed')
+                                             : BYD.i18n.t('vehicle.lock_failed');
+                const msg = (result && result.message)
+                    || (result && result.success ? fallbackOk : ((result && result.error) || fallbackErr));
+                const type = (result && result.success) ? 'success'
+                    : (result && (result.outcome === 'auth_required' || result.outcome === 'rate_limited')) ? 'info'
+                    : 'error';
+                BYD.utils.toast(msg, type);
+            }
+        };
+
+        BYD.stream.closeVehicleActions = function() {
+            const panel = document.getElementById('deterrentControls');
+            const trigger = document.getElementById('vehicleActionsTrigger');
+            if (panel) panel.style.display = 'none';
+            if (trigger) trigger.setAttribute('aria-expanded', 'false');
+        };
+        BYD.stream.toggleVehicleActions = function() {
+            const panel = document.getElementById('deterrentControls');
+            const trigger = document.getElementById('vehicleActionsTrigger');
+            if (!panel || !trigger) return;
+            if (panel.style.display !== 'none') { this.closeVehicleActions(); return; }
+            panel.style.display = 'flex';
+            trigger.setAttribute('aria-expanded', 'true');
+            const rect = trigger.getBoundingClientRect();
+            const below = window.innerHeight - rect.bottom - 8;
+            const above = rect.top - 8;
+            const up = below < 180 && above > below;
+            panel.style.maxHeight = Math.max(64, Math.min(440, (up ? above : below) - 8)) + 'px';
+            const width = panel.offsetWidth;
+            const anchorX = document.documentElement.dir === 'rtl' ? rect.left : rect.right - width;
+            panel.style.left = Math.max(8, Math.min(anchorX, window.innerWidth - width - 8)) + 'px';
+            panel.style.top = Math.max(8, up ? rect.top - panel.offsetHeight - 6 : rect.bottom + 6) + 'px';
+        };
+        document.addEventListener('click', function(event) {
+            const panel = document.getElementById('deterrentControls');
+            const trigger = document.getElementById('vehicleActionsTrigger');
+            if (panel && panel.style.display !== 'none' &&
+                !(panel.contains(event.target) || (trigger && trigger.contains(event.target)))) {
+                BYD.stream.closeVehicleActions();
+            }
+        });
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                const trigger = document.getElementById('vehicleActionsTrigger');
+                if (trigger && trigger.getAttribute('aria-expanded') === 'true') {
+                    BYD.stream.closeVehicleActions();
+                    trigger.focus();
+                }
+            }
+        });
+        window.addEventListener('resize', function() { BYD.stream.closeVehicleActions(); });
+
+        // Serialize all Actions selections, including their confirmation dialogs.
+        // Keep #425's fireDoorLock and #118's fireDeterrent implementations.
+        BYD.stream.fireLiveAction = async function(kind) {
+            if (this.liveActionBusy) return;
+            this.closeVehicleActions();
+            this.liveActionBusy = true;
+            try {
+                if (kind === 'lock' || kind === 'unlock') await this.fireDoorLock(kind);
+                else if (kind === 'horn' || kind === 'flash') await this.fireDeterrent(kind);
+                else await this.fireLiveVehicleCommand(kind);
+            } catch (e) {
+                if (BYD.utils && BYD.utils.toast) BYD.utils.toast(BYD.i18n.t('dashboard.toast_command_failed'), 'error');
+            } finally {
+                this.liveActionBusy = false;
+            }
+        };
+        BYD.stream.fireLiveVehicleCommand = async function(kind) {
+            const commands = {
+                powerOn: { id: 'vehiclePowerOnBtn', path: '/api/vehicle/power-on',
+                    label: 'vehicle.power_on', title: 'vehicle.power_on_confirm', body: 'vehicle.power_on_confirm_body' },
+                powerOff: { id: 'vehiclePowerOffBtn', path: '/api/vehicle/power-off',
+                    label: 'vehicle.power_off', title: 'vehicle.power_off_confirm', body: 'vehicle.power_off_confirm_body', danger: true },
+                trunkOpen: { id: 'vehicleTrunkOpenBtn', path: '/api/vehicle/trunk', payload: { action: 'open' },
+                    label: 'dashboard.cmd_trunk_open', title: 'liveview.trunk_open_confirm_title', body: 'liveview.trunk_open_confirm_body' },
+                trunkClose: { id: 'vehicleTrunkCloseBtn', path: '/api/vehicle/trunk', payload: { action: 'close' },
+                    label: 'dashboard.cmd_trunk_close', title: 'liveview.trunk_close_confirm_title', body: 'liveview.trunk_close_confirm_body', danger: true }
+            };
+            const command = commands[kind];
+            if (!command) return;
+            const btn = document.getElementById(command.id);
+            if (!btn || btn.style.display === 'none') return;
+            const confirmed = await BYD.utils.confirmDialog({
+                title: BYD.i18n.t(command.title), body: BYD.i18n.t(command.body),
+                confirmLabel: BYD.i18n.t(command.label), cancelLabel: BYD.i18n.t('common.cancel'),
+                danger: !!command.danger
+            });
+            if (!confirmed) return;
+            btn.classList.add('pending');
+            btn.setAttribute('aria-busy', 'true');
+            let result;
+            try {
+                const resp = await fetch(command.path, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: command.payload ? JSON.stringify(command.payload) : undefined
+                });
+                result = await resp.json();
+            } catch (e) {
+                result = { success: false };
+            } finally {
+                btn.classList.remove('pending');
+                btn.removeAttribute('aria-busy');
+            }
+            if (BYD.utils && BYD.utils.toast) {
+                const ok = !!(result && result.success);
+                const fallback = BYD.i18n.t(ok ? 'dashboard.toast_command_sent' : 'dashboard.toast_command_failed');
+                const msg = (result && (result.message || result.error)) || fallback;
+                const type = ok ? 'success' : (result &&
+                    (result.outcome === 'auth_required' || result.outcome === 'rate_limited')) ? 'info' : 'error';
+                BYD.utils.toast(msg, type);
+            }
+        };
+
         BYD.stream.toggleFullscreen = function() {
+            this.closeVehicleActions();
             const view = document.querySelector('.seamless-camera-view');
             if (!view) return;
             this.isFullscreen = !this.isFullscreen;
@@ -2528,7 +2727,8 @@
             }
         })();
         
-        // Gate the deterrent controls (issue #118) on BYD Cloud availability.
+        // Gate the vehicle controls on availability: horn + flash (issue #118) need
+        // BYD Cloud; lock + unlock need cloud OR the local remote key.
         // The horn (find-car) and flash commands are CLOUD_ONLY on this BYD
         // generation — there is no SDK fallback — so if the cloud account
         // isn't configured + verified the buttons would only ever produce a
@@ -2543,8 +2743,20 @@
                 const res = await fetch('/api/vehicle/cloud-status');
                 const data = await res.json();
                 const cloudReady = !!(data && data.configured && data.verified);
-                const controls = document.getElementById('deterrentControls');
-                if (controls && cloudReady) controls.style.display = '';
+                // Lock / unlock also work on the local remote-key rail with no
+                // cloud account; horn + flash stay cloud-only.
+                const localKey = !!(data && data.localRemoteKey);
+                const lockRow = document.getElementById('vehicleLockRow');
+                const horn = document.getElementById('deterrentHornBtn');
+                const flash = document.getElementById('deterrentFlashBtn');
+                if (lockRow && (cloudReady || localKey)) lockRow.style.display = '';
+                if (horn && cloudReady) horn.style.display = '';
+                if (flash && cloudReady) flash.style.display = '';
+                // The menu must stay closed until Actions is explicitly clicked.
+                const powerOn = document.getElementById('vehiclePowerOnBtn');
+                const powerOff = document.getElementById('vehiclePowerOffBtn');
+                if (powerOn && localKey) powerOn.style.display = '';
+                if (powerOff && localKey) powerOff.style.display = '';
             } catch (e) {
                 // Cloud status unreachable — leave the cluster hidden (its
                 // inline default). Deterrent controls are opt-in on cloud

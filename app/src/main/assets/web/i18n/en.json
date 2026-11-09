@@ -3388,6 +3388,7 @@
     "popup_radius": "<b>{name}</b><br>{meters}m radius"
   },
   "liveview": {
+    "actions": "Actions",
     "cameras": "Cameras",
     "location": "Location",
     "live": "Live",
@@ -3412,7 +3413,13 @@
     "deterrent_confirm_ok": "Activate",
     "deterrent_horn_sent": "Horn and lights activated",
     "deterrent_flash_sent": "Lights flashed",
-    "deterrent_failed": "Could not send the command"
+    "deterrent_failed": "Could not send the command",
+    "unlock_confirm_title": "Unlock the car?",
+    "unlock_confirm_body": "This will unlock your vehicle's doors.",
+    "trunk_open_confirm_title": "Open the trunk?",
+    "trunk_open_confirm_body": "This will open the vehicle's trunk.",
+    "trunk_close_confirm_title": "Close the trunk?",
+    "trunk_close_confirm_body": "Check that the trunk area is clear before closing."
   },
   "map": {
     "your_vehicle": "Your Vehicle",
