@@ -1642,7 +1642,15 @@ public final class ScreenDeterrent {
 
     private static byte[] readAllBytes(String path) {
         try (FileInputStream fis = new FileInputStream(path)) {
-            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            // Most deterrent assets have a known size. Pre-size the accumulator
+            // to avoid repeated growth and copying while loading the image.
+            // Cap the hint so unexpectedly large files do not cause a large
+            // eager allocation before any bytes have been read.
+            long fileSize = new File(path).length();
+            int initialCapacity = (int) Math.min(1024L * 1024L,
+                    Math.max(16L * 1024L, fileSize));
+            java.io.ByteArrayOutputStream bos =
+                    new java.io.ByteArrayOutputStream(initialCapacity);
             byte[] buf = new byte[16 * 1024];
             int n;
             while ((n = fis.read(buf)) > 0) bos.write(buf, 0, n);
