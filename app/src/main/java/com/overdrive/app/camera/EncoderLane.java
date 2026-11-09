@@ -177,8 +177,14 @@ public final class EncoderLane {
         if (f == null || shutdownRequested.get()) return;
         mailbox.set(f);
         maybeWarnStalled();
+        scheduleDrain();
+    }
+
+    /** Keeps at most one drain callback queued or executing. */
+    private void scheduleDrain() {
         Handler h = handler;
-        if (h != null && postQueued.compareAndSet(false, true)) {
+        if (h != null && !shutdownRequested.get()
+                && postQueued.compareAndSet(false, true)) {
             if (!h.post(this::drainOnce)) {
                 postQueued.set(false);
             }
@@ -455,7 +461,20 @@ public final class EncoderLane {
     }
 
     private void drainOnce() {
-        postQueued.set(false);
+        try {
+            processLatestFrame();
+        } finally {
+            // Keep the in-flight callback coalesced until processing finishes.
+            // A concurrent submit after this reset will schedule its own drain;
+            // otherwise pick up the newest frame left in the mailbox.
+            postQueued.set(false);
+            if (mailbox.get() != null) {
+                scheduleDrain();
+            }
+        }
+    }
+
+    private void processLatestFrame() {
         Frame f = mailbox.getAndSet(null);
         if (f == null || shutdownRequested.get()) {
             return;
