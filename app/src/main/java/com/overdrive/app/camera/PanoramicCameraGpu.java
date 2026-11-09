@@ -6758,8 +6758,10 @@ public class PanoramicCameraGpu {
                 lane.submit(new EncoderLane.Frame(
                     camSlot,
                     slotTex,
+                    camRing.generationOf(camSlot),
                     wsUsable ? decoupledLastWsSlot : -1,
                     wsUsable ? decoupledWsRing.textureOf(decoupledLastWsSlot) : 0,
+                    wsUsable ? decoupledWsRing.generationOf(decoupledLastWsSlot) : -1,
                     wsUsable,
                     currentFrameTimestampNs,
                     cameraFrameSeq.get()));

@@ -54,18 +54,23 @@ public final class EncoderLane {
     public static final class Frame {
         final int camSlot;
         final int camTex;
+        final long camGeneration;
         final int wsSlot;
         final int wsTex;
+        final long wsGeneration;
         final boolean wsReady;
         final long ptsNs;
         final long seq;
 
-        public Frame(int camSlot, int camTex, int wsSlot, int wsTex,
+        public Frame(int camSlot, int camTex, long camGeneration,
+                     int wsSlot, int wsTex, long wsGeneration,
                      boolean wsReady, long ptsNs, long seq) {
             this.camSlot = camSlot;
             this.camTex = camTex;
+            this.camGeneration = camGeneration;
             this.wsSlot = wsSlot;
             this.wsTex = wsTex;
+            this.wsGeneration = wsGeneration;
             this.wsReady = wsReady;
             this.ptsNs = ptsNs;
             this.seq = seq;
@@ -501,7 +506,7 @@ public final class EncoderLane {
             if (camRing == null) {
                 return;
             }
-            if (!camRing.pinForRead(f.camSlot)) {
+            if (!camRing.pinForRead(f.camSlot, f.camGeneration)) {
                 return;
             }
             boolean camPinned = true;
@@ -509,7 +514,8 @@ public final class EncoderLane {
             // (recorder falls back to the 360 front slice) — the camera slot
             // is pinned and safe, so dropping the whole frame would be worse.
             CopiedFrameRing wsRing = f.wsReady ? wsRingSupplier.get() : null;
-            boolean wsPinned = wsRing != null && wsRing.pinForRead(f.wsSlot);
+            boolean wsPinned = wsRing != null
+                && wsRing.pinForRead(f.wsSlot, f.wsGeneration);
             boolean wsUse = f.wsReady && wsPinned;
             try {
                 localRecorder.drawFrame(f.camTex,
