@@ -81,6 +81,7 @@ Enable your preferred tunnel (Zrok, Cloudflared or Tailscale).
 - **Proximity Recording (Market First)** — Uses BYD's 8 parking radar sensors to trigger recording only when objects approach. Configurable trigger levels, pre-event buffer, and 500ms debouncing.
 - **Advanced Sentry Mode** — 24/7 surveillance with motion detection and AI object recognition
 - **Real-time Performance Monitor** — CPU, GPU, memory usage, and battery voltage dashboard
+- **Tyre telemetry** — Dashboard shows each wheel's pressure in the selected unit and temperature in °C when available.
 - **ISP Blocklist Bypass** — Browse via BYD's built-in SIM card without a dedicated hotspot
 - **ADB Shell Runner** — Built-in terminal for running commands, checking processes, and viewing logs
 - **Telegram Notifications** — Instant alerts for motion detection, recording events, and low battery

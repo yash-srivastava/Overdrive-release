@@ -48,7 +48,7 @@
                       Vehicle glance panel. Replaces the decorative hero GLB
                       (the sidebar EV-card still renders the 3D model) with
                       live state: a top-down schematic annotated with per-door
-                      lock pills + per-corner tyre PSI from /api/vehicle/state
+                      lock pills + per-corner tyre pressure and temperature from /api/vehicle/state
                       (polled every 6s by refreshVehicleState), an SoC ring +
                       range fed by /api/status, and glance rows for climate /
                       windows / tyres. When a charge session is live the panel
@@ -116,11 +116,17 @@
                                 <rect id="glDoorLR" class="dash-car-door lr" x="27" y="148" width="5" height="44" rx="2.5"/>
                                 <rect id="glDoorRF" class="dash-car-door rf" x="118" y="98" width="5" height="44" rx="2.5"/>
                                 <rect id="glDoorRR" class="dash-car-door rr" x="118" y="148" width="5" height="44" rx="2.5"/>
-                                <!-- per-corner tyre PSI callouts -->
-                                <text id="glPsiFL" class="dash-car-psi" x="24" y="36" text-anchor="middle">--</text>
-                                <text id="glPsiFR" class="dash-car-psi" x="126" y="36" text-anchor="middle">--</text>
+                                <!-- Per-corner tyre pressure and temperature -->
+                                <text id="glPsiFL" class="dash-car-psi" x="24" y="25" text-anchor="middle">--</text>
+                                <text id="glPsiFR" class="dash-car-psi" x="126" y="25" text-anchor="middle">--</text>
                                 <text id="glPsiRL" class="dash-car-psi" x="24" y="240" text-anchor="middle">--</text>
                                 <text id="glPsiRR" class="dash-car-psi" x="126" y="240" text-anchor="middle">--</text>
+                                <g class="dash-car-temp" style="fill:var(--on-surface-variant);font-size:9px;font-weight:600;font-family:inherit">
+                                    <text id="glTempFL" x="24" y="42" text-anchor="middle">--</text>
+                                    <text id="glTempFR" x="126" y="42" text-anchor="middle">--</text>
+                                    <text id="glTempRL" x="24" y="255" text-anchor="middle">--</text>
+                                    <text id="glTempRR" x="126" y="255" text-anchor="middle">--</text>
+                                </g>
                                 <path class="dash-car-light dash-car-head" d="M44 30Q52 20 64 17"/>
                                 <path class="dash-car-light dash-car-head" d="M106 30Q98 20 86 17"/>
                                 <path class="dash-car-light dash-car-tail" d="M50 238Q75 246 100 238"/>
@@ -3334,7 +3340,7 @@
                         setRowState('glClimateText', climateKnown && acOn ? 'good' : '');
                     }
 
-                    // Tyres — colour the wheels, print PSI at each corner,
+                    // Tyres — colour the wheels, print pressure and temperature at each corner,
                     // and roll the worst corner up into the summary row.
                     if (data.tyres) {
                         var L = data.tyres.limits;
@@ -3384,6 +3390,13 @@
                                 psiEl.textContent = pv;
                                 psiEl.setAttribute('class', 'dash-car-psi'
                                     + (state === 'warn' || state === 'alert' ? ' ' + state : ''));
+                            }
+                            // Temperature is supplied separately for each wheel.
+                            var tempEl = document.getElementById('glTemp' + suffix);
+                            if (tempEl) {
+                                var tempC = corner.temperatureC;
+                                tempEl.textContent = typeof tempC === 'number' && isFinite(tempC)
+                                    ? Math.round(tempC) + '°C' : '--';
                             }
                         }
                         if (worst === 'alert') {
