@@ -83,8 +83,7 @@ final class FisheyeDewarp {
     }
 
     // Cached LUT for the single (strength, w, h) combination in live use
-    // (0.5 @ 320×240). Rebuilt only if dims change. lut[outIdx] = srcIdx,
-    // both in PIXEL units (not byte offsets).
+    // (0.5 @ 320×240). Rebuilt only if dims change. lut[outIdx] = src RGB byte offset (pixel index * 3).
     private static int[] cachedLut = null;
     private static float cachedStrength = -1f;
     private static int cachedW = -1, cachedH = -1;
@@ -121,7 +120,7 @@ final class FisheyeDewarp {
                     float sy = (nya * inv * zoom) / ASPECT;
                     int px = clampi((int) ((sx * 0.5f + 0.5f) * w), 0, w - 1);
                     int py = clampi((int) ((sy * 0.5f + 0.5f) * h), 0, h - 1);
-                    lut[y * w + x] = py * w + px;
+                    lut[y * w + x] = (py * w + px) * 3;
                 }
             }
             cachedLut = lut;
@@ -150,7 +149,7 @@ final class FisheyeDewarp {
                 dewarpScratch = out;
             }
             for (int i = 0; i < lut.length; i++) {
-                int s = lut[i] * 3;
+                int s = lut[i];
                 int d = i * 3;
                 out[d] = rgb[s];
                 out[d + 1] = rgb[s + 1];
