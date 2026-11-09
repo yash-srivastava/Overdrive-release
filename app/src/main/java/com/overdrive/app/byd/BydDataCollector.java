@@ -23820,7 +23820,7 @@ public class BydDataCollector {
     public boolean setOperationMode(int mode) {
         if (!invokeModeSetterForReadback(energyDevice, "setOperationMode", mode)) return false;
 
-        long deadline = SystemClock.elapsedRealtime() + DRIVE_MODE_APPLY_TIMEOUT_MS;
+        long deadline = SystemClock.elapsedRealtime() + getDriveModeApplyTimeoutMs();
         boolean answered = false;
         int raw = -1;
         int surface = -1;
@@ -23860,7 +23860,13 @@ public class BydDataCollector {
         return false;
     }
 
-    private static final long DRIVE_MODE_APPLY_TIMEOUT_MS = 1500L;
+    private static final long DRIVE_MODE_APPLY_TIMEOUT_MS_LEGACY = 1500L;
+    private static final long DRIVE_MODE_APPLY_TIMEOUT_MS_DILINK5 = 4000L;
+    private static long getDriveModeApplyTimeoutMs() {
+        return isDiLink5Vehicle()
+                ? DRIVE_MODE_APPLY_TIMEOUT_MS_DILINK5
+                : DRIVE_MODE_APPLY_TIMEOUT_MS_LEGACY;
+    }
     private static final long DRIVE_MODE_APPLY_POLL_MS = 50L;
 
     /** Public setter enum -> the same normalized live axis used by triggers. */
@@ -24062,7 +24068,7 @@ public class BydDataCollector {
     }
 
     private boolean awaitDriveMode(int configMode) {
-        long deadline = SystemClock.elapsedRealtime() + DRIVE_MODE_APPLY_TIMEOUT_MS;
+        long deadline = SystemClock.elapsedRealtime() + getDriveModeApplyTimeoutMs();
         do {
             int energyMode = readEnergyAxisDriveMode();
             int settingMode = readDriveConfigRaw();
@@ -24096,7 +24102,7 @@ public class BydDataCollector {
             if (VehicleActuatorBridge.isDiLink5RequestExpired()) return false;
             Object r = m.invoke(energyDevice, mode);
             logger.info("setRoadSurfaceMode(" + mode + ") return=" + r);
-            long deadline = SystemClock.elapsedRealtime() + DRIVE_MODE_APPLY_TIMEOUT_MS;
+            long deadline = SystemClock.elapsedRealtime() + getDriveModeApplyTimeoutMs();
             int seen;
             do {
                 seen = readRoadSurfaceMode(energyDevice);
