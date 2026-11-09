@@ -15,6 +15,7 @@ const NetworkPage = {
 
     uiTimer: null,
     pollTimer: null,
+    _refreshInFlight: false,
     status: null,
     statusAt: 0,
     // Text inputs are seeded from config once, then left to the user.
@@ -29,8 +30,12 @@ const NetworkPage = {
 
     init() {
         this.refresh();
-        this.pollTimer = setInterval(() => this.refresh(), this.POLL_MS);
-        this.uiTimer = setInterval(() => this.renderUptime(), this.UI_TICK_MS);
+        this.pollTimer = setInterval(() => {
+            if (!document.hidden) this.refresh();
+        }, this.POLL_MS);
+        this.uiTimer = setInterval(() => {
+            if (!document.hidden) this.renderUptime();
+        }, this.UI_TICK_MS);
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) this.refresh();
         });
@@ -39,6 +44,9 @@ const NetworkPage = {
     // ============== Fetch / render ==============
 
     async refresh() {
+        // A slow daemon response must not accumulate overlapping status requests.
+        if (document.hidden || this._refreshInFlight) return;
+        this._refreshInFlight = true;
         try {
             const resp = await fetch('/api/hotspot');
             const data = await resp.json();
@@ -48,6 +56,8 @@ const NetworkPage = {
             this.render();
         } catch (e) {
             console.warn('[Network] status fetch failed:', e);
+        } finally {
+            this._refreshInFlight = false;
         }
     },
 
