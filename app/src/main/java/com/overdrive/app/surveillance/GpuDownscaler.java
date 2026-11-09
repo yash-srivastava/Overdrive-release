@@ -778,20 +778,7 @@ public class GpuDownscaler {
             return dst;
         }
 
-        // ---- 2. Queue an async DMA into the head PBO ----
-        int nextHead = (directRingHead + 1) % DIRECT_PBO_RING_SIZE;
-        boolean ringFull = (nextHead == directRingTail) && directFenceSyncs[directRingTail] != 0L;
-        if (!ringFull) {
-            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, directPboIds[directRingHead]);
-            GLES30.glReadPixels(0, 0, WIDTH, HEIGHT,
-                    GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, 0);
-            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0);
-            directFenceSyncs[directRingHead] = GLES30.glFenceSync(
-                    GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-            directRingHead = nextHead;
-        }
-
-        // ---- 3. Drain: harvest the oldest signaled slot, if any ----
+        // ---- 2. Drain the oldest completed transfer before testing ring capacity ----
         byte[] result = null;
         if (directRingTail != directRingHead && directFenceSyncs[directRingTail] != 0L) {
             int sig = GLES30.glClientWaitSync(directFenceSyncs[directRingTail], 0, 0);
@@ -838,6 +825,21 @@ public class GpuDownscaler {
                 directRingTail = (directRingTail + 1) % DIRECT_PBO_RING_SIZE;
             }
             // Not signaled — leave fence in place; next call will poll it.
+        }
+
+        // Reclaiming first prevents a needless frame drop when the ring was full
+        // but its oldest DMA had completed. No GPU wait is introduced.
+        // ---- 3. Queue the current frame after reclaiming a completed slot ----
+        int nextHead = (directRingHead + 1) % DIRECT_PBO_RING_SIZE;
+        boolean ringFull = (nextHead == directRingTail) && directFenceSyncs[directRingTail] != 0L;
+        if (!ringFull) {
+            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, directPboIds[directRingHead]);
+            GLES30.glReadPixels(0, 0, WIDTH, HEIGHT,
+                    GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, 0);
+            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0);
+            directFenceSyncs[directRingHead] = GLES30.glFenceSync(
+                    GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            directRingHead = nextHead;
         }
 
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
