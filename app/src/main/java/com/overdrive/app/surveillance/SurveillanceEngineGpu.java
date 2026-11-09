@@ -759,6 +759,26 @@ public class SurveillanceEngineGpu {
     // is genuinely close doubles the classification chances in that short
     // window. Scoped to close-zone motion so steady-state CPU is unchanged.
     private static final long AI_COOLDOWN_CLOSE_MS = 250;
+    // Adaptive cadence for non-urgent inference only. Preserve the 250 ms
+    // NEAR/vigilance path and the 500 ms minimum used by existing callers.
+    // Bound the response to sustained slow inference; never accumulate delay.
+    private static final long AI_ADAPTIVE_MAX_COOLDOWN_MS = 1000;
+    private volatile long aiInferenceEwmaMs = 0;
+
+    private long normalAiCooldownMs() {
+        long observed = aiInferenceEwmaMs;
+        if (observed <= 0) return AI_COOLDOWN_MS;
+        return Math.max(AI_COOLDOWN_MS,
+                Math.min(AI_ADAPTIVE_MAX_COOLDOWN_MS, observed * 2));
+    }
+
+    private void recordAiInferenceDuration(long elapsedMs) {
+        if (elapsedMs <= 0) return;
+        long bounded = Math.min(5000L, elapsedMs);
+        long old = aiInferenceEwmaMs;
+        aiInferenceEwmaMs = old == 0 ? bounded : (old * 7 + bounded) / 8;
+    }
+
 
     // LIGHT-CHANGE CHECK: a camera whose motion the >25% flash filter discarded
     // gets an AI look anyway — a close car with headlights on reads as that burst,
@@ -3167,7 +3187,7 @@ public class SurveillanceEngineGpu {
                             // the empty-scene-storm defense.
                             if (useObjectDetection && !isAiRunning.get()
                                     && aiQuadrantQueueIsEmpty()
-                                    && (System.currentTimeMillis() - lastAiTimeMs) >= AI_COOLDOWN_MS) {
+                                    && (System.currentTimeMillis() - lastAiTimeMs) >= normalAiCooldownMs()) {
                                 aiQuadrantQueueAdd(q);
                                 runAiOnQuadrant(smallRgbFrame, aiQuadrantQueuePoll());
                             }
@@ -4037,7 +4057,7 @@ public class SurveillanceEngineGpu {
                 // more classification attempts; everything else keeps the 500ms
                 // base to preserve steady-state CPU. Read the best quadrant's
                 // proximity tier (the same estimate the diag logs use).
-                long cooldown = AI_COOLDOWN_MS;
+                long cooldown = normalAiCooldownMs();
                 if (bestQ >= 0) {
                     DistanceEstimator.ProximityEstimate bestProx =
                             proximityForQuadrant(bestQ, results[bestQ]);
@@ -4781,7 +4801,7 @@ public class SurveillanceEngineGpu {
                             }
                         }
                         // FIX: Check cooldown before consuming queue item
-                        if (!aiQuadrantQueueIsEmpty() && (System.currentTimeMillis() - lastAiTimeMs) >= AI_COOLDOWN_MS) {
+                        if (!aiQuadrantQueueIsEmpty() && (System.currentTimeMillis() - lastAiTimeMs) >= normalAiCooldownMs()) {
                             runAiOnQuadrant(smallRgbFrame, aiQuadrantQueuePoll());
                         }
                     }
@@ -4799,7 +4819,7 @@ public class SurveillanceEngineGpu {
                         }
                     }
                     // FIX: Check cooldown before consuming queue item
-                    if (!aiQuadrantQueueIsEmpty() && (System.currentTimeMillis() - lastAiTimeMs) >= AI_COOLDOWN_MS) {
+                    if (!aiQuadrantQueueIsEmpty() && (System.currentTimeMillis() - lastAiTimeMs) >= normalAiCooldownMs()) {
                         runAiOnQuadrant(smallRgbFrame, aiQuadrantQueuePoll());
                     }
                 }
@@ -5156,7 +5176,7 @@ public class SurveillanceEngineGpu {
         // the quadrant, then runAiOnQuadrant's internal cooldown check rejected it —
         // permanently vaporizing that quadrant's AI pass.
         if (useObjectDetection && !isAiRunning.get() && !aiQuadrantQueueIsEmpty()) {
-            if ((System.currentTimeMillis() - lastAiTimeMs) >= AI_COOLDOWN_MS) {
+            if ((System.currentTimeMillis() - lastAiTimeMs) >= normalAiCooldownMs()) {
                 runAiOnQuadrant(smallRgbFrame, aiQuadrantQueuePoll());
             }
         }
@@ -5177,10 +5197,11 @@ public class SurveillanceEngineGpu {
             // every dropped signal is observable).
             logger.info(String.format(
                     "V2 stats: frames=%d, motions=%d, recording=%b | AI dispatch=%d detect=%d skip=%d "
-                    + "(last=%s) laneBusy=%b repairs=%d | gates: useOD=%b aiEnabled=%b detector=%s",
+                    + "(last=%s) laneBusy=%b repairs=%d | cadence=%dms inferenceEwma=%dms | gates: useOD=%b aiEnabled=%b detector=%s",
                     frameCount, motionDetections, recording,
                     aiDispatchCount.get(), aiDetectCompletedCount.get(), aiSkipCount.get(),
                     lastAiSkipReason, isAiRunning.get(), aiLaneRepairCount.get(),
+                    normalAiCooldownMs(), aiInferenceEwmaMs,
                     useObjectDetection, aiEnabled,
                     (yoloDetector != null ? "ok" : "NULL")));
             // Log per-quadrant status for debugging
@@ -5805,12 +5826,14 @@ public class SurveillanceEngineGpu {
                         : FisheyeDewarp.dewarpForDetector(cropData, qW, qH, qIdx);
                 final boolean dewarpApplied = (dewarpedInput != null);
 
+                final long inferenceStartedMs = android.os.SystemClock.elapsedRealtime();
                 java.util.List<com.overdrive.app.ai.Detection> detections = detectorSnap.detect(
                         dewarpApplied ? dewarpedInput : cropData,
                         qW, qH, aiConfidence, detectPerson, detectCar, detectAnimal, detectBike, minObjectSize);
                 // Inference actually ran (an empty result still counts — it proves
                 // the lane is alive, which is exactly what the field log could not
                 // distinguish from "never dispatched").
+                recordAiInferenceDuration(android.os.SystemClock.elapsedRealtime() - inferenceStartedMs);
                 aiDetectCompletedCount.incrementAndGet();
 
                 // POST-INFERENCE epoch re-check (audit R4 ExtB-2): the entry
