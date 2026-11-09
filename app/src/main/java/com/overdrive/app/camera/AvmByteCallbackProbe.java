@@ -8,8 +8,10 @@ import android.media.MediaMuxer;
 
 import com.overdrive.app.logging.DaemonLogger;
 
+import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.OutputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
@@ -69,6 +71,8 @@ public final class AvmByteCallbackProbe {
     private static final int ENCODER_IFRAME_INTERVAL = 1;
     /** Frames buffered between HAL callback and worker. Dropping oldest is preferred over stalling the HAL. */
     private static final int FRAME_QUEUE_DEPTH = 3;
+    // Batch raw fallback writes on the worker thread; MP4 uses MediaMuxer.
+    private static final int RAW_WRITE_BUFFER_BYTES = 2 * 1024 * 1024;
     /** Hard cap on raw NV21 frames per combo to bound disk usage.
      *  At 5120×960 NV21 = 7.4 MB/frame → 60 frames = 444 MB max per combo. */
     private static final int MAX_RAW_FRAMES_PER_COMBO = 60;
@@ -450,7 +454,7 @@ public final class AvmByteCallbackProbe {
         private long firstPtsUs = -1;
         private File mp4Tmp;
         private File mp4Final;
-        private FileOutputStream rawOut;
+        private OutputStream rawOut;
         private File rawTmp;
         private File rawFinal;
         private boolean encoderInitAttempted;
@@ -718,7 +722,8 @@ public final class AvmByteCallbackProbe {
                 if (rawTmp.exists()) {
                     try { rawTmp.delete(); } catch (Throwable ignored) {}
                 }
-                rawOut = new FileOutputStream(rawTmp);
+                rawOut = new BufferedOutputStream(
+                    new FileOutputStream(rawTmp), RAW_WRITE_BUFFER_BYTES);
                 outputPath = rawFinal.getAbsolutePath();
                 encoderUsed = false;
                 logger.info("Raw NV21 dump: " + outputPath);
