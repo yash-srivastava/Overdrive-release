@@ -5718,6 +5718,11 @@ public class SurveillanceEngineGpu {
         // stale-session detections into the fresh session's baseline/tracker
         // state. Same pattern as the seed/refresh lambdas.
         final int taskEpoch = armEpoch;
+        // The AI executor is asynchronous and shared with baseline/refresh work.
+        // Do not spend a full inference on a live crop that has already waited
+        // too long in its queue. Use a monotonic clock (wall time can jump).
+        final long aiQueuedAtMs = android.os.SystemClock.elapsedRealtime();
+        final long MAX_LIVE_AI_QUEUE_AGE_MS = 750L;
         // CLASS-CONFIG SNAPSHOT + EPOCH (audit R11-8 / ExtD-9). classFilter
         // is a plain (non-volatile) field the lambda used to read TWICE
         // (detect-param derivation, per-detection allowlist) — a toggle
@@ -5736,6 +5741,14 @@ public class SurveillanceEngineGpu {
         final int cfgEpochAtDispatch = ccAtDispatch.epoch;
         final Runnable aiTask = () -> {
             try {
+                // A stale frame is less useful than the next live motion frame.
+                // Keep this check inside the executor: dispatch-time checks cannot
+                // account for baseline/refresh tasks queued ahead of this work.
+                if (android.os.SystemClock.elapsedRealtime() - aiQueuedAtMs
+                        > MAX_LIVE_AI_QUEUE_AGE_MS) {
+                    noteAiSkip("lambda:staleQueuedFrame");
+                    return; // finally releases the stamped AI lane.
+                }
                 // FIX (A8/B3): Snapshot the detector reference at lambda entry.
                 // The line-1450 guard runs on the calling thread BEFORE this
                 // lambda is scheduled. Between scheduling and execution, the UI
