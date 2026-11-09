@@ -1,5 +1,6 @@
 package com.overdrive.app.camera;
 
+import android.os.Process;
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.surveillance.SurveillanceEngineGpu;
 
@@ -51,7 +52,7 @@ public final class AiLaneWorker {
         this.executor = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "AiLaneWorker");
             t.setDaemon(true);
-            t.setPriority(Thread.NORM_PRIORITY);
+            t.setPriority(Process.THREAD_PRIORITY_BACKGROUND);
             return t;
         });
     }
