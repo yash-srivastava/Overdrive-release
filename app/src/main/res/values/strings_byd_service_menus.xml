@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_security_byd_tools_title">BYD service menus</string>
+    <string name="settings_security_byd_tools_description">Open the built-in head-unit configuration tools.</string>
+    <string name="settings_security_byd_adb_title">ADB / Developer options</string>
+    <string name="settings_security_byd_adb_hint">Open Developer options and enable USB debugging there.</string>
+    <string name="settings_security_byd_adb_unavailable">ADB settings are unavailable on this firmware.</string>
+    <string name="settings_security_country_code_title">Country Code</string>
+    <string name="settings_security_country_code_warning">This opens BYD country/region settings. Changing the country code may affect regional services or require a head-unit restart. Continue only while parked.</string>
+    <string name="settings_security_country_code_open">Open settings</string>
+    <string name="settings_security_country_code_unavailable">Country Code is unavailable on this head unit.</string>
+</resources>
