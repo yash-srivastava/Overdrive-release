@@ -103,6 +103,8 @@ class YoloDetector(private val context: Context) {
     // SOTA: Pre-allocate all buffers to avoid GC
     private var inputImageBuffer: TensorImage? = null
     private var outputBuffer: ByteBuffer? = null
+    // Cache the FP32 view instead of allocating a FloatBuffer on every inference.
+    private var floatOutputView: java.nio.FloatBuffer? = null
 
     // Reusable shaped input buffer. Re-create only when image dimensions
     // change (rare — quadrant size is fixed at startup). Without this,
@@ -381,6 +383,7 @@ class YoloDetector(private val context: Context) {
             // FP32: 4 bytes/element. INT8/UINT8: 1 byte/element.
             val outputBytes = outputElements * if (outputIsQuantized) 1 else 4
             outputBuffer = ByteBuffer.allocateDirect(outputBytes).order(ByteOrder.nativeOrder())
+            floatOutputView = if (outputIsQuantized) null else outputBuffer!!.asFloatBuffer()
             if (outputIsQuantized) {
                 int8OutputBuffer = ByteArray(outputElements)
             }
@@ -528,7 +531,7 @@ class YoloDetector(private val context: Context) {
             } else {
                 // FP32 output path: bulk-copy from direct ByteBuffer to the
                 // Java float[] in one JNI call.
-                outputBuffer!!.asFloatBuffer().get(fo)
+                floatOutputView!!.apply { rewind(); get(fo) }
             }
             // parseOutput INSIDE the lock, deliberately.
             //
@@ -1219,6 +1222,7 @@ class YoloDetector(private val context: Context) {
             shapedBufferW = -1
             shapedBufferH = -1
             floatOutput = null
+            floatOutputView = null
             boxesScratch = null
             nmsScratch = null
             letterboxProcessor = null
