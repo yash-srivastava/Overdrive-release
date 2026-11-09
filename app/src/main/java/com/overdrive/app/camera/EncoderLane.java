@@ -117,6 +117,16 @@ public final class EncoderLane {
     private volatile long lastStallLogMs = 0;
     private static final long STALL_WARN_INTERVAL_MS = 10_000L;
 
+    // A single outstanding GPU read may hold one slot in each ring. The
+    // encoder lane never submits a second draw until these reads retire.
+    // All fields below are accessed only on the lane thread.
+    private long readFence;
+    private CopiedFrameRing pendingCamRing;
+    private CopiedFrameRing pendingWsRing;
+    private long deferredGpuFrames;
+    private long completedGpuFences;
+    private boolean fenceUnavailable;
+
     public EncoderLane(EGLCore parentCore,
                        java.util.function.Supplier<CopiedFrameRing> camRingSupplier,
                        java.util.function.Supplier<CopiedFrameRing> wsRingSupplier,
@@ -430,6 +440,12 @@ public final class EncoderLane {
 
     /** Lane thread only. */
     private void releaseLaneGlLocked() {
+        // Teardown must not release ring pins while the GPU still samples
+        // their textures, including when shutdown races a pending fence.
+        if (readFence != 0) {
+            android.opengl.GLES20.glFinish();
+            releasePendingReadFence();
+        }
         try {
             CopiedFrameRing cr = camRingSupplier.get();
             if (cr != null) cr.unpinRead();
@@ -454,8 +470,66 @@ public final class EncoderLane {
         laneCore = null;
     }
 
+    /**
+     * Nonblocking completion check for the previous draw. A timeout retains
+     * both pins and drops this mailbox packet; the next camera submission
+     * retries. No busy-wait or blocking GPU drain on the normal path.
+     */
+    private boolean previousReadComplete() {
+        if (readFence == 0) return true;
+        int status;
+        try {
+            status = android.opengl.GLES30.glClientWaitSync(readFence, 0, 0);
+        } catch (Throwable t) {
+            status = android.opengl.GLES30.GL_WAIT_FAILED;
+        }
+        if (status == android.opengl.GLES30.GL_ALREADY_SIGNALED
+                || status == android.opengl.GLES30.GL_CONDITION_SATISFIED) {
+            completedGpuFences++;
+            if (completedGpuFences % 300 == 0) {
+                logger.info("Encoder GPU fences completed=" + completedGpuFences
+                    + ", deferred mailbox drains=" + deferredGpuFrames);
+            }
+            releasePendingReadFence();
+            return true;
+        }
+        if (status == android.opengl.GLES30.GL_TIMEOUT_EXPIRED) {
+            deferredGpuFrames++;
+            return false;
+        }
+        // Driver/context errors must never cause an early texture reuse.
+        android.opengl.GLES20.glFinish();
+        fenceUnavailable = true;
+        releasePendingReadFence();
+        logger.warn("Encoder GPU fence failed; falling back to glFinish");
+        return true;
+    }
+
+    private void releasePendingReadFence() {
+        if (readFence != 0) {
+            try { android.opengl.GLES30.glDeleteSync(readFence); }
+            catch (Throwable ignored) { }
+            readFence = 0;
+        }
+        if (pendingCamRing != null) pendingCamRing.unpinRead();
+        if (pendingWsRing != null) pendingWsRing.unpinRead();
+        pendingCamRing = null;
+        pendingWsRing = null;
+    }
+
     private void drainOnce() {
         postQueued.set(false);
+        // Preserve pinned textures until the preceding GPU read completes.
+        // This check happens before consuming the latest mailbox frame.
+        if (!previousReadComplete()) {
+            // Poll again even if camera submissions stop. Only one retry is
+            // queued at a time; the latest-wins mailbox remains untouched.
+            Handler h = handler;
+            if (h != null && postQueued.compareAndSet(false, true)) {
+                if (!h.postDelayed(this::drainOnce, 5)) postQueued.set(false);
+            }
+            return;
+        }
         Frame f = mailbox.getAndSet(null);
         if (f == null || shutdownRequested.get()) {
             return;
@@ -514,16 +588,29 @@ public final class EncoderLane {
             try {
                 localRecorder.drawFrame(f.camTex,
                     wsUse ? f.wsTex : 0, wsUse, f.ptsNs);
-                // The draw commands sampling the pinned slots were issued into
-                // this context and eglSwapBuffers flushed them. Before letting
-                // the writer reuse the slots, make sure the GPU actually
-                // retired those reads: finish on this context. This blocks the
-                // LANE thread only — blocking here is precisely what this lane
-                // exists to absorb. (A fence + deferred unpin would trade this
-                // bounded wait for slot-starvation complexity; with a 3-slot
-                // ring the writer already tolerates one pinned slot at all
-                // times, so the simple barrier wins on failure-mode clarity.)
-                android.opengl.GLES20.glFinish();
+                // Keep the sampled slots pinned until the GPU finishes its
+                // reads. The next mailbox drain polls this fence without
+                // blocking. A GLES2/driver fallback retains the old barrier.
+                if (!fenceUnavailable) {
+                    try {
+                        readFence = android.opengl.GLES30.glFenceSync(
+                            android.opengl.GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+                        if (readFence != 0) {
+                            android.opengl.GLES20.glFlush();
+                            pendingCamRing = camRing;
+                            pendingWsRing = wsPinned ? wsRing : null;
+                            camPinned = false;
+                            wsPinned = false;
+                        } else {
+                            fenceUnavailable = true;
+                        }
+                    } catch (Throwable t) {
+                        fenceUnavailable = true;
+                    }
+                }
+                if (fenceUnavailable) {
+                    android.opengl.GLES20.glFinish();
+                }
             } finally {
                 if (camPinned && camRing != null) camRing.unpinRead();
                 if (wsPinned && wsRing != null) wsRing.unpinRead();
