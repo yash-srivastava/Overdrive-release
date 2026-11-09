@@ -117,6 +117,12 @@ public class GpuDownscaler {
     };
     private final Object producerCornerMapLock = new Object();
 
+    // GL entry points are serialized per instance. Reuse uniform snapshots
+    // rather than allocating two arrays for every camera preprocessing draw.
+    private final float[] drawProducerCorners = new float[8];
+    private final float[] drawFlipFlags = new float[8];
+    private final int[] drawSavedViewport = new int[4];
+
     // SurfaceTexture transform matrix and layout selector. Written from
     // the camera GL thread via setTextureMatrix / setCameraLayout, read on
     // every readPixels / readPixelsDirect call. Plain copy is safe — both
@@ -482,8 +488,8 @@ public class GpuDownscaler {
                 (cameraLayout == 1 || cameraLayout == 3) ? 0.0f : 1.0f);
         }
         if (uProducerForFrontLocation >= 0) {
-            float[] m = new float[8];
-            float[] f = new float[8];
+            float[] m = drawProducerCorners;
+            float[] f = drawFlipFlags;
             snapshotProducerCornersAndFlips(m, f);
             GLES20.glUniform2f(uProducerForFrontLocation, m[0], m[1]);
             GLES20.glUniform2f(uProducerForRightLocation, m[2], m[3]);
@@ -695,7 +701,7 @@ public class GpuDownscaler {
         if (!directInitialized) initDirectFbo();
         if (!directInitialized) return null;
 
-        int[] savedViewport = new int[4];
+        int[] savedViewport = drawSavedViewport;
         GLES20.glGetIntegerv(GLES20.GL_VIEWPORT, savedViewport, 0);
 
         // ---- 1. Render the current camera frame into the FBO ----
@@ -722,8 +728,8 @@ public class GpuDownscaler {
                 (cameraLayout == 1 || cameraLayout == 3) ? 0.0f : 1.0f);
         }
         if (directUProducerForFront >= 0) {
-            float[] m = new float[8];
-            float[] f = new float[8];
+            float[] m = drawProducerCorners;
+            float[] f = drawFlipFlags;
             snapshotProducerCornersAndFlips(m, f);
             GLES20.glUniform2f(directUProducerForFront, m[0], m[1]);
             GLES20.glUniform2f(directUProducerForRight, m[2], m[3]);
@@ -960,7 +966,7 @@ public class GpuDownscaler {
         if (!syncInitialized) initSyncFbo();
         if (!syncInitialized) return null;
 
-        int[] savedViewport = new int[4];
+        int[] savedViewport = drawSavedViewport;
         GLES20.glGetIntegerv(GLES20.GL_VIEWPORT, savedViewport, 0);
 
         try {
@@ -988,8 +994,8 @@ public class GpuDownscaler {
                     (cameraLayout == 1 || cameraLayout == 3) ? 0.0f : 1.0f);
             }
             if (directUProducerForFront >= 0) {
-                float[] m = new float[8];
-                float[] f = new float[8];
+                float[] m = drawProducerCorners;
+                float[] f = drawFlipFlags;
                 snapshotProducerCornersAndFlips(m, f);
                 GLES20.glUniform2f(directUProducerForFront, m[0], m[1]);
                 GLES20.glUniform2f(directUProducerForRight, m[2], m[3]);
