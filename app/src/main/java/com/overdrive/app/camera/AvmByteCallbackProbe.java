@@ -17,6 +17,7 @@ import java.lang.reflect.Proxy;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
@@ -457,6 +458,38 @@ public final class AvmByteCallbackProbe {
 
         private final LinkedBlockingQueue<byte[]> frameQueue =
             new LinkedBlockingQueue<>(FRAME_QUEUE_DEPTH);
+        // Bounded reuse: queued frames + worker frame + one callback in flight.
+        // A frame is returned only after its consumer has finished reading it.
+        private static final int FRAME_POOL_CAPACITY = FRAME_QUEUE_DEPTH + 2;
+        private final ArrayBlockingQueue<byte[]> freeFrames =
+            new ArrayBlockingQueue<>(FRAME_POOL_CAPACITY);
+        private int allocatedFrames;
+        private final Object framePoolLock = new Object();
+
+        private byte[] acquireFrame(int length) {
+            synchronized (framePoolLock) {
+                byte[] frame;
+                while ((frame = freeFrames.poll()) != null) {
+                    if (frame.length == length) return frame;
+                    allocatedFrames--; // Dimensions changed: discard old allocation.
+                }
+                if (allocatedFrames >= FRAME_POOL_CAPACITY) return null;
+                allocatedFrames++;
+            }
+            try {
+                return new byte[length];
+            } catch (OutOfMemoryError error) {
+                synchronized (framePoolLock) { allocatedFrames--; }
+                throw error;
+            }
+        }
+
+        private void recycleFrame(byte[] frame) {
+            if (frame == null || frame == EOS_SENTINEL) return;
+            synchronized (framePoolLock) {
+                if (!freeFrames.offer(frame)) allocatedFrames--;
+            }
+        }
         private Thread worker;
 
         FrameCollector(int cameraId, int viewIndex, File probeDir) {
@@ -487,7 +520,7 @@ public final class AvmByteCallbackProbe {
             }
             if (!delivered) {
                 // Queue still full and worker isn't draining → drop oldest, retry once.
-                frameQueue.poll();
+                recycleFrame(frameQueue.poll());
                 delivered = frameQueue.offer(EOS_SENTINEL);
             }
             if (!delivered) {
@@ -512,8 +545,12 @@ public final class AvmByteCallbackProbe {
                 while (true) {
                     byte[] nv21 = frameQueue.poll(200, TimeUnit.MILLISECONDS);
                     if (nv21 == EOS_SENTINEL) break;
-                    if (Thread.currentThread().isInterrupted()) break;
+                    if (Thread.currentThread().isInterrupted()) {
+                        recycleFrame(nv21);
+                        break;
+                    }
                     if (nv21 == null) continue;
+                    try {
                     if (!encoderInitAttempted && width > 0 && height > 0) {
                         encoderInitAttempted = true;
                         if (!tryInitEncoder()) {
@@ -538,6 +575,9 @@ public final class AvmByteCallbackProbe {
                     } else if (rawOut != null) {
                         writeRaw(nv21);
                     }
+                    } finally {
+                        recycleFrame(nv21);
+                    }
                 }
             } catch (InterruptedException ignored) {
                 Thread.currentThread().interrupt();
@@ -547,6 +587,8 @@ public final class AvmByteCallbackProbe {
             } finally {
                 // Worker-thread-only finalization. encoder/muxer/raw are owned by us.
                 finalizeOutputs();
+                byte[] pending;
+                while ((pending = frameQueue.poll()) != null) recycleFrame(pending);
             }
         }
 
@@ -597,13 +639,16 @@ public final class AvmByteCallbackProbe {
                     return null;
                 }
                 int copyLen = Math.min(data.length, bufSize);
-                byte[] copy = new byte[copyLen];
-                System.arraycopy(data, 0, copy, 0, copyLen);
+                // Prefer a recycled frame; if all buffers are in flight, drop
+                // rather than allocate without bound or stall the HAL callback.
+                byte[] copy = acquireFrame(copyLen);
                 frameCount = seen;
+                if (copy == null) return null;
+                System.arraycopy(data, 0, copy, 0, copyLen);
                 if (!frameQueue.offer(copy)) {
                     // Queue full — drop oldest, push newest.
-                    frameQueue.poll();
-                    frameQueue.offer(copy);
+                    recycleFrame(frameQueue.poll());
+                    if (!frameQueue.offer(copy)) recycleFrame(copy);
                 }
             } catch (Throwable t) {
                 logger.warn("invoke error cam=" + cameraId + " view="
