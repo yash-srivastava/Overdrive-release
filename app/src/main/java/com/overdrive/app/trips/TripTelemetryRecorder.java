@@ -1358,7 +1358,8 @@ public class TripTelemetryRecorder {
         // Append gzipped bytes to the (possibly relocated) output file.
         try (OutputStream fos = new BufferedOutputStream(
                 new FileOutputStream(target, true))) {
-            fos.write(baos.toByteArray());
+            // Avoid duplicating the compressed chunk in a second byte array.
+            baos.writeTo(fos);
         }
 
         logger.info("Flushed " + samples.size() + " 1Hz samples to " + target.getName() +
