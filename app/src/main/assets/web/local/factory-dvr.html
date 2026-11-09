@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title data-i18n="app.factory_dvr_title">Factory DVR - OverDrive</title>
+    <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
+    <script src="../shared/theme.js?v=11"></script>
+    <script src="../shared/app-shell.js?v=18"></script>
+    <link rel="stylesheet" href="../shared/styles.css?v=38">
+    <link rel="stylesheet" href="../shared/revamp.css?v=2">
+    <style>
+        .factory-wrap { padding: var(--page-pad-y) var(--page-pad-x) 32px; }
+        .factory-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px; }
+        .factory-help { color: var(--on-surface-variant); margin-bottom: 16px; }
+        .factory-list { display: grid; gap: 10px; }
+        .factory-clip { min-width: 0; padding: 14px; background: var(--tile); border: 1px solid var(--outline-variant); border-radius: var(--radius-md); }
+        .factory-path { display: block; overflow-wrap: anywhere; font-weight: 600; }
+        .factory-meta { margin: 6px 0 12px; color: var(--on-surface-variant); font-size: var(--fs-label); }
+        .factory-clip-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+        .factory-player { display: none; max-width: 900px; margin-bottom: 18px; }
+        .factory-player video { display: block; width: 100%; max-height: 62vh; background: #000; }
+        .factory-player p { overflow-wrap: anywhere; }
+        .factory-status { margin: 12px 0; }
+        @media (pointer: coarse) { .factory-actions a, .factory-actions button, .factory-clip-actions a, .factory-clip-actions button { min-height: 48px; } }
+    </style>
+</head>
+<body>
+<div class="app-layout">
+    <div id="app-shell-mount"></div>
+    <main class="main-content">
+        <div class="mobile-header">
+            <button class="menu-toggle" onclick="toggleSidebar()" aria-label="Open menu">&#9776;</button>
+            <span data-i18n="factory_dvr.title">Factory DVR</span>
+        </div>
+        <header class="page-header"><h1 class="page-title" data-i18n="factory_dvr.title">Factory DVR</h1></header>
+        <section class="factory-wrap">
+            <div class="factory-actions">
+                <a class="btn btn-secondary" href="/events.html" data-i18n="factory_dvr.back">Back to Recordings</a>
+                <button class="btn btn-primary" id="factoryRefresh" type="button" data-i18n="factory_dvr.refresh">Refresh</button>
+            </div>
+            <p class="factory-help" data-i18n="factory_dvr.help">Original BYD dashcam videos. Read-only; downloading saves a separate copy.</p>
+            <p class="factory-status" id="factoryStatus" role="status" aria-live="polite"></p>
+            <section class="factory-player" id="factoryPlayerPanel">
+                <p id="factoryPlaying"></p>
+                <video id="factoryPlayer" controls preload="metadata" playsinline></video>
+            </section>
+            <div class="factory-list" id="factoryList"></div>
+        </section>
+    </main>
+</div>
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+<script src="../shared/auth.js"></script>
+<script src="../shared/core.js?v=24"></script>
+<script src="../shared/factory-dvr.js?v=1"></script>
+<script>
+    function toggleSidebar() {
+        document.getElementById('sidebar').classList.toggle('open');
+        document.getElementById('sidebarOverlay').classList.toggle('show');
+    }
+    document.addEventListener('DOMContentLoaded', function () {
+        BYD.i18n.init().then(function () {
+            BYD.core.init();
+            BYD.factoryDvr.init();
+        });
+    });
+</script>
+</body>
+</html>

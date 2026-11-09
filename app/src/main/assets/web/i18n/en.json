@@ -33,7 +33,23 @@
     "communicate_title": "Communicate - OverDrive",
     "assistant_title": "Assistant - OverDrive",
     "parking_title": "Parking - OverDrive",
-    "safekeep_title": "SafeKeep - OverDrive"
+    "safekeep_title": "SafeKeep - OverDrive",
+    "factory_dvr_title": "Factory DVR - OverDrive"
+  },
+  "factory_dvr": {
+    "title": "Factory DVR",
+    "back": "Back to Recordings",
+    "refresh": "Refresh",
+    "help": "Original BYD dashcam videos. Read-only; downloading saves a separate copy.",
+    "scanning": "Scanning the microSD card…",
+    "missing": "No readable BYD factory DVR folder was found.",
+    "empty": "No readable factory videos were found.",
+    "videos": "factory videos",
+    "limited": "List limited to the newest recordings",
+    "play": "Play",
+    "save_copy": "Save a copy",
+    "play_failed": "Playback failed or the format is unsupported.",
+    "unavailable": "Unable to read factory recordings. Check the microSD card and login."
   },
   "nav": {
     "dashboard": "Dashboard",

@@ -747,8 +747,13 @@ public class HttpServer {
             // the glassWidgets settings, like the built-ins: the car's own arrange mode writes those over loopback.
             boolean widgetWriteRequest = !method.equals("GET")
                     && (isCustomWidgetsPath(pathOnly) || isCommunityWidgetsPath(pathOnly));
+            // Factory DVR footage always requires an authenticated web session, even on loopback.
+            boolean factoryDvrRequest = pathOnly.equals("/factory-dvr")
+                    || pathOnly.equals("/factory-dvr.html")
+                    || pathOnly.equals("/api/factory-dvr")
+                    || pathOnly.startsWith("/api/factory-dvr/");
             boolean authenticated = remoteDevRequest || genAiRequest || wireGuardRequest || remoteAccessRequest
-                    || widgetWriteRequest
+                    || widgetWriteRequest || factoryDvrRequest
                 ? AuthMiddleware.checkJwtOnly(path, cookieHeader, authHeader, out)
                 : AuthMiddleware.checkAuth(path, cookieHeader, authHeader, out,
                     client.getRemoteSocketAddress(), hasTunnelHeaders,
@@ -794,6 +799,10 @@ public class HttpServer {
             } else if (path.equals("/recording.html") || path.equals("/recording")) {
                 if (!serveStaticFile(out, "local/recording.html")) {
                     HttpResponse.sendError(out, 404, "recording.html not found");
+                }
+            } else if (path.equals("/factory-dvr.html") || path.equals("/factory-dvr")) {
+                if (!serveStaticFile(out, "local/factory-dvr.html")) {
+                    HttpResponse.sendError(out, 404, "factory-dvr.html not found");
                 }
             } else if (path.equals("/storage.html") || path.equals("/storage")) {
                 if (!serveStaticFile(out, "local/storage.html")) {
@@ -1228,6 +1237,8 @@ public class HttpServer {
             return AboutApiHandler.handle(method, path, body, out);
         }
 
+        // Factory DVR API uses the read-only scanner added in issue #529.
+        if (FactoryDvrApiHandler.handle(method, path, rangeHeader, out)) return true;
         // Recordings API (with Range header support for video seeking) + thumbnails + event timelines
         if (path.startsWith("/api/recordings") || path.startsWith("/video/") ||
             path.startsWith("/thumb/") || path.startsWith("/api/events/")) {
