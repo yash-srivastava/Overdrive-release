@@ -2165,6 +2165,11 @@ public class StorageManager {
      *
      * @return true if a card is physically present in the SD slot
      */
+    // Reuse the immutable sysfs card-entry pattern across kernel fallback probes.
+    // The MMC/eMMC distinction is still made by reading each candidate's type file.
+    private static final java.util.regex.Pattern MMC_CARD_ENTRY =
+            java.util.regex.Pattern.compile("mmc\\d+:[0-9a-fA-F]+");
+
     private boolean isSdCardPhysicallyPresent() {
         // Signal 1 (vendor prop, EXPECTED bus-agnostic + SD-specific): the BYD
         // firmware's own SD-slot occupancy flag. Intended to cover SCSI/USB-
@@ -2201,7 +2206,7 @@ public class StorageManager {
                         File[] children = host.listFiles();
                         if (children == null) continue;
                         for (File child : children) {
-                            if (!child.getName().matches("mmc\\d+:[0-9a-fA-F]+")) continue;
+                            if (!MMC_CARD_ENTRY.matcher(child.getName()).matches()) continue;
                             // Discriminate external SD from internal eMMC via the
                             // card `type` sysfs node: "SD"/"SDIO" = removable card,
                             // "MMC" = soldered eMMC.
