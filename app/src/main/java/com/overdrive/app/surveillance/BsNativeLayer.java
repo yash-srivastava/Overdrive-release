@@ -43,6 +43,13 @@ public final class BsNativeLayer {
     // blind-spot overlay is ACC-ON + signaling on the cluster stack.
     private static final int Z_ORDER = Integer.MAX_VALUE - 1;
 
+    // Reuse immutable patterns across dumpsys display parsing calls. String.matches()
+    // otherwise recompiles the state expression for every inspected line.
+    private static final java.util.regex.Pattern INACTIVE_DISPLAY_STATE =
+            java.util.regex.Pattern.compile(".*\\bstate[ =]+(off|unknown)\\b.*");
+    private static final java.util.regex.Pattern LAYER_STACK =
+            java.util.regex.Pattern.compile("(?i)layerstack[ =]+(\\d+)");
+
     private final int bufferW;
     private final int bufferH;
     // SurfaceControl layer name (for dumpsys SurfaceFlinger identification) and its
@@ -550,7 +557,7 @@ public final class BsNativeLayer {
             while ((line = r.readLine()) != null) {
                 String low = line.toLowerCase(java.util.Locale.US);
                 if (!low.contains("fission")
-                        || low.matches(".*\\bstate[ =]+(off|unknown)\\b.*")) {
+                        || INACTIVE_DISPLAY_STATE.matcher(low).matches()) {
                     continue;
                 }
                 int lineId = extractDisplayIdOnLine(line);
@@ -717,8 +724,6 @@ public final class BsNativeLayer {
             // (That block-parser was a regression — this restores the same-line read.)
             // The displayId is on the SAME fission line ("displayId 1"), so it comes
             // for free. Prefer the LAST such line (Override after Base; identical N).
-            java.util.regex.Pattern sameLineStack =
-                java.util.regex.Pattern.compile("(?i)layerstack[ =]+(\\d+)");
             String line;
             int foundId = -1, foundStack = -1, foundW = 0, foundH = 0;
             while ((line = r.readLine()) != null) {
@@ -769,7 +774,7 @@ public final class BsNativeLayer {
                 // with no parseable state token is ACCEPTED (v25.4 lenient behaviour),
                 // so we never over-reject a trim whose format we don't recognise; we
                 // still skip a genuinely dead/destroyed entry that says "state off".
-                if (low.matches(".*\\bstate[ =]+(off|unknown)\\b.*")) continue;
+                if (INACTIVE_DISPLAY_STATE.matcher(low).matches()) continue;
                 // Capture id + stack ATOMICALLY from the authoritative DisplayInfo line
                 // (the one that actually carries layerStack), not as independent halves
                 // accumulated across lines. A live fission display prints multiple
@@ -784,7 +789,7 @@ public final class BsNativeLayer {
                 // both); fall back to a same-line id with no stack only when no
                 // layerStack line was seen yet. "Prefer LAST" still holds (Override after
                 // Base; identical N).
-                java.util.regex.Matcher m = sameLineStack.matcher(line);
+                java.util.regex.Matcher m = LAYER_STACK.matcher(line);
                 int id = extractDisplayIdOnLine(line);
                 Point size = extractLargestSizeOnLine(line);
                 if (m.find() && id >= 0) {
@@ -909,18 +914,16 @@ public final class BsNativeLayer {
         FissionDisplay plain = null;
         FissionDisplay target = null;
         boolean targetIsSharedShadow = false;
-        java.util.regex.Pattern stackPattern =
-                java.util.regex.Pattern.compile("(?i)layerstack[ =]+(\\d+)");
         for (String line : dump.split("\\r?\\n")) {
             String low = line.toLowerCase(java.util.Locale.US);
             if (!low.contains("displayinfo{\"")
-                    || low.matches(".*\\bstate[ =]+(off|unknown)\\b.*")) {
+                    || INACTIVE_DISPLAY_STATE.matcher(low).matches()) {
                 continue;
             }
             String name = extractDisplayNameOnLine(line);
             if (name == null) continue;
             int id = extractDisplayIdOnLine(line);
-            java.util.regex.Matcher stackMatcher = stackPattern.matcher(line);
+            java.util.regex.Matcher stackMatcher = LAYER_STACK.matcher(line);
             if (id <= 0 || !stackMatcher.find()) continue;
             int stack = parseIntSafe(stackMatcher.group(1));
             if (stack <= 0) continue;
