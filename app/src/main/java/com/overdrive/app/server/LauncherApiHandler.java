@@ -906,7 +906,7 @@ public final class LauncherApiHandler {
                     com.overdrive.app.daemon.CameraDaemon.getTripAnalyticsManager();
             com.overdrive.app.trips.TripDatabase db = (tam != null) ? tam.getDatabase() : null;
             if (db != null) {
-                java.util.List<com.overdrive.app.trips.TripRecord> recent = db.getTrips(365, 5, 0);
+                java.util.List<com.overdrive.app.trips.TripRecord> recent = db.getTripsWithoutMoments(365, 5, 0);
                 if (recent != null) {
                     for (com.overdrive.app.trips.TripRecord t : recent) {
                         if (t == null) continue;

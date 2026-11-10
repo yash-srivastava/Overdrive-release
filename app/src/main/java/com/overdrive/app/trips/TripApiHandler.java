@@ -288,7 +288,7 @@ public class TripApiHandler {
 
         List<TripRecord> trips = (fromMs > 0 || toMs > 0)
                 ? db.getTripsBetween(fromMs, toMs, limit, offset)
-                : db.getTrips(days, limit, offset);
+                : db.getTripsWithoutMoments(days, limit, offset);
         JSONArray tripsArray = new JSONArray();
         for (TripRecord trip : trips) {
             enrichTripEnergy(trip);
