@@ -225,6 +225,8 @@ public final class HighResPreviewSampler {
     private ByteBuffer readBuffer;
     private byte[] scratchRgba;
     private int[] argbPixels;
+    // Sampler-thread-owned; reused until the FBO dimensions change.
+    private Bitmap jpegBitmap;
     private final boolean isTexture2D;
     private volatile Object sourceLock;
     private volatile SourceGuard sourceGuard;
@@ -360,6 +362,7 @@ public final class HighResPreviewSampler {
             readBuffer.order(ByteOrder.nativeOrder());
             scratchRgba = new byte[rgbaBytes];
             argbPixels = new int[width * height];
+            jpegBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
             fboWidth = width;
             fboHeight = height;
         } catch (Throwable t) {
@@ -668,15 +671,14 @@ public final class HighResPreviewSampler {
                 }
             }
 
-            Bitmap bmp = Bitmap.createBitmap(argbPixels, width, height,
-                    Bitmap.Config.ARGB_8888);
-            try {
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                bmp.compress(Bitmap.CompressFormat.JPEG, 85, out);
-                return out.toByteArray();
-            } finally {
-                bmp.recycle();
+            // Reuse the mutable bitmap instead of allocating one per preview.
+            // All renderAndEncode calls run serially on the sampler thread.
+            jpegBitmap.setPixels(argbPixels, 0, width, 0, 0, width, height);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            if (!jpegBitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)) {
+                return null;
             }
+            return out.toByteArray();
         } catch (Throwable t) {
             logger.warn("renderAndEncode failed " + width + "x" + height
                     + ": " + t.getMessage());
@@ -701,6 +703,10 @@ public final class HighResPreviewSampler {
         readBuffer = null;
         scratchRgba = null;
         argbPixels = null;
+        if (jpegBitmap != null) {
+            jpegBitmap.recycle();
+            jpegBitmap = null;
+        }
         fboWidth = 0;
         fboHeight = 0;
     }
