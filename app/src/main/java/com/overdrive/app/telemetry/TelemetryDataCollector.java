@@ -498,10 +498,10 @@ public class TelemetryDataCollector {
             }
             if (refs > 0) {
                 logger.info("Polling stop requested but still needed (refCount=" + refs + ")");
-                // If overlay just stopped but trip recorder still needs polling, downgrade rate
-                if (!overlayRecordingActive) {
-                    restartAtCurrentRateLocked();
-                }
+                // setOverlayRecordingActive() already restarts the executor when
+                // the requested rate changes. A consumer releasing a reference
+                // does not change that rate; restarting here only discards the
+                // current schedule and spins up an unnecessary poller thread.
                 return;
             }
             activePollingGeneration = 0L;
