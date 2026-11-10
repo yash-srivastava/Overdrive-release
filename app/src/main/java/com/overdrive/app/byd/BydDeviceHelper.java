@@ -79,8 +79,17 @@ public final class BydDeviceHelper {
     }
 
     private static void ensureRuntimeSdk() {
+        ensureHiddenApiBypass();
         if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
             com.overdrive.app.byd.dilink5.Dilink5SdkInjector.ensure(null);
+        }
+    }
+
+    private static void ensureHiddenApiBypass() {
+        try {
+            com.overdrive.app.shell.HiddenApiBypass.INSTANCE.bypass();
+        } catch (Throwable ignored) {
+            // Pure JVM unit tests have no dalvik.system.VMRuntime; safe to ignore.
         }
     }
 
@@ -91,6 +100,153 @@ public final class BydDeviceHelper {
         Object connected = callGetter(manager, "isCarServiceConnect");
         return Boolean.TRUE.equals(connected)
                 && callGetter(manager, adapterGetter) != null;
+    }
+
+    static boolean isDiLink5BinderServiceAlive(Object adapter) {
+        if (adapter == null) return false;
+        try {
+            Field serviceField = findDeclaredField(adapter.getClass(), "mService");
+            if (serviceField == null) return false;
+            serviceField.setAccessible(true);
+            Object service = serviceField.get(adapter);
+            if (!(service instanceof android.os.IInterface)) return false;
+            android.os.IBinder binder = ((android.os.IInterface) service).asBinder();
+            return binder != null && binder.isBinderAlive();
+        } catch (Throwable failure) {
+            logger.debug("DiLink 5 adapter binder check failed for "
+                    + adapter.getClass().getSimpleName() + ": " + failure.getMessage());
+            return false;
+        }
+    }
+
+    private static Field findDeclaredField(Class<?> type, String name) {
+        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+            try {
+                return current.getDeclaredField(name);
+            } catch (NoSuchFieldException ignored) {
+            }
+        }
+        return null;
+    }
+
+    private static Class<?> loadDiLink5Class(String className, ClassLoader preferred) {
+        ClassLoader[] loaders = new ClassLoader[] {
+                preferred,
+                com.overdrive.app.byd.dilink5.Dilink5SdkInjector.class.getClassLoader(),
+                BydDeviceHelper.class.getClassLoader(),
+                Context.class.getClassLoader()
+        };
+        for (ClassLoader loader : loaders) {
+            if (loader == null) continue;
+            try {
+                return Class.forName(className, true, loader);
+            } catch (Throwable ignored) {
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Resolve a live DiLink 5 {@code com.ts.lib.caradapter.*} manager in the app process.
+     *
+     * <p>In {@code /system/framework/byd.ota.master.jar}, {@code TsManagerImpl}'s getters (such as
+     * {@code getChargingAdapterManager()}) return the cached field without lazy resolution, so a
+     * call that races the asynchronous {@code CarAdapterService} bind or follows a transient
+     * binder drop sees {@code null} and makes {@code BYDAutoChargingDevice.setACChargingLimit}
+     * fail immediately with {@code rc=-1} before reaching {@code CarPropertyService}. Falling back
+     * to {@code CarAdapterManager.getInstance(ctx).getCarAdapterManager(carAdapterKey)} resolves
+     * the live Binder handle directly once {@code CarAdapterService} is bound.
+     */
+    public static Object acquireDiLink5CarAdapter(
+            Context context, Object deviceHint, String tsAdapterGetter, String carAdapterKey) {
+        if (context == null || VehicleActuatorBridge.isDiLink5RequestExpired()) {
+            return null;
+        }
+        ensureHiddenApiBypass();
+        try {
+            com.overdrive.app.byd.dilink5.Dilink5SdkInjector.ensure(context);
+        } catch (Throwable ignored) {
+        }
+        Context rawApp = context.getApplicationContext();
+        Context appContext = withBydPermissionBypass(rawApp != null ? rawApp : context);
+        ClassLoader preferredLoader = deviceHint != null
+                ? deviceHint.getClass().getClassLoader()
+                : com.overdrive.app.byd.dilink5.Dilink5SdkInjector.class.getClassLoader();
+
+        if (tsAdapterGetter != null && !tsAdapterGetter.isEmpty()) {
+            try {
+                Class<?> tsManagerClass = loadDiLink5Class(
+                        "android.hardware.bydauto.TsManagerImpl", preferredLoader);
+                if (tsManagerClass != null) {
+                    Method getInstance = tsManagerClass.getMethod("getInstance", Context.class);
+                    Object tsManager = getInstance.invoke(null, appContext);
+                    if (adapterManagerReady(tsManager, tsAdapterGetter)) {
+                        Object adapter = callGetter(tsManager, tsAdapterGetter);
+                        if (isDiLink5BinderServiceAlive(adapter)) {
+                            return adapter;
+                        }
+                    }
+                }
+            } catch (Throwable failure) {
+                logger.debug("DiLink 5 TsManagerImpl probe failed for "
+                        + tsAdapterGetter + ": " + failure.getMessage());
+            }
+        }
+
+        if (carAdapterKey != null && !carAdapterKey.isEmpty()) {
+            try {
+                Class<?> carAdapterMgrClass = loadDiLink5Class(
+                        "com.ts.lib.caradapter.CarAdapterManager", preferredLoader);
+                if (carAdapterMgrClass != null) {
+                    Method getInstance = carAdapterMgrClass.getMethod("getInstance", Context.class);
+                    Object carAdapterMgr = getInstance.invoke(null, appContext);
+                    if (carAdapterMgr != null) {
+                        Object bound = callGetter(carAdapterMgr, "isCarServiceBound");
+                        if (!(bound instanceof Boolean)) {
+                            bound = callGetter(carAdapterMgr, "isServiceBound");
+                        }
+                        if (!Boolean.TRUE.equals(bound)) {
+                            carAdapterMgrClass.getMethod("connect").invoke(carAdapterMgr);
+                            return null;
+                        }
+                        Method getAdapter = carAdapterMgrClass.getMethod(
+                                "getCarAdapterManager", String.class);
+                        Object adapter = getAdapter.invoke(carAdapterMgr, carAdapterKey);
+                        if (isDiLink5BinderServiceAlive(adapter)) {
+                            return adapter;
+                        }
+                    }
+                }
+            } catch (Throwable failure) {
+                logger.debug("DiLink 5 CarAdapterManager fallback failed for '"
+                        + carAdapterKey + "': " + failure.getMessage());
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Bounded wait for a live DiLink 5 car adapter after {@code VehicleActuatorService} cold-starts
+     * (typically ~100-250 ms for {@code CarAdapterService} bind completion).
+     */
+    public static Object awaitDiLink5CarAdapter(
+            Context context,
+            Object deviceHint,
+            String tsAdapterGetter,
+            String carAdapterKey,
+            int maxAttempts,
+            long sleepMs) {
+        if (context == null || maxAttempts <= 0) return null;
+        for (int attempt = 0; attempt < maxAttempts; attempt++) {
+            Object adapter = acquireDiLink5CarAdapter(
+                    context, deviceHint, tsAdapterGetter, carAdapterKey);
+            if (adapter != null) return adapter;
+            if (VehicleActuatorBridge.isDiLink5RequestExpired()) break;
+            if (sleepMs > 0L && attempt + 1 < maxAttempts) {
+                android.os.SystemClock.sleep(sleepMs);
+            }
+        }
+        return null;
     }
 
     /**
@@ -105,6 +261,7 @@ public final class BydDeviceHelper {
             return false;
         }
         try {
+            ensureHiddenApiBypass();
             com.overdrive.app.byd.dilink5.Dilink5SdkInjector.ensure(context);
             Class<?> managerClass = Class.forName(
                     "android.hardware.bydauto.TsManagerImpl",

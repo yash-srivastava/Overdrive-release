@@ -18911,7 +18911,7 @@ public class BydDataCollector {
     public static final int AC_CHARGE_CURRENT_16A = 4;
     public static final int AC_CHARGE_CURRENT_MAX = 5;
 
-    private static boolean isValidAcChargingCurrentLimitState(int state) {
+    static boolean isValidAcChargingCurrentLimitState(int state) {
         return state >= AC_CHARGE_CURRENT_6A && state <= AC_CHARGE_CURRENT_MAX;
     }
 
@@ -19012,45 +19012,200 @@ public class BydDataCollector {
                 supported, available, config, state);
     }
 
-    /** DiLink 5 has no config id for this setting; a valid 1..5 typed readback proves it. */
-    private AcChargingCurrentLimitStatus getDiLink5AcChargingCurrentLimitStatus() {
-        int rawState = readDiLink5AcChargingLimit();
+    /**
+     * Normalize DiLink 5 {@code StudyAdapterManager.getSupportAcChargingLimit()} /
+     * {@code BYDAutoStudy.getSupportAcChargingLimit()} ({@code 0x2140416a}): OEM {@code BydCarSettings}
+     * treats {@code 2} as supported and {@code 1} as unsupported; {@code 0} or negative sentinels mean
+     * the study property has not been populated yet.
+     */
+    static int normalizeDiLink5AcChargingLimitConfig(int rawConfig) {
+        return rawConfig == 1 || rawConfig == 2 ? rawConfig : BydVehicleData.UNAVAILABLE;
+    }
+
+    static AcChargingCurrentLimitStatus evaluateDiLink5AcChargingCurrentLimitStatus(
+            int rawConfig, int rawState, Boolean previousVerdict) {
+        int configState = normalizeDiLink5AcChargingLimitConfig(rawConfig);
         boolean valid = isValidAcChargingCurrentLimitState(rawState);
-        Boolean supported = resolveAcChargingCurrentLimitSupport(
-                BydVehicleData.UNAVAILABLE, rawState, acChargingCurrentLimitSupported);
-        if (supported == null) {
-            supported = Boolean.TRUE;
-            acChargingCurrentLimitSupported = Boolean.TRUE;
-        } else if (valid) {
-            acChargingCurrentLimitSupported = supported;
-        }
-        // In the daemon process that serves the web UI / status API, chargingDevice is null
-        // because BYD HAL singletons are only acquired in the main app process. On DiLink 5,
-        // availability must remain true so driver selection controls are unblocked.
-        boolean available = Boolean.TRUE.equals(supported);
+        Boolean resolved = resolveAcChargingCurrentLimitSupport(
+                configState, rawState, previousVerdict);
+        // If neither a valid 1..5 state nor a 1|2 study config has been observed yet, expose the
+        // control transiently without latching previousVerdict so a later configState=1 still wins.
+        Boolean supported = resolved != null ? resolved : Boolean.TRUE;
+        boolean available = Boolean.TRUE.equals(supported)
+                || (configState == 1 && Boolean.FALSE.equals(supported));
         return new AcChargingCurrentLimitStatus(
-                supported, available, BydVehicleData.UNAVAILABLE,
+                supported,
+                available,
+                configState,
                 valid ? rawState : BydVehicleData.UNAVAILABLE);
+    }
+
+    private AcChargingCurrentLimitStatus getDiLink5AcChargingCurrentLimitStatus() {
+        int[] sample = pollDiLink5AcChargingLimitSample();
+        int rawState = sample[0];
+        int configState = normalizeDiLink5AcChargingLimitConfig(sample[1]);
+        AcChargingCurrentLimitStatus status = evaluateDiLink5AcChargingCurrentLimitStatus(
+                configState, rawState, acChargingCurrentLimitSupported);
+        if (isValidAcChargingCurrentLimitState(rawState)
+                || configState != BydVehicleData.UNAVAILABLE) {
+            acChargingCurrentLimitSupported = status.supported;
+        }
+        return status;
     }
 
     // Daemon cache: every bridge read starts the app's foreground service, and the UI polls 15 s.
     private volatile int diLink5AcLimitCached = BydVehicleData.UNAVAILABLE;
+    private volatile int diLink5AcLimitConfigCached = BydVehicleData.UNAVAILABLE;
     private volatile long diLink5AcLimitCachedAtElapsedMs;
+    private volatile int lastDiLink5AcLimitReadBack = BydVehicleData.UNAVAILABLE;
+    private volatile int lastDiLink5AcLimitConfig = BydVehicleData.UNAVAILABLE;
+
+    public int lastDiLink5AcChargingLimitReadBack() {
+        return lastDiLink5AcLimitReadBack;
+    }
+
+    public int lastDiLink5AcChargingLimitConfig() {
+        return lastDiLink5AcLimitConfig;
+    }
+
+    public void updateDiLink5AcChargingLimitCache(int state, int configState) {
+        int normalizedConfig = normalizeDiLink5AcChargingLimitConfig(configState);
+        diLink5AcLimitCached = state;
+        if (normalizedConfig != BydVehicleData.UNAVAILABLE) {
+            diLink5AcLimitConfigCached = normalizedConfig;
+        }
+        diLink5AcLimitCachedAtElapsedMs = SystemClock.elapsedRealtime();
+        if (isValidAcChargingCurrentLimitState(state) || normalizedConfig == 2) {
+            acChargingCurrentLimitSupported = Boolean.TRUE;
+        }
+    }
+
+    private int[] pollDiLink5AcChargingLimitSample() {
+        if (isDiLink5DaemonProcess()) {
+            long now = SystemClock.elapsedRealtime();
+            long cachedAt = diLink5AcLimitCachedAtElapsedMs;
+            if (cachedAt > 0L && now - cachedAt < 60_000L) {
+                return new int[] {diLink5AcLimitCached, diLink5AcLimitConfigCached};
+            }
+            VehicleActuatorBridge.DiLink5AcChargeLimitSample sample =
+                    VehicleActuatorBridge.readDiLink5AcChargeLimitSample(getRuntimeContext());
+            int normalizedConfig = normalizeDiLink5AcChargingLimitConfig(sample.configState);
+            diLink5AcLimitCached = sample.state;
+            if (normalizedConfig != BydVehicleData.UNAVAILABLE) {
+                diLink5AcLimitConfigCached = normalizedConfig;
+            }
+            diLink5AcLimitCachedAtElapsedMs = now;
+            return new int[] {sample.state, diLink5AcLimitConfigCached};
+        }
+        Object chargingAdapter = BydDeviceHelper.awaitDiLink5CarAdapter(
+                context, chargingDevice, "getChargingAdapterManager", "charging", 10, 200L);
+        int state = readDiLink5AcChargingLimitWithAdapter(chargingAdapter);
+        int config = readDiLink5AcChargingLimitConfig();
+        return new int[] {state, config};
+    }
 
     /** Raw DiLink 5 AC limit (same 1..5 domain); only the app process can read the SDK. */
     public int readDiLink5AcChargingLimit() {
         if (isDiLink5DaemonProcess()) {
-            long now = SystemClock.elapsedRealtime();
-            long cachedAt = diLink5AcLimitCachedAtElapsedMs;
-            if (cachedAt > 0L && now - cachedAt < 60_000L) return diLink5AcLimitCached;
-            int value = VehicleActuatorBridge.readDiLink5AcChargeLimit(getRuntimeContext());
-            diLink5AcLimitCached = value;
-            diLink5AcLimitCachedAtElapsedMs = now;
-            return value;
+            return pollDiLink5AcChargingLimitSample()[0];
         }
-        Object value = BydDeviceHelper.callGetter(chargingDevice, "getACChargingLimit");
-        return value instanceof Number
-                ? ((Number) value).intValue() : BydVehicleData.UNAVAILABLE;
+        Object chargingAdapter = BydDeviceHelper.awaitDiLink5CarAdapter(
+                context, chargingDevice, "getChargingAdapterManager", "charging", 10, 200L);
+        return readDiLink5AcChargingLimitWithAdapter(chargingAdapter);
+    }
+
+    /** DiLink 5 OEM capability config ({@code 0x2140416a}: {@code 2}=supported, {@code 1}=unsupported). */
+    public int readDiLink5AcChargingLimitConfig() {
+        if (isDiLink5DaemonProcess()) {
+            return pollDiLink5AcChargingLimitSample()[1];
+        }
+        Object studyAdapter = BydDeviceHelper.awaitDiLink5CarAdapter(
+                context, chargingDevice, "getStudyAdapterManager", "selfstudy", 5, 100L);
+        int normalized = BydVehicleData.UNAVAILABLE;
+        if (studyAdapter != null) {
+            Object raw = BydDeviceHelper.callGetter(studyAdapter, "getSupportAcChargingLimit");
+            if (raw instanceof Number) {
+                normalized = normalizeDiLink5AcChargingLimitConfig(((Number) raw).intValue());
+            }
+        }
+        if (normalized == BydVehicleData.UNAVAILABLE && context != null) {
+            Object studyDevice = BydDeviceHelper.getDevice(
+                    "android.hardware.bydauto.uistyleconfig.BYDAutoStudy", context);
+            Object raw = BydDeviceHelper.callGetter(studyDevice, "getSupportAcChargingLimit");
+            if (raw instanceof Number) {
+                normalized = normalizeDiLink5AcChargingLimitConfig(((Number) raw).intValue());
+            }
+        }
+        lastDiLink5AcLimitConfig = normalized;
+        return normalized;
+    }
+
+    static int readDiLink5AcChargingLimitFromHandles(
+            Object chargingDeviceHandle, Object chargingAdapterHandle) {
+        int deviceState = BydVehicleData.UNAVAILABLE;
+        if (chargingDeviceHandle != null) {
+            Object value = BydDeviceHelper.callGetter(chargingDeviceHandle, "getACChargingLimit");
+            if (value == null) {
+                value = BydDeviceHelper.callGetter(chargingDeviceHandle, "getAcChargingLimit");
+            }
+            if (value instanceof Number) {
+                deviceState = ((Number) value).intValue();
+            }
+        }
+        if (isValidAcChargingCurrentLimitState(deviceState)) {
+            return deviceState;
+        }
+        if (chargingAdapterHandle != null) {
+            Object adapterValue = BydDeviceHelper.callGetter(
+                    chargingAdapterHandle, "getAcChargingLimit");
+            if (adapterValue instanceof Number) {
+                int adapterState = ((Number) adapterValue).intValue();
+                if (adapterState != BydVehicleData.UNAVAILABLE) {
+                    return adapterState;
+                }
+            }
+        }
+        return deviceState;
+    }
+
+    private int readDiLink5AcChargingLimitWithAdapter(Object chargingAdapter) {
+        if (chargingDevice == null && context != null) {
+            chargingDevice = initDevice(
+                    "android.hardware.bydauto.charging.BYDAutoChargingDevice", "Charging");
+        }
+        int state = readDiLink5AcChargingLimitFromHandles(chargingDevice, chargingAdapter);
+        lastDiLink5AcLimitReadBack = state;
+        return state;
+    }
+
+    static Object writeDiLink5AcChargingLimitToHandles(
+            Object chargingDeviceHandle, Object chargingAdapterHandle, int state, String[] viaOut) {
+        Object rc = null;
+        String via = "none";
+        if (chargingDeviceHandle != null) {
+            via = "BYDAutoChargingDevice";
+            rc = BydDeviceHelper.callMethod(chargingDeviceHandle, "setACChargingLimit", state);
+            if (rc == null) {
+                rc = BydDeviceHelper.callMethod(chargingDeviceHandle, "setAcChargingLimit", state);
+            }
+        }
+        if (!(rc instanceof Number) || ((Number) rc).intValue() < 0) {
+            if (chargingAdapterHandle != null) {
+                Object prevRc = rc;
+                Object fallbackRc = BydDeviceHelper.callMethod(
+                        chargingAdapterHandle, "setAcChargingLimit", state);
+                if (fallbackRc != null) {
+                    rc = fallbackRc;
+                    via = chargingDeviceHandle != null
+                            ? "ChargingAdapterManager(afterDeviceRc=" + prevRc + ")"
+                            : "ChargingAdapterManager";
+                }
+            }
+        }
+        if (viaOut != null && viaOut.length > 0) {
+            viaOut[0] = via;
+        }
+        return rc;
     }
 
     /** A DI5 AC-limit command was sent; the next daemon read must ask the car again. */
@@ -19060,40 +19215,87 @@ public class BydDataCollector {
 
     /** DiLink 5: typed setter (STATE_AC_LIMIT_6A=1 … MAX=5), success only on matching readback. */
     private boolean setDiLink5AcChargingCurrentLimit(int state) {
-        if (!isMainAppProcess() || chargingDevice == null) {
-            logger.warn("setAcChargingCurrentLimitState: DI5 charging device unavailable");
+        if (isDiLink5DaemonProcess()) {
+            return VehicleActuatorBridge.dispatchDiLink5Command(
+                    getRuntimeContext(),
+                    new com.overdrive.app.byd.routing.VehicleCommandRouter
+                            .AcChargeCurrentLimitCommand(state));
+        }
+        if (!isMainAppProcess()) {
+            logger.warn("setAcChargingCurrentLimitState: DI5 app process required");
             return false;
         }
-        int before = readDiLink5AcChargingLimit();
+        if (chargingDevice == null && context != null) {
+            chargingDevice = initDevice(
+                    "android.hardware.bydauto.charging.BYDAutoChargingDevice", "Charging");
+        }
+        Object chargingAdapter = BydDeviceHelper.awaitDiLink5CarAdapter(
+                context, chargingDevice, "getChargingAdapterManager", "charging", 10, 200L);
+        boolean adapterReady = chargingAdapter != null;
+        int configState = readDiLink5AcChargingLimitConfig();
+        if (chargingDevice == null && chargingAdapter == null) {
+            logger.warn("setAcChargingCurrentLimitState: DI5 charging device and adapter unavailable"
+                    + " (configState=" + configState + ")");
+            return false;
+        }
+        int before = readDiLink5AcChargingLimitWithAdapter(chargingAdapter);
         if (isValidAcChargingCurrentLimitState(before)) {
             acChargingCurrentLimitSupported = Boolean.TRUE;
-            if (before == state) return true;
+            if (before == state) {
+                logger.info("DI5 AC charge current limit already at requested=" + state
+                        + " (" + acChargingCurrentLimitLabel(state) + ") configState=" + configState
+                        + " adapterReady=" + adapterReady);
+                return true;
+            }
         } else {
-            logger.debug("setAcChargingCurrentLimitState: DI5 limit initially unreadable (" + before + "), proceeding with command");
+            logger.debug("setAcChargingCurrentLimitState: DI5 limit initially unreadable ("
+                    + before + "), proceeding with command");
         }
-        if (VehicleActuatorBridge.isDiLink5RequestExpired()) return false;
-        Object rc = BydDeviceHelper.callMethod(chargingDevice, "setACChargingLimit", state);
-        if (rc == null) {
-            rc = BydDeviceHelper.callMethod(chargingDevice, "setAcChargingLimit", state);
+        if (VehicleActuatorBridge.isDiLink5RequestExpired()) {
+            logger.warn("setAcChargingCurrentLimitState: DI5 request expired before write"
+                    + " (requested=" + state + ", adapterReady=" + adapterReady
+                    + ", configState=" + configState + ")");
+            return false;
         }
+        String[] via = new String[] {"none"};
+        if (chargingAdapter == null) {
+            chargingAdapter = BydDeviceHelper.acquireDiLink5CarAdapter(
+                    context, chargingDevice, "getChargingAdapterManager", "charging");
+            adapterReady = chargingAdapter != null;
+        }
+        Object rc = writeDiLink5AcChargingLimitToHandles(
+                chargingDevice, chargingAdapter, state, via);
         if (!(rc instanceof Number) || ((Number) rc).intValue() < 0) {
-            logger.warn("setACChargingLimit(" + state + ") refused: rc=" + rc);
+            logger.warn("setACChargingLimit(" + state + ") refused: rc=" + rc
+                    + " via=" + via[0] + " adapterReady=" + adapterReady
+                    + " configState=" + configState + " before=" + before);
             return false;
         }
         int readBack = BydVehicleData.UNAVAILABLE;
         for (int attempt = 0; attempt < 10
                 && !VehicleActuatorBridge.isDiLink5RequestExpired(); attempt++) {
             SystemClock.sleep(200L);
-            readBack = readDiLink5AcChargingLimit();
+            if (chargingAdapter == null) {
+                chargingAdapter = BydDeviceHelper.acquireDiLink5CarAdapter(
+                        context, chargingDevice, "getChargingAdapterManager", "charging");
+            }
+            readBack = readDiLink5AcChargingLimitWithAdapter(chargingAdapter);
             if (readBack == state) break;
         }
         boolean confirmed = readBack == state;
         if (confirmed) {
             acChargingCurrentLimitSupported = Boolean.TRUE;
         }
-        logger.info("DI5 AC charge current limit: requested=" + state
-                + " (" + acChargingCurrentLimitLabel(state) + ") rc=" + rc
-                + " before=" + before + " readBack=" + readBack + " confirmed=" + confirmed);
+        String summary = "DI5 AC charge current limit: requested=" + state
+                + " (" + acChargingCurrentLimitLabel(state) + ") via=" + via[0]
+                + " adapterReady=" + adapterReady + " configState=" + configState
+                + " rc=" + rc + " before=" + before + " readBack=" + readBack
+                + " confirmed=" + confirmed;
+        if (confirmed) {
+            logger.info(summary);
+        } else {
+            logger.warn(summary);
+        }
         return confirmed;
     }
 

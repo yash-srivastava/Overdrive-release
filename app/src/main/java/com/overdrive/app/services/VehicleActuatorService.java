@@ -345,6 +345,7 @@ public class VehicleActuatorService extends Service {
     private static boolean keepsDiLink5SuccessDetail(VehicleCommandRouter.VehicleCommand command,
             com.overdrive.app.remoteaccess.DiLink5ProximityCommandGuard.Scope proximity) {
         return VehicleActuatorBridge.isDiLink5CabinLightCommand(command)
+                || command instanceof VehicleCommandRouter.AcChargeCurrentLimitCommand
                 || command instanceof VehicleCommandRouter.DiLink5DiPilotCpdCommand
                 || (proximity != null && (command instanceof VehicleCommandRouter.LockCommand
                         || command instanceof VehicleCommandRouter.UnlockCommand));
@@ -487,6 +488,14 @@ public class VehicleActuatorService extends Service {
                         VehicleActuatorBridge.DILINK5_RESULT_SETPOINT,
                         ((VehicleCommandRouter.AmbientColourCommand) command).resultColour);
             }
+            if (command instanceof VehicleCommandRouter.AcChargeCurrentLimitCommand) {
+                result.putInt(
+                        VehicleActuatorBridge.DILINK5_AC_CHARGE_LIMIT_READ,
+                        collector.lastDiLink5AcChargingLimitReadBack());
+                result.putInt(
+                        VehicleActuatorBridge.DILINK5_AC_CHARGE_LIMIT_CONFIG,
+                        collector.lastDiLink5AcChargingLimitConfig());
+            }
             return result;
         }
 
@@ -606,10 +615,21 @@ public class VehicleActuatorService extends Service {
 
         if (VehicleActuatorBridge.DILINK5_AC_CHARGE_LIMIT_READ.equals(operation)) {
             requireDiLink5ModeCurrent(request);
+            if (diLink5BridgeExpired(request)) {
+                return bridgeFailure("vehicle request expired before read");
+            }
+            int[] sample = VehicleActuatorBridge.runDiLink5Request(
+                    diLink5BridgeDeadline(request),
+                    diLink5BridgeModeGeneration(request),
+                    diLink5BridgeAccAuthoritative(request),
+                    diLink5BridgeAccOn(request),
+                    () -> new int[] {
+                            collector.readDiLink5AcChargingLimit(),
+                            collector.readDiLink5AcChargingLimitConfig()
+                    });
             result.putBoolean("success", true);
-            result.putInt(
-                    VehicleActuatorBridge.DILINK5_AC_CHARGE_LIMIT_READ,
-                    collector.readDiLink5AcChargingLimit());
+            result.putInt(VehicleActuatorBridge.DILINK5_AC_CHARGE_LIMIT_READ, sample[0]);
+            result.putInt(VehicleActuatorBridge.DILINK5_AC_CHARGE_LIMIT_CONFIG, sample[1]);
             return result;
         }
 

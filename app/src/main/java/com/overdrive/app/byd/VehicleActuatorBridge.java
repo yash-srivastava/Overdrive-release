@@ -78,6 +78,7 @@ public final class VehicleActuatorBridge {
     private static final long DILINK5_AMBIENT_PALETTE_PROBE_RELOG_MS = 30L * 60_000L;
     public static final String DILINK5_AMBIENT_STATE = "ambient_state";
     public static final String DILINK5_AC_CHARGE_LIMIT_READ = "ac_charge_limit_read";
+    public static final String DILINK5_AC_CHARGE_LIMIT_CONFIG = "ac_charge_limit_config";
     public static final String DILINK5_CALIBRATION_READ = "calibration_read";
     // The shell-identity start is this daemon's normal path; log it once, and again after a failure.
     private static volatile boolean diLink5ShellStartLogged;
@@ -369,13 +370,24 @@ public final class VehicleActuatorBridge {
                 command.motionSafety()
                         == com.overdrive.app.byd.routing.VehicleCommandRouter.VehicleCommand
                                 .MotionSafety.BLOCK_WHILE_MOVING,
-                !isDiLink5CabinLightCommand(command),
+                usesDiLink5AccLease(command),
                 usesGenericRemoteKeyFrame(command));
         if (command
                 instanceof com.overdrive.app.byd.routing.VehicleCommandRouter
                         .AcChargeCurrentLimitCommand) {
-            // Even a timed-out request may still apply in the app process.
-            BydDataCollector.getInstance().invalidateDiLink5AcChargingLimit();
+            int confirmedState = result != null && result.getBoolean("success", false)
+                    ? result.getInt(DILINK5_AC_CHARGE_LIMIT_READ, BydVehicleData.UNAVAILABLE)
+                    : BydVehicleData.UNAVAILABLE;
+            int configState = result != null
+                    ? result.getInt(DILINK5_AC_CHARGE_LIMIT_CONFIG, BydVehicleData.UNAVAILABLE)
+                    : BydVehicleData.UNAVAILABLE;
+            if (BydDataCollector.isValidAcChargingCurrentLimitState(confirmedState)) {
+                BydDataCollector.getInstance().updateDiLink5AcChargingLimitCache(
+                        confirmedState, configState);
+            } else {
+                // Even a timed-out request may still apply in the app process.
+                BydDataCollector.getInstance().invalidateDiLink5AcChargingLimit();
+            }
         }
         if (result != null) {
             applyDiLink5CommandResult(
@@ -540,12 +552,33 @@ public final class VehicleActuatorBridge {
                 ? result.getString(DILINK5_CALIBRATION_READ) : null;
     }
 
-    public static int readDiLink5AcChargeLimit(android.content.Context context) {
+    public static final class DiLink5AcChargeLimitSample {
+        public final int state;
+        public final int configState;
+
+        public DiLink5AcChargeLimitSample(int state, int configState) {
+            this.state = state;
+            this.configState = configState;
+        }
+    }
+
+    public static DiLink5AcChargeLimitSample readDiLink5AcChargeLimitSample(
+            android.content.Context context) {
+        // AC current-limit reads never inspect ACC and run while parked/charging: do not cap their
+        // deadline to the ACC safety lease.
         android.os.Bundle result = dispatchDiLink5Request(
-                context, newDiLink5BridgeIntent(DILINK5_AC_CHARGE_LIMIT_READ), false);
-        return result != null && result.getBoolean("success", false)
-                ? result.getInt(DILINK5_AC_CHARGE_LIMIT_READ, BydVehicleData.UNAVAILABLE)
-                : BydVehicleData.UNAVAILABLE;
+                context, newDiLink5BridgeIntent(DILINK5_AC_CHARGE_LIMIT_READ), false, false);
+        if (result == null || !result.getBoolean("success", false)) {
+            return new DiLink5AcChargeLimitSample(
+                    BydVehicleData.UNAVAILABLE, BydVehicleData.UNAVAILABLE);
+        }
+        return new DiLink5AcChargeLimitSample(
+                result.getInt(DILINK5_AC_CHARGE_LIMIT_READ, BydVehicleData.UNAVAILABLE),
+                result.getInt(DILINK5_AC_CHARGE_LIMIT_CONFIG, BydVehicleData.UNAVAILABLE));
+    }
+
+    public static int readDiLink5AcChargeLimit(android.content.Context context) {
+        return readDiLink5AcChargeLimitSample(context).state;
     }
 
     private static android.content.Intent newDiLink5BridgeIntent(String operation) {
@@ -598,6 +631,18 @@ public final class VehicleActuatorBridge {
                 || command instanceof com.overdrive.app.byd.routing.VehicleCommandRouter.AmbientPowerCommand
                 || command instanceof com.overdrive.app.byd.routing.VehicleCommandRouter.ReadingLightCommand
                 || command instanceof com.overdrive.app.byd.routing.VehicleCommandRouter.CabinLightProbeCommand;
+    }
+
+    /**
+     * Whether a DiLink 5 command must have its bridge deadline capped by the daemon's ACC safety
+     * lease. Cabin lights and AC charging current limit writes never inspect ACC and execute
+     * multi-step adapter-bind + readback loops while parked.
+     */
+    public static boolean usesDiLink5AccLease(
+            com.overdrive.app.byd.routing.VehicleCommandRouter.VehicleCommand command) {
+        return !isDiLink5CabinLightCommand(command)
+                && !(command instanceof com.overdrive.app.byd.routing.VehicleCommandRouter
+                        .AcChargeCurrentLimitCommand);
     }
 
     /** Di5 lock/unlock use their existing typed rails; these commands use generic frames. */
