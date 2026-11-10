@@ -1,8 +1,11 @@
 package com.overdrive.app.ui.fragment.settings
 
+import android.content.ComponentName
+import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.text.InputType
 import android.view.LayoutInflater
 import android.view.View
@@ -77,6 +80,8 @@ class SettingsSecurityFragment : Fragment() {
         rowToggle.setOnClickListener { onToggleRowTapped() }
         rowChange.setOnClickListener { onChangePinTapped() }
         rowAutoLock.setOnClickListener { onAutoLockTapped() }
+        view.findViewById<View>(R.id.btnSecurityBydAdb).setOnClickListener { openBydAdb() }
+        view.findViewById<View>(R.id.btnSecurityCountryCode).setOnClickListener { confirmCountryCode() }
 
         // The layout carries the legacy-root command as its static text; bind
         // the live one so a head unit on the alternate scratch root shows the
@@ -96,6 +101,50 @@ class SettingsSecurityFragment : Fragment() {
         super.onDestroyView()
         pinExecutor?.shutdownNow()
         pinExecutor = null
+    }
+
+    /** Open one of the head unit's built-in BYD configuration screens. */
+    private fun launchBydScreen(packageName: String, activityName: String, verify: Boolean): Boolean {
+        val intent = Intent().setComponent(ComponentName(packageName, activityName))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (verify) intent.putExtra("Development.verify.requestCode", true)
+        return try {
+            startActivity(intent)
+            true
+        } catch (e: Exception) {
+            android.util.Log.d("SettingsSecurity", "BYD screen unavailable: $activityName", e)
+            false
+        }
+    }
+
+    private fun openBydAdb() {
+        val packageName = "com.byd.byddevelopmenttools"
+        if (launchBydScreen(packageName, "$packageName.MainActivity", true) ||
+            launchBydScreen(packageName, "$packageName.VerificationActivity", true)) return
+        try {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            Toast.makeText(requireContext(), R.string.settings_security_byd_adb_hint,
+                Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(requireContext(), R.string.settings_security_byd_adb_unavailable,
+                Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun confirmCountryCode() {
+        val ctx = requireContext()
+        MaterialAlertDialogBuilder(ctx)
+            .setTitle(R.string.settings_security_country_code_title)
+            .setMessage(R.string.settings_security_country_code_warning)
+            .setNegativeButton(R.string.action_cancel, null)
+            .setPositiveButton(R.string.settings_security_country_code_open) { _, _ ->
+                if (!launchBydScreen("com.byd.countrycodetool",
+                        "com.byd.countrycodetool.MainActivity", false)) {
+                    Toast.makeText(ctx, R.string.settings_security_country_code_unavailable,
+                        Toast.LENGTH_LONG).show()
+                }
+            }.show()
     }
 
     private fun executor(): ExecutorService =
