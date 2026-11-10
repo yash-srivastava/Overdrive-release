@@ -362,6 +362,9 @@ public class PanoramicCameraGpu {
     };
 
     // Render loop
+    // Reuse the same callback for every frame. Recreating the bound method
+    // reference for every Handler.post can allocate on the camera GL path.
+    private final Runnable renderLoopCallback = this::renderLoop;
     private HandlerThread glThread;
     private Handler glHandler;
     private volatile boolean running = false;
@@ -1961,7 +1964,7 @@ public class PanoramicCameraGpu {
                         this.aiCameraStateRef = aiCameraState;
                         running = true;
                         // Start render loop
-                        glHandler.post(this::renderLoop);
+                        glHandler.post(renderLoopCallback);
                         // Start watchdog
                         startWatchdog();
                         published = true;
@@ -7622,7 +7625,7 @@ public class PanoramicCameraGpu {
             // where no new image is ready) still re-posts the loop. Without
             // this, the GL thread stops iterating and the watchdog kills us.
             if (running) {
-                glHandler.post(this::renderLoop);
+                glHandler.post(renderLoopCallback);
             }
         }
     }
