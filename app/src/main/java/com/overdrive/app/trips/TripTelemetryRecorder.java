@@ -1279,6 +1279,13 @@ public class TripTelemetryRecorder {
         }
     }
 
+    /** Accumulates a second without allocating a list for every 5Hz sample. */
+    private static final class SecondBucket {
+        TelemetrySample closest;
+        long closestDistance = Long.MAX_VALUE;
+        float landedMeters;
+    }
+
     /**
      * 1Hz downsampling: for each whole-second boundary present in the data,
      * select the sample with timestamp closest to that boundary.
@@ -1286,42 +1293,37 @@ public class TripTelemetryRecorder {
     static List<TelemetrySample> downsampleTo1Hz(List<TelemetrySample> samples) {
         if (samples == null || samples.isEmpty()) return new ArrayList<>();
 
-        // Group samples by their whole-second (floor to nearest second)
-        Map<Long, List<TelemetrySample>> bySecond = new HashMap<>();
+        // Keep the original encounter order for ties and float accumulation.
+        Map<Long, SecondBucket> bySecond = new HashMap<>();
         for (TelemetrySample s : samples) {
-            long secondBoundary = (s.timestampMs / 1000) * 1000;
-            List<TelemetrySample> group = bySecond.get(secondBoundary);
-            if (group == null) {
-                group = new ArrayList<>();
-                bySecond.put(secondBoundary, group);
+            long boundary = (s.timestampMs / 1000) * 1000;
+            SecondBucket bucket = bySecond.get(boundary);
+            if (bucket == null) {
+                bucket = new SecondBucket();
+                bySecond.put(boundary, bucket);
             }
-            group.add(s);
+            long distance = Math.abs(s.timestampMs - boundary);
+            if (distance < bucket.closestDistance) {
+                bucket.closestDistance = distance;
+                bucket.closest = s;
+            }
+            bucket.landedMeters += s.distanceLandedM;
         }
 
-        // For each second boundary, pick the sample closest to that boundary
         List<Long> sortedSeconds = new ArrayList<>(bySecond.keySet());
         java.util.Collections.sort(sortedSeconds);
 
         List<TelemetrySample> result = new ArrayList<>(sortedSeconds.size());
         for (long boundary : sortedSeconds) {
-            List<TelemetrySample> group = bySecond.get(boundary);
-            TelemetrySample closest = null;
-            long closestDist = Long.MAX_VALUE;
-            for (TelemetrySample s : group) {
-                long dist = Math.abs(s.timestampMs - boundary);
-                if (dist < closestDist) {
-                    closestDist = dist;
-                    closest = s;
-                }
-            }
+            SecondBucket bucket = bySecond.get(boundary);
+            TelemetrySample closest = bucket.closest;
             if (closest != null) {
-                // A landed distance is an event, not a state: the second's kept row carries all of it.
-                float landedM = 0f;
-                for (TelemetrySample s : group) landedM += s.distanceLandedM;
-                result.add(landedM != closest.distanceLandedM ? closest.withDistanceLandedM(landedM) : closest);
+                // Landed distance is an event: retain the sum on the selected row.
+                float landedM = bucket.landedMeters;
+                result.add(landedM != closest.distanceLandedM
+                        ? closest.withDistanceLandedM(landedM) : closest);
             }
         }
-
         return result;
     }
 
