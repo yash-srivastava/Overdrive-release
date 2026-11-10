@@ -270,7 +270,7 @@ public class HttpResponse {
                .append("Connection: close\r\n\r\n");
         out.write(headers.toString().getBytes());
         try (java.io.FileInputStream fis = new java.io.FileInputStream(file)) {
-            byte[] buffer = new byte[16384];
+            byte[] buffer = new byte[64 * 1024];
             int count;
             while ((count = fis.read(buffer)) != -1) {
                 out.write(buffer, 0, count);
@@ -328,7 +328,7 @@ public class HttpResponse {
 
         try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file, "r")) {
             raf.seek(start);
-            byte[] buffer = new byte[16384];
+            byte[] buffer = new byte[64 * 1024];
             long remaining = contentLength;
             while (remaining > 0) {
                 int toRead = (int) Math.min(buffer.length, remaining);
@@ -420,7 +420,7 @@ public class HttpResponse {
 
         // Stream file in chunks
         try (java.io.FileInputStream fis = new java.io.FileInputStream(file)) {
-            byte[] buffer = new byte[16384];
+            byte[] buffer = new byte[64 * 1024];
             int count;
             while ((count = fis.read(buffer)) != -1) {
                 out.write(buffer, 0, count);
@@ -474,7 +474,7 @@ public class HttpResponse {
 
         try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file, "r")) {
             raf.seek(start);
-            byte[] buffer = new byte[16384];
+            byte[] buffer = new byte[64 * 1024];
             long remaining = contentLength;
             while (remaining > 0) {
                 int toRead = (int) Math.min(buffer.length, remaining);
