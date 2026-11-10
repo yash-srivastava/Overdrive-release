@@ -3838,18 +3838,19 @@ public class BydDataCollector {
                             && ((Number) doubleFlash).intValue() == 1) {
                         return 0x3;
                     }
-                }
-                Object fs = BydDeviceHelper.callGetter(lightDevice, "getTurnLightFlashState");
-                if (fs instanceof Number) {
-                    int flashState = ((Number) fs).intValue();
-                    if (flashState >= 0 && flashState != 65535 && flashState != 65534) {
-                        boolean left = flashState == 2 || flashState == 3;
-                        boolean right = flashState == 4 || flashState == 5;
-                        if (flashState == 6 || flashState == 7) {
-                            left = true;
-                            right = true;
+                } else {
+                    Object fs = BydDeviceHelper.callGetter(lightDevice, "getTurnLightFlashState");
+                    if (fs instanceof Number) {
+                        int flashState = ((Number) fs).intValue();
+                        if (flashState >= 0 && flashState != 65535 && flashState != 65534) {
+                            boolean left = flashState == 2 || flashState == 3;
+                            boolean right = flashState == 4 || flashState == 5;
+                            if (flashState == 6 || flashState == 7) {
+                                left = true;
+                                right = true;
+                            }
+                            return (left ? 0x1 : 0) | (right ? 0x2 : 0);
                         }
-                        return (left ? 0x1 : 0) | (right ? 0x2 : 0);
                     }
                 }
             } catch (Throwable t) {
@@ -4634,22 +4635,24 @@ public class BydDataCollector {
         }
         int wiperLevel = BydVehicleData.UNAVAILABLE;
         int settingSpeed = BydVehicleData.UNAVAILABLE;
-        if (wiperDevice != null) {
-            try {
-                Object event = BydDeviceHelper.callGet(
-                        wiperDevice, BydFeatureIds.WIPER_FRONT_LEVEL, Integer.class);
-                wiperLevel = BydDeviceHelper.getIntValue(event);
-            } catch (Throwable t) {
-                logger.debug("readWiperActiveNow wiper error: " + t.getMessage());
+        if (!isDiLink5Vehicle()) {
+            if (wiperDevice != null) {
+                try {
+                    Object event = BydDeviceHelper.callGet(
+                            wiperDevice, BydFeatureIds.WIPER_FRONT_LEVEL, Integer.class);
+                    wiperLevel = BydDeviceHelper.getIntValue(event);
+                } catch (Throwable t) {
+                    logger.debug("readWiperActiveNow wiper error: " + t.getMessage());
+                }
             }
-        }
-        if (settingDevice != null) {
-            try {
-                Object event = BydDeviceHelper.callGet(
-                        settingDevice, BydFeatureIds.SETTING_RAIN_WIPER_SPEED, Integer.class);
-                settingSpeed = BydDeviceHelper.getIntValue(event);
-            } catch (Throwable t) {
-                logger.debug("readWiperActiveNow setting error: " + t.getMessage());
+            if (settingDevice != null) {
+                try {
+                    Object event = BydDeviceHelper.callGet(
+                            settingDevice, BydFeatureIds.SETTING_RAIN_WIPER_SPEED, Integer.class);
+                    settingSpeed = BydDeviceHelper.getIntValue(event);
+                } catch (Throwable t) {
+                    logger.debug("readWiperActiveNow setting error: " + t.getMessage());
+                }
             }
         }
         int direct = normalizeWiperActivity(wiperLevel, settingSpeed);
@@ -6387,26 +6390,28 @@ public class BydDataCollector {
             // firmwares, so it cannot be trusted as a drivetrain discriminator.
             // PHEV detection now uses live fuel HAL signals (computeIsPhev).
 
-            // Battery temp from bodywork (feature ID 300941320, Double.TYPE)
-            Object battTemp = BydDeviceHelper.callGet(bodyworkDevice, BydFeatureIds.BODYWORK_BATTERY_METRIC, Double.class);
-            if (battTemp != null) {
-                double tempVal = BydDeviceHelper.getDoubleValue(battTemp);
-                if (!Double.isNaN(tempVal) && tempVal > -50 && tempVal < 80) b.bodyworkBattTempC(tempVal);
-            }
+            if (!isDiLink5Vehicle()) {
+                // Battery temp from bodywork (feature ID 300941320, Double.TYPE)
+                Object battTemp = BydDeviceHelper.callGet(bodyworkDevice, BydFeatureIds.BODYWORK_BATTERY_METRIC, Double.class);
+                if (battTemp != null) {
+                    double tempVal = BydDeviceHelper.getDoubleValue(battTemp);
+                    if (!Double.isNaN(tempVal) && tempVal > -50 && tempVal < 80) b.bodyworkBattTempC(tempVal);
+                }
 
-            // Battery range from bodywork (feature ID 300941336).
-            // INT-FIRST probe, because the extraction below is getIntValue: the HAL fills only
-            // the BYDAutoEventValue field matching the width it was asked for, so requesting
-            // Double left intValue at its default 0 — and 0 passed the range check, publishing a
-            // hard "0 km" every poll (which fires a "range below X" automation permanently and
-            // publishes bodywork_range_km=0 over MQTT). Ask for the width we read.
-            Object battRange = BydDeviceHelper.callGetProbing(
-                    bodyworkDevice, BydFeatureIds.BODYWORK_BATTERY_RANGE, true);
-            if (battRange != null) {
-                int rangeVal = BydDeviceHelper.getIntValue(battRange);
-                // > 0, not >= 0: 0 is what a failed/absent read yields here, and a real pack
-                // reporting exactly 0 km is indistinguishable from it, so treat it as no reading.
-                if (rangeVal > 0 && rangeVal <= 1016) b.bodyworkRangeKm((int) Math.round(rangeVal * distanceToKmFactor));
+                // Battery range from bodywork (feature ID 300941336).
+                // INT-FIRST probe, because the extraction below is getIntValue: the HAL fills only
+                // the BYDAutoEventValue field matching the width it was asked for, so requesting
+                // Double left intValue at its default 0 — and 0 passed the range check, publishing a
+                // hard "0 km" every poll (which fires a "range below X" automation permanently and
+                // publishes bodywork_range_km=0 over MQTT). Ask for the width we read.
+                Object battRange = BydDeviceHelper.callGetProbing(
+                        bodyworkDevice, BydFeatureIds.BODYWORK_BATTERY_RANGE, true);
+                if (battRange != null) {
+                    int rangeVal = BydDeviceHelper.getIntValue(battRange);
+                    // > 0, not >= 0: 0 is what a failed/absent read yields here, and a real pack
+                    // reporting exactly 0 km is indistinguishable from it, so treat it as no reading.
+                    if (rangeVal > 0 && rangeVal <= 1016) b.bodyworkRangeKm((int) Math.round(rangeVal * distanceToKmFactor));
+                }
             }
 
             // Window open percent (positions 1-6). Via readWindowPercent so the 0..100 domain check
@@ -6418,25 +6423,27 @@ public class BydDataCollector {
             }
             b.windowOpenPercent(windows);
 
-            // Emergency alarm. SENTINEL-GATED, unlike the original write.
-            //
-            // This read was previously dead (it passed a wrapper Class to a HAL that matches
-            // primitives only), so an unvalidated store was harmless. Now that the read can
-            // succeed, a trim that answers with a sentinel instead of throwing would store
-            // e.g. -10011 — and BydEvent treats "not UNAVAILABLE and not 0" as ALARM ACTIVE,
-            // so every user automation with an emergency-alarm trigger would fire spuriously
-            // and MQTT would publish the sentinel. A sentinel means "no reading", which for a
-            // boolean-ish alarm is the OPPOSITE of what an unguarded store implies, so it must
-            // be filtered rather than passed through.
-            Object alarm = BydDeviceHelper.callGet(bodyworkDevice, BydFeatureIds.BODYWORK_EMERGENCY_ALARM, Integer.class);
-            if (alarm != null) {
-                int alarmRaw = BydDeviceHelper.getIntValue(alarm);
-                if (alarmRaw != BydFeatureIds.BMS_UNAVAILABLE
-                        && alarmRaw != BydFeatureIds.INVALID_VALUE
-                        && alarmRaw != BydFeatureIds.INVALID_VALUE_2
-                        && alarmRaw != Integer.MIN_VALUE
-                        && alarmRaw >= 0) {
-                    b.emergencyAlarmState(alarmRaw);
+            if (!isDiLink5Vehicle()) {
+                // Emergency alarm. SENTINEL-GATED, unlike the original write.
+                //
+                // This read was previously dead (it passed a wrapper Class to a HAL that matches
+                // primitives only), so an unvalidated store was harmless. Now that the read can
+                // succeed, a trim that answers with a sentinel instead of throwing would store
+                // e.g. -10011 — and BydEvent treats "not UNAVAILABLE and not 0" as ALARM ACTIVE,
+                // so every user automation with an emergency-alarm trigger would fire spuriously
+                // and MQTT would publish the sentinel. A sentinel means "no reading", which for a
+                // boolean-ish alarm is the OPPOSITE of what an unguarded store implies, so it must
+                // be filtered rather than passed through.
+                Object alarm = BydDeviceHelper.callGet(bodyworkDevice, BydFeatureIds.BODYWORK_EMERGENCY_ALARM, Integer.class);
+                if (alarm != null) {
+                    int alarmRaw = BydDeviceHelper.getIntValue(alarm);
+                    if (alarmRaw != BydFeatureIds.BMS_UNAVAILABLE
+                            && alarmRaw != BydFeatureIds.INVALID_VALUE
+                            && alarmRaw != BydFeatureIds.INVALID_VALUE_2
+                            && alarmRaw != Integer.MIN_VALUE
+                            && alarmRaw >= 0) {
+                        b.emergencyAlarmState(alarmRaw);
+                    }
                 }
             }
 
@@ -6481,31 +6488,34 @@ public class BydDataCollector {
 
     private void collectEngine(BydVehicleData.Builder b) {
         if (engineDevice == null) return;
+        boolean diLink5 = isDiLink5Vehicle();
         try {
             // ==================== ENGINE SPEED ====================
             // Feature ID path first — try ENGINE_SPEED (339738642), then ENGINE_SPEED_GB (282066952)
-            try {
-                Object val = BydDeviceHelper.callGet(engineDevice, BydFeatureIds.ENGINE_SPEED, Integer.class);
-                if (val != null) {
-                    int raw = BydDeviceHelper.getIntValue(val);
-                    if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
-                        && raw != BydFeatureIds.INVALID_VALUE_2 && raw >= 0 && raw <= 8000) {
-                        b.engineSpeedRpm(raw);
-                    }
-                }
-                // Try alternate signal if primary didn't populate
-                if (b.engineSpeedRpm == BydVehicleData.UNAVAILABLE) {
-                    Object altVal = BydDeviceHelper.callGet(engineDevice, BydFeatureIds.ENGINE_SPEED_ALT, Integer.class);
-                    if (altVal != null) {
-                        int altRaw = BydDeviceHelper.getIntValue(altVal);
-                        if (altRaw != BydFeatureIds.BMS_UNAVAILABLE && altRaw != BydFeatureIds.INVALID_VALUE
-                            && altRaw != BydFeatureIds.INVALID_VALUE_2 && altRaw >= 0 && altRaw <= 8000) {
-                            b.engineSpeedRpm(altRaw);
+            if (!diLink5) {
+                try {
+                    Object val = BydDeviceHelper.callGet(engineDevice, BydFeatureIds.ENGINE_SPEED, Integer.class);
+                    if (val != null) {
+                        int raw = BydDeviceHelper.getIntValue(val);
+                        if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
+                            && raw != BydFeatureIds.INVALID_VALUE_2 && raw >= 0 && raw <= 8000) {
+                            b.engineSpeedRpm(raw);
                         }
                     }
+                    // Try alternate signal if primary didn't populate
+                    if (b.engineSpeedRpm == BydVehicleData.UNAVAILABLE) {
+                        Object altVal = BydDeviceHelper.callGet(engineDevice, BydFeatureIds.ENGINE_SPEED_ALT, Integer.class);
+                        if (altVal != null) {
+                            int altRaw = BydDeviceHelper.getIntValue(altVal);
+                            if (altRaw != BydFeatureIds.BMS_UNAVAILABLE && altRaw != BydFeatureIds.INVALID_VALUE
+                                && altRaw != BydFeatureIds.INVALID_VALUE_2 && altRaw >= 0 && altRaw <= 8000) {
+                                b.engineSpeedRpm(altRaw);
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.debug("collectEngine engineSpeed feature ID error: " + e.getMessage());
                 }
-            } catch (Exception e) {
-                logger.debug("collectEngine engineSpeed feature ID error: " + e.getMessage());
             }
             // Fallback to typed getter if feature ID didn't populate
             if (b.engineSpeedRpm == BydVehicleData.UNAVAILABLE) {
@@ -6535,24 +6545,26 @@ public class BydDataCollector {
             boolean powerWritten = false;
             String powerSource = "carry-forward";
             double powerRaw = Double.NaN;
-            try {
-                long powerObservedAtMs = System.currentTimeMillis();
-                Object val = BydDeviceHelper.callGet(engineDevice, BydFeatureIds.ENGINE_POWER, Double.class);
-                if (val != null) {
-                    double raw = BydDeviceHelper.getDoubleValue(val);
-                    double kw = scaleEnginePowerKw(raw);
-                    if (!Double.isNaN(raw) && raw >= -200.0 && raw <= 400.0
-                            && !isEnginePowerSentinel(kw)
-                            && allowsEnginePowerObservation(
-                                    b, kw, powerObservedAtMs)) {
-                        b.enginePowerKw(kw).enginePowerAtMs(powerObservedAtMs);
-                        powerWritten = true;
-                        powerSource = "featureId";
-                        powerRaw = raw;
+            if (!diLink5) {
+                try {
+                    long powerObservedAtMs = System.currentTimeMillis();
+                    Object val = BydDeviceHelper.callGet(engineDevice, BydFeatureIds.ENGINE_POWER, Double.class);
+                    if (val != null) {
+                        double raw = BydDeviceHelper.getDoubleValue(val);
+                        double kw = scaleEnginePowerKw(raw);
+                        if (!Double.isNaN(raw) && raw >= -200.0 && raw <= 400.0
+                                && !isEnginePowerSentinel(kw)
+                                && allowsEnginePowerObservation(
+                                        b, kw, powerObservedAtMs)) {
+                            b.enginePowerKw(kw).enginePowerAtMs(powerObservedAtMs);
+                            powerWritten = true;
+                            powerSource = "featureId";
+                            powerRaw = raw;
+                        }
                     }
+                } catch (Exception e) {
+                    logger.debug("collectEngine enginePower feature ID error: " + e.getMessage());
                 }
-            } catch (Exception e) {
-                logger.debug("collectEngine enginePower feature ID error: " + e.getMessage());
             }
             // Fallback to typed getter whenever the feature-ID read did NOT write a
             // fresh value THIS cycle — a live re-read that keeps the value tracking
@@ -6644,26 +6656,28 @@ public class BydDataCollector {
             // Downstream MQTT happens to gate these, but the snapshot is shared and a future
             // consumer without a gate would inherit the bug — so filter at the source.
             //
-            // Front motor speed (negated)
-            Object fms = BydDeviceHelper.callGet(engineDevice, BydFeatureIds.ENGINE_FRONT_MOTOR_SPEED, Integer.class);
-            if (fms != null) {
-                int v = BydDeviceHelper.getIntValue(fms);
-                if (isPlausibleMotorRpm(v)) b.frontMotorSpeed(-v);
-            }
+            if (!diLink5) {
+                // Front motor speed (negated)
+                Object fms = BydDeviceHelper.callGet(engineDevice, BydFeatureIds.ENGINE_FRONT_MOTOR_SPEED, Integer.class);
+                if (fms != null) {
+                    int v = BydDeviceHelper.getIntValue(fms);
+                    if (isPlausibleMotorRpm(v)) b.frontMotorSpeed(-v);
+                }
 
-            // Rear motor speed
-            Object rms = BydDeviceHelper.callGet(engineDevice, BydFeatureIds.ENGINE_REAR_MOTOR_SPEED, Integer.class);
-            if (rms != null) {
-                int v = BydDeviceHelper.getIntValue(rms);
-                if (isPlausibleMotorRpm(v)) b.rearMotorSpeed(v);
-            }
+                // Rear motor speed
+                Object rms = BydDeviceHelper.callGet(engineDevice, BydFeatureIds.ENGINE_REAR_MOTOR_SPEED, Integer.class);
+                if (rms != null) {
+                    int v = BydDeviceHelper.getIntValue(rms);
+                    if (isPlausibleMotorRpm(v)) b.rearMotorSpeed(v);
+                }
 
-            // Front motor torque (negated double)
-            Object fmt = BydDeviceHelper.callGet(engineDevice, BydFeatureIds.ENGINE_FRONT_MOTOR_TORQUE, Double.class);
-            if (fmt != null) {
-                double t = BydDeviceHelper.getDoubleValue(fmt);
-                // ±2000 Nm covers every BYD drivetrain with margin; sentinels are far outside.
-                if (!Double.isNaN(t) && Math.abs(t) <= 2000.0) b.frontMotorTorque(-t);
+                // Front motor torque (negated double)
+                Object fmt = BydDeviceHelper.callGet(engineDevice, BydFeatureIds.ENGINE_FRONT_MOTOR_TORQUE, Double.class);
+                if (fmt != null) {
+                    double t = BydDeviceHelper.getDoubleValue(fmt);
+                    // ±2000 Nm covers every BYD drivetrain with margin; sentinels are far outside.
+                    if (!Double.isNaN(t) && Math.abs(t) <= 2000.0) b.frontMotorTorque(-t);
+                }
             }
         } catch (Exception e) {
             logger.debug("collectEngine error: " + e.getMessage());
@@ -6708,7 +6722,7 @@ public class BydDataCollector {
                             normalizeRawTotalMileage(raw) * distanceFactor));
                 }
             }
-            if (b.totalMileageKm == BydVehicleData.UNAVAILABLE) {
+            if (!diLink5 && b.totalMileageKm == BydVehicleData.UNAVAILABLE) {
                 try {
                     Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_TOTAL_MILEAGE, Integer.class);
                     if (val != null) {
@@ -6734,7 +6748,7 @@ public class BydDataCollector {
                     b.evMileageKm((int) Math.round(raw * distanceFactor));
                 }
             }
-            if (b.evMileageKm == BydVehicleData.UNAVAILABLE) {
+            if (!diLink5 && b.evMileageKm == BydVehicleData.UNAVAILABLE) {
                 try {
                     Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_MILEAGE_EV, Integer.class);
                     if (val != null) {
@@ -6749,7 +6763,7 @@ public class BydDataCollector {
                     logger.debug("collectStatistic evMileage feature ID error: " + e.getMessage());
                 }
             }
-            if (b.evMileageKm == BydVehicleData.UNAVAILABLE) {
+            if (!diLink5 && b.evMileageKm == BydVehicleData.UNAVAILABLE) {
                 int raw = readMileageViaManager(BydFeatureIds.STAT_MILEAGE_EV, diLink5);
                 if (raw != BydVehicleData.UNAVAILABLE) {
                     b.evMileageKm((int) Math.round(raw * distanceFactor));
@@ -6778,7 +6792,7 @@ public class BydDataCollector {
                     }
                 }
             }
-            if (b.hevMileageKm == BydVehicleData.UNAVAILABLE
+            if (!diLink5 && b.hevMileageKm == BydVehicleData.UNAVAILABLE
                     && (hevMileageProbesLeft > 0 || hevMileagePresent)) {
                 try {
                     Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_MILEAGE_HEV, Integer.class);
@@ -6847,7 +6861,7 @@ public class BydDataCollector {
                     }
                 }
             }
-            if (Double.isNaN(b.socPercent)) {
+            if (!diLink5 && Double.isNaN(b.socPercent)) {
                 try {
                     Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_ELEC_PERCENTAGE, Integer.class);
                     if (val != null) {
@@ -6950,7 +6964,7 @@ public class BydDataCollector {
                     b.elecRangeKm((int) Math.round(raw * distanceFactor));
                 }
             }
-            if (b.elecRangeKm == BydVehicleData.UNAVAILABLE) {
+            if (!diLink5 && b.elecRangeKm == BydVehicleData.UNAVAILABLE) {
                 try {
                     Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_ELEC_DRIVING_RANGE, Integer.class);
                     if (val != null) {
@@ -6985,7 +6999,7 @@ public class BydDataCollector {
                         b.fuelRangeKm((int) Math.round(raw * distanceFactor));
                     }
                 }
-                if (b.fuelRangeKm == BydVehicleData.UNAVAILABLE) {
+                if (!diLink5 && b.fuelRangeKm == BydVehicleData.UNAVAILABLE) {
                     try {
                         Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_FUEL_DRIVING_RANGE, Integer.class);
                         if (val != null) {
@@ -7020,7 +7034,7 @@ public class BydDataCollector {
                     }
                 }
                 // Feature ID fallback
-                if (Double.isNaN(b.fuelPercent)) {
+                if (!diLink5 && Double.isNaN(b.fuelPercent)) {
                     try {
                         Object val = BydDeviceHelper.callGet(statisticDevice, BydFeatureIds.STAT_FUEL_PERCENTAGE, Integer.class);
                         if (val != null) {
@@ -7037,14 +7051,18 @@ public class BydDataCollector {
                 }
             }
 
-            // Battery temps via get() — intValue - 40 = °C
-            collectStatTemp(b, BydFeatureIds.STAT_HIGHEST_BATTERY_TEMP, "high");
-            collectStatTemp(b, BydFeatureIds.STAT_LOWEST_BATTERY_TEMP, "low");
-            collectStatTemp(b, BydFeatureIds.STAT_AVERAGE_BATTERY_TEMP, "avg");
+            double cellHi = Double.NaN;
+            double cellLo = Double.NaN;
+            if (!diLink5) {
+                // Battery temps via get() — intValue - 40 = °C
+                collectStatTemp(b, BydFeatureIds.STAT_HIGHEST_BATTERY_TEMP, "high");
+                collectStatTemp(b, BydFeatureIds.STAT_LOWEST_BATTERY_TEMP, "low");
+                collectStatTemp(b, BydFeatureIds.STAT_AVERAGE_BATTERY_TEMP, "avg");
 
-            // Cell voltages via get() — intValue / 1000.0 = V
-            double cellHi = collectStatVoltage(b, BydFeatureIds.STAT_HIGHEST_BATTERY_VOLTAGE, "high");
-            double cellLo = collectStatVoltage(b, BydFeatureIds.STAT_LOWEST_BATTERY_VOLTAGE, "low");
+                // Cell voltages via get() — intValue / 1000.0 = V
+                cellHi = collectStatVoltage(b, BydFeatureIds.STAT_HIGHEST_BATTERY_VOLTAGE, "high");
+                cellLo = collectStatVoltage(b, BydFeatureIds.STAT_LOWEST_BATTERY_VOLTAGE, "low");
+            }
 
             // HV pack voltage, derived from the (accurate) per-cell voltage × series cell count.
             // The statistic-device event 1151336480 (formerly read as pack voltage in decivolts)
@@ -8044,15 +8062,17 @@ public class BydDataCollector {
         } catch (Exception e) {
             logger.debug("getChargingCapacity error: " + e.getMessage());
         }
-        try {
-            Object value = BydDeviceHelper.callGetProbing(
-                    chargingDevice, BydFeatureIds.CHARGING_CHARGE_CAPACITY);
-            if (value != null) {
-                return new ChargingCapacityReading(
-                        BydDeviceHelper.getDoubleValue(value), "featureId(0x27C00018)");
+        if (!isDiLink5Vehicle()) {
+            try {
+                Object value = BydDeviceHelper.callGetProbing(
+                        chargingDevice, BydFeatureIds.CHARGING_CHARGE_CAPACITY);
+                if (value != null) {
+                    return new ChargingCapacityReading(
+                            BydDeviceHelper.getDoubleValue(value), "featureId(0x27C00018)");
+                }
+            } catch (Exception e) {
+                logger.debug("charging-capacity feature ID error: " + e.getMessage());
             }
-        } catch (Exception e) {
-            logger.debug("charging-capacity feature ID error: " + e.getMessage());
         }
         return new ChargingCapacityReading(Double.NaN, null);
     }
@@ -8429,12 +8449,11 @@ public class BydDataCollector {
                 }
             }
 
-            Object charger = BydDeviceHelper.callGetter(
-                    chargingDevice, "getChargerWorkState");
-            if (charger instanceof Number) {
-                int value = ((Number) charger).intValue();
-                if (!isDiLink5Vehicle()
-                        || !isDiLink5UnavailableRail(value)) {
+            if (!isDiLink5Vehicle()) {
+                Object charger = BydDeviceHelper.callGetter(
+                        chargingDevice, "getChargerWorkState");
+                if (charger instanceof Number) {
+                    int value = ((Number) charger).intValue();
                     b.chargerWorkState(value);
                 }
             }
@@ -8475,18 +8494,20 @@ public class BydDataCollector {
             // (the detector treats it as ambiguous and falls through to L2/L3), and it is what
             // powerIsCharging above already does by resetting to null each poll.
             // Feature ID for battery device state, fallback to named getter
-            try {
-                long bmsObservation = chargingObservationOrder.begin();
-                Object val = BydDeviceHelper.callGet(chargingDevice, BydFeatureIds.CHARGING_BATTERY_DEVICE_STATE, Integer.class);
-                if (val != null) {
-                    int raw = BydDeviceHelper.getIntValue(val);
-                    if (isValidChargingBmsState(raw)) {
-                        observedChargingState = raw;
-                        evidence.bmsObservation = bmsObservation;
+            if (!isDiLink5Vehicle()) {
+                try {
+                    long bmsObservation = chargingObservationOrder.begin();
+                    Object val = BydDeviceHelper.callGet(chargingDevice, BydFeatureIds.CHARGING_BATTERY_DEVICE_STATE, Integer.class);
+                    if (val != null) {
+                        int raw = BydDeviceHelper.getIntValue(val);
+                        if (isValidChargingBmsState(raw)) {
+                            observedChargingState = raw;
+                            evidence.bmsObservation = bmsObservation;
+                        }
                     }
+                } catch (Exception e) {
+                    logger.debug("collectCharging batteryState feature ID error: " + e.getMessage());
                 }
-            } catch (Exception e) {
-                logger.debug("collectCharging batteryState feature ID error: " + e.getMessage());
             }
             if (observedChargingState == BydVehicleData.UNAVAILABLE) {
                 long bmsObservation = chargingObservationOrder.begin();
@@ -8693,64 +8714,66 @@ public class BydDataCollector {
                 if (chgPct >= 0 && chgPct <= 100) b.chargingPercent(chgPct);
             }
 
-            // Charger work state via feature ID fallback
-            if (b.chargerWorkState == BydVehicleData.UNAVAILABLE) {
+            if (!isDiLink5Vehicle()) {
+                // Charger work state via feature ID fallback
+                if (b.chargerWorkState == BydVehicleData.UNAVAILABLE) {
+                    try {
+                        Object val = BydDeviceHelper.callGet(chargingDevice, BydFeatureIds.CHARGING_CHARGER_WORK_STATE, Integer.class);
+                        if (val != null) {
+                            int raw = BydDeviceHelper.getIntValue(val);
+                            if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
+                                && raw != BydFeatureIds.INVALID_VALUE_2 && raw >= 0) {
+                                b.chargerWorkState(raw);
+                            }
+                        }
+                    } catch (Exception e) {
+                        logger.debug("collectCharging chargerWorkState feature ID error: " + e.getMessage());
+                    }
+                }
+
+                // Wireless charging states via feature IDs
                 try {
-                    Object val = BydDeviceHelper.callGet(chargingDevice, BydFeatureIds.CHARGING_CHARGER_WORK_STATE, Integer.class);
-                    if (val != null) {
-                        int raw = BydDeviceHelper.getIntValue(val);
-                        if (raw != BydFeatureIds.BMS_UNAVAILABLE && raw != BydFeatureIds.INVALID_VALUE
-                            && raw != BydFeatureIds.INVALID_VALUE_2 && raw >= 0) {
-                            b.chargerWorkState(raw);
+                    Object wlLeft = BydDeviceHelper.callGet(chargingDevice, BydFeatureIds.CHARGING_WIRELESS_LEFT_STATE, Integer.class);
+                    if (wlLeft != null) {
+                        int raw = BydDeviceHelper.getIntValue(wlLeft);
+                        if (raw >= 0
+                                && raw != BydFeatureIds.BMS_UNAVAILABLE
+                                && raw != BydFeatureIds.INVALID_VALUE
+                                && raw != BydFeatureIds.INVALID_VALUE_2) {
+                            b.wirelessChargingLeftState(raw);
                         }
                     }
                 } catch (Exception e) {
-                    logger.debug("collectCharging chargerWorkState feature ID error: " + e.getMessage());
+                    logger.debug("collectCharging wirelessLeft error: " + e.getMessage());
                 }
-            }
-
-            // Wireless charging states via feature IDs
-            try {
-                Object wlLeft = BydDeviceHelper.callGet(chargingDevice, BydFeatureIds.CHARGING_WIRELESS_LEFT_STATE, Integer.class);
-                if (wlLeft != null) {
-                    int raw = BydDeviceHelper.getIntValue(wlLeft);
-                    if (raw >= 0
-                            && raw != BydFeatureIds.BMS_UNAVAILABLE
-                            && raw != BydFeatureIds.INVALID_VALUE
-                            && raw != BydFeatureIds.INVALID_VALUE_2) {
-                        b.wirelessChargingLeftState(raw);
+                try {
+                    Object wlRight = BydDeviceHelper.callGet(chargingDevice, BydFeatureIds.CHARGING_WIRELESS_RIGHT_STATE, Integer.class);
+                    if (wlRight != null) {
+                        int raw = BydDeviceHelper.getIntValue(wlRight);
+                        if (raw >= 0
+                                && raw != BydFeatureIds.BMS_UNAVAILABLE
+                                && raw != BydFeatureIds.INVALID_VALUE
+                                && raw != BydFeatureIds.INVALID_VALUE_2) {
+                            b.wirelessChargingRightState(raw);
+                        }
                     }
+                } catch (Exception e) {
+                    logger.debug("collectCharging wirelessRight error: " + e.getMessage());
                 }
-            } catch (Exception e) {
-                logger.debug("collectCharging wirelessLeft error: " + e.getMessage());
-            }
-            try {
-                Object wlRight = BydDeviceHelper.callGet(chargingDevice, BydFeatureIds.CHARGING_WIRELESS_RIGHT_STATE, Integer.class);
-                if (wlRight != null) {
-                    int raw = BydDeviceHelper.getIntValue(wlRight);
-                    if (raw >= 0
-                            && raw != BydFeatureIds.BMS_UNAVAILABLE
-                            && raw != BydFeatureIds.INVALID_VALUE
-                            && raw != BydFeatureIds.INVALID_VALUE_2) {
-                        b.wirelessChargingRightState(raw);
+                try {
+                    Object wlState = BydDeviceHelper.callGet(chargingDevice, BydFeatureIds.CHARGING_WIRELESS_STATE, Integer.class);
+                    if (wlState != null) {
+                        int raw = BydDeviceHelper.getIntValue(wlState);
+                        if (raw >= 0
+                                && raw != BydFeatureIds.BMS_UNAVAILABLE
+                                && raw != BydFeatureIds.INVALID_VALUE
+                                && raw != BydFeatureIds.INVALID_VALUE_2) {
+                            b.wirelessChargingStatus(raw);
+                        }
                     }
+                } catch (Exception e) {
+                    logger.debug("collectCharging wirelessState error: " + e.getMessage());
                 }
-            } catch (Exception e) {
-                logger.debug("collectCharging wirelessRight error: " + e.getMessage());
-            }
-            try {
-                Object wlState = BydDeviceHelper.callGet(chargingDevice, BydFeatureIds.CHARGING_WIRELESS_STATE, Integer.class);
-                if (wlState != null) {
-                    int raw = BydDeviceHelper.getIntValue(wlState);
-                    if (raw >= 0
-                            && raw != BydFeatureIds.BMS_UNAVAILABLE
-                            && raw != BydFeatureIds.INVALID_VALUE
-                            && raw != BydFeatureIds.INVALID_VALUE_2) {
-                        b.wirelessChargingStatus(raw);
-                    }
-                }
-            } catch (Exception e) {
-                logger.debug("collectCharging wirelessState error: " + e.getMessage());
             }
         } catch (Exception e) {
             logger.debug("collectCharging error: " + e.getMessage());
@@ -8976,14 +8999,15 @@ public class BydDataCollector {
             // restricted, in VehicleDataMonitor.getChargingState(), which uses this field on PHEV
             // only. Anyone lifting that restriction must first make the scale unambiguous —
             // otherwise a genuine 150 kW BEV session displays as 1.5 kW.
-            try {
-                // Probe the primitive widths rather than passing a wrapper Class: the HAL
-                // dispatches on the EXACT Class object and matches PRIMITIVES only, so the old
-                // `Double.class` argument returned null on every trim (see
-                // BydDeviceHelper.callGetProbing). That alone would have kept this read dead
-                // even without the gating bug above.
-                Object val = BydDeviceHelper.callGetProbing(
-                        instrumentDevice, BydFeatureIds.INSTRUMENT_CHARGING_CHARGE_POWER_DD);
+            if (!isDiLink5Vehicle()) {
+                try {
+                    // Probe the primitive widths rather than passing a wrapper Class: the HAL
+                    // dispatches on the EXACT Class object and matches PRIMITIVES only, so the old
+                    // `Double.class` argument returned null on every trim (see
+                    // BydDeviceHelper.callGetProbing). That alone would have kept this read dead
+                    // even without the gating bug above.
+                    Object val = BydDeviceHelper.callGetProbing(
+                            instrumentDevice, BydFeatureIds.INSTRUMENT_CHARGING_CHARGE_POWER_DD);
                 // SECOND CHANNEL. The per-device get(int[], Class) form above is not the only way
                 // into the HAL: the manager exposes getDouble(deviceType, featureId), and a trim
                 // may implement one and not the other. Reference apps resolve BOTH accessors at
@@ -9203,8 +9227,9 @@ public class BydDataCollector {
                     }
                 }
                 b.clusterChargePowerKw(clusterKw);
-            } catch (Exception e) {
-                logger.debug("collectInstrument cluster charge-power feature ID error: " + e.getMessage());
+                } catch (Exception e) {
+                    logger.debug("collectInstrument cluster charge-power feature ID error: " + e.getMessage());
+                }
             }
 
             // Charging percent via instrument feature ID (842006544) — read
@@ -9214,7 +9239,7 @@ public class BydDataCollector {
             // reads above; the safe-clear in collectCharging() wipes stale
             // values when the vehicle is genuinely idle (BMS not charging AND
             // gun disconnected).
-            if (b.chargingPercent == BydVehicleData.UNAVAILABLE) {
+            if (!isDiLink5Vehicle() && b.chargingPercent == BydVehicleData.UNAVAILABLE) {
                 try {
                     Object val = BydDeviceHelper.callGet(instrumentDevice,
                             BydFeatureIds.INSTRUMENT_CHARGING_CHARGE_PERCENT_DD, Integer.class);
@@ -9243,21 +9268,23 @@ public class BydDataCollector {
             // first and the fallback only fills when this is still UNAVAILABLE.
             b.chargingRestTimeHours(BydVehicleData.UNAVAILABLE);
             b.chargingRestTimeMinutes(BydVehicleData.UNAVAILABLE);
-            try {
-                Object hourVal = BydDeviceHelper.callGet(instrumentDevice,
-                        BydFeatureIds.INSTRUMENT_CHARGING_CHARGE_REST_HOUR_DD, Integer.class);
-                Object minVal = BydDeviceHelper.callGet(instrumentDevice,
-                        BydFeatureIds.INSTRUMENT_CHARGING_CHARGE_REST_MINUTE_DD, Integer.class);
-                if (hourVal != null && minVal != null) {
-                    int hours = BydDeviceHelper.getIntValue(hourVal);
-                    int minutes = BydDeviceHelper.getIntValue(minVal);
-                    if (hours != 255 && minutes != 255 && hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
-                        b.chargingRestTimeHours(hours);
-                        b.chargingRestTimeMinutes(minutes);
+            if (!isDiLink5Vehicle()) {
+                try {
+                    Object hourVal = BydDeviceHelper.callGet(instrumentDevice,
+                            BydFeatureIds.INSTRUMENT_CHARGING_CHARGE_REST_HOUR_DD, Integer.class);
+                    Object minVal = BydDeviceHelper.callGet(instrumentDevice,
+                            BydFeatureIds.INSTRUMENT_CHARGING_CHARGE_REST_MINUTE_DD, Integer.class);
+                    if (hourVal != null && minVal != null) {
+                        int hours = BydDeviceHelper.getIntValue(hourVal);
+                        int minutes = BydDeviceHelper.getIntValue(minVal);
+                        if (hours != 255 && minutes != 255 && hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+                            b.chargingRestTimeHours(hours);
+                            b.chargingRestTimeMinutes(minutes);
+                        }
                     }
+                } catch (Exception e) {
+                    logger.debug("collectInstrument chargingRestTime feature ID error: " + e.getMessage());
                 }
-            } catch (Exception e) {
-                logger.debug("collectInstrument chargingRestTime feature ID error: " + e.getMessage());
             }
         } catch (Exception e) {
             logger.debug("collectInstrument error: " + e.getMessage());
@@ -9546,6 +9573,9 @@ public class BydDataCollector {
      * "cabin below 5 C" rule.
      */
     private int readCabinTempC() {
+        if (isDiLink5Vehicle()) {
+            return cabinReadFailed("dilink5-unsupported", "AC_TEMP_INSIDE unsupported on DiLink 5");
+        }
         if (acDevice == null) return cabinReadFailed("no-device", "no AC device");
         Object val = BydDeviceHelper.callGet(acDevice, BydFeatureIds.AC_TEMP_INSIDE, Integer.class);
         if (val == null) return cabinReadFailed("no-answer", "AC_TEMP_INSIDE returned nothing");
@@ -12572,7 +12602,7 @@ public class BydDataCollector {
     }
 
     private void collectRadar(BydVehicleData.Builder b) {
-        if (radarDevice == null) return;
+        if (isDiLink5Vehicle() || radarDevice == null) return;
         try {
             Object distances = BydDeviceHelper.callGetter(radarDevice, "getAllRadarDistance");
             if (distances instanceof int[]) b.radarDistances((int[]) distances);
@@ -12677,7 +12707,7 @@ public class BydDataCollector {
             // the 0..100 range check, so this tier would report a healthy pack as "SOH 0%" and
             // (because the canonical display chain prefers a valid OEM value) it would then be
             // rejected as absent rather than corrected. Ask for the width we extract.
-            if (!isPlausibleOemSohPercent(sohValue)) {
+            if (!isDiLink5Vehicle() && !isPlausibleOemSohPercent(sohValue)) {
                 try {
                     Object sohVal = BydDeviceHelper.callGetProbing(
                             statisticDevice, BydFeatureIds.STAT_BATTERY_HEALTHY_INDEX, true);
@@ -12802,7 +12832,7 @@ public class BydDataCollector {
 
         // Current trip mileage
         try {
-            if (instrumentDevice != null) {
+            if (!isDiLink5Vehicle() && instrumentDevice != null) {
                 Object tripMileage = BydDeviceHelper.callGet(instrumentDevice,
                         BydFeatureIds.INSTRUMENT_2IN1_CURRENT_JOURNEY_DRIVE_MILEAGE, Double.class);
                 if (tripMileage != null) {
@@ -12816,7 +12846,7 @@ public class BydDataCollector {
 
         // Current trip time
         try {
-            if (instrumentDevice != null) {
+            if (!isDiLink5Vehicle() && instrumentDevice != null) {
                 Object tripTime = BydDeviceHelper.callGet(instrumentDevice,
                         BydFeatureIds.INSTRUMENT_2IN1_CURRENT_JOURNEY_DRIVE_TIME, Double.class);
                 if (tripTime != null) {
@@ -12830,7 +12860,7 @@ public class BydDataCollector {
 
         // This trip electricity consumption from statistic device
         try {
-            if (statisticDevice != null) {
+            if (!isDiLink5Vehicle() && statisticDevice != null) {
                 Object tripElec = BydDeviceHelper.callGet(statisticDevice,
                         BydFeatureIds.STAT_THIS_TRIP_ELEC_CONSUMPTION, Double.class);
                 if (tripElec != null) {
@@ -13079,14 +13109,16 @@ public class BydDataCollector {
         }
 
         // Sunshade panel percent
-        try {
-            Object sunshade = BydDeviceHelper.callGet(bodyworkDevice, BydFeatureIds.BODY_SUNSHADE_PANEL_PERCENT, Integer.class);
-            if (sunshade != null) {
-                int val = BydDeviceHelper.getIntValue(sunshade);
-                if (val >= 0 && val <= 100) b.sunshadePercent(val);
+        if (!isDiLink5Vehicle()) {
+            try {
+                Object sunshade = BydDeviceHelper.callGet(bodyworkDevice, BydFeatureIds.BODY_SUNSHADE_PANEL_PERCENT, Integer.class);
+                if (sunshade != null) {
+                    int val = BydDeviceHelper.getIntValue(sunshade);
+                    if (val >= 0 && val <= 100) b.sunshadePercent(val);
+                }
+            } catch (Exception e) {
+                logger.debug("collectBodyworkExtended sunshade error: " + e.getMessage());
             }
-        } catch (Exception e) {
-            logger.debug("collectBodyworkExtended sunshade error: " + e.getMessage());
         }
     }
 
@@ -23650,6 +23682,7 @@ public class BydDataCollector {
 
     /** One pad's state as a boolean, or null if unreadable. */
     private Boolean readWirelessPadOn(int pad) {
+        if (isDiLink5Vehicle()) return null;
         try {
             int id = (pad == WIRELESS_PAD_LEFT)
                     ? BydFeatureIds.CHARGING_WIRELESS_LEFT_STATE
@@ -23676,7 +23709,7 @@ public class BydDataCollector {
 
     /** Raw combined wireless-charging state (CHARGING_WIRELESS_STATE), or -1 if unreadable. */
     public int getWirelessChargingState() {
-        if (chargingDevice == null) return -1;
+        if (isDiLink5Vehicle() || chargingDevice == null) return -1;
         try {
             Object v = BydDeviceHelper.callGet(chargingDevice, BydFeatureIds.CHARGING_WIRELESS_STATE, Integer.class);
             if (v == null) return -1;
@@ -24192,16 +24225,19 @@ public class BydDataCollector {
             Object opMode = BydDeviceHelper.callGetter(energyDevice, "getOperationMode");
             if (!(opMode instanceof Number)) return -1;
             int op = ((Number) opMode).intValue();
-            int surface = readRoadSurfaceMode(energyDevice);
-            int target = op == 1 && surface != 2
+            boolean diLink5 = isDiLink5Vehicle();
+            int surface = readRoadSurfaceMode(energyDevice, diLink5);
+            int target = !diLink5 && op == 1 && surface != 2
                     ? readTargetDrivingMode(settingDevice) : -1;
             int operationEvent = lastEnergyOperationModeEvent;
             int normalized = driveModeFromEnergyAxis(
                     op, surface, target, operationEvent, lastNormalEcoDriveMode);
             if (normalized == 3) lastNormalEcoDriveMode = -1;
-            String directProbes = op == 1 && surface != 2
-                    ? readDriveModeDiagnosticProbes()
-                    : "skipped-unambiguous";
+            String directProbes = diLink5
+                    ? "skipped-dilink5"
+                    : (op == 1 && surface != 2
+                            ? readDriveModeDiagnosticProbes()
+                            : "skipped-unambiguous");
             Object rawEnergyValue = BydDeviceHelper.callGetter(energyDevice, "getEnergyMode");
             int rawEnergy = rawEnergyValue instanceof Number
                     ? ((Number) rawEnergyValue).intValue() : Integer.MIN_VALUE;
@@ -24234,8 +24270,13 @@ public class BydDataCollector {
 
     /** Named SDK getter first, then the same Energy property through the generic feature bus. */
     static int readRoadSurfaceMode(Object device) {
+        return readRoadSurfaceMode(device, false);
+    }
+
+    static int readRoadSurfaceMode(Object device, boolean diLink5) {
         Object named = BydDeviceHelper.callGetter(device, "getRoadSurfaceMode");
         if (named instanceof Number) return ((Number) named).intValue();
+        if (diLink5) return -1;
         int generic = BydDeviceHelper.getIntValue(BydDeviceHelper.callGetProbing(
                 device, BydFeatureIds.ENERGY_ROAD_SURFACE_MODE, true));
         return generic != Integer.MIN_VALUE ? generic : -1;
