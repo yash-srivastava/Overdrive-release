@@ -26,8 +26,10 @@ const (
 	exposeDialTimeout = 5 * time.Second
 	// Idle limit per direction. Live view and WebSocket traffic is continuous
 	// or pinged; a peer that vanished without FIN is reaped after this.
-	exposeIdle  = 5 * time.Minute
-	exposeWrite = 30 * time.Second
+	exposeIdle            = 5 * time.Minute
+	exposeWrite           = 30 * time.Second
+	exposeDeadlineRefresh = 5 * time.Second
+	exposeCopyBufferSize  = 64 * 1024
 )
 
 type exposeSpec struct {
@@ -208,16 +210,31 @@ func spliceIdle(a, b net.Conn) {
 }
 
 func copyIdle(dst, src net.Conn) {
-	buf := make([]byte, 32*1024)
+	buf := make([]byte, exposeCopyBufferSize)
+	var nextReadRefresh, nextWriteRefresh time.Time
 	for {
-		_ = src.SetReadDeadline(time.Now().Add(exposeIdle))
+		// Avoid resetting the socket timer for every chunk on busy streams.
+		now := time.Now()
+		if !now.Before(nextReadRefresh) {
+			_ = src.SetReadDeadline(now.Add(exposeIdle))
+			nextReadRefresh = now.Add(exposeDeadlineRefresh)
+		}
 		n, err := src.Read(buf)
 		if n > 0 {
-			_ = dst.SetWriteDeadline(time.Now().Add(exposeWrite))
-			if _, werr := dst.Write(buf[:n]); werr != nil {
-				// Destination is gone: unblock the opposite copy.
-				_ = src.Close()
-				return
+			now = time.Now()
+			if !now.Before(nextWriteRefresh) {
+				_ = dst.SetWriteDeadline(now.Add(exposeWrite))
+				nextWriteRefresh = now.Add(exposeDeadlineRefresh)
+			}
+			// A larger buffer must not drop bytes on a short write.
+			for sent := 0; sent < n; {
+				written, werr := dst.Write(buf[sent:n])
+				sent += written
+				if werr != nil || written == 0 {
+					// Destination is gone: unblock the opposite copy.
+					_ = src.Close()
+					return
+				}
 			}
 		}
 		if err != nil {
