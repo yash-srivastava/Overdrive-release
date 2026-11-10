@@ -8,10 +8,8 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.List;
 
 /**
  * Tiny on-disk spool for Telegram notifications that could not be delivered to
@@ -305,16 +303,17 @@ public final class TelegramSpool {
     private static void evictOldestIfFull(File dir) {
         File[] files = dir.listFiles((d, n) -> n.endsWith(".json"));
         if (files == null || files.length < MAX_ENTRIES) return;
-        List<File> list = new ArrayList<>(Arrays.asList(files));
-        list.sort(Comparator.comparing(File::getName));  // oldest-first
+        // Sort the listFiles() array in place; copying it into an ArrayList
+        // allocates an extra collection on the full-spool eviction path.
+        Arrays.sort(files, Comparator.comparing(File::getName));  // oldest-first
         // Evict down to MAX_ENTRIES-1 so the incoming write fits under the cap.
         // Chronological (oldest-first) eviction is intentional/simple — but log
         // each drop at WARN so a full-spool loss is observable in logcat (it was
         // previously the only silent drop path in this class).
-        int toRemove = list.size() - (MAX_ENTRIES - 1);
-        for (int i = 0; i < toRemove && i < list.size(); i++) {
-            File victim = list.get(i);
-            Log.w(TAG, "Spool full (" + list.size() + "/" + MAX_ENTRIES
+        int toRemove = files.length - (MAX_ENTRIES - 1);
+        for (int i = 0; i < toRemove && i < files.length; i++) {
+            File victim = files[i];
+            Log.w(TAG, "Spool full (" + files.length + "/" + MAX_ENTRIES
                     + "); evicting oldest unsent entry " + victim.getName());
             try { //noinspection ResultOfMethodCallIgnored
                 victim.delete(); } catch (Exception ignored) {}
