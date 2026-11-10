@@ -3438,6 +3438,52 @@ public class BydDataCollector {
     }
 
     private String lastSummaryHash = "";
+    // Fast path for unchanged poll summaries: formatting seven floating-point values
+    // on every poll creates temporary objects even when no log entry is emitted.
+    private boolean hasLastSummaryValues;
+    private double lastSummarySoc;
+    private double lastSummary12v;
+    private double lastSummaryHighTemp;
+    private double lastSummaryLowTemp;
+    private double lastSummaryAvgTemp;
+    private double lastSummaryHighVoltage;
+    private double lastSummaryLowVoltage;
+    private java.util.Locale lastSummaryLocale;
+
+    private void logChangedPollSummary(BydVehicleData d) {
+        if (d == null) return;
+        java.util.Locale locale = java.util.Locale.getDefault();
+        if (hasLastSummaryValues && locale.equals(lastSummaryLocale)
+                && Double.compare(d.socPercent, lastSummarySoc) == 0
+                && Double.compare(d.voltage12v, lastSummary12v) == 0
+                && Double.compare(d.highCellTempC, lastSummaryHighTemp) == 0
+                && Double.compare(d.lowCellTempC, lastSummaryLowTemp) == 0
+                && Double.compare(d.avgCellTempC, lastSummaryAvgTemp) == 0
+                && Double.compare(d.highCellVoltage, lastSummaryHighVoltage) == 0
+                && Double.compare(d.lowCellVoltage, lastSummaryLowVoltage) == 0) {
+            return;
+        }
+        // Keep the original rounded-string comparison: a raw sensor change that
+        // rounds to the same displayed value must not produce another log entry.
+        String hash = String.format(locale, "%.1f|%.2f|%.1f/%.1f/%.1f|%.3f/%.3f",
+                d.socPercent, d.voltage12v, d.highCellTempC, d.lowCellTempC,
+                d.avgCellTempC, d.highCellVoltage, d.lowCellVoltage);
+        if (!hash.equals(lastSummaryHash)) {
+            logger.info("Data changed: SOC=" + d.socPercent + "% 12V=" + d.voltage12v + "V" +
+                    " Temp=" + d.highCellTempC + "/" + d.lowCellTempC + "/" + d.avgCellTempC + "°C" +
+                    " CellV=" + d.highCellVoltage + "/" + d.lowCellVoltage + "V");
+            lastSummaryHash = hash;
+        }
+        lastSummarySoc = d.socPercent;
+        lastSummary12v = d.voltage12v;
+        lastSummaryHighTemp = d.highCellTempC;
+        lastSummaryLowTemp = d.lowCellTempC;
+        lastSummaryAvgTemp = d.avgCellTempC;
+        lastSummaryHighVoltage = d.highCellVoltage;
+        lastSummaryLowVoltage = d.lowCellVoltage;
+        lastSummaryLocale = locale;
+        hasLastSummaryValues = true;
+    }
 
     // ==================== RoadSense fast dynamics poll ====================
     // RoadSense needs brake/accel/gear event-aligned to ~200 ms jolts (R-PERF-4),
@@ -4706,18 +4752,7 @@ public class BydDataCollector {
             try {
                 if (!collectAllFromScheduler(schedulerGeneration)) return;
                 // Log when data actually changes
-                BydVehicleData d = snapshot.get();
-                if (d != null) {
-                    String hash = String.format("%.1f|%.2f|%.1f/%.1f/%.1f|%.3f/%.3f",
-                        d.socPercent, d.voltage12v, d.highCellTempC, d.lowCellTempC, d.avgCellTempC,
-                        d.highCellVoltage, d.lowCellVoltage);
-                    if (!hash.equals(lastSummaryHash)) {
-                        logger.info("Data changed: SOC=" + d.socPercent + "% 12V=" + d.voltage12v + "V" +
-                            " Temp=" + d.highCellTempC + "/" + d.lowCellTempC + "/" + d.avgCellTempC + "°C" +
-                            " CellV=" + d.highCellVoltage + "/" + d.lowCellVoltage + "V");
-                        lastSummaryHash = hash;
-                    }
-                }
+                logChangedPollSummary(snapshot.get());
             } catch (Throwable t) {
                 logger.debug("Poll error: " + t.getMessage());
             }
@@ -5266,18 +5301,7 @@ public class BydDataCollector {
             pollScheduler.scheduleAtFixedRate(() -> {
                 try {
                     if (!collectAllFromScheduler(schedulerGeneration)) return;
-                    BydVehicleData d = snapshot.get();
-                    if (d != null) {
-                        String hash = String.format("%.1f|%.2f|%.1f/%.1f/%.1f|%.3f/%.3f",
-                            d.socPercent, d.voltage12v, d.highCellTempC, d.lowCellTempC, d.avgCellTempC,
-                            d.highCellVoltage, d.lowCellVoltage);
-                        if (!hash.equals(lastSummaryHash)) {
-                            logger.info("Data changed: SOC=" + d.socPercent + "% 12V=" + d.voltage12v + "V" +
-                                " Temp=" + d.highCellTempC + "/" + d.lowCellTempC + "/" + d.avgCellTempC + "°C" +
-                                " CellV=" + d.highCellVoltage + "/" + d.lowCellVoltage + "V");
-                            lastSummaryHash = hash;
-                        }
-                    }
+                    logChangedPollSummary(snapshot.get());
                 } catch (Throwable t) {
                     logger.debug("Poll error: " + t.getMessage());
                 }
