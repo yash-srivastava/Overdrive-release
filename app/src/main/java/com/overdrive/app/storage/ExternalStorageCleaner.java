@@ -125,8 +125,9 @@ public class ExternalStorageCleaner {
     };
     
     // Video file extensions to clean
+    // Names are normalized once; these extensions are already lowercase.
     private static final String[] VIDEO_EXTENSIONS = {
-        ".mp4", ".MP4", ".avi", ".AVI", ".ts", ".TS", ".mov", ".MOV"
+        ".mp4", ".avi", ".ts", ".mov"
     };
     
     // Config file location (shared with StorageManager)
@@ -353,14 +354,7 @@ public class ExternalStorageCleaner {
     private boolean containsVideoFiles(File dir) {
         if (dir == null || !dir.exists()) return false;
         
-        File[] files = dir.listFiles(file -> {
-            if (!file.isFile()) return false;
-            String name = file.getName().toLowerCase();
-            for (String ext : VIDEO_EXTENSIONS) {
-                if (name.endsWith(ext.toLowerCase())) return true;
-            }
-            return false;
-        });
+        File[] files = dir.listFiles(file -> file.isFile() && isVideoFile(file));
         
         return files != null && files.length > 0;
     }
@@ -699,7 +693,7 @@ public class ExternalStorageCleaner {
     private boolean isVideoFile(File file) {
         String name = file.getName().toLowerCase();
         for (String ext : VIDEO_EXTENSIONS) {
-            if (name.endsWith(ext.toLowerCase())) return true;
+            if (name.endsWith(ext)) return true;
         }
         return false;
     }
