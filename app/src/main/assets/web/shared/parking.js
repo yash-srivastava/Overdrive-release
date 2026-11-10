@@ -570,7 +570,7 @@
                 if (r.bikeCount) counts.push(countGlyph('bike', t('parking.bike'), r.bikeCount));
                 if (r.animalCount) counts.push(countGlyph('paw', t('parking.animal'), r.animalCount));
                 var cams = r.cameras ? String(r.cameras).split(',').map(function (c) { return t('parking.side_' + c); }).join(' · ') : '';
-                return '<a class="pk-event" href="events.html?file=' + encodeURIComponent(r.filename || '') + '">' +
+                return '<a class="pk-event" href="#" data-parking-clip="' + esc(r.filename || '') + '">' +
                     '<div class="pk-ev-thumb"' + (thumb ? ' data-img="' + esc(thumb) + '"' : '') + '></div>' +
                     '<div class="pk-ev-main"><div class="pk-ev-title">' + esc(fmtTime(r.timestamp)) + sev + '</div>' +
                     '<div class="pk-ev-sub">' + counts.join('') + (cams ? (counts.length ? '· ' : '') + esc(cams) : '') + '</div></div></a>';

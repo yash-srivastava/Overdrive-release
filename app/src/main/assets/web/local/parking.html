@@ -446,6 +446,9 @@
         }
         .pk-lightbox.open { display: flex; }
         .pk-lightbox img { max-width: 96vw; max-height: 92vh; border-radius: var(--radius-md); }
+        .pk-clip-content { position: relative; width: min(96vw, 960px); }
+        .pk-clip-content video { display: block; width: 100%; max-height: 85vh; background: #000; }
+        .pk-clip-close { position: absolute; right: 0; top: -40px; color: white; background: transparent; border: 0; font-size: 32px; cursor: pointer; }
 
         /* ===== SETTINGS TAB (shared settings kit) =====
            Card head chip, rows, switches and folded descriptions come from
@@ -698,11 +701,18 @@
         <img id="pkLightboxImg" alt="">
     </div>
 
+    <div class="pk-lightbox" id="pkClipDialog" role="dialog" aria-modal="true" aria-label="Sentry clip">
+        <div class="pk-clip-content">
+            <button type="button" class="pk-clip-close" onclick="Parking.closeClip()" aria-label="Close video">×</button>
+            <video id="pkClipPlayer" controls playsinline preload="metadata"></video>
+        </div>
+    </div>
+
     <script src="../shared/auth.js"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
     <script src="../shared/core.js?v=24"></script>
     <script src="../shared/parking-settings.js?v=5"></script>
-    <script src="../shared/parking.js?v=11"></script>
+    <script src="../shared/parking.js?v=12"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
