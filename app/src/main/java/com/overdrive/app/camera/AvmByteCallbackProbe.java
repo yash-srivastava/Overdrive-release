@@ -527,8 +527,7 @@ public final class AvmByteCallbackProbe {
                     }
                     if (encoder != null) {
                         try {
-                            byte[] nv12 = nv21ToNv12(nv21, width, height);
-                            feedEncoder(nv12);
+                            feedEncoder(nv21);
                             drainEncoder(false);
                         } catch (Throwable t) {
                             logger.warn("Encoder runtime error cam=" + cameraId
@@ -745,7 +744,7 @@ public final class AvmByteCallbackProbe {
             }
         }
 
-        private void feedEncoder(byte[] nv12) {
+        private void feedEncoder(byte[] nv21) {
             int idx = encoder.dequeueInputBuffer(50_000);
             if (idx < 0) return;
             ByteBuffer buf = encoder.getInputBuffer(idx);
@@ -754,8 +753,24 @@ public final class AvmByteCallbackProbe {
                 return;
             }
             buf.clear();
-            int writable = Math.min(nv12.length, buf.capacity());
-            buf.put(nv12, 0, writable);
+            int ySize = width * height;
+            int frameSize = ySize + ySize / 2;
+            int writable;
+            if (nv21.length >= frameSize && buf.remaining() >= frameSize) {
+                // Write Y directly into MediaCodec's owned input buffer. Convert
+                // interleaved VU to UV in place without an intermediate NV12 array.
+                buf.put(nv21, 0, ySize);
+                for (int i = ySize; i < frameSize; i += 2) {
+                    buf.put(nv21[i + 1]);
+                    buf.put(nv21[i]);
+                }
+                writable = frameSize;
+            } else {
+                // Preserve the previous truncated/undersized-frame behavior.
+                byte[] nv12 = nv21ToNv12(nv21, width, height);
+                writable = Math.min(nv12.length, buf.remaining());
+                buf.put(nv12, 0, writable);
+            }
             long nowUs = System.nanoTime() / 1_000L;
             if (firstPtsUs < 0) firstPtsUs = nowUs;
             encoder.queueInputBuffer(idx, 0, writable, nowUs - firstPtsUs, 0);
