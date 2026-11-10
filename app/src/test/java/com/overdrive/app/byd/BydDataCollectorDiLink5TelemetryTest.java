@@ -476,6 +476,115 @@ public class BydDataCollectorDiLink5TelemetryTest {
                         BydVehicleData.UNAVAILABLE));
     }
 
+    @Test
+    public void daemonOverlayEnrichesParkedSnapshotFromDumpAndDoorLockFallback() {
+        CarSvcTelemetry.clearForTest();
+        try {
+            assertNull(CarSvcTelemetry.applyDaemonOverlayFromDump(null, null, 2));
+
+            BydVehicleData base = new BydVehicleData.Builder()
+                    .voltage12v(13.0)
+                    .build();
+
+            BydVehicleData fallbackOnly = CarSvcTelemetry.applyDaemonOverlayFromDump(
+                    base, null, 2);
+            assertEquals(13.0, fallbackOnly.voltage12v, 0.001);
+            assertArrayEquals(
+                    new int[] { 2, 2, 2, 2, BydVehicleData.UNAVAILABLE, BydVehicleData.UNAVAILABLE, 2 },
+                    fallbackOnly.doorLockStatus);
+
+            String dump = ""
+                    + "lastEvent:Property:0x2140461e, status: 0, timestamp: 1000, floatValues: [13.42]\n"
+                    + "lastEvent:Property:0x2140506e, status: 0, timestamp: 1000, int32Values: [2]\n"
+                    + "lastEvent:Property:0x21404627, status: 0, timestamp: 1000, int32Values: [1]\n"
+                    + "lastEvent:Property:0x21405070, status: 0, timestamp: 1000, int32Values: [2]\n"
+                    + "lastEvent:Property:0x2140506f, status: 0, timestamp: 1000, int32Values: [2]\n"
+                    + "lastEvent:Property:0x21403407, status: 0, timestamp: 1000, int32Values: [1]\n"
+                    + "lastEvent:Property:0x2140461c, status: 0, timestamp: 1000, int32Values: [2]\n"
+                    + "lastEvent:Property:0x21603408, status: 0, timestamp: 1000, floatValues: [6.8]\n";
+
+            BydVehicleData enriched = CarSvcTelemetry.applyDaemonOverlayFromDump(
+                    base, dump, 2);
+            assertEquals(13.42, enriched.voltage12v, 0.01);
+            assertArrayEquals(
+                    new int[] { 2, 1, 2, 2, BydVehicleData.UNAVAILABLE, BydVehicleData.UNAVAILABLE, 1 },
+                    enriched.doorLockStatus);
+            assertEquals(6.8, enriched.chargingPowerKw, 0.01);
+            assertTrue(enriched.chargingPowerAtMs > 0L);
+        } finally {
+            CarSvcTelemetry.clearForTest();
+        }
+    }
+
+    @Test
+    public void diLink5TyreTemperaturePollPairsGetTyreAreaWithSharedValue() {
+        final int[] areas = { 3, 3 };
+        final int[] sharedTemp = { 29 };
+        Object stubTyreDevice = new Object() {
+            int areaCall = 0;
+
+            @SuppressWarnings("unused")
+            public int getTyreArea() {
+                int idx = Math.min(areaCall++, areas.length - 1);
+                return areas[idx];
+            }
+
+            @SuppressWarnings("unused")
+            public int getTyreTemperatureValue(int ignoredArea) {
+                return sharedTemp[0];
+            }
+        };
+
+        int[] cache = {
+                BydVehicleData.UNAVAILABLE,
+                BydVehicleData.UNAVAILABLE,
+                BydVehicleData.UNAVAILABLE,
+                BydVehicleData.UNAVAILABLE
+        };
+        java.util.concurrent.atomic.AtomicLongArray timestamps =
+                new java.util.concurrent.atomic.AtomicLongArray(4);
+
+        assertTrue(BydDataCollector.pollDiLink5TyreTemperatureOnce(
+                stubTyreDevice, cache, timestamps, 50_000L));
+        assertArrayEquals(
+                new int[] {
+                        BydVehicleData.UNAVAILABLE,
+                        BydVehicleData.UNAVAILABLE,
+                        29,
+                        BydVehicleData.UNAVAILABLE
+                },
+                cache);
+        assertEquals(0L, timestamps.get(0));
+        assertEquals(0L, timestamps.get(1));
+        assertEquals(50_000L, timestamps.get(2));
+        assertEquals(0L, timestamps.get(3));
+
+        // Mid-call area rotation (area changes from 2 -> 4 while reading value) is discarded
+        Object racingTyreDevice = new Object() {
+            int areaCall = 0;
+
+            @SuppressWarnings("unused")
+            public int getTyreArea() {
+                return areaCall++ == 0 ? 2 : 4;
+            }
+
+            @SuppressWarnings("unused")
+            public int getTyreTemperatureValue(int ignoredArea) {
+                return 34;
+            }
+        };
+        assertFalse(BydDataCollector.pollDiLink5TyreTemperatureOnce(
+                racingTyreDevice, cache, timestamps, 60_000L));
+        assertEquals(BydVehicleData.UNAVAILABLE, cache[1]);
+        assertEquals(BydVehicleData.UNAVAILABLE, cache[3]);
+
+        // Zero placeholder is ignored
+        sharedTemp[0] = 0;
+        assertFalse(BydDataCollector.pollDiLink5TyreTemperatureOnce(
+                stubTyreDevice, cache, timestamps, 70_000L));
+        assertEquals(29, cache[2]);
+    }
+
     private static void assertFieldEquals(
             String name, Object expected, Object actual) {
         if (expected instanceof int[] || actual instanceof int[]) {

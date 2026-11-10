@@ -1194,7 +1194,23 @@ public final class GenAiRuntime implements Closeable {
     static String boundedContext(JSONObject context) {
         String encoded = context.toString();
         if (encoded.length() <= MAX_CONTEXT_CHARS) return encoded;
-        int end = Math.min(encoded.length(), MAX_CONTEXT_CHARS - 256);
+        JSONObject preserved = new JSONObject();
+        try {
+            preserved.put("truncated", true);
+            for (String key : new String[]{
+                    "mode", "available", "capturedAtMs",
+                    "vehicle", "chargingDetector"}) {
+                if (context.has(key)) {
+                    Object v = context.opt(key);
+                    if (v != null && v.toString().length() <= 6_000) {
+                        preserved.put(key, v);
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        int baseOverhead = Math.max(256, preserved.toString().length() + 128);
+        int end = Math.max(0, Math.min(encoded.length(), MAX_CONTEXT_CHARS - baseOverhead));
         while (end > 0) {
             if (end < encoded.length()
                     && Character.isHighSurrogate(
@@ -1202,11 +1218,10 @@ public final class GenAiRuntime implements Closeable {
                 end--;
             }
             try {
-                String wrapped = new JSONObject()
-                        .put("truncated", true)
-                        .put("jsonPrefix",
-                                encoded.substring(0, end))
-                        .toString();
+                JSONObject wrapper = new JSONObject(preserved.toString());
+                wrapper.put("truncated", true);
+                wrapper.put("jsonPrefix", encoded.substring(0, end));
+                String wrapped = wrapper.toString();
                 if (wrapped.length() <= MAX_CONTEXT_CHARS) {
                     return wrapped;
                 }
