@@ -401,8 +401,9 @@ class TailscaleLauncher(
 
     private fun launchInstalledTailscale(callback: TailscaleCallback) {
         val useProxy = ProxyHelper.probePort(PROXY_PORT)
+        val healthyProxy = useProxy && ProxyHelper.isEgressProxyAvailable()
         isProxyEnabled { enableProxy ->
-            launchTailscaleDaemon(useProxy, enableProxy, callback)
+            launchTailscaleDaemon(healthyProxy, enableProxy, callback)
         }
     }
 

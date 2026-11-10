@@ -73,6 +73,7 @@ object ProxyConfiguration {
      * hop. The car's own `mixed-in` traffic keeps the plain outbound, so nothing
      * that depends on [PROXY_PORT] starts depending on the hotspot being up.
      */
+    @JvmStatic
     @JvmOverloads
     fun createConfig(
         listen: String = DEFAULT_LISTEN,
@@ -138,10 +139,10 @@ object ProxyConfiguration {
 
         return """
 {
-  "log": { "level": "error", "timestamp": true, "output": "$logPath" },
+  "log": { "level": "warn", "timestamp": true, "output": "$logPath" },
   "dns": {
     "servers": [
-      { "tag": "google", "address": "8.8.8.8", "detour": "proxy" }
+      { "tag": "google", "address": "tcp://8.8.8.8", "detour": "proxy" }
     ],
     "final": "google",
     "strategy": "ipv4_only"
@@ -189,9 +190,9 @@ object ProxyConfiguration {
   ],
   "route": {
     "auto_detect_interface": true,
-    "override_android_vpn": true,
     "rules": [
-      { "inbound": ["mixed-in"], "protocol": "dns", "outbound": "${Enc.OUTBOUND_PROXY}" }$clientRule
+      { "inbound": ["mixed-in"], "protocol": "dns", "outbound": "${Enc.OUTBOUND_PROXY}" },
+      { "ip_cidr": ["127.0.0.0/8", "10.0.0.0/8", "192.168.0.0/16", "172.16.0.0/12"], "outbound": "${Enc.OUTBOUND_DIRECT}" }$clientRule
     ]
   }
 }

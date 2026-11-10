@@ -1060,15 +1060,15 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 StringBuilder tailscaleCmd = new StringBuilder();
                 tailscaleCmd.append("nohup sh -c '");
 
-                if (useProxy) {
+                boolean healthyTailscaleProxy =
+                        useProxy && com.overdrive.app.mqtt.ProxyHelper.isEgressProxyAvailable();
+                if (healthyTailscaleProxy) {
                     ctx.log("Using sing-box proxy for tailscale...");
-                    String proxyUrl = "http://127.0.0.1:8119";
-                    tailscaleCmd.append("export http_proxy=").append(proxyUrl).append(" && ");
-                    tailscaleCmd.append("export https_proxy=").append(proxyUrl).append(" && ");
-                    tailscaleCmd.append("export HTTP_PROXY=").append(proxyUrl).append(" && ");
-                    tailscaleCmd.append("export HTTPS_PROXY=").append(proxyUrl).append(" && ");
-                    tailscaleCmd.append("export no_proxy=\"localhost,127.0.0.1,::1\" && ");
-                    tailscaleCmd.append("export NO_PROXY=\"localhost,127.0.0.1,::1\" && ");
+                    String proxyUrl = "socks5://127.0.0.1:8119";
+                    tailscaleCmd.append("ALL_PROXY=").append(proxyUrl).append(" ");
+                    tailscaleCmd.append("HTTP_PROXY=").append(proxyUrl).append(" ");
+                    tailscaleCmd.append("HTTPS_PROXY=").append(proxyUrl).append(" ");
+                    tailscaleCmd.append("NO_PROXY=localhost,127.0.0.1 ");
                 } else {
                     ctx.log("Direct connection (no proxy)...");
                 }
@@ -1080,7 +1080,7 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                     tailscaleCmd.append("--socks5-server 127.0.0.1:8539 ");
                 }
                 tailscaleCmd.append("--socket 127.0.0.1:8532");
-                tailscaleCmd.append("' > /data/local/tmp/.tailscale/tailscaled.log 2>&1 &");
+                tailscaleCmd.append("' > /data/local/tmp/.tailscale/tailscale.log 2>&1 &");
 
                 cmd = tailscaleCmd.toString();
                 processName = "tailscaled";
@@ -1114,8 +1114,18 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
                 break;
 
             case "singbox":
+                // Ensure singbox_config.json exists with valid encrypted VLESS credentials
+                String sbConfigPath = com.overdrive.app.daemon.proxy.ProxyConfiguration.INSTANCE.getCONFIG_PATH();
+                String sbConfigCheck = ctx.execShell("test -s " + sbConfigPath + " && echo yes || echo no");
+                if (sbConfigCheck == null || !"yes".equals(sbConfigCheck.trim())) {
+                    String sbConfigJson = com.overdrive.app.daemon.proxy.ProxyConfiguration.createConfig();
+                    ctx.execShell(
+                        "cat > " + sbConfigPath + " <<'__SINGBOX_CONFIG_EOF__'\n" +
+                        sbConfigJson + "\n" +
+                        "__SINGBOX_CONFIG_EOF__");
+                }
                 // Sing-box proxy
-                cmd = "nohup /data/local/tmp/sing-box run -c /data/local/tmp/singbox_config.json " +
+                cmd = "nohup /data/local/tmp/sing-box run -c " + sbConfigPath + " " +
                       "> /data/local/tmp/singbox.log 2>&1 &";
                 processName = "sing-box";
                 break;
