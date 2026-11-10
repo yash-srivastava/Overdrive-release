@@ -1,7 +1,7 @@
 package com.overdrive.app.camera;
 
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
+import android.graphics.BitmapRegionDecoder;
 import android.graphics.ImageFormat;
 import android.graphics.Rect;
 import android.graphics.YuvImage;
@@ -784,14 +784,18 @@ public final class CameraPreviewHelper {
      */
     public static byte[] cropMosaicJpegToSlice(byte[] mosaicJpegBytes, PanoramicSlice slice) {
         if (mosaicJpegBytes == null || mosaicJpegBytes.length == 0 || slice == null) return null;
-        Bitmap mosaic = null;
+        BitmapRegionDecoder decoder = null;
         Bitmap cropped = null;
         try {
-            mosaic = BitmapFactory.decodeByteArray(mosaicJpegBytes, 0, mosaicJpegBytes.length);
-            if (mosaic == null) return null;
-
-            int qW = Math.max(1, mosaic.getWidth() / 2);
-            int qH = Math.max(1, mosaic.getHeight() / 2);
+            // Decode only the requested quadrant. Decoding the complete mosaic
+            // first allocates four times as many pixels on memory-limited units.
+            decoder = BitmapRegionDecoder.newInstance(
+                    mosaicJpegBytes, 0, mosaicJpegBytes.length, false);
+            if (decoder == null) return null;
+            int width = decoder.getWidth();
+            int height = decoder.getHeight();
+            int qW = Math.max(1, width / 2);
+            int qH = Math.max(1, height / 2);
             int x, y;
             switch (slice) {
                 case SLICE_4: x = 0;  y = 0;  break;   // Front → TL
@@ -800,27 +804,24 @@ public final class CameraPreviewHelper {
                 case SLICE_2: x = qW; y = qH; break;   // Left  → BR
                 default:      x = 0;  y = 0;  break;
             }
-            x = Math.max(0, Math.min(x, mosaic.getWidth() - 1));
-            y = Math.max(0, Math.min(y, mosaic.getHeight() - 1));
-            int cropW = Math.min(qW, mosaic.getWidth() - x);
-            int cropH = Math.min(qH, mosaic.getHeight() - y);
-            cropped = Bitmap.createBitmap(mosaic, x, y, cropW, cropH);
-
+            x = Math.max(0, Math.min(x, width - 1));
+            y = Math.max(0, Math.min(y, height - 1));
+            int cropW = Math.min(qW, width - x);
+            int cropH = Math.min(qH, height - y);
+            cropped = decoder.decodeRegion(new Rect(x, y, x + cropW, y + cropH), null);
+            if (cropped == null) return null;
             ByteArrayOutputStream out = new ByteArrayOutputStream();
-            cropped.compress(Bitmap.CompressFormat.JPEG, 82, out);
+            if (!cropped.compress(Bitmap.CompressFormat.JPEG, 82, out)) return null;
             return out.toByteArray();
         } catch (Exception e) {
             logger.warn("cropMosaicJpegToSlice failed for " + slice + ": " + e.getMessage());
             return null;
         } finally {
-            // Bitmap.createBitmap may return the source instance when no
-            // transform is needed (e.g. degenerate crop covering full src).
-            // Guard against double-recycle.
-            if (cropped != null && cropped != mosaic) {
+            if (cropped != null) {
                 try { cropped.recycle(); } catch (Exception ignored) {}
             }
-            if (mosaic != null) {
-                try { mosaic.recycle(); } catch (Exception ignored) {}
+            if (decoder != null) {
+                try { decoder.recycle(); } catch (Exception ignored) {}
             }
         }
     }
