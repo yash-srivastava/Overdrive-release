@@ -122,6 +122,10 @@ class DashboardFragment : Fragment() {
     private var selectedTunnel: DaemonType? = null
     private var lastRenderedQrUrl: String? = null
     private var hasRenderedQrForView = false
+    private var pendingQrUrl: String? = null
+    private var qrGeneration = 0
+    // QR encoding is CPU work; never run it on the dashboard UI thread.
+    private var qrExecutor: ExecutorService? = null
 
     // Auth
     private lateinit var tvDeviceToken: TextView
@@ -250,8 +254,12 @@ class DashboardFragment : Fragment() {
         skeleton?.cancel()
         skeleton = null
         if (::ivQrCode.isInitialized) ivQrCode.setImageDrawable(null)
+        qrGeneration++
+        pendingQrUrl = null
         lastRenderedQrUrl = null
         hasRenderedQrForView = false
+        qrExecutor?.shutdownNow()
+        qrExecutor = null
         super.onDestroyView()
         metricsExecutor?.shutdownNow()
         metricsExecutor = null
@@ -1220,36 +1228,56 @@ class DashboardFragment : Fragment() {
     }
 
     private fun renderQr(url: String?) {
-        // Tunnel status and URL LiveData can both emit unchanged values during the
-        // 30-second refresh. Do no bitmap work while this section is hidden, and
-        // don't regenerate the same QR for each duplicate observer notification.
+        // Ignore duplicate LiveData emissions while a QR is being encoded.
         if (!dashboardState.remoteExpanded) return
-
         if (url.isNullOrEmpty()) {
-            // Placeholder copy depends on daemon state, not just the null URL, so
-            // keep this cheap text path live while caching only real QR bitmaps.
-            showPlaceholder()
+            qrGeneration++
+            pendingQrUrl = null
             lastRenderedQrUrl = null
             hasRenderedQrForView = false
+            showPlaceholder()
             return
         }
-        if (hasRenderedQrForView && url == lastRenderedQrUrl) return
-        try {
-            val qrBitmap = QrCodeGenerator.generate(url, 400)
-            if (qrBitmap != null) {
-                ivQrCode.setImageBitmap(qrBitmap)
-                qrContainer.visibility = View.VISIBLE
-                ivQrCode.visibility = View.VISIBLE
-                tvQrPlaceholder.visibility = View.GONE
-                tvUrl.text = url
-                tvUrl.visibility = View.VISIBLE
-                lastRenderedQrUrl = url
-                hasRenderedQrForView = true
-            } else {
-                showPlaceholder()
+        if ((hasRenderedQrForView && url == lastRenderedQrUrl) || url == pendingQrUrl) return
+
+        // Clear a previous tunnel's QR immediately: an old URL must never be
+        // presented as the newly selected connection while encoding is pending.
+        qrGeneration++
+        val generation = qrGeneration
+        pendingQrUrl = url
+        lastRenderedQrUrl = null
+        hasRenderedQrForView = false
+        showPlaceholder()
+
+        val executor = qrExecutor ?: Executors.newSingleThreadExecutor()
+            .also { qrExecutor = it }
+        executor.execute {
+            val bitmap = try {
+                QrCodeGenerator.generate(url, 400)
+            } catch (_: Exception) {
+                null
             }
-        } catch (e: Exception) {
-            showPlaceholder()
+            mainHandler.post {
+                if (!isAdded || view == null || generation != qrGeneration ||
+                    !dashboardState.remoteExpanded || pendingQrUrl != url
+                ) {
+                    bitmap?.recycle() // Result is never installed into an ImageView.
+                    return@post
+                }
+                pendingQrUrl = null
+                if (bitmap == null) {
+                    showPlaceholder()
+                } else {
+                    ivQrCode.setImageBitmap(bitmap)
+                    qrContainer.visibility = View.VISIBLE
+                    ivQrCode.visibility = View.VISIBLE
+                    tvQrPlaceholder.visibility = View.GONE
+                    tvUrl.text = url
+                    tvUrl.visibility = View.VISIBLE
+                    lastRenderedQrUrl = url
+                    hasRenderedQrForView = true
+                }
+            }
         }
     }
 
@@ -1276,6 +1304,10 @@ class DashboardFragment : Fragment() {
         )
         if (expanded) {
             renderQr(selectedTunnel?.let(::urlFor))
+        } else {
+            // Prevent an in-flight encode from repainting a collapsed panel.
+            qrGeneration++
+            pendingQrUrl = null
         }
     }
 
