@@ -381,14 +381,14 @@
 
                         <!-- Keep USB ports powered while parked. Default ON. Off lets the
                              head unit sleep on the next ACC-OFF cycle to save the 12V
-                             battery. IMPORTANT: the SD-card slot shares the USB power
+                             battery. IMPORTANT: the microSD card slot shares the USB power
                              domain on this platform, so turning USB power off also powers
-                             down the SD card while parked — surveillance must then record
+                             down the microSD card while parked — surveillance must then record
                              to Internal storage. The toggle/confirm flow enforces this. -->
                         <div class="setting-row">
                             <div class="setting-info">
                                 <div class="setting-name" id="survKeepUsbPowerName" data-i18n="surveillance.keep_usb_power">Keep USB powered while parked</div>
-                                <div class="setting-desc" id="survKeepUsbPowerDesc" data-i18n="surveillance.keep_usb_power_desc">Keeps the USB ports powered after the car is switched off (for example to charge a phone or power an accessory). Turn off to let the head unit sleep and save the 12V battery. Note: the SD-card slot shares the USB power rail, so turning this off also powers down the SD card while parked — surveillance will record to Internal storage instead. Takes effect the next time the car is switched off.</div>
+                                <div class="setting-desc" id="survKeepUsbPowerDesc" data-i18n="surveillance.keep_usb_power_desc">Keeps the USB ports powered after the car is switched off (for example to charge a phone or power an accessory). Turn off to let the head unit sleep and save the 12V battery. Note: the microSD card slot shares the USB power rail, so turning this off also powers down the microSD card while parked — surveillance will record to Internal storage instead. Takes effect the next time the car is switched off.</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -397,7 +397,7 @@
                                 </label>
                             </div>
                         </div>
-                        <div class="setting-hint" id="survKeepUsbPowerCapabilityNote" data-i18n="surveillance.keep_usb_wake_capability_note" style="display:none;">This mode can keep Android awake, but parked USB and SD-card power remains best-effort because the vehicle firmware controls the physical rail.</div>
+                        <div class="setting-hint" id="survKeepUsbPowerCapabilityNote" data-i18n="surveillance.keep_usb_wake_capability_note" style="display:none;">This mode can keep Android awake, but parked USB and microSD card power remains best-effort because the vehicle firmware controls the physical rail.</div>
 
                         <!-- Parked cellular keep-alive. Default OFF (opt-in): on some
                              models the data module sleeps a while after the car is
@@ -533,13 +533,13 @@
                         </div>
                         <div class="setting-hint" id="survAssistOffUnavailableHint" style="display:none;" data-i18n="surveillance.assist_off_unavailable_hint">Available only in DiLink 5 mode with the vehicle model set to Sealion 7 in Settings.</div>
 
-                        <!-- Shown only while USB power is OFF: SD card is unpowered while
+                        <!-- Shown only while USB power is OFF: microSD card is unpowered while
                              parked, so surveillance records to Internal. Visibility driven
                              by SurvSettings.updateUsbPowerStorageNotice(). Belongs to the
                              Keep-USB toggle above — keep them adjacent. -->
                         <div class="info-box-warning" id="survUsbPowerStorageNotice" style="display:none;margin-top:12px;">
                             <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                            <div class="info-note" data-i18n="surveillance.usb_off_storage_notice">USB power is off, so the SD card is unpowered while parked. Surveillance records to Internal storage until USB power is turned back on.</div>
+                            <div class="info-note" data-i18n="surveillance.usb_off_storage_notice">USB power is off, so the microSD card is unpowered while parked. Surveillance records to Internal storage until USB power is turned back on.</div>
                         </div>
 
                         <!-- Low-power-while-parked toggle. Default OFF (byte-identical

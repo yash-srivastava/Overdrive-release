@@ -534,7 +534,7 @@
     <!-- Storage filter chip labels (full words; the tile badge uses the short
          SD/USB/INT forms above). -->
     <string name="recording_lib_storage_filter_internal">Internal</string>
-    <string name="recording_lib_storage_filter_sd">SD card</string>
+    <string name="recording_lib_storage_filter_sd">microSD card</string>
     <string name="recording_lib_storage_filter_usb">USB</string>
     <string name="recording_lib_place_search_hint">Search places…</string>
     <string name="recording_lib_chip_type_normal">Normal</string>
@@ -1251,7 +1251,7 @@
     <string name="recording_preview_storage">Storage</string>
     <string name="recording_preview_file_size">File size</string>
     <string name="recording_preview_storage_internal">Internal</string>
-    <string name="recording_preview_storage_sd">SD card</string>
+    <string name="recording_preview_storage_sd">microSD card</string>
     <string name="recording_preview_storage_usb">USB</string>
     <string name="recording_preview_storage_unknown">Unknown</string>
     <string name="recording_headline_activity">Activity detected</string>

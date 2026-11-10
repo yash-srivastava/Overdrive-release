@@ -707,7 +707,7 @@ Condensed highlights below. Full release notes for every version live in [RELEAS
 - **Zrok tunnel reachability fix** — Resolved a case where the tunnel could go silently unreachable after a network handover
 - **Lower CPU + memory across ACC ON/OFF transitions**
 - **Accurate SOH and kWh for PHEVs**
-- **SD card detection edge cases** — Fixed mounts where the card was visible to the OS but the daemon reported "no card"
+- **microSD card detection edge cases** — Fixed mounts where the card was visible to the OS but the daemon reported "no card"
 - **BYD Cloud account: country picker replaces region picker** — Korea now uses the right `-kr` host, and the Middle East / Africa node is exposed for the first time. **EU users — re-save your BYD Cloud settings**
 - **"Bad magic: expected BGTB" sign-in error fixed**
 
@@ -802,7 +802,7 @@ Android app + web companion rebuilt around how you actually use the car. Materia
 
 **⚡ Optimizations & Fixes**
 - **Fixed Duplicate Recordings**
-- **Fixed Broken Recordings** — Reliable across rapid ACC/gear transitions and SD card hiccups
+- **Fixed Broken Recordings** — Reliable across rapid ACC/gear transitions and microSD card hiccups
 - **Fixed Charging** — Indicator updates during active charging; kW reads true value
 
 ---
@@ -909,9 +909,9 @@ Android app + web companion rebuilt around how you actually use the car. Materia
 - Resolved a gap in power level detection where the ON → ACC transition during BYD app shutdown was not triggering sentry mode re-entry
 
 **📹 Events & Recordings**
-- Fixed events page showing deleted or inaccessible ghost recordings from unmounted SD card paths
+- Fixed events page showing deleted or inaccessible ghost recordings from unmounted microSD card paths
 - Videos that no longer exist on disk are now properly filtered out instead of showing as unplayable entries
-- Eliminated duplicate entries when the same recording exists across SD card and internal storage
+- Eliminated duplicate entries when the same recording exists across microSD card and internal storage
 
 **🐛 Bug Fixes**
 - 🔋 **ACC State Reliability:** Hardened the ACC state notification path so CameraDaemon always receives the correct state, even when surveillance is disabled or suppressed by safe zones

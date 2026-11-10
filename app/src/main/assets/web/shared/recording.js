@@ -1,8 +1,8 @@
 /**
  * BYD Champ - Recording Settings Module
  * SOTA: Uses unified config for cross-UID access (app UI + web UI sync)
- * SOTA: Storage limits with auto-cleanup (100MB - 100GB internal/SD card)
- * SOTA: Storage type selection (internal vs SD card)
+ * SOTA: Storage limits with auto-cleanup (100MB - 100GB internal/microSD card)
+ * SOTA: Storage type selection (internal vs microSD card)
  */
 
 window.BYD = window.BYD || {};
@@ -144,7 +144,7 @@ BYD.recording = {
         // The hero line is composed from option labels; rebuild it once they are re-translated.
         if (BYD.i18n && BYD.i18n.onChange) BYD.i18n.onChange(() => this.renderHeroSummary());
 
-        // CDR status can recursively scan a slow or unhealthy SD card. Keep
+        // CDR status can recursively scan a slow or unhealthy microSD card. Keep
         // its controls gated by _cdrReady instead of holding the whole page.
         if (this.config.recordingsStorageType === 'SD_CARD') {
             this.updateCdrCleanupVisibility();
@@ -489,7 +489,7 @@ BYD.recording = {
                 this.config.recordingsStorageTypeActive =
                     data.recordingsStorageTypeActive || this.config.recordingsStorageType;
 
-                // SD card info
+                // microSD card info
                 this.storageInfo.sdCardAvailable = data.sdCardAvailable || false;
                 this.storageInfo.sdCardPath = data.sdCardPath || null;
                 this.storageInfo.sdCardFreeSpace = data.sdCardFreeSpace || 0;
@@ -744,7 +744,7 @@ BYD.recording = {
             }
         }
 
-        // SD card button state
+        // microSD card button state
         const sdCardBtn = document.getElementById('btnRecSdCard');
         if (sdCardBtn) {
             sdCardBtn.disabled = !this.storageInfo.sdCardAvailable;
@@ -758,7 +758,7 @@ BYD.recording = {
             usbBtn.title = this.storageInfo.usbAvailable ? '' : BYD.i18n.t('recording.usb_unavailable');
         }
 
-        // SD card status block
+        // microSD card status block
         const sdStatusEl = document.getElementById('recSdCardStatus');
         if (sdStatusEl) {
             sdStatusEl.style.display = 'block';
@@ -1386,7 +1386,7 @@ BYD.recording = {
         // size + qualityEquivalent now come from the server via the
         // recordingQualityOptions / activeRecordingEstimate API fields.
 
-        // Show CDR cleanup card if SD card is selected
+        // Show CDR cleanup card if microSD card is selected
         this.updateCdrCleanupVisibility();
         
         // Reset Apply button state after UI update (no unsaved changes after load)

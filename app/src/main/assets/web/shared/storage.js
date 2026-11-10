@@ -260,7 +260,7 @@ BYD.storagePage = {
         if (!results[0] || !results[1]) {
             this._toast(this._tr('errors.load_failed'), 'error');
         }
-        // DVR status can recursively scan a slow SD card; its controls have
+        // DVR status can recursively scan a slow microSD card; its controls have
         // their own _cdrReady gate, so it loads after hydration.
         if (this._cdrVisible()) this.loadCdrConfig();
         this._startPolling();
@@ -572,7 +572,7 @@ BYD.storagePage = {
             const active = this.survInfo.activeType || configured;
             if (loaded && configured !== 'INTERNAL' && active === 'INTERNAL') {
                 const volName = configured === 'SD_CARD'
-                    ? this._tr('events.storage_sd_card', null, 'SD card')
+                    ? this._tr('events.storage_sd_card', null, 'microSD card')
                     : this._tr('events.storage_usb', null, 'USB');
                 fallbackEl.textContent = this._tr('surveillance.storage_fallback_warning', { volume: volName },
                     volName + ' unavailable — saving to internal storage');
@@ -952,7 +952,7 @@ BYD.storagePage = {
 
     // ==================== Factory dashcam (DVR) clean-up ====================
 
-    /** SD-only: shown while any category is (or is being set) on the SD card. */
+    /** SD-only: shown while any category is (or is being set) on the microSD card. */
     _cdrWanted() {
         const c = this.config;
         const sd = this.volumes.sdCardAvailable;

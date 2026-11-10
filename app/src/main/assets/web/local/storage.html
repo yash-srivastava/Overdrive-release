@@ -128,7 +128,7 @@
                         <span class="st-vol-bar" id="stVolIntBar" style="display:none;" aria-hidden="true"><span class="st-vol-fill" id="stVolIntFill"></span></span>
                     </div>
                     <div class="r-hero-stat">
-                        <span class="r-hero-stat-label st-vol-name"><span class="sd-status-dot offline" id="stVolSdDot" aria-hidden="true"></span><span id="stVolSdText" data-i18n="recording.sd_checking">SD Card: Checking...</span></span>
+                        <span class="r-hero-stat-label st-vol-name"><span class="sd-status-dot offline" id="stVolSdDot" aria-hidden="true"></span><span id="stVolSdText" data-i18n="recording.sd_checking">microSD card: Checking...</span></span>
                         <span class="r-hero-stat-value num" id="stVolSdFree">--</span>
                         <span class="st-vol-total num" id="stVolSdTotal"></span>
                         <span class="st-vol-bar" id="stVolSdBar" style="display:none;" aria-hidden="true"><span class="st-vol-fill" id="stVolSdFill"></span></span>
@@ -162,7 +162,7 @@
                             <div class="setting-control">
                                 <div class="btn-group" id="survStorageTypeBtns">
                                     <button class="btn-toggle active" data-value="INTERNAL" onclick="StoragePage.setSurvStorageType('INTERNAL')" data-i18n="trip.settings.storage_internal">Internal</button>
-                                    <button class="btn-toggle" data-value="SD_CARD" onclick="StoragePage.setSurvStorageType('SD_CARD')" id="btnSurvSdCard" data-i18n="trip.settings.storage_sd">SD card</button>
+                                    <button class="btn-toggle" data-value="SD_CARD" onclick="StoragePage.setSurvStorageType('SD_CARD')" id="btnSurvSdCard" data-i18n="trip.settings.storage_sd">microSD card</button>
                                     <button class="btn-toggle" data-value="USB" onclick="StoragePage.setSurvStorageType('USB')" id="btnSurvUsb" data-i18n="trip.settings.storage_usb">USB</button>
                                 </div>
                             </div>
@@ -224,7 +224,7 @@
                             <div class="setting-control">
                                 <div class="btn-group" id="recStorageTypeBtns">
                                     <button class="btn-toggle active" data-value="INTERNAL" onclick="StoragePage.setRecStorageType('INTERNAL')" data-i18n="trip.settings.storage_internal">Internal</button>
-                                    <button class="btn-toggle" data-value="SD_CARD" onclick="StoragePage.setRecStorageType('SD_CARD')" id="btnRecSdCard" data-i18n="trip.settings.storage_sd">SD card</button>
+                                    <button class="btn-toggle" data-value="SD_CARD" onclick="StoragePage.setRecStorageType('SD_CARD')" id="btnRecSdCard" data-i18n="trip.settings.storage_sd">microSD card</button>
                                     <button class="btn-toggle" data-value="USB" onclick="StoragePage.setRecStorageType('USB')" id="btnRecUsb" data-i18n="trip.settings.storage_usb">USB</button>
                                 </div>
                             </div>
@@ -288,7 +288,7 @@
                             <div class="setting-control">
                                 <div class="btn-group" id="tripStorageTypeBtns">
                                     <button class="btn-toggle active" data-value="INTERNAL" id="storageInternal" onclick="StoragePage.setTripStorageType('INTERNAL')" data-i18n="trip.settings.storage_internal">Internal</button>
-                                    <button class="btn-toggle" data-value="SD_CARD" id="storageSdCard" onclick="StoragePage.setTripStorageType('SD_CARD')" data-i18n="trip.settings.storage_sd">SD card</button>
+                                    <button class="btn-toggle" data-value="SD_CARD" id="storageSdCard" onclick="StoragePage.setTripStorageType('SD_CARD')" data-i18n="trip.settings.storage_sd">microSD card</button>
                                     <button class="btn-toggle" data-value="USB" id="storageUsb" onclick="StoragePage.setTripStorageType('USB')" data-i18n="trip.settings.storage_usb">USB</button>
                                 </div>
                             </div>
@@ -329,7 +329,7 @@
                     </div>
                 </div>
 
-                <!-- BYD factory dashcam clean-up: SD only, shown while a category uses the SD card.
+                <!-- BYD factory dashcam clean-up: SD only, shown while a category uses the microSD card.
                      Saves immediately (toggle, debounced sliders, clean-up). -->
                 <div class="card" id="cdrCleanupCard" style="display:none;">
                     <div class="card-header">
@@ -346,7 +346,7 @@
                         <div class="setting-row">
                             <div class="setting-info">
                                 <div class="setting-name" data-i18n="recording.cdr_auto_delete">Auto-Delete Old Dashcam Files</div>
-                                <div class="setting-desc" data-i18n="recording.cdr_auto_delete_desc">Free up SD card space by removing oldest BYD dashcam recordings</div>
+                                <div class="setting-desc" data-i18n="recording.cdr_auto_delete_desc">Free up microSD card space by removing oldest BYD dashcam recordings</div>
                             </div>
                             <div class="setting-control">
                                 <label class="toggle-switch">
@@ -375,7 +375,7 @@
                         <div class="setting-row" style="margin-top:12px;">
                             <div class="setting-info">
                                 <div class="setting-name" data-i18n="recording.cdr_reserved">Reserved Space for Overdrive</div>
-                                <div class="setting-desc" data-i18n="recording.cdr_reserved_desc">Keep this much free on SD card</div>
+                                <div class="setting-desc" data-i18n="recording.cdr_reserved_desc">Keep this much free on microSD card</div>
                             </div>
                             <div class="setting-control">
                                 <div class="slider-control">
@@ -431,7 +431,7 @@
                         <div class="setting-row st-action-row">
                             <div class="setting-info">
                                 <div class="setting-name" data-i18n="trip.recover.action">Rebuild from storage</div>
-                                <div class="setting-desc" data-i18n="trip.recover.desc">If trips vanished from your history after an SD card was briefly undetected, this rebuilds them from the telemetry files still on disk. Distance, speed, route and elevation are restored; energy, cost and driving scores aren’t available for recovered trips. Safe to run anytime.</div>
+                                <div class="setting-desc" data-i18n="trip.recover.desc">If trips vanished from your history after an microSD card was briefly undetected, this rebuilds them from the telemetry files still on disk. Distance, speed, route and elevation are restored; energy, cost and driving scores aren’t available for recovered trips. Safe to run anytime.</div>
                             </div>
                             <div class="setting-control">
                                 <button class="btn btn-secondary" id="tripRecoverBtn" onclick="StoragePage.recoverTrips()" data-i18n="trip.recover.button">Scan &amp; Recover Trips</button>
