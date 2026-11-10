@@ -32,6 +32,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 /**
  * Adapter for displaying recording files with video thumbnails.
@@ -83,6 +85,10 @@ class RecordingAdapter(
     private val thumbnailLock = Any()
     private var disposed = false
     private val thumbnailScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // The shared IO dispatcher is not a decoder concurrency limit: when several
+    // rows become visible together, each can start a native video-frame decode.
+    // Keep at most two thumbnail pipelines active on memory-constrained units.
+    private val thumbnailSlots = Semaphore(2)
     
     // Multi-select state
     var selectMode = false
@@ -587,12 +593,13 @@ class RecordingAdapter(
                 // Prefer the hero JPEG written by ThumbnailBuffer next to the MP4.
                 // Falls back to MediaMetadataRetriever for legacy clips with no
                 // sidecar.
-                val thumbnail = recording.heroThumbnailFile?.let { decodeJpeg(it) }
-                    ?: recording.file.takeIf { it.canRead() }?.let {
-                        extractThumbnail(it.absolutePath)
-                    }
-                    ?: recording.thumbnailUrl?.let { decodeRemoteThumbnail(it) }
-                    ?: return@launch
+                val thumbnail = thumbnailSlots.withPermit {
+                    recording.heroThumbnailFile?.let { decodeJpeg(it) }
+                        ?: recording.file.takeIf { it.canRead() }?.let {
+                            extractThumbnail(it.absolutePath)
+                        }
+                        ?: recording.thumbnailUrl?.let { decodeRemoteThumbnail(it) }
+                } ?: return@launch
                 val accepted = synchronized(thumbnailLock) {
                     if (disposed || !isActive) {
                         false
