@@ -37,6 +37,13 @@ public final class S3Destination implements Destination {
     private static final int MIN_PART = 5 * 1024 * 1024;
     private static final Pattern XML_CODE = Pattern.compile("<Code>([^<]+)</Code>");
     private static final Pattern UPLOAD_ID = Pattern.compile("<UploadId>([^<]+)</UploadId>");
+    // Reuse compiled expressions across paginated listings; Matcher instances remain per response.
+    private static final Pattern LIST_CONTENTS = Pattern.compile(
+            "<Contents>.*?<Key>([^<]+)</Key>.*?<Size>(\\d+)</Size>.*?</Contents>", Pattern.DOTALL);
+    private static final Pattern LIST_PREFIXES = Pattern.compile(
+            "<CommonPrefixes>\\s*<Prefix>([^<]+)</Prefix>");
+    private static final Pattern LIST_NEXT_TOKEN = Pattern.compile(
+            "<NextContinuationToken>([^<]+)</NextContinuationToken>");
 
     private final OkHttpClient http;
     private final String scheme;
@@ -379,18 +386,17 @@ public final class S3Destination implements Destination {
             try (Response r = exec(null, signed("GET", null, q, SigV4.EMPTY_SHA256, null, null).build())) {
                 String body = Http.body(r);
                 if (!r.isSuccessful()) throw error("S3 list", r, body);
-                Matcher c = Pattern.compile("<Contents>.*?<Key>([^<]+)</Key>.*?<Size>(\\d+)</Size>.*?</Contents>",
-                        Pattern.DOTALL).matcher(body);
+                Matcher c = LIST_CONTENTS.matcher(body);
                 while (c.find()) {
                     String k = xmlUnescape(c.group(1));
                     out.add(new RemoteEntry(k.substring(k.lastIndexOf('/') + 1), k, Long.parseLong(c.group(2)), false));
                 }
-                Matcher p = Pattern.compile("<CommonPrefixes>\\s*<Prefix>([^<]+)</Prefix>").matcher(body);
+                Matcher p = LIST_PREFIXES.matcher(body);
                 while (p.find()) {
                     String k = xmlUnescape(p.group(1)).replaceAll("/+$", "");
                     out.add(new RemoteEntry(k.substring(k.lastIndexOf('/') + 1), k, 0, true));
                 }
-                Matcher t = Pattern.compile("<NextContinuationToken>([^<]+)</NextContinuationToken>").matcher(body);
+                Matcher t = LIST_NEXT_TOKEN.matcher(body);
                 token = body.contains("<IsTruncated>true</IsTruncated>") && t.find() ? xmlUnescape(t.group(1)) : null;
             }
         } while (token != null && out.size() < 20000);
