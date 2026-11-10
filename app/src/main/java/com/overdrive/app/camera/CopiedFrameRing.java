@@ -84,6 +84,9 @@ public final class CopiedFrameRing {
     private int lastWritten = -1;     // guarded by this
     private int writingSlot = NO_PIN; // guarded by this — mid-blit slot
     private int pinnedSlot = NO_PIN;  // guarded by this — lane-held slot
+    // Each completed overwrite advances the slot generation. A queued encoder
+    // packet must not sample a slot that now contains a different frame.
+    private final long[] slotGenerations; // guarded by this
 
     // Fullscreen identity quad. Texcoords map 1:1 so the ring content is a
     // texel-for-texel proxy of the OES source — downstream geometry
@@ -121,6 +124,7 @@ public final class CopiedFrameRing {
         this.slotCount = slotCount;
         this.width = width;
         this.height = height;
+        this.slotGenerations = new long[slotCount];
     }
 
     /**
@@ -256,6 +260,7 @@ public final class CopiedFrameRing {
             GLES20.glFinish();
 
             synchronized (this) {
+                slotGenerations[slot]++;
                 lastWritten = slot;
                 writingSlot = NO_PIN;
             }
@@ -271,6 +276,13 @@ public final class CopiedFrameRing {
         }
     }
 
+    /** Version of the pixels currently published in this slot. Writer reads
+     * this immediately after copyFrom; the encoder verifies it when pinning. */
+    public synchronized long generationOf(int slot) {
+        if (!initialized || slot < 0 || slot >= slotCount) return -1;
+        return slotGenerations[slot];
+    }
+
     /** Texture id backing {@code slot}, or 0 when out of range/uninitialized. */
     public int textureOf(int slot) {
         if (!initialized || slot < 0 || slot >= slotCount) return 0;
@@ -284,8 +296,10 @@ public final class CopiedFrameRing {
      * slot — the caller must then SKIP the draw entirely (latest-wins delivers
      * a fresh packet within a frame), never sample unpinned.
      */
-    public synchronized boolean pinForRead(int slot) {
-        if (slot < 0 || slot >= slotCount) return false;
+    public synchronized boolean pinForRead(int slot, long expectedGeneration) {
+        if (!initialized || slot < 0 || slot >= slotCount
+                || expectedGeneration < 0
+                || slotGenerations[slot] != expectedGeneration) return false;
         if (pinnedSlot != NO_PIN) {
             logger.warn(name + ": pinForRead(" + slot + ") refused — slot "
                 + pinnedSlot + " still pinned (unpin missed?)");
@@ -332,6 +346,7 @@ public final class CopiedFrameRing {
             pinnedSlot = NO_PIN;
             writingSlot = NO_PIN;
             lastWritten = -1;
+            java.util.Arrays.fill(slotGenerations, 0L);
         }
     }
 }
