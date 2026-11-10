@@ -139,7 +139,11 @@ public class PerformanceMonitor {
             return t;
         });
         
-        scheduler.scheduleAtFixedRate(this::collectMetrics, 0, SAMPLE_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        // A sysfs/proc sweep can exceed the sample interval on slower BYD head units.
+        // Fixed-rate scheduling immediately runs missed samples back-to-back,
+        // keeping the sampler busy instead of giving the UI/camera time to run.
+        // Fixed-delay guarantees a full idle interval after each sweep.
+        scheduler.scheduleWithFixedDelay(this::collectMetrics, 0, SAMPLE_INTERVAL_MS, TimeUnit.MILLISECONDS);
         logger.info("Performance monitoring started");
     }
     
