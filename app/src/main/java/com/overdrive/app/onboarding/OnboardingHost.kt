@@ -43,14 +43,26 @@ class OnboardingHost(
     // every ENCODER_POLL_MS and read synchronously by the overlay's emphasis gate so a
     // decorative pulse never competes with the H.265 encoder on the shared bus.
     @Volatile private var encoderBusyCached = false
+    // Wait for each ADB probe before scheduling another: slow probes must not pile up.
+    private var encoderPollGeneration = 0
     private val encoderPoll = object : Runnable {
         override fun run() {
+            val generation = encoderPollGeneration
             try {
-                adbLauncher.isDaemonRunning { running -> encoderBusyCached = running }
+                adbLauncher.isDaemonRunning { running ->
+                    mainHandler.post {
+                        // A dismissed/restarted tour must not accept an old result.
+                        if (!started || generation != encoderPollGeneration) return@post
+                        encoderBusyCached = running
+                        mainHandler.postDelayed(this, ENCODER_POLL_MS)
+                    }
+                }
             } catch (t: Throwable) {
                 Log.w(TAG, "encoder poll failed: ${t.message}")
+                if (started && generation == encoderPollGeneration) {
+                    mainHandler.postDelayed(this, ENCODER_POLL_MS)
+                }
             }
-            mainHandler.postDelayed(this, ENCODER_POLL_MS)
         }
     }
 
@@ -94,6 +106,8 @@ class OnboardingHost(
         overlay = ov
         started = true
 
+        encoderPollGeneration++
+        encoderBusyCached = false
         mainHandler.post(encoderPoll)
         Log.i(TAG, "Onboarding started (expert=$expertMode replay=$replayMode)")
         if (expertMode) launchExpertTrack() else routeFirstStep()
@@ -109,6 +123,7 @@ class OnboardingHost(
 
     /** Tear everything down (ACC-ON, completion, or replay restart). */
     fun dismiss() {
+        encoderPollGeneration++
         mainHandler.removeCallbacks(encoderPoll)
         // Cancel the camera coach FIRST so its ~10s applying animator can't keep running
         // against a detached overlay (transient Activity leak) after we remove the view.
