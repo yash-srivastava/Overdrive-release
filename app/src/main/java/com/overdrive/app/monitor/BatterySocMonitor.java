@@ -18,6 +18,10 @@ public class BatterySocMonitor extends BaseDeviceMonitor<BatterySocData> {
     private final AtomicReference<BatterySocData> cachedData = new AtomicReference<>();
     private final SocListener listener = new SocListener();
     
+    private static final long CARSVC_POLL_INTERVAL_MS = 60_000L;
+    private volatile boolean carSvcPollingMode = false;
+    private Thread pollThread;
+    
     public BatterySocMonitor() {
         super("BatterySocMonitor");
     }
@@ -25,8 +29,18 @@ public class BatterySocMonitor extends BaseDeviceMonitor<BatterySocData> {
     @Override
     public void init(Context context) {
         this.context = context;
+        carSvcPollingMode = false;
         
         try {
+            if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                    && android.os.Process.myUid() < android.os.Process.FIRST_APPLICATION_UID) {
+                carSvcPollingMode = true;
+                pollCarSvcSocOnce();
+                markAvailable();
+                log("Initialized in DiLink 5 CarSvcTelemetry VHAL polling mode");
+                return;
+            }
+
             log("Initializing BYDAutoStatisticDevice via reflection...");
             
             // Context is already PermissionBypassContext
@@ -72,6 +86,36 @@ public class BatterySocMonitor extends BaseDeviceMonitor<BatterySocData> {
     
     @Override
     public void start() {
+        if (carSvcPollingMode) {
+            if (isRunning.getAndSet(true)) {
+                log("Already running");
+                return;
+            }
+            pollThread = new Thread(() -> {
+                log("CarSvcTelemetry SOC polling thread started");
+                while (isRunning.get()) {
+                    try {
+                        pollCarSvcSocOnce();
+                        Thread.sleep(CARSVC_POLL_INTERVAL_MS);
+                    } catch (InterruptedException e) {
+                        break;
+                    } catch (Throwable t) {
+                        logError("CarSvcTelemetry SOC poll error", t);
+                        try {
+                            Thread.sleep(CARSVC_POLL_INTERVAL_MS);
+                        } catch (InterruptedException ie) {
+                            break;
+                        }
+                    }
+                }
+                log("CarSvcTelemetry SOC polling thread stopped");
+            }, "BatterySocPoll");
+            pollThread.setDaemon(true);
+            pollThread.start();
+            log("Started successfully (CarSvcTelemetry polling mode)");
+            return;
+        }
+
         if (device == null) {
             logError("Cannot start - device not initialized", null);
             return;
@@ -122,6 +166,15 @@ public class BatterySocMonitor extends BaseDeviceMonitor<BatterySocData> {
         }
         
         cancelRetries();
+
+        if (pollThread != null) {
+            pollThread.interrupt();
+            try {
+                pollThread.join(1000);
+            } catch (InterruptedException ignored) {
+            }
+            pollThread = null;
+        }
         
         if (device != null) {
             try {
@@ -146,6 +199,27 @@ public class BatterySocMonitor extends BaseDeviceMonitor<BatterySocData> {
     public long getLastUpdateTime() {
         BatterySocData data = cachedData.get();
         return data != null ? data.timestamp : 0;
+    }
+
+    private void pollCarSvcSocOnce() {
+        double percentage = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.socPercentValue();
+        if (Double.isNaN(percentage) || percentage < 0.0 || percentage > 100.0) {
+            return;
+        }
+        BatterySocData oldData = cachedData.get();
+        BatterySocData newData = new BatterySocData(percentage);
+        cachedData.set(newData);
+        if (oldData == null || Math.abs(percentage - oldData.socPercent) >= 1.0) {
+            log("SOC (CarSvcTelemetry): " + percentage + "%");
+        }
+        if (newData.isCritical) {
+            log("CRITICAL: Battery SOC is critically low (" + percentage + "%)!");
+        } else if (newData.isLow && (oldData == null || !oldData.isLow)) {
+            log("WARNING: Battery SOC is low (" + percentage + "%)");
+        }
+        try {
+            com.overdrive.app.power.SocCutoffMonitor.notifyElecPercentage(percentage);
+        } catch (Throwable ignored) {}
     }
     
     /**

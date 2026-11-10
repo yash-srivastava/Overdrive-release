@@ -375,10 +375,59 @@ object CarSvcTelemetry {
     @JvmStatic
     fun powerModeLine(): String? {
         if (!isActive()) return null
-        val snapshot = dumpSnapshot() ?: return null
+        val snapshot = dumpSnapshot()
+        if (snapshot != null) {
+            return freshPowerModeLine(
+                snapshot.text, snapshot.observedAtElapsedMs
+            ) { android.os.SystemClock.elapsedRealtime() }
+        }
+        val fastSnapshot = dumpAudioPowerModeSnapshot() ?: return null
         return freshPowerModeLine(
-            snapshot.text, snapshot.observedAtElapsedMs
+            fastSnapshot.first, fastSnapshot.second
         ) { android.os.SystemClock.elapsedRealtime() }
+    }
+
+    /**
+     * Targeted fallback dump of CarEnhancedAudioCore / CarAudioService (~30 ms)
+     * used when the full VHAL car_service dump exceeds DUMP_TTL_MS under load.
+     */
+    private fun dumpAudioPowerModeSnapshot(): Pair<String, Long>? {
+        val path = com.overdrive.app.util.ScratchRoot.path(
+            ".carsvc_audio_${Thread.currentThread().id}_${System.nanoTime()}.txt"
+        )
+        val file = File(path)
+        var process: Process? = null
+        return try {
+            val observedAtElapsedMs = android.os.SystemClock.elapsedRealtime()
+            process = Runtime.getRuntime().exec(
+                arrayOf(
+                    "/system/bin/sh",
+                    "-c",
+                    com.overdrive.app.util.ScratchRoot.remap(
+                        "dumpsys -t 2 car_service --services CarEnhancedAudioCore CarAudioService > $path 2>&1"
+                    )
+                )
+            )
+            if (!process.waitFor(DUMP_TTL_MS, TimeUnit.MILLISECONDS)) {
+                process.destroyForcibly()
+                return null
+            }
+            if (!file.isFile) return null
+            val text = file.readText()
+            if (text.isBlank()) return null
+            if (!dumpSourceFresh(android.os.SystemClock.elapsedRealtime(), observedAtElapsedMs)) {
+                return null
+            }
+            text to observedAtElapsedMs
+        } catch (_: Throwable) {
+            null
+        } finally {
+            try {
+                process?.destroy()
+                if (file.exists()) file.delete()
+            } catch (_: Throwable) {
+            }
+        }
     }
 
     internal fun freshPowerModeLine(

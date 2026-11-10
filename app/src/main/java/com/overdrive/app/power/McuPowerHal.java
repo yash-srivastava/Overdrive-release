@@ -125,6 +125,7 @@ public final class McuPowerHal {
      * fleet-wide requestSentryWake/Sleep writers.
      */
     private static volatile Object cachedLeaseSpecialDevice;
+    private static volatile boolean leaseSpecialDeviceUnavailable;
 
     private McuPowerHal() {}
 
@@ -140,6 +141,7 @@ public final class McuPowerHal {
         cachedPowerDevice = null;
         cachedSpecialDevice = null;
         cachedLeaseSpecialDevice = null;
+        leaseSpecialDeviceUnavailable = false;
     }
 
     /**
@@ -336,6 +338,7 @@ public final class McuPowerHal {
      */
     private static Object resolveLeaseSpecialDevice() {
         if (cachedLeaseSpecialDevice != null) return cachedLeaseSpecialDevice;
+        if (leaseSpecialDeviceUnavailable) return null;
         if (appContext == null) {
             logger.debug("resolveLeaseSpecialDevice: no appContext — call setAppContext first");
             return null;
@@ -354,12 +357,20 @@ public final class McuPowerHal {
                         + " -> " + device.getClass().getName());
                 return device;
             } catch (ClassNotFoundException e) {
+                Object injected = BydDeviceHelper.getDevice(fqn, appContext);
+                if (injected != null) {
+                    cachedLeaseSpecialDevice = injected;
+                    logger.info("resolveLeaseSpecialDevice: " + fqn
+                            + " -> " + injected.getClass().getName());
+                    return injected;
+                }
                 logger.debug("resolveLeaseSpecialDevice: " + fqn + " not present");
             } catch (Throwable t) {
                 logger.debug("resolveLeaseSpecialDevice: " + fqn + " failed: " + t.getMessage());
             }
         }
-        logger.warn("resolveLeaseSpecialDevice: BYDAutoSpecialDevice unavailable ("
+        leaseSpecialDeviceUnavailable = true;
+        logger.info("resolveLeaseSpecialDevice: BYDAutoSpecialDevice unavailable ("
                 + SPECIAL_CLASS_CANDIDATES.length
                 + " candidates probed) — lease sentry-flag writes will no-op");
         return null;

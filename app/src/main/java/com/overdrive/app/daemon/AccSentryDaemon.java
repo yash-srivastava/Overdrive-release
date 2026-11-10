@@ -6526,8 +6526,45 @@ public class AccSentryDaemon {
                         .ParkedLinkContract
                         .RESULT_STALE_GENERATION;
             }
-            return sendParkedLinkBroadcast(
+            int rc = sendParkedLinkBroadcast(
                     generation, start ? "start" : "stop");
+            if (rc == com.overdrive.app.power.ParkedLinkContract.RESULT_BROADCAST_UNKNOWN
+                    || rc == com.overdrive.app.power.ParkedLinkContract.RESULT_BIND_FAILED
+                    || rc == com.overdrive.app.power.ParkedLinkContract.RESULT_SERVICE_UNAVAILABLE) {
+                int qnxRc = tryQnxVehicleNetworkHold(generation, start);
+                if (qnxRc != Integer.MIN_VALUE) {
+                    return qnxRc;
+                }
+            }
+            return rc;
+        }
+
+        private int tryQnxVehicleNetworkHold(long generation, boolean start) {
+            try {
+                if (start && !isSentryTransitionCurrent(generation, true)) {
+                    return com.overdrive.app.power.ParkedLinkContract.RESULT_STALE_GENERATION;
+                }
+                com.overdrive.app.byd.dilink5.QnxMessageBus bus =
+                        com.overdrive.app.byd.dilink5.QnxMessageBus.get();
+                if (!bus.isAvailable()) {
+                    return Integer.MIN_VALUE;
+                }
+                int qnxResult = bus.setVehicleNetworkHold(start);
+                if (qnxResult == com.overdrive.app.byd.dilink5.QnxMessageBus.RESULT_OK) {
+                    log("Di5 keep-alive: parked link " + (start ? "START" : "STOP")
+                            + " confirmed via QnxMessageBus fallback for generation " + generation);
+                    return com.overdrive.app.power.ParkedLinkContract.RESULT_CONFIRMED;
+                }
+                if (qnxResult == com.overdrive.app.byd.dilink5.QnxMessageBus.RESULT_NO_ANSWER) {
+                    return com.overdrive.app.power.ParkedLinkContract.RESULT_DISPATCHED_UNCONFIRMED;
+                }
+                if (qnxResult == com.overdrive.app.byd.dilink5.QnxMessageBus.RESULT_FAIL) {
+                    return com.overdrive.app.power.ParkedLinkContract.RESULT_REJECTED;
+                }
+            } catch (Throwable t) {
+                log("Di5 keep-alive: QnxMessageBus fallback failed: " + t.getMessage());
+            }
+            return Integer.MIN_VALUE;
         }
 
         @Override
@@ -6614,16 +6651,21 @@ public class AccSentryDaemon {
             try {
                 Object ota = com.overdrive.app.byd.BydDeviceHelper.getDevice(
                         "android.hardware.bydauto.ota.BYDAutoOtaDevice", appContext);
-                if (ota == null) return null;
-                // Two sources, and only a physically plausible 12V reading counts: a HAL
-                // sentinel such as 6553.5 or 65535 must read as "no sample", never as healthy.
-                Double volts = plausible12v(com.overdrive.app.byd.BydDeviceHelper
-                        .callGetter(ota, "getBatteryPowerVoltage"));
-                if (volts == null) {
-                    volts = plausible12v(com.overdrive.app.byd.BydDeviceHelper
-                            .callGetter(ota, "getBatteryVoltage", 0));
+                if (ota != null) {
+                    // Two sources, and only a physically plausible 12V reading counts: a HAL
+                    // sentinel such as 6553.5 or 65535 must read as "no sample", never as healthy.
+                    Double volts = plausible12v(com.overdrive.app.byd.BydDeviceHelper
+                            .callGetter(ota, "getBatteryPowerVoltage"));
+                    if (volts == null) {
+                        volts = plausible12v(com.overdrive.app.byd.BydDeviceHelper
+                                .callGetter(ota, "getBatteryVoltage", 0));
+                    }
+                    if (volts != null) {
+                        return volts;
+                    }
                 }
-                return volts;
+                float carSvcVolts = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.batteryVoltage12v();
+                return plausible12v(Float.valueOf(carSvcVolts));
             } catch (Throwable t) {
                 return null;
             }
@@ -9385,7 +9427,12 @@ public class AccSentryDaemon {
             return android.content.pm.PackageManager.PERMISSION_GRANTED;
         }
         @Override public Context getApplicationContext() {
-            try { return super.getApplicationContext(); } catch (NullPointerException e) { return this; }
+            try {
+                Context appCtx = super.getApplicationContext();
+                return appCtx != null ? appCtx : this;
+            } catch (NullPointerException e) {
+                return this;
+            }
         }
         @Override public String getPackageName() {
             try { return super.getPackageName(); } catch (NullPointerException e) { return APP_PACKAGE_NAME(); }
