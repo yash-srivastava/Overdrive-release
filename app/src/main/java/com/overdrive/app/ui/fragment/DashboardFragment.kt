@@ -628,10 +628,16 @@ class DashboardFragment : Fragment() {
             val result = fetchVehicleStatus()
             mainHandler.post {
                 if (!isAdded || view == null || generation != viewGeneration) return@post
+                val previousVehicleState = dashboardState.vehicle
                 dashboardState = DashboardStateReducer.status(dashboardState, result)
                 skeleton?.markLoaded(R.id.vehicleSocSkeleton)
                 skeleton?.markLoaded(R.id.vehicleRangeSkeleton)
-                renderVehicleState()
+                // /status may return unchanged values for many successive polls.
+                // Avoid rebuilding text, layout, and the animated SOC gauge when
+                // the displayed vehicle state has not actually changed.
+                if (dashboardState.vehicle != previousVehicleState) {
+                    renderVehicleState()
+                }
                 if (dashboardResumed) {
                     mainHandler.postDelayed(statusRefreshRunnable, STATUS_REFRESH_MS)
                 }
