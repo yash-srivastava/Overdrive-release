@@ -2245,17 +2245,12 @@ public class AppUpdater {
         // never a broad overdrive_config* / *.json glob.
         script.append("rm -f /data/local/tmp/overdrive_config.json.tmp.* "
                 + com.overdrive.app.util.ScratchRoot.path("overdrive_config.json.bak.tmp") + " 2>/dev/null\n");
-        // Clear only machine-written CORE markers. Pre-existing UI/Telegram
-        // markers are durable manual stop intent and survive the update.
-        // POST_UPDATE_FILE / UPDATE_IN_PROGRESS_FILE stay in place; the new
-        // process consumes them via UpdateLifecycle.
-        script.append("for S in /data/local/tmp/camera_daemon.disabled "
-                + com.overdrive.app.util.ScratchRoot.path("acc_sentry_daemon.disabled;") + " do\n");
-        script.append("  R=$(head -1 \"$S\" 2>/dev/null)\n");
-        script.append("  case \"$R\" in 'disabled for update'*|"
-                + "'disabled by stopAllDaemons sweep'*|'disabled by killDaemon'*) "
-                + "rm -f \"$S\" 2>/dev/null;; esac\n");
-        script.append("done\n");
+        // Keep core daemon sentinels (acc_sentry_daemon.disabled / camera_daemon.disabled)
+        // intact during pm install so shell watchdogs do NOT respawn background daemons
+        // while the APK is being uninstalled and reinstalled. Respawning while the app is dead
+        // triggers catastrophic system_server Binder exhaustion deadlocks via broadcast timeouts.
+        // UpdateLifecycle.hardResetDaemons() clears these machine-written markers post-update
+        // once the newly installed app is booted and ready to service IPC/broadcasts.
         script.append("sleep 2\n");
         // Step 4: install. `pm install -r -d` allows downgrades (-d) so a
         // bad release doesn't strand the user, and replaces the existing app
