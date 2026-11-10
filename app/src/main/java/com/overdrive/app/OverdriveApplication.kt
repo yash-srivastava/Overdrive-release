@@ -72,6 +72,7 @@ class OverdriveApplication : Application() {
         // saved app-private while daemon IPC was unavailable, replay it once
         // the daemon comes back instead of letting an old server locale win.
         if (packageName == android.app.Application.getProcessName()) {
+            com.overdrive.app.launcher.DiLink5AdbPermissionBootstrap.startIfEnabled(this)
             LocaleManager.replayPendingWriteAsync()
         }
 

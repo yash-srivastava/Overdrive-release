@@ -34,6 +34,21 @@ Free, open-source dashcam and sentry mode app built specifically for BYD vehicle
 ---
 
 
+### DiLink 5: optional ADB recovery permission setup
+
+In **Settings → Daemons** on DiLink 5, enable **Prepare automatic ADB recovery**
+while wireless ADB is already running and authorized. The app will periodically
+attempt to grant itself `WRITE_SECURE_SETTINGS` using that authorized connection.
+The setting is off by default and persists across app restarts. This complements
+the existing DiLink 5 settings re-enable and OEM fallback mechanisms; it does not
+replace their port watcher, change their retry policy, or enable recovery on DiLink 3/4.
+
+The existing DiLink 5 recovery needs the permission before ADB disappears.
+Without it, or if the firmware does not restart the TCP listener, recovery may
+require manual intervention. A stopped app process cannot perform recovery.
+Wireless debugging may expose the head unit to other devices on reachable networks;
+use it only where that risk is acceptable.
+
 ## Quick Start (Use Pre-built APK)
 
 Download the latest APK from [GitHub Releases](https://github.com/yash-srivastava/Overdrive-release/releases/tag/alpha) and install it directly on your BYD head unit.

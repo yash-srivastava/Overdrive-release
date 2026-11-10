@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="di5_adb_recovery_setup_label">Prepare automatic ADB recovery (DiLink 5)</string>
+    <string name="di5_adb_recovery_setup_description">Optional: while wireless ADB is already enabled and authorized, attempt to grant WRITE_SECURE_SETTINGS for the existing DiLink 5 recovery. Off by default. This does not bypass ADB authorization, and recovery is not guaranteed when firmware disables the listener. Wireless ADB is a security risk on untrusted networks.</string>
+</resources>

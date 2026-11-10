@@ -24,6 +24,7 @@ object PreferencesManager {
     private const val KEY_ZROK_UNIQUE_NAME = "zrok_unique_name"
     private const val KEY_ZROK_ENABLE_TOKEN = "zrok_enable_token"
     private const val KEY_LOGS_EXPANDED = "logs_expanded"
+    private const val KEY_DI5_ADB_RECOVERY_SETUP = "dilink5_adb_recovery_setup"
     private const val KEY_NAVIGATION_VISIBLE_V1 = "navigation_visible_v1"
     /** Rail keys the user has already been offered, so a NEW one can default to
      *  visible without un-hiding something they deliberately switched off. */
@@ -146,6 +147,13 @@ object PreferencesManager {
         return type in getEnabledDaemons()
     }
     
+    /** Opt-in permission setup for the existing DiLink 5 ADB recovery path. */
+    fun isDiLink5AdbRecoverySetupEnabled(): Boolean =
+        requirePrefs().getBoolean(KEY_DI5_ADB_RECOVERY_SETUP, false)
+
+    fun setDiLink5AdbRecoverySetupEnabled(enabled: Boolean): Boolean =
+        requirePrefs().edit().putBoolean(KEY_DI5_ADB_RECOVERY_SETUP, enabled).commit()
+
     // Selected Cameras
     fun getSelectedCameras(): Set<Int> {
         val strings = requirePrefs().getStringSet(KEY_SELECTED_CAMERAS, setOf("1")) ?: setOf("1")
