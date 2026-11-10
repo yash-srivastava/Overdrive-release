@@ -295,9 +295,18 @@ public final class H2StoreSalvage {
     }
 
     private static void hideChunk(File file, List<long[]> headers, long id) throws IOException {
+        // Reuse a single zero-filled block when hiding matching chunk headers.
+        ByteBuffer zeros = ByteBuffer.allocate(BLOCK_SIZE);
         try (FileChannel channel = FileChannel.open(file.toPath(), StandardOpenOption.WRITE)) {
             for (long[] header : headers) {
-                if (header[1] == id) channel.write(ByteBuffer.allocate(BLOCK_SIZE), header[0]);
+                if (header[1] != id) continue;
+                zeros.clear();
+                long position = header[0];
+                while (zeros.hasRemaining()) {
+                    int written = channel.write(zeros, position);
+                    if (written <= 0) throw new IOException("Could not clear chunk header at " + position);
+                    position += written;
+                }
             }
         }
     }
