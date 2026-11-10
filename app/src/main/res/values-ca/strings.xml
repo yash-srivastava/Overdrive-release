@@ -1870,4 +1870,7 @@
     <string name="voice_enroll_learning">Estic aprenent la vostra veu...</string>
     <string name="voice_enroll_done">Fet — L\'OverDrive ara coneix la vostra veu</string>
     <string name="voice_enroll_failed">No he pogut aprendre la vostra veu. Torneu-ho a provar en un cotxe tranquil</string>
+    <string name="settings_overlay_chip_opacity">Visibilitat del xip</string>
+    <string name="settings_overlay_chip_opacity_subtitle">Més alt = més prominent. Interval de 10 a 100 (percentatge es mostra a la dreta).</string>
+    <string name="settings_overlay_chip_opacity_value">%1$d%%</string>
 </resources>
