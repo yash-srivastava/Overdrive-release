@@ -2120,17 +2120,18 @@ public class SurveillanceEngineGpu {
      * simultaneously, they're serviced round-robin across consecutive
      * render frames.
      */
-    public void serviceFoveatedRequestsOnGlThread() {
+    /** Returns true if a crop was attempted (and could have queued GPU work). */
+    public boolean serviceFoveatedRequestsOnGlThread() {
         FoveatedCropper cropper = this.foveatedCropper;
         int texId = this.cameraTextureId;
-        if (cropper == null || texId < 0 || !cropper.isInitialized()) return;
+        if (cropper == null || texId < 0 || !cropper.isInitialized()) return false;
 
         // SOTA throttle: even with double-buffered async readback, the row pack
         // + Y-flip costs ~3 ms per call on Adreno 610. Capping to one service
         // per 150 ms keeps total per-frame GL cost predictable across the
         // entire event window.
         long nowNs = System.nanoTime();
-        if (nowNs - lastFoveatedServiceNs < FOVEATED_SERVICE_INTERVAL_NS) return;
+        if (nowNs - lastFoveatedServiceNs < FOVEATED_SERVICE_INTERVAL_NS) return false;
 
         // Snapshot the requests under the lock, then service at most one per
         // call. Round-robin via a per-instance cursor so no quadrant starves.
@@ -2149,7 +2150,7 @@ public class SurveillanceEngineGpu {
                 }
             }
         }
-        if (qToServe < 0) return;
+        if (qToServe < 0) return false;
 
         lastFoveatedServiceNs = nowNs;
 
@@ -2162,11 +2163,11 @@ public class SurveillanceEngineGpu {
             result = cropper.crop(texId, qToServe, cx, cy);
         } catch (Throwable t) {
             logger.warn("Foveated crop (GL inline) failed: " + t.getMessage());
-            return;
+            return true; // A draw may already have been queued.
         }
         if (result == null || result.rgb == null || result.quadrant < 0
                 || result.quadrant >= FOVEATED_NUM_QUADRANTS) {
-            return;
+            return true; // Async crop can return null after a GPU submission.
         }
         // Deep-copy: cropper.rgb is a pointer to its shared internal buffer;
         // the next service call will overwrite it. The copy is 1.2 MB —
@@ -2183,6 +2184,7 @@ public class SurveillanceEngineGpu {
                 result.width, result.height,
                 result.mapAx, result.mapBx, result.mapAy, result.mapBy,
                 result.hasAffine(), result.captureNanos));
+        return true;
     }
 
     private int foveatedRoundRobin = 0;
