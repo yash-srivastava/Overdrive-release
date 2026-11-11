@@ -795,6 +795,17 @@
             flex: 1 1 auto;
             min-width: 0;
             padding: 12px 14px 14px;
+            /* New clips have a solid grey info panel. Only the info panel
+               changes; thumbnails and trigger/severity tags remain intact. */
+            background-color: rgba(120, 128, 138, 0.16);
+            transition: background-color 160ms ease;
+        }
+        .recording-card.watched .recording-info {
+            background-color: rgba(120, 128, 138, 0.045);
+        }
+        .recording-card.watched .clip-time {
+            color: var(--on-surface-variant);
+            font-weight: 500;
         }
 
         .clip-line {
@@ -2797,7 +2808,7 @@
     <script src="../shared/core.js?v=24"></script>
     <script src="../shared/update-flow.js?v=3"></script>
     <script src="../shared/safekeep-badges.js?v=3"></script>
-    <script src="../shared/events.js?v=revamp2"></script>
+    <script src="../shared/events.js?v=watched1"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');

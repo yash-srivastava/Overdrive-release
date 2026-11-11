@@ -216,6 +216,16 @@ public class RecordingsApiHandler {
             return true;
         }
 
+        // Playback acknowledgement for a stable recording id and its exact
+        // file fingerprint. Must precede the generic id DELETE route.
+        if (path.startsWith("/api/recordings/id/")
+                && path.endsWith("/watched") && method.equals("POST")) {
+            String recordingId = path.substring("/api/recordings/id/".length(),
+                    path.length() - "/watched".length());
+            markRecordingWatched(out, recordingId, body);
+            return true;
+        }
+
         if (path.startsWith("/api/recordings/id/") && method.equals("DELETE")) {
             String recordingId = stripQuery(path.substring("/api/recordings/id/".length()));
             deleteRecordingById(out, recordingId);
@@ -274,6 +284,41 @@ public class RecordingsApiHandler {
         return false;
     }
     
+    /** Persist watched state on the daemon so WebView and remote clients agree. */
+    private static void markRecordingWatched(OutputStream out, String recordingId,
+                                              String body) throws Exception {
+        if (!validRecordingId(recordingId)) {
+            HttpResponse.sendError(out, 400, "Invalid recording identity");
+            return;
+        }
+        JSONObject request;
+        try {
+            request = new JSONObject(body == null ? "" : body);
+            if (!request.has("sizeBytes") || !request.has("mp4Mtime")) {
+                throw new IllegalArgumentException("Missing recording fingerprint");
+            }
+        } catch (Exception invalid) {
+            HttpResponse.sendError(out, 400, "Invalid recording fingerprint");
+            return;
+        }
+        long size = request.optLong("sizeBytes", -1);
+        long mtime = request.optLong("mp4Mtime", -1);
+        if (size < 0 || mtime < 0) {
+            HttpResponse.sendError(out, 400, "Invalid recording fingerprint");
+            return;
+        }
+        RecordingsIndex index = RecordingsIndex.getInstance();
+        if (!index.isAvailable()) {
+            HttpResponse.sendError(out, 503, "Recordings index unavailable");
+            return;
+        }
+        if (!index.markWatched(recordingId, size, mtime)) {
+            HttpResponse.sendError(out, 404, "Recording was removed or replaced");
+            return;
+        }
+        HttpResponse.sendJson(out, "{\"success\":true}");
+    }
+
     private static int parseIntParam(String value, int defaultValue) {
         if (value == null || value.isEmpty()) return defaultValue;
         try {
