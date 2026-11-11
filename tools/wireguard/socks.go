@@ -282,6 +282,11 @@ func errToReply(err error) byte {
 // half-closing would keep both sockets and both goroutines forever.
 var pipeIdle = exposeIdle
 
+// Reuse transfer buffers across SOCKS sessions to reduce allocation churn.
+var pipeBuffers = sync.Pool{New: func() interface{} {
+	return make([]byte, 32*1024)
+}}
+
 // pipe copies in both directions until both are done, then closes both
 // connections. A finished direction half-closes its destination when
 // possible. A write error means the destination is gone, so both conns are
@@ -296,11 +301,14 @@ func pipe(a, b net.Conn) {
 	wg.Add(2)
 	cp := func(dst, src net.Conn) {
 		defer wg.Done()
-		buf := make([]byte, 32*1024)
+		buf := pipeBuffers.Get().([]byte)
+		defer pipeBuffers.Put(buf)
 		for {
 			n, err := src.Read(buf)
 			if n > 0 {
-				if _, werr := dst.Write(buf[:n]); werr != nil {
+				// A short write without an error must not silently drop data.
+				written, werr := dst.Write(buf[:n])
+				if werr != nil || written != n {
 					_ = a.Close()
 					_ = b.Close()
 					return
