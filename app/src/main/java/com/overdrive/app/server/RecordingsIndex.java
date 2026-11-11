@@ -1842,9 +1842,15 @@ public final class RecordingsIndex {
         List<Object> args = new ArrayList<>();
         buildWhere(f, where, args);
 
-        String sql = "SELECT *" + fromRecordings(f)
+        // One indexed watched lookup per returned row, not an additional
+        // HTTP request per card. The fingerprint rejects a replaced file.
+        String sql = "SELECT recordings.*, EXISTS (SELECT 1 FROM recordings_watched w"
+                + " WHERE w.recording_id = recordings.recording_id"
+                + " AND w.size_bytes = recordings.size_bytes"
+                + " AND w.mp4_mtime = recordings.mp4_mtime) AS watched"
+                + fromRecordings(f)
                 + (where.length() > 0 ? " WHERE " + where : "")
-            + " ORDER BY ts_ms DESC, root_rank ASC"
+                + " ORDER BY ts_ms DESC, root_rank ASC"
                 + " LIMIT ? OFFSET ?";
 
         // The result list is built INSIDE the body so a reconnect-retry
@@ -1862,6 +1868,40 @@ public final class RecordingsIndex {
                 }
             }
             return out;
+        });
+    }
+
+    /**
+     * Record completed playback for the exact physical file revision the
+     * client displayed. A replacement at the same stable path id must not
+     * inherit the previous recording's watched state.
+     */
+    public synchronized boolean markWatched(String recordingId, long sizeBytes, long mp4Mtime) {
+        if (recordingId == null || !recordingId.matches("[0-9a-f]{32}")
+                || sizeBytes < 0 || mp4Mtime < 0) return false;
+        return withRetry("markWatched", Boolean.FALSE, () -> {
+            try (PreparedStatement find = connection.prepareStatement(
+                    "SELECT 1 FROM recordings WHERE recording_id = ?"
+                            + " AND size_bytes = ? AND mp4_mtime = ?"
+                            + " AND is_available = TRUE")) {
+                find.setString(1, recordingId);
+                find.setLong(2, sizeBytes);
+                find.setLong(3, mp4Mtime);
+                try (ResultSet rs = find.executeQuery()) {
+                    if (!rs.next()) return Boolean.FALSE;
+                }
+            }
+            try (PreparedStatement save = connection.prepareStatement(
+                    "MERGE INTO recordings_watched"
+                            + " (recording_id, size_bytes, mp4_mtime, watched_at)"
+                            + " KEY(recording_id) VALUES (?, ?, ?, ?)")) {
+                save.setString(1, recordingId);
+                save.setLong(2, sizeBytes);
+                save.setLong(3, mp4Mtime);
+                save.setLong(4, System.currentTimeMillis());
+                save.executeUpdate();
+                return Boolean.TRUE;
+            }
         });
     }
 
@@ -2525,6 +2565,8 @@ public final class RecordingsIndex {
         rec.put("timestamp", ts);
         long size = rs.getLong("size_bytes");
         rec.put("size", size);
+        rec.put("mp4Mtime", rs.getLong("mp4_mtime"));
+        rec.put("watched", rs.getBoolean("watched"));
         rec.put("sizeFormatted", formatSize(size));
 
         Date d = new Date(ts);

@@ -16,6 +16,14 @@ BYD.events = {
     pageSize: 12,
     totalPages: 1,
     
+    // Watched state is stored on the daemon, not in per-browser localStorage.
+    // Mark only after a clip actually plays for 2.5 seconds. The server
+    // fingerprints the file so a new clip at the same path stays unwatched.
+    _WATCHED_AFTER_MS: 2500,
+    _watchActiveKey: null,
+    _watchTimer: null,
+    _watchListenersReady: false,
+
     // Multi-select state
     selectMode: false,
     selectedFiles: new Set(),
@@ -1694,7 +1702,7 @@ BYD.events = {
             const thumbMeta = (rec.duration ? '<span class="duration-badge">' + rec.duration + '</span>' : '') +
                 (rec.sizeFormatted ? '<span>' + rec.sizeFormatted + '</span>' : '');
 
-            return dayHead + '<div class="recording-card' + (isSelected ? ' selected' : '') + (sevClass ? ' ' + sevClass : '') + '" data-recording-key="' + this._esc(recordingKey) + '" data-filename="' + this._esc(rec.filename) + '" onclick="' + this._esc(cardClick) + '">' +
+            return dayHead + '<div class="recording-card' + (isSelected ? ' selected' : '') + (sevClass ? ' ' + sevClass : '') + (rec.watched ? ' watched' : '') + '" data-recording-key="' + this._esc(recordingKey) + '" data-filename="' + this._esc(rec.filename) + '" onclick="' + this._esc(cardClick) + '">' +
                 checkbox +
                 '<div class="recording-thumbnail" id="' + thumbId + '" data-thumb="' + thumbUrl + '">' +
                 '<div class="thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg></div>' +
@@ -1787,6 +1795,73 @@ BYD.events = {
         container.innerHTML = '<div class="thumb-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg><span>' + BYD.i18n.t('events.no_preview') + '</span></div><div class="play-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>';
     },
     
+    _cancelWatchedTimer() {
+        if (this._watchTimer !== null) clearTimeout(this._watchTimer);
+        this._watchTimer = null;
+    },
+
+    _bindWatchedTracking(player) {
+        if (this._watchListenersReady) return;
+        this._watchListenersReady = true;
+        const schedule = () => {
+            const key = this._watchActiveKey;
+            if (!key || this._watchTimer !== null || document.hidden) return;
+            const rec = this.findRecording(key);
+            if (!rec || rec.watched || !rec.id) return;
+            // Start the threshold only when playback genuinely begins;
+            // opening the modal, buffering, or seeking alone does not count.
+            this._watchTimer = setTimeout(() => {
+                this._watchTimer = null;
+                if (this._watchActiveKey !== key || document.hidden
+                        || player.paused || player.seeking || player.readyState < 2) return;
+                this._persistWatched(rec, key);
+            }, this._WATCHED_AFTER_MS);
+        };
+        player.addEventListener('playing', schedule);
+        // Seeking may end without firing `playing` again when playback was
+        // uninterrupted. Start a fresh threshold after the seek finishes.
+        player.addEventListener('seeked', schedule);
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) this._cancelWatchedTimer();
+            else if (!player.paused && !player.seeking) schedule();
+        });
+        ['pause', 'waiting', 'seeking', 'ended', 'emptied'].forEach(type => {
+            player.addEventListener(type, () => this._cancelWatchedTimer());
+        });
+    },
+
+    async _persistWatched(rec, key) {
+        if (this._watchActiveKey !== key || rec.watched) return;
+        // Do not issue repeated requests while this one is in flight.
+        this._watchActiveKey = null;
+        try {
+            const response = await fetch('/api/recordings/id/' + encodeURIComponent(rec.id)
+                    + '/watched', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sizeBytes: rec.size, mp4Mtime: rec.mp4Mtime })
+            });
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            const result = await response.json();
+            if (!result.success) throw new Error('Watched status not saved');
+            rec.watched = true;
+            // The list may have been reloaded while the POST was in flight.
+            const current = this.findRecording(key);
+            if (current && current.id === rec.id && current.size === rec.size
+                    && current.mp4Mtime === rec.mp4Mtime) current.watched = true;
+            if (current && current.id === rec.id && current.size === rec.size
+                    && current.mp4Mtime === rec.mp4Mtime) {
+                document.querySelectorAll('.recording-card[data-recording-key]').forEach(card => {
+                    if (card.dataset.recordingKey === key) card.classList.add('watched');
+                });
+            }
+        } catch (error) {
+            // Keep the card unwatched on write failure. Reopening the clip
+            // can retry; never claim persistence that did not succeed.
+            console.warn('[events] Unable to persist watched state:', error);
+        }
+    },
+
     playVideo(recordingKey) {
         const rec = this.findRecording(recordingKey);
         if (!rec) return;
@@ -1801,6 +1876,9 @@ BYD.events = {
         downloadBtn.download = rec.filename;
         
         const player = document.getElementById('videoPlayer');
+        this._cancelWatchedTimer();
+        this._watchActiveKey = rec.watched ? null : this.recordingKey(rec);
+        this._bindWatchedTracking(player);
         player.setAttribute('playsinline', '');
         player.setAttribute('webkit-playsinline', '');
         player.src = rec.videoUrl;
@@ -1859,6 +1937,8 @@ BYD.events = {
     },
     
     closeVideo() {
+        this._cancelWatchedTimer();
+        this._watchActiveKey = null;
         const player = document.getElementById('videoPlayer');
         player.pause();
         player.src = '';
