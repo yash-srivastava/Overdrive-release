@@ -15,7 +15,11 @@ import java.io.PrintWriter;
 import java.lang.reflect.Method;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * BYD Event Daemon - runs as UID 1000 (system) via app_process.
@@ -34,6 +38,19 @@ public class BydEventDaemon {
     private static volatile boolean running = true;
     private static ServerSocket serverSocket;
     private static final CopyOnWriteArrayList<ClientHandler> clients = new CopyOnWriteArrayList<>();
+
+    // Each client handler blocks while reading its TCP connection. Bound both
+    // worker threads and queued sockets so local clients cannot grow threads
+    // without limit or accumulate an unbounded backlog.
+    private static final ThreadPoolExecutor clientExecutor = new ThreadPoolExecutor(
+            4, 4, 30L, TimeUnit.SECONDS,
+            new ArrayBlockingQueue<>(16),
+            runnable -> {
+                Thread thread = new Thread(runnable, "BydEventClient");
+                thread.setDaemon(true);
+                return thread;
+            },
+            new ThreadPoolExecutor.AbortPolicy());
     
     // Managers
     private static RadarManager radarManager;
@@ -109,7 +126,13 @@ public class BydEventDaemon {
                         logger.info("Client connected from " + client.getRemoteSocketAddress());
                         ClientHandler handler = new ClientHandler(client);
                         clients.add(handler);
-                        new Thread(handler, "Client-" + System.currentTimeMillis()).start();
+                        try {
+                            clientExecutor.execute(handler);
+                        } catch (RejectedExecutionException e) {
+                            clients.remove(handler);
+                            try { client.close(); } catch (Exception ignored) {}
+                            logger.warn("TCP client limit reached; rejected connection");
+                        }
                     } catch (java.net.SocketException e) {
                         if (running) logger.warn("TCP socket error: " + e.getMessage());
                         break;
