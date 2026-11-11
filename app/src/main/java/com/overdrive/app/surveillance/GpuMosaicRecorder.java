@@ -1132,6 +1132,11 @@ public class GpuMosaicRecorder {
                 if (overlayFrameCounter <= 5) {
                     logger.error("Overlay draw error: " + e.getMessage(), e);
                 }
+            } finally {
+                // An exception after enabling blending must not leak GL state
+                // into the next mosaic frame. The normal path also disables
+                // blending above; repeating the disable is harmless.
+                GLES20.glDisable(GLES20.GL_BLEND);
             }
         }
         long tAfterOverlayNs = System.nanoTime();
