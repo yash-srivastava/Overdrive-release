@@ -2230,6 +2230,10 @@ public class GpuMosaicRecorder {
             // on-device-unverified) helper can't regress the proven standard
             // path; unify once verified on-device.
             "vec2 rectifyTile(vec2 t) {\n" +
+            // With the default zero-strength setting, dewarp is an identity
+            // transform. Return the original coordinate without per-fragment
+            // dot products, reciprocals, aspect correction, or clamping.
+            "    if (uRectifyK1 == 0.0 && uRectifyK2 == 0.0) return t;\n" +
             "    vec2 nxy = t * 2.0 - 1.0;\n" +
             "    vec2 nxyAspect = vec2(nxy.x, nxy.y * uRectifyAspect);\n" +
             "    float r2 = dot(nxyAspect, nxyAspect);\n" +
@@ -2365,7 +2369,10 @@ public class GpuMosaicRecorder {
             // 0.25-wide column of the producer strip — a single-precision
             // jitter at r² near 0 cannot push us into the neighbouring
             // quadrant.
-            "        vec2 nxy = vec2(localX / 0.25, localY) * 2.0 - 1.0;\n" + // -1..+1 in tile units
+            "        if (uRectifyK1 == 0.0 && uRectifyK2 == 0.0) {\n" +
+            "            samplePos = vec2(stripOffsetX + localX, localY);\n" +
+            "        } else {\n" +
+            "            vec2 nxy = vec2(localX / 0.25, localY) * 2.0 - 1.0;\n" + // -1..+1 in tile units
             // Aspect-correct radial: compute r² in true tile-pixel space
             // by squashing the y-axis by the tile aspect (height / width
             // < 1 for landscape). This keeps iso-distortion lines
@@ -2396,6 +2403,7 @@ public class GpuMosaicRecorder {
             "        vec2 camUV = srcTile * 0.5 + 0.5;\n" +
             "        camUV = clamp(camUV, vec2(0.0), vec2(1.0));\n" +
             "        samplePos = vec2(stripOffsetX + camUV.x * 0.25, camUV.y);\n" +
+            "        }\n" +
             "    }\n" +
             "    vec4 src = texture2D(uCameraTex, samplePos);\n" +
             // Shared red-overlay suppression. See GlUtil.RED_MASK_GLSL.
