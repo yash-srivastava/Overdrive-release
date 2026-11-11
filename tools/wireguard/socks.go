@@ -357,12 +357,31 @@ func dialViaConnect(ctx context.Context, proxy, target string) (net.Conn, error)
 		c.Close()
 		return nil, fmt.Errorf("upstream proxy: CONNECT %s: %s", target, resp.Status)
 	}
-	if br.Buffered() > 0 {
-		// Nothing may follow the response before we send; a proxy that does
-		// so is broken, and dropping those bytes would corrupt the stream.
-		c.Close()
-		return nil, errors.New("upstream proxy: unexpected data after CONNECT response")
-	}
 	_ = c.SetDeadline(time.Time{})
+	if br.Buffered() > 0 {
+		// ReadResponse may have read tunnel bytes beyond the CONNECT headers.
+		// Preserve those bytes before reading directly from the connection.
+		return &bufferedConn{Conn: c, reader: br}, nil
+	}
 	return c, nil
+}
+
+// bufferedConn preserves data already read by the HTTP response parser.
+// Other net.Conn operations (including deadlines) pass
+// through to the underlying connection.
+type bufferedConn struct {
+	net.Conn
+	reader *bufio.Reader
+}
+
+func (c *bufferedConn) Read(p []byte) (int, error) {
+	return c.reader.Read(p)
+}
+
+// Keep TCP half-close behavior when the buffered wrapper is used.
+func (c *bufferedConn) CloseWrite() error {
+	if cw, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return cw.CloseWrite()
+	}
+	return c.Conn.Close()
 }
