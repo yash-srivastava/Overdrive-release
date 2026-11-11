@@ -13,6 +13,7 @@ var RoiEditor = (function() {
     var savedBlocks = [null, null, null, null];
     var savedEnabled = [false, false, false, false];
     var snapshotImages = [null, null, null, null];
+    var snapshotGenerations = [0, 0, 0, 0];
     var canvasW = 640, canvasH = 480;
     function qName(q) {
         var keys = ['roi.cam_front', 'roi.cam_right', 'roi.cam_rear', 'roi.cam_left'];
@@ -99,9 +100,19 @@ var RoiEditor = (function() {
     }
 
     function loadSnapshot(q) {
+        // Ignore late responses from an earlier request for the same camera.
+        var generation = ++snapshotGenerations[q];
         var img = new Image(); img.crossOrigin = 'anonymous';
-        img.onload = function() { snapshotImages[q] = img; draw(); };
-        img.onerror = function() { snapshotImages[q] = null; draw(); };
+        img.onload = function() {
+            if (generation !== snapshotGenerations[q]) return;
+            snapshotImages[q] = img;
+            if (currentQuadrant === q) draw();
+        };
+        img.onerror = function() {
+            if (generation !== snapshotGenerations[q]) return;
+            snapshotImages[q] = null;
+            if (currentQuadrant === q) draw();
+        };
         img.src = '/api/surveillance/snapshot/' + q + '?t=' + Date.now();
     }
 
