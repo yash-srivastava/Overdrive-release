@@ -50,6 +50,9 @@ public class GpuMosaicRecorder {
     
     // OpenGL program and locations
     private int programId;
+    // Context/program state persists across frames; reset after each init().
+    private boolean viewportConfigured = false;
+    private boolean cameraSamplerDirty = true;
     private int uCameraTexLocation;
     private int uApaModeLocation;
     private int uTexMatrixLocation;
@@ -527,6 +530,10 @@ public class GpuMosaicRecorder {
         this.eglCore = eglCore;
         this.encoder = encoder;
 
+        // Viewport and sampler state must be republished after EGL/program init.
+        viewportConfigured = false;
+        cameraSamplerDirty = true;
+
         // Scale the HAL-contention safety valve to the configured fps. Budget
         // is 2 × the per-frame target so a normal eglSwap fence + AI readback
         // never trips it; only sustained backpressure during BYD native AVM
@@ -882,8 +889,12 @@ public class GpuMosaicRecorder {
         eglCore.makeCurrent(encoderSurface);
         long tAfterMakeCurrentNs = System.nanoTime();
 
-        // Set viewport to encoder resolution (profile-driven: Seal=2560x1920, Tang=2560x1440)
-        GLES20.glViewport(0, 0, viewportWidth, viewportHeight);
+        // Viewport is persistent context state; dimensions are immutable for
+        // this recorder, so issue the driver update only after init/reinit.
+        if (!viewportConfigured) {
+            GLES20.glViewport(0, 0, viewportWidth, viewportHeight);
+            viewportConfigured = true;
+        }
         long tAfterViewportNs = System.nanoTime();
 
         // Clear. glClearColor was hoisted to init() — it's GL context state
@@ -900,13 +911,21 @@ public class GpuMosaicRecorder {
         // Use our shader program
         GLES20.glUseProgram(programId);
 
+        // The camera sampler is assigned to unit 0 once per linked program.
+        // Its value persists across frames; do not upload it at recording FPS.
+        if (cameraSamplerDirty) {
+            if (uCameraTexLocation >= 0) {
+                GLES20.glUniform1i(uCameraTexLocation, 0);
+            }
+            cameraSamplerDirty = false;
+        }
+
         // Bind camera texture
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
         GLES20.glBindTexture(
             isTexture2D ? GLES20.GL_TEXTURE_2D
                         : GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
             cameraTextureId);
-        GLES20.glUniform1i(uCameraTexLocation, 0);
         // Bind the optional windshield texture to unit 2 (dashcam top band).
         // Fall back to the camera texture when no windshield frame is ready so
         // the external sampler always has a valid binding; the shader gates
