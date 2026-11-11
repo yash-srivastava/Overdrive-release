@@ -67,6 +67,7 @@ var NOTIFLOG = {
     load: function () {
         var self = this;
         var seq = ++this._loadSeq;   // tag this request; ignore stale responses
+        var requestedPage = this.currentPage;
         this._showSkeleton();
         var url = '/api/notifications/log?' + this._query();
         BYDAuth.fetch(url).then(function (r) { return r.json(); })
@@ -79,10 +80,11 @@ var NOTIFLOG = {
                 self.total = d.total || 0;
                 self.totalPages = d.totalPages || 1;
                 self.currentPage = d.page || 1;
-                // If a delete collapsed pages and we asked past the end, the
-                // server clamps `page`; re-fetch that page once so the view
-                // isn't stranded on an empty page.
-                if (self.currentPage > self.totalPages && self.totalPages >= 1) {
+                // The requested page can become invalid after a deletion.
+                // Compare the original request, not the server-reported page:
+                // the server may already have clamped d.page, or returned an
+                // empty result for an out-of-range request.
+                if (requestedPage > self.totalPages && self.totalPages >= 1) {
                     self.currentPage = self.totalPages;
                     self.load();
                     return;
