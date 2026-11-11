@@ -7,6 +7,8 @@ const MQTT = {
     connections: [],
     maxConnections: 5,
     refreshInterval: null,
+    refreshInFlight: false,
+    visibilityListenerInstalled: false,
     expandedId: null,
     editingId: null,
 
@@ -67,10 +69,31 @@ const MQTT = {
     },
 
     startAutoRefresh() {
+        // Avoid duplicate intervals when init() is called again.
+        if (this.refreshInterval !== null) return;
+        if (!this.visibilityListenerInstalled) {
+            this.visibilityListenerInstalled = true;
+            document.addEventListener('visibilitychange', () => {
+                // Refresh promptly after returning to the page instead of
+                // waiting for the next five-second timer tick.
+                if (!document.hidden) this.refreshVisibleData();
+            });
+        }
         this.refreshInterval = setInterval(() => {
-            this.loadStatus();
-            this.loadTelemetry();
+            this.refreshVisibleData();
         }, 5000);
+    },
+
+    async refreshVisibleData() {
+        // A hidden WebView does not need live DOM updates or network polls.
+        // Skip overlapping cycles when the head unit/network is overloaded.
+        if (document.hidden || this.refreshInFlight) return;
+        this.refreshInFlight = true;
+        try {
+            await Promise.all([this.loadStatus(), this.loadTelemetry()]);
+        } finally {
+            this.refreshInFlight = false;
+        }
     },
 
     // ==================== RENDERING ====================
