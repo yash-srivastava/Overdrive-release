@@ -4751,8 +4751,10 @@ public class CameraDaemon {
                         apkAssets = mgr;
                         log("AssetManager created from APK: " + apkPath);
 
-                        // Extract web assets for HTTP server
-                        HttpServer.extractWebAssets(assetManager);
+                        // Reuse the extracted web UI across daemon restarts when
+                        // the installed APK has not changed. An APK update or
+                        // interrupted extraction still triggers a full refresh.
+                        HttpServer.extractWebAssets(assetManager, apkPath);
                     } else {
                         log("Failed to add asset path (cookie=0)");
                     }
