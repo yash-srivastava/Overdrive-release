@@ -341,6 +341,19 @@
         refreshApply(active);
         bindClicks(nav, tabs, main, function () { return active; }, function (next) { active = next; }, refreshApply);
 
+        // Handle deep links opened after mount, including browser history navigation.
+        window.addEventListener('hashchange', function () {
+            var target = readHashTab(tabs);
+            if (!target || target === active) return;
+            var buttons = nav.querySelectorAll('.bottom-tab');
+            for (var i = 0; i < buttons.length; i++) {
+                if (buttons[i].getAttribute('data-tab-target') === target) {
+                    buttons[i].click();
+                    break;
+                }
+            }
+        });
+
         // i18n re-apply for the freshly-injected labels.
         if (window.BYD && window.BYD.i18n && typeof window.BYD.i18n.applyAll === 'function') {
             try { window.BYD.i18n.applyAll(); } catch (e) {}
