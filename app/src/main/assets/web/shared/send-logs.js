@@ -60,14 +60,14 @@
         if (act) act.textContent = t('logs.uploading', 'Uploading…');
 
         fetch('/api/logs/upload?daemon=' + encodeURIComponent(key), { method: 'POST' })
-            .then(function (r) { return r.text().then(function (txt) { return { ok: r.ok, body: txt }; }); })
+            .then(function (r) { return r.text().then(function (txt) { return { ok: r.ok, status: r.status, body: txt }; }); })
             .then(function (resp) {
                 rowEl.className = 'diag-row';
                 var res = null;
                 try { res = resp.body ? JSON.parse(resp.body) : null; } catch (e) {}
-                if (!res || res.error || !res.code) {
+                if (!resp.ok || !res || res.error || !res.code) {
                     if (act) act.textContent = t('logs.send', 'Send');
-                    toast(t('logs.upload_failed', 'Upload failed') + ': ' + ((res && res.error) || ('HTTP ' + (resp.ok ? '?' : 'error'))), 'error');
+                    toast(t('logs.upload_failed', 'Upload failed') + ': ' + ((res && res.error) || ('HTTP ' + resp.status)), 'error');
                     return;
                 }
                 if (act) act.textContent = '✓';
