@@ -119,6 +119,12 @@ public class TelegramNotifier {
      * @param durationSeconds Duration in seconds
      */
     public static void notifyVideoRecorded(String filePath, String aiDetection, int durationSeconds) {
+        notifyVideoRecorded(filePath, aiDetection, durationSeconds, "");
+    }
+
+    /** Video notification with optional confirmed deterrent execution details. */
+    public static void notifyVideoRecorded(String filePath, String aiDetection, int durationSeconds,
+                                           String extraCaption) {
         // Publish to in-app event bus (independent of Telegram delivery)
         TelegramEventBus.getInstance().publish(
                 new VideoEvent(filePath, aiDetection, durationSeconds)
@@ -139,6 +145,9 @@ public class TelegramNotifier {
                         ? TelegramMessages.get("recording_caption",
                                 localizedDetection(aiDetection), durationSeconds)
                         : TelegramMessages.get("recording_caption_no_label", durationSeconds);
+                if (extraCaption != null && !extraCaption.isEmpty()) {
+                    caption += "\n" + extraCaption;
+                }
                 cmd.put("caption", caption);
                 // Fire-and-forget: the response is unused, and the upload can
                 // take tens of seconds — don't tie up even this lane waiting on
