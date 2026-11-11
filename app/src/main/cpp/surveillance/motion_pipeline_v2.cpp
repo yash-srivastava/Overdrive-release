@@ -673,17 +673,28 @@ static float stage4b_flowCoherence(
         // matching the cached current samples against the N-3 reference.
         long bestSad = -1;
         int bestDx = 0, bestDy = 0;
-        for (int dy = -V2_FLOW_SEARCH_RADIUS; dy <= V2_FLOW_SEARCH_RADIUS; dy++) {
-            for (int dx = -V2_FLOW_SEARCH_RADIUS; dx <= V2_FLOW_SEARCH_RADIUS; dx++) {
+        // SAD is a sum of nonnegative differences. Once a candidate reaches
+        // the current best, the remaining samples cannot improve it. Preserve
+        // the strict-less-than tie rule and original scan order so the flow
+        // vector and downstream threat decisions remain unchanged.
+        for (int dy = -V2_FLOW_SEARCH_RADIUS;
+                dy <= V2_FLOW_SEARCH_RADIUS && bestSad != 0; dy++) {
+            for (int dx = -V2_FLOW_SEARCH_RADIUS;
+                    dx <= V2_FLOW_SEARCH_RADIUS && bestSad != 0; dx++) {
                 long sad = 0;
                 int si = 0;
-                for (int y = 0; y < patchHeight; y += 4) {
+                bool canImprove = true;
+                for (int y = 0; y < patchHeight && canImprove; y += 4) {
                     for (int x = 0; x < V2_BLOCK_SIZE; x += 4) {
                         int ref = lumaAt(reference, x0 + x + dx, y0 + y + dy);
                         sad += std::abs(curSamp[si++] - ref);
+                        if (bestSad >= 0 && sad >= bestSad) {
+                            canImprove = false;
+                            break;
+                        }
                     }
                 }
-                if (bestSad < 0 || sad < bestSad) {
+                if (canImprove && (bestSad < 0 || sad < bestSad)) {
                     bestSad = sad;
                     bestDx = dx;
                     bestDy = dy;
@@ -1313,16 +1324,24 @@ void v2_processFrame(
         if (!config->quadrantEnabled[q]) continue;
         QuadrantState* qs = &state->quadrants[q];
         
-        // Quick mean luma calculation (same as stage1 but without modifying state)
-        extractQuadrant(frame, width, height, q, quadrantBuf);
+        // The JNI caller guarantees a 640x480 RGB mosaic. Stage 1 only
+        // samples every eighth pixel, so read those samples from the mosaic
+        // directly instead of copying the entire 320x240 RGB quadrant into
+        // the scratch buffer. PASS 2 still extracts the same quadrant bytes
+        // for the motion filters; brightness/suppression results are identical.
         float meanLuma = 0;
         int sampleCount = 0;
+        const int startX = (q % 2) * (width / 2);
+        const int startY = (q / 2) * (height / 2);
+        const int rowStride = width * V2_BYTES_PER_PIXEL;
         for (int y = 0; y < V2_QUADRANT_HEIGHT; y += 8) {
+            const int rowOffset = (startY + y) * rowStride
+                    + startX * V2_BYTES_PER_PIXEL;
             for (int x = 0; x < V2_QUADRANT_WIDTH; x += 8) {
-                int idx = (y * V2_QUADRANT_WIDTH + x) * V2_BYTES_PER_PIXEL;
-                int r = quadrantBuf[idx] & 0xFF;
-                int g = quadrantBuf[idx + 1] & 0xFF;
-                int b = quadrantBuf[idx + 2] & 0xFF;
+                int idx = rowOffset + x * V2_BYTES_PER_PIXEL;
+                int r = frame[idx] & 0xFF;
+                int g = frame[idx + 1] & 0xFF;
+                int b = frame[idx + 2] & 0xFF;
                 meanLuma += (r + (g << 1) + b) >> 2;
                 sampleCount++;
             }
