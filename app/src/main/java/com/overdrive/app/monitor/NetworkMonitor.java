@@ -226,9 +226,12 @@ public class NetworkMonitor {
 
     private static void tryShellFallback() {
         try {
-            // Check wlan0 for WiFi
-            String wlanIp = shellInterfaceIpv4("wlan0");
-            if (!wlanIp.isEmpty()) {
+            // One bounded shell invocation replaces up to six independent
+            // `ip addr show <iface>` subprocesses on API-restricted head units.
+            // Parse the same interface priority order as before.
+            java.util.Map<String, String> addresses = shellInterfaceIpv4Snapshot();
+            String wlanIp = addresses.get("wlan0");
+            if (wlanIp != null) {
                 networkType = "wifi";
                 ipAddress = wlanIp;
                 String ssid = shellGetWifiSsid();
@@ -238,11 +241,10 @@ public class NetworkMonitor {
                 return;
             }
 
-            // Check rmnet for mobile data
             String[] rmnetIfaces = {"rmnet_data0", "rmnet_data1", "rmnet_data2", "rmnet_data3"};
             for (String iface : rmnetIfaces) {
-                String rmnetIp = shellInterfaceIpv4(iface);
-                if (!rmnetIp.isEmpty()) {
+                String rmnetIp = addresses.get(iface);
+                if (rmnetIp != null) {
                     networkType = "cellular";
                     ipAddress = rmnetIp;
                     clearWifiDetails();
@@ -251,9 +253,8 @@ public class NetworkMonitor {
                 }
             }
 
-            // Check eth0
-            String ethIp = shellInterfaceIpv4("eth0");
-            if (!ethIp.isEmpty()) {
+            String ethIp = addresses.get("eth0");
+            if (ethIp != null) {
                 networkType = "ethernet";
                 ipAddress = ethIp;
                 clearWifiDetails();
@@ -272,15 +273,39 @@ public class NetworkMonitor {
     }
 
     /**
-     * First IPv4 address on {@code iface} via {@code ip addr}, or "" when there is none.
-     * BoundedShell merges stderr into the output, so only a dotted quad is accepted.
+     * Capture interface IPv4 addresses in one bounded subprocess. Android's
+     * `ip addr show` prints an interface header followed by indented `inet`
+     * entries; preserve the first valid IPv4 address for each interface.
      */
-    private static String shellInterfaceIpv4(String iface) {
-        String out = BoundedShell.run(
-                "ip addr show " + iface + " 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f1",
-                SHELL_DEADLINE_MS).output;
-        String first = firstLine(out);
-        return IPV4.matcher(first).matches() ? first : "";
+    private static java.util.Map<String, String> shellInterfaceIpv4Snapshot() {
+        String output = BoundedShell.run("ip addr show", SHELL_DEADLINE_MS).output;
+        java.util.Map<String, String> addresses = new java.util.HashMap<>();
+        String currentIface = null;
+        for (String line : output.split("\n")) {
+            String trimmed = line.trim();
+            if (!line.isEmpty() && !Character.isWhitespace(line.charAt(0))) {
+                // Header format: `2: wlan0: <BROADCAST,...>`.
+                int firstColon = line.indexOf(':');
+                int secondColon = firstColon < 0 ? -1 : line.indexOf(':', firstColon + 1);
+                currentIface = null;
+                if (secondColon > firstColon) {
+                    String iface = line.substring(firstColon + 1, secondColon).trim();
+                    // Strip optional @peer suffix from virtual interfaces.
+                    int peer = iface.indexOf('@');
+                    currentIface = peer >= 0 ? iface.substring(0, peer) : iface;
+                }
+            } else if (currentIface != null && trimmed.startsWith("inet ")
+                    && !addresses.containsKey(currentIface)) {
+                String addressWithMask = trimmed.substring(5).split("\\s+", 2)[0];
+                int slash = addressWithMask.indexOf('/');
+                String address = slash >= 0
+                        ? addressWithMask.substring(0, slash) : addressWithMask;
+                if (IPV4.matcher(address).matches()) {
+                    addresses.put(currentIface, address);
+                }
+            }
+        }
+        return addresses;
     }
 
     /**
