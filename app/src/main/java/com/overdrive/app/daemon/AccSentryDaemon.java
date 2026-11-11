@@ -6536,6 +6536,9 @@ public class AccSentryDaemon {
                     generation, "detach");
         }
 
+        private long lastParkedLinkBroadcastTimeoutMs = 0L;
+        private static final long PARKED_LINK_TIMEOUT_BACKOFF_MS = 30_000L;
+
         /**
          * The receiver is exported only behind android.permission.DUMP, which is
          * held by this shell-UID daemon but not ordinary apps. Ordered broadcast
@@ -6543,6 +6546,16 @@ public class AccSentryDaemon {
          */
         private int sendParkedLinkBroadcast(
                 long generation, String command) {
+            long now = System.currentTimeMillis();
+            if (now - lastParkedLinkBroadcastTimeoutMs < PARKED_LINK_TIMEOUT_BACKOFF_MS) {
+                return com.overdrive.app.power.ParkedLinkContract.RESULT_BROADCAST_UNKNOWN;
+            }
+            if (new java.io.File(com.overdrive.app.updater.UpdateLifecycle.UPDATE_IN_PROGRESS_FILE).exists()
+                    || new java.io.File(com.overdrive.app.util.ScratchRoot.path("acc_sentry_daemon.disabled")).exists()) {
+                log("Di5 keep-alive: skipping parked link " + command
+                        + " broadcast (update in progress or daemon disabled)");
+                return com.overdrive.app.power.ParkedLinkContract.RESULT_BROADCAST_UNKNOWN;
+            }
             String shellCommand =
                     "am broadcast -W --receiver-foreground"
                             // BYD's power service force-stops the app at ACC-off, and a
@@ -6559,10 +6572,15 @@ public class AccSentryDaemon {
                     + "\n"
                     + (result.error == null ? "" : result.error);
             int parsed = parseOrderedBroadcastResult(output);
-            if (parsed != Integer.MIN_VALUE) return parsed;
+            if (parsed != Integer.MIN_VALUE) {
+                lastParkedLinkBroadcastTimeoutMs = 0L;
+                return parsed;
+            }
+            lastParkedLinkBroadcastTimeoutMs = System.currentTimeMillis();
             log("Di5 keep-alive: parked link " + command
                     + " receiver returned no result (exit="
-                    + result.exitCode + ", output=" + output.trim() + ")");
+                    + result.exitCode + ", output=" + output.trim() + ") — backing off for "
+                    + (PARKED_LINK_TIMEOUT_BACKOFF_MS / 1000) + "s");
             return com.overdrive.app.power.ParkedLinkContract.RESULT_BROADCAST_UNKNOWN;
         }
 
