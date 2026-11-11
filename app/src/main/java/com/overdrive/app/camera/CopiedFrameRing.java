@@ -2,6 +2,7 @@ package com.overdrive.app.camera;
 
 import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
+import android.opengl.GLES30;
 import com.overdrive.app.logging.DaemonLogger;
 
 import java.nio.ByteBuffer;
@@ -75,6 +76,14 @@ public final class CopiedFrameRing {
     private FloatBuffer texCoordBuffer;
     private boolean initialized;
 
+    // A fence scopes the writer's completion wait to the OES-to-ring copy
+    // commands. glFinish remains the correctness fallback for GLES2/driver
+    // failures and for a copy that does not signal within the bounded wait.
+    private static final long COPY_FENCE_WAIT_NS = 5_000_000L;
+    private boolean fenceSyncUnavailable;
+    private boolean fenceFallbackLogged;
+    private boolean fenceTimeoutLogged;
+
     // Slot-state protocol. All three fields are guarded by the ring monitor:
     // a plain atomic pin was TOCTOU-racy — with N slots, a lane lagging N-1
     // frames pins exactly the slot the writer's stale pin-read already
@@ -137,6 +146,9 @@ public final class CopiedFrameRing {
      */
     public boolean init() {
         if (initialized) return true;
+        fenceSyncUnavailable = false;
+        fenceFallbackLogged = false;
+        fenceTimeoutLogged = false;
         try {
             blitProgram = GlUtil.createProgram(BLIT_VERTEX_SHADER, BLIT_FRAGMENT_SHADER);
             if (blitProgram == 0) {
@@ -247,17 +259,15 @@ public final class CopiedFrameRing {
             GLES20.glDisableVertexAttribArray(aPositionLoc);
             GLES20.glDisableVertexAttribArray(aTexCoordLoc);
 
-            // COMPLETION BARRIER — inside the write reservation. glDrawArrays
-            // only SUBMITS the blit; clearing writingSlot here-without-finish
-            // left a gap in which a stale lane packet could pin this slot and
-            // sample it cross-context while the GPU was still writing it
-            // (release-blocker review round 2, finding 2). glFinish before the
-            // reservation clears makes copyFrom's contract "returns only when
-            // the slot content is GPU-complete and safe to publish/sample" —
-            // it doubles as the publish barrier for the caller's camera-buffer
-            // close and the cross-context consumers (bounded: only this
-            // frame's blits are queued at this point, ~1-2 ms).
-            GLES20.glFinish();
+            // COMPLETION BARRIER — keep the write reservation until the copy
+            // has completed on the GPU. A fence waits for this context's
+            // commands up to the copy boundary instead of issuing a broad
+            // glFinish on every frame. The fallback preserves the original
+            // publish and camera-buffer lifetime guarantee on GLES2 or driver
+            // fence failures.
+            if (!awaitCopyFence()) {
+                GLES20.glFinish();
+            }
 
             synchronized (this) {
                 slotGenerations[slot]++;
@@ -273,6 +283,78 @@ public final class CopiedFrameRing {
             return -1;
         } finally {
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+        }
+    }
+
+    /**
+     * Waits for the OES-to-ring blit fence. The caller still owns the write
+     * reservation, so no reader can pin the slot until this method returns.
+     *
+     * @return true only when the fence signalled; false asks copyFrom to use
+     *         the original glFinish correctness fallback.
+     */
+    private boolean awaitCopyFence() {
+        if (fenceSyncUnavailable) {
+            return false;
+        }
+
+        long fence = 0L;
+        try {
+            fence = GLES30.glFenceSync(
+                GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            if (fence == 0L) {
+                fenceSyncUnavailable = true;
+                if (!fenceFallbackLogged) {
+                    logger.warn(name + ": GL fence creation unavailable; "
+                        + "using glFinish fallback");
+                    fenceFallbackLogged = true;
+                }
+                return false;
+            }
+
+            int status = GLES30.glClientWaitSync(
+                fence, GLES30.GL_SYNC_FLUSH_COMMANDS_BIT, COPY_FENCE_WAIT_NS);
+            if (status == GLES30.GL_ALREADY_SIGNALED
+                    || status == GLES30.GL_CONDITION_SATISFIED) {
+                return true;
+            }
+
+            if (status == GLES30.GL_TIMEOUT_EXPIRED) {
+                if (!fenceTimeoutLogged) {
+                    logger.warn(name + ": copy fence exceeded "
+                        + (COPY_FENCE_WAIT_NS / 1_000_000L)
+                        + "ms; using glFinish fallback for this frame");
+                    fenceTimeoutLogged = true;
+                }
+                return false;
+            }
+
+            fenceSyncUnavailable = true;
+            if (!fenceFallbackLogged) {
+                logger.warn(name + ": GL fence wait failed (status=0x"
+                    + Integer.toHexString(status)
+                    + "); using glFinish fallback");
+                fenceFallbackLogged = true;
+            }
+            return false;
+        } catch (Throwable t) {
+            // GLES3 sync is unavailable on a GLES2 fallback context and can
+            // also fail on a driver/context error. Never publish early.
+            fenceSyncUnavailable = true;
+            if (!fenceFallbackLogged) {
+                logger.warn(name + ": GL fence sync unavailable: "
+                    + t.getMessage() + "; using glFinish fallback");
+                fenceFallbackLogged = true;
+            }
+            return false;
+        } finally {
+            if (fence != 0L) {
+                try {
+                    GLES30.glDeleteSync(fence);
+                } catch (Throwable ignored) {
+                    // The completion result, not deletion, controls safety.
+                }
+            }
         }
     }
 
