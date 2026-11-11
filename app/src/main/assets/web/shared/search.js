@@ -228,8 +228,15 @@
 
     function fetchPage(page, collected, done) {
         var xhr;
+        var completed = false;
+        function finish() {
+            // Release a crawl worker slot exactly once, including on abort.
+            if (completed) return;
+            completed = true;
+            done();
+        }
         try { xhr = new XMLHttpRequest(); xhr.open('GET', page.href, true); }
-        catch (e) { done(); return; }
+        catch (e) { finish(); return; }
         xhr.timeout = 8000;
         xhr.onload = function () {
             if (xhr.status >= 200 && xhr.status < 300 && xhr.responseText) {
@@ -239,11 +246,12 @@
                     for (var n = 0; n < ex.length; n++) collected.push(ex[n]);
                 } catch (e) { /* skip unparseable page */ }
             }
-            done();
+            finish();
         };
-        xhr.onerror = function () { done(); };
-        xhr.ontimeout = function () { done(); };
-        try { xhr.send(); } catch (e) { done(); }
+        xhr.onerror = finish;
+        xhr.ontimeout = finish;
+        xhr.onabort = finish;
+        try { xhr.send(); } catch (e) { finish(); }
     }
 
     function buildIndex(cb) {
