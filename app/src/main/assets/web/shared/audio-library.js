@@ -15,6 +15,7 @@ window.AudioLibrary = (function () {
     'use strict';
 
     var MAX_BYTES = 48 * 1024 * 1024;
+    var refreshGeneration = 0;
 
     function $(id) { return document.getElementById(id); }
     function tr(k, d) { return (window.BYD && BYD.i18n && BYD.i18n.t) ? (BYD.i18n.t(k) || d) : d; }
@@ -23,10 +24,22 @@ window.AudioLibrary = (function () {
     function refresh() {
         var list = $('audioLibList');
         if (!list) return;
+        var generation = ++refreshGeneration;
         fetch('/api/audio/library', { cache: 'no-store' })
-            .then(function (r) { return r.json(); })
-            .then(function (j) { render((j && j.success && j.sounds) ? j.sounds : []); })
-            .catch(function () { render([]); });
+            .then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
+            .then(function (j) {
+                if (generation !== refreshGeneration) return;
+                if (!j || !j.success || !Array.isArray(j.sounds)) throw new Error('Invalid audio library response');
+                render(j.sounds);
+            })
+            .catch(function () {
+                if (generation === refreshGeneration) {
+                    toast(tr('automation.audio_list_failed', 'Could not load sounds'), 'error');
+                }
+            });
     }
 
     function render(sounds) {
