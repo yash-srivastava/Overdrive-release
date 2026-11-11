@@ -573,6 +573,8 @@ public class RecordingsApiHandler {
      */
     private static byte[] generateThumbnail(File videoFile) {
         MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        Bitmap frame = null;
+        Bitmap scaled = null;
         // setDataSource(String) calls ActivityThread.currentApplication().getPackageManager()
         // for MIME lookup. The daemon has no registered Application, so that NPEs on DiLink5.
         // The FileDescriptor overload skips the package-manager probe entirely.
@@ -580,42 +582,43 @@ public class RecordingsApiHandler {
             retriever.setDataSource(fis.getFD());
 
             // Get frame at 1 second (1000000 microseconds)
-            Bitmap frame = retriever.getFrameAtTime(1000000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+            frame = retriever.getFrameAtTime(1000000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
             if (frame == null) {
                 // Try frame at 0 if 1 second fails
                 frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
             }
-            
+
             if (frame == null) {
                 return null;
             }
-            
-            // Scale down to thumbnail size (320x180 for 16:9 aspect)
-            int targetWidth = 320;
-            int targetHeight = 180;
-            Bitmap scaled = Bitmap.createScaledBitmap(frame, targetWidth, targetHeight, true);
-            
-            // Compress to JPEG
+
+            // Scale down to thumbnail size (320x180 for 16:9 aspect).
+            scaled = Bitmap.createScaledBitmap(frame, 320, 180, true);
+
+            // A failed compression must not be cached as a successful thumbnail.
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            scaled.compress(Bitmap.CompressFormat.JPEG, 75, baos);
-            
-            // Clean up
-            if (scaled != frame) {
-                scaled.recycle();
+            if (!scaled.compress(Bitmap.CompressFormat.JPEG, 75, baos)) {
+                CameraDaemon.log("Thumbnail generation failed: JPEG compression returned false");
+                return null;
             }
-            frame.recycle();
-            
             return baos.toByteArray();
         } catch (Exception e) {
             CameraDaemon.log("Thumbnail generation failed: " + e.getMessage());
             return null;
         } finally {
+            // Release both bitmaps even when scaling or compression throws.
+            // createScaledBitmap may return the source unchanged, so recycle it once.
+            if (scaled != null && scaled != frame && !scaled.isRecycled()) {
+                scaled.recycle();
+            }
+            if (frame != null && !frame.isRecycled()) {
+                frame.recycle();
+            }
             try {
                 retriever.release();
             } catch (Exception e) {}
         }
     }
-    
     /**
      * Reports whether a given filename is currently being written by the
      * encoder as {@code <filename>.tmp}. Used by the events page to display
