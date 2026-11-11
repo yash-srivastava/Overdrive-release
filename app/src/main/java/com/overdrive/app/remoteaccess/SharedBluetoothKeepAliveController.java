@@ -3,9 +3,13 @@ package com.overdrive.app.remoteaccess;
 import android.bluetooth.BluetoothAdapter;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.os.SystemClock;
 
 import com.overdrive.app.config.UnifiedConfigManager;
 import com.overdrive.app.services.VehicleActuatorService;
+import com.overdrive.app.monitor.GpsMonitor;
+import com.overdrive.app.monitor.ParkedPosition;
+import com.overdrive.app.surveillance.SafeLocationManager;
 
 import org.json.JSONObject;
 
@@ -49,9 +53,10 @@ public final class SharedBluetoothKeepAliveController {
             BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
             int state = adapter == null ? -1 : adapter.getState();
             boolean owned = lease.getBoolean(OWNED, false);
+            boolean safeZoneBluetoothOff = vehicleOff && !vehicleOn && isInsideUnlockRestrictedSafeZone();
             ParkedBluetoothKeepAlivePolicy.Action action = ParkedBluetoothKeepAlivePolicy.decide(
                     consent.enabled, consent.onOnly, vehicleOff, vehicleOn, owned,
-                    forceDisable, radioState(state));
+                    forceDisable || safeZoneBluetoothOff, radioState(state));
             lastError = "";
             if (action == ParkedBluetoothKeepAlivePolicy.Action.RELEASE_OWNERSHIP) {
                 if (!writeOwned(lease, false)) lastError = "lease_write_failed";
@@ -188,6 +193,54 @@ public final class SharedBluetoothKeepAliveController {
             } catch (Throwable ignored) {}
         }
         return result;
+    }
+
+
+    /**
+     * The existing "unlock only outside safe zones" choice also suppresses parked
+     * Bluetooth in a confirmed selected zone. This deliberately reuses the same
+     * geometry, GPS freshness and boundary policy as proximity unlock decisions.
+     * Outside the zone, the normal parked keep-alive preference resumes unchanged.
+     */
+    private static boolean isInsideUnlockRestrictedSafeZone() {
+        try {
+            JSONObject settings = RemoteAccessSettings.read();
+            if (!settings.optBoolean("enabled")
+                    || !settings.optBoolean("restrictUnlockToOutsideSafeZones")) return false;
+
+            java.util.List<String> ids = new java.util.ArrayList<>();
+            org.json.JSONArray selected = settings.optJSONArray("proximitySafeZoneIds");
+            if (selected != null) {
+                for (int i = 0; i < selected.length(); i++) ids.add(selected.optString(i, ""));
+            }
+            java.util.List<ProximitySafeZonePolicy.Zone> zones = new java.util.ArrayList<>();
+            if (!ids.isEmpty()) {
+                for (SafeLocationManager.ZoneSnapshot zone :
+                        SafeLocationManager.getInstance().getGeometrySnapshot()) {
+                    zones.add(new ProximitySafeZonePolicy.Zone(zone.id, zone.name,
+                            zone.latitude, zone.longitude, zone.radiusMeters, zone.geometryValid));
+                }
+            }
+            ProximitySafeZonePolicy.Fix position = null;
+            ProximitySafeZonePolicy.Fix parked = null;
+            GpsMonitor.GpsFixSnapshot fix = GpsMonitor.getInstance().getFixSnapshot();
+            if (fix != null && fix.hasLocation()) {
+                position = new ProximitySafeZonePolicy.Fix(fix.latitude, fix.longitude,
+                        fix.accuracy, GpsMonitor.fixAgeMs(fix));
+            }
+            ParkedPosition.Fix parkedFix = ParkedPosition.get().current();
+            if (parkedFix != null) {
+                parked = new ProximitySafeZonePolicy.Fix(parkedFix.latitude, parkedFix.longitude,
+                        parkedFix.accuracyM,
+                        SystemClock.elapsedRealtime() - parkedFix.fixElapsedMs);
+            }
+            ProximitySafeZonePolicy.Result result = ProximitySafeZonePolicy.evaluate(
+                    true, false, true, ids, zones, position, parked);
+            return "INSIDE".equals(result.state);
+        } catch (Throwable unavailable) {
+            // Never infer zone membership from stale, missing or invalid location data.
+            return false;
+        }
     }
 
     private static SharedPreferences lease(Context context) {
