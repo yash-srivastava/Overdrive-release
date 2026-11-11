@@ -265,7 +265,7 @@
         .then(function (resp) {
             var res;
             try { res = resp.body ? JSON.parse(resp.body) : null; } catch (e) { res = null; }
-            if (!res) { toast(t('backup.preview_failed', 'Could not validate the backup.'), 'error'); return; }
+            if (!resp.ok || !res) { toast(t('backup.preview_failed', 'Could not validate the backup.'), 'error'); return; }
             if (!res.valid) {
                 toast(res.message || t('backup.invalid_file', 'That file is not a valid Overdrive backup.'), 'error');
                 return;
@@ -317,7 +317,7 @@
         .then(function (resp) {
             var res;
             try { res = resp.body ? JSON.parse(resp.body) : null; } catch (e) { res = null; }
-            if (res && res.success) {
+            if (resp.ok && res && res.success) {
                 if (btn) btn.textContent = t('backup.restored', 'Restored');
                 // Settings are on disk, but already-running daemon pipelines read
                 // most config at start — show a restart advisory (plus any
