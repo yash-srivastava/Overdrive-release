@@ -5,6 +5,7 @@ window.SafeKeepBadges = (function () {
     'use strict';
 
     var enabled = null;
+    var statusPromise = null;
     var metered = false;
     var states = {};
     var pending = null;
@@ -27,16 +28,47 @@ window.SafeKeepBadges = (function () {
 
     function post(url, body) {
         return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
-            .then(function (r) { return r.json().then(function (j) { j.httpStatus = r.status; return j; }, function () { return { success: false, httpStatus: r.status }; }); });
+            .then(function (r) {
+                return r.json().then(function (j) {
+                    if (!j || typeof j !== 'object') j = {};
+                    j.httpStatus = r.status;
+                    if (!r.ok && j.success === true) j.success = false;
+                    return j;
+                }, function () {
+                    return { success: false, httpStatus: r.status, error: 'invalid_response' };
+                });
+            })
+            .catch(function () {
+                // Keep callers on their normal failure path when the daemon is
+                // temporarily unreachable; do not leave action sheets hanging.
+                return { success: false, httpStatus: 0, error: 'network_error' };
+            });
     }
 
     function checkEnabled() {
         if (enabled !== null) return Promise.resolve(enabled);
-        return fetch('/api/safekeep/status').then(function (r) { return r.json(); }).then(function (s) {
-            enabled = !!(s && s.enabled && s.destinations && s.destinations.length);
-            metered = !!(s && s.network && s.network.metered);
+        if (statusPromise) return statusPromise;
+
+        statusPromise = fetch('/api/safekeep/status').then(function (r) {
+            if (!r.ok) throw new Error('SafeKeep status HTTP ' + r.status);
+            return r.json();
+        }).then(function (s) {
+            if (!s || typeof s.enabled !== 'boolean') {
+                throw new Error('Invalid SafeKeep status response');
+            }
+            enabled = !!(s.enabled && s.destinations && s.destinations.length);
+            metered = !!(s.network && s.network.metered);
             return enabled;
-        }, function () { enabled = false; return false; });
+        }).catch(function () {
+            // A transient error must not be cached as "SafeKeep disabled".
+            // The next recordings render can retry the status request.
+            return false;
+        }).then(function (result) {
+            statusPromise = null;
+            return result;
+        });
+
+        return statusPromise;
     }
 
     /** Called after every Recordings render; coalesced so re-renders don't fan out requests. */
