@@ -1542,10 +1542,15 @@ BYD.core = {
         if (!netEl) return;
 
         const net = status.network;
+        // Status is polled frequently; avoid reparsing identical SVG/HTML and
+        // invalidating layout when the connection details are unchanged.
+        const setHtml = (el, html) => {
+            if (el && el.innerHTML !== html) el.innerHTML = html;
+        };
         if (!net) {
             netEl.textContent = '--';
             netEl.className = 'status-value';
-            if (netIcon) netIcon.innerHTML = this._wifiSvg();
+            setHtml(netIcon, this._wifiSvg());
             return;
         }
 
@@ -1553,20 +1558,20 @@ BYD.core = {
             const ssid = net.ssid || BYD.i18n.t('status.wifi');
             const ip = net.ip || '';
             // Show SSID on first line, IP smaller below
-            netEl.innerHTML = '<span class="net-ssid">' + this._esc(ssid) + '</span>' +
-                (ip ? '<span class="net-ip">' + this._esc(ip) + '</span>' : '');
+            setHtml(netEl, '<span class="net-ssid">' + this._esc(ssid) + '</span>' +
+                (ip ? '<span class="net-ip">' + this._esc(ip) + '</span>' : ''));
             netEl.className = 'status-value on net-info';
-            if (netIcon) netIcon.innerHTML = this._wifiSvg();
+            setHtml(netIcon, this._wifiSvg());
         } else if (net.type === 'cellular') {
             const ip = net.ip || '';
-            netEl.innerHTML = '<span class="net-ssid">' + this._esc(BYD.i18n.t('status.mobile_data')) + '</span>' +
-                (ip ? '<span class="net-ip">' + this._esc(ip) + '</span>' : '');
+            setHtml(netEl, '<span class="net-ssid">' + this._esc(BYD.i18n.t('status.mobile_data')) + '</span>' +
+                (ip ? '<span class="net-ip">' + this._esc(ip) + '</span>' : ''));
             netEl.className = 'status-value on net-info';
-            if (netIcon) netIcon.innerHTML = this._cellSvg();
+            setHtml(netIcon, this._cellSvg());
         } else {
             netEl.textContent = BYD.i18n.t('status.no_network');
             netEl.className = 'status-value off';
-            if (netIcon) netIcon.innerHTML = this._wifiOffSvg();
+            setHtml(netIcon, this._wifiOffSvg());
         }
     },
 

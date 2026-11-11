@@ -164,7 +164,10 @@ BYD.recording = {
         
         // SOTA: More frequent config refresh (every 10s) to catch app UI changes quickly
         setInterval(() => {
-            // Unconditional: reloadConfig self-gates on hasUnsavedChanges and, when
+            // Configuration and storage cards are not visible in a hidden WebView.
+            // The visibilitychange handler above refreshes on return.
+            if (document.hidden) return;
+            // Unconditional while visible: reloadConfig self-gates on hasUnsavedChanges and, when
             // dirty, refreshes only the overcommit banner (which writes no control).
             // Gating here as well would leave a dirty page's banner stale forever.
             this.reloadConfig();

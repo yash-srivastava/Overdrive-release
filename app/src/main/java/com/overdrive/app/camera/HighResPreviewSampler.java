@@ -214,6 +214,8 @@ public final class HighResPreviewSampler {
         0f, 0f, 0f, 1f,
     };
     private final Object texMatrixLock = new Object();
+    // Used only on the sampler GL thread; avoid a new float[16] per preview.
+    private final float[] renderTexMatrix = new float[16];
     private volatile int cameraLayout = 0;  // 0=4-strip, 1=full-frame, 3=corner remap
 
     private int fbo = -1;
@@ -600,11 +602,10 @@ public final class HighResPreviewSampler {
                 GLES20.glUniform1f(uOffsetLoc, offsetValue);
             }
             if (uTexMatrixLoc >= 0) {
-                float[] m = new float[16];
                 synchronized (texMatrixLock) {
-                    System.arraycopy(currentTexMatrix, 0, m, 0, 16);
+                    System.arraycopy(currentTexMatrix, 0, renderTexMatrix, 0, 16);
                 }
-                GLES20.glUniformMatrix4fv(uTexMatrixLoc, 1, false, m, 0);
+                GLES20.glUniformMatrix4fv(uTexMatrixLoc, 1, false, renderTexMatrix, 0);
             }
             if (uApaModeLoc >= 0) {
                 GLES20.glUniform1f(uApaModeLoc, (float) apaModeOverride);
