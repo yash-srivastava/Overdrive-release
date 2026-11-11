@@ -1784,8 +1784,10 @@ public class DiLink5RuntimeContractTest {
         assertFalse(scaler.contains("float tileCropY = 0.0423077"));
         assertTrue(recorder.contains(
                 "String fullFrameSampling = \"        samplePos = vTexCoord;\\n\";"));
+        // DiLink 5 single views: same producer corner, optionally un-fisheyed
+        // per tile (DiLink5FisheyeModel; identity when the slider is 0).
         assertTrue(scaler.contains(
-                "samplePos = corner + vTexCoord * 0.5;"));
+                "samplePos = corner + dl5Unfish(vTexCoord) * 0.5;"));
         assertOrdered(
                 recorder,
                 "DiLink5Platform.isEnabled()) {",

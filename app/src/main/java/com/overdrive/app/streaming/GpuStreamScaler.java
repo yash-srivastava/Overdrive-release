@@ -86,6 +86,10 @@ public class GpuStreamScaler {
     private int uBsRectifyK1Location     = -1;
     private int uBsRectifyK2Location     = -1;
     private int uBsRectifyAspectLocation = -1;
+    // DiLink 5 raw-fisheye un-warp (DiLink5FisheyeModel); 0 = off. Only the
+    // 2D-texture full-frame branch reads it, and only DiLink 5 pushes it.
+    private volatile float dl5FishTan = 0f;
+    private int uDl5FishTanLocation = -1;
     // Free-angle CONTENT transform for the blind-spot card (views 7/8). Maps the
     // card's local uv to the source uv, so the picture turns inside a card that
     // stays rectangular. Identity + inactive by default: every existing path,
@@ -397,7 +401,8 @@ public class GpuStreamScaler {
         uBsRectifyK1Location     = GLES20.glGetUniformLocation(programId, "uBsRectifyK1");
         uBsRectifyK2Location     = GLES20.glGetUniformLocation(programId, "uBsRectifyK2");
         uBsRectifyAspectLocation = GLES20.glGetUniformLocation(programId, "uBsRectifyAspect");
-        uBsContentMatLocation    = GLES20.glGetUniformLocation(programId, "uBsContentMat");
+        uDl5FishTanLocation      = GLES20.glGetUniformLocation(programId, "uDl5FishTan");
+        uBsContentMatLocation   = GLES20.glGetUniformLocation(programId, "uBsContentMat");
         uBsContentOffLocation    = GLES20.glGetUniformLocation(programId, "uBsContentOff");
         uBsContentActiveLocation = GLES20.glGetUniformLocation(programId, "uBsContentActive");
         uBsCardWidthFracLocation = GLES20.glGetUniformLocation(programId, "uBsCardWidthFrac");
@@ -604,6 +609,7 @@ public class GpuStreamScaler {
                 if (uBsRectifyK1Location     >= 0) GLES20.glUniform1f(uBsRectifyK1Location,     bsRectifyK1);
                 if (uBsRectifyK2Location     >= 0) GLES20.glUniform1f(uBsRectifyK2Location,     bsRectifyK2);
                 if (uBsRectifyAspectLocation >= 0) GLES20.glUniform1f(uBsRectifyAspectLocation, bsRectifyAspect);
+                if (uDl5FishTanLocation      >= 0) GLES20.glUniform1f(uDl5FishTanLocation,      dl5FishTan);
                 // Free-angle content transform. Gated to the BS views for the same
                 // reason as uBsMargin: the branch is only reachable on 7/8, and
                 // forcing it inert elsewhere keeps a stale preset from ever leaking
@@ -1507,6 +1513,15 @@ public class GpuStreamScaler {
         this.uniformsDirty.set(true);
     }
 
+    /** DiLink 5 only: un-warp each raw fisheye tile with the shared
+     *  {@code recording.rectifyStrength} (0 = off). Idempotent. */
+    public void setDiLink5FisheyeStrength(float strength) {
+        float tan = com.overdrive.app.camera.dilink5.DiLink5FisheyeModel.tanHalfFov(strength);
+        if (Float.compare(tan, this.dl5FishTan) == 0) return;
+        this.dl5FishTan = tan;
+        this.uniformsDirty.set(true);
+    }
+
     /** Per-quadrant tile aspect (height/width) for the fisheye radial metric; 0.75
      *  for a 4:3 camera quadrant. Identity-equivalent when strength is 0. */
     public void setBlindSpotRectifyAspect(float aspect) {
@@ -1646,9 +1661,11 @@ public class GpuStreamScaler {
                     + "            if (uViewMode == 2) corner = uProducerForRight;\n"
                     + "            else if (uViewMode == 3) corner = uProducerForRear;\n"
                     + "            else if (uViewMode == 4) corner = uProducerForLeft;\n"
-                    + "            samplePos = corner + vTexCoord * 0.5;\n"
+                    // dl5Unfish* are identity unless the DiLink 5 fisheye
+                    // strength was pushed (setDiLink5FisheyeStrength).
+                    + "            samplePos = corner + dl5Unfish(vTexCoord) * 0.5;\n"
                     + "        } else {\n"
-                    + "            samplePos = vTexCoord;\n"
+                    + "            samplePos = dl5UnfishMosaic(vTexCoord);\n"
                     + "        }\n"
                 : "        samplePos = vTexCoord;\n";
         String cameraSampler = isTexture2D
@@ -1666,6 +1683,7 @@ public class GpuStreamScaler {
             "uniform int uOemActive;\n" +
             "uniform int uViewMode;\n" +
             "uniform float uApaMode;\n" +
+            com.overdrive.app.camera.dilink5.DiLink5FisheyeModel.GLSL +
             "uniform vec2 uProducerForFront;\n" +
             "uniform vec2 uProducerForRight;\n" +
             "uniform vec2 uProducerForRear;\n" +
