@@ -84,6 +84,9 @@ public class PerformanceMonitor {
     // so we don't pay 4× File.exists() every second forever.
     private java.io.File resolvedGpuBusyFile = null;
     private boolean gpuBusyResolutionLogged = false;
+    // Resolve the GPU devfreq directory once instead of enumerating sysfs on
+    // every dashboard sample. null = unresolved, sentinel = no matching GPU.
+    private java.io.File[] gpuDevfreqDevices = null;
 
     // Cache the resolved CPU/GPU thermal-zone /temp paths. The original code
     // re-scanned up to 30 thermal_zone* dirs — opening + reading the /type file
@@ -444,10 +447,16 @@ public class PerformanceMonitor {
             // Auto-detect GPU via /sys/class/devfreq/.
             // Modern kernels expose GPU as a generic 'devfreq' device — works
             // on MediaTek, Snapdragon, Exynos.
-            java.io.File devfreqDir = new java.io.File("/sys/class/devfreq/");
-            if (devfreqDir.exists() && devfreqDir.isDirectory()) {
-                java.io.File[] devices = devfreqDir.listFiles();
-                if (devices != null) {
+            java.io.File[] devices = gpuDevfreqDevices;
+            if (devices == null) {
+                java.io.File[] discovered = new java.io.File("/sys/class/devfreq/").listFiles();
+                if (discovered == null) discovered = new java.io.File[0];
+                // Cache the directory listing; frequency and load are still
+                // read live so thermal/governor changes remain visible.
+                gpuDevfreqDevices = discovered;
+                devices = discovered;
+            }
+            if (devices.length > 0) {
                     for (java.io.File device : devices) {
                         String name = device.getName().toLowerCase();
                         if (name.contains("kgsl") ||   // Adreno (Qualcomm)
@@ -477,7 +486,6 @@ public class PerformanceMonitor {
                             if (snapshot.gpuFreqMhz > 0) break;
                         }
                     }
-                }
             }
 
             // Legacy kgsl freq path if devfreq didn't yield one.
