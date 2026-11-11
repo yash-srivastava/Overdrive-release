@@ -199,7 +199,7 @@ public final class AiLaneGl {
 
         final java.util.concurrent.CountDownLatch ready = new java.util.concurrent.CountDownLatch(1);
         final Throwable[] failure = new Throwable[1];
-        handler.post(() -> {
+        boolean initPosted = handler.post(() -> {
             try {
                 aiCore = EGLCore.createShared(parentCore);
                 // Pbuffer is just a 1x1 dummy — we never present to it; all
@@ -210,25 +210,86 @@ public final class AiLaneGl {
             } catch (Throwable t) {
                 failure[0] = t;
                 logger.error("AI-lane GL init failed: " + t.getMessage());
+                // Construction may have succeeded far enough to allocate an
+                // EGL context or pbuffer. Release those objects on this GL
+                // thread before reporting initialization failure.
+                cleanupGlContextOnHandlerThread();
             } finally {
                 ready.countDown();
             }
         });
+        if (!initPosted) {
+            running.set(false);
+            stopFailedStartThread();
+            throw new IllegalStateException("AiLaneGl initialization task could not be posted");
+        }
 
         try {
             if (!ready.await(3, java.util.concurrent.TimeUnit.SECONDS)) {
                 running.set(false);
+                cleanupAfterFailedStart();
                 throw new IllegalStateException("AiLaneGl init timed out");
             }
         } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
             running.set(false);
+            cleanupAfterFailedStart();
+            Thread.currentThread().interrupt();
             throw new IllegalStateException("AiLaneGl init interrupted", ie);
         }
         if (failure[0] != null) {
             running.set(false);
+            stopFailedStartThread();
             throw new RuntimeException("AiLaneGl init failed", failure[0]);
         }
+    }
+
+    /**
+     * Releases partially initialized EGL objects. Must run on the AI GL
+     * handler thread, where the context and pbuffer were created.
+     */
+    private void cleanupGlContextOnHandlerThread() {
+        if (aiCore != null) {
+            try { aiCore.makeNothingCurrent(); } catch (Throwable ignored) {}
+            if (aiPbuffer != null) {
+                try { aiCore.destroySurface(aiPbuffer); } catch (Throwable ignored) {}
+                aiPbuffer = null;
+            }
+            try { aiCore.release(); } catch (Throwable ignored) {}
+            aiCore = null;
+        }
+    }
+
+    /**
+     * Initialization may time out while its GL task is still executing.
+     * Queue cleanup behind that task so it cannot race EGL construction,
+     * then stop and join the worker.
+     */
+    private void cleanupAfterFailedStart() {
+        final android.os.Handler h = handler;
+        if (h != null && thread != null && thread.isAlive()) {
+            final java.util.concurrent.CountDownLatch cleaned =
+                    new java.util.concurrent.CountDownLatch(1);
+            if (h.post(() -> {
+                try { cleanupGlContextOnHandlerThread(); }
+                finally { cleaned.countDown(); }
+            })) {
+                try { cleaned.await(3, java.util.concurrent.TimeUnit.SECONDS); }
+                catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            }
+        }
+        stopFailedStartThread();
+    }
+
+    /** Stops a worker created by start() when initialization did not succeed. */
+    private void stopFailedStartThread() {
+        final android.os.HandlerThread worker = thread;
+        if (worker != null) {
+            worker.quitSafely();
+            try { worker.join(1500); }
+            catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+        }
+        handler = null;
+        thread = null;
     }
 
     /**
