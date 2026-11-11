@@ -70,7 +70,7 @@
                                          quality value and its localized labels; the
                                          trigger and list mirror it because a native
                                          option popup can't be themed. -->
-                                    <div class="quality-menu" id="qualityMenu">
+                                    <div class="quality-menu is-loading" id="qualityMenu" aria-busy="true">
                                         <select id="qualitySelector" class="quality-menu__native" onchange="BYD.stream.setQuality(this.value)">
                                             <option value="ULTRA_LOW"  data-i18n="stream.quality_ultra_low">Ultra Low (400k)</option>
                                             <option value="LOW"        data-i18n="stream.quality_low">Low (600k)</option>
@@ -449,6 +449,8 @@
         }
         
         .quality-menu { position: relative; }
+        /* Do not show the HTML default while the persisted quality is loading. */
+        .quality-menu.is-loading { visibility: hidden; }
         .quality-menu__native { display: none; }
 
         .quality-menu__trigger {
@@ -2678,6 +2680,14 @@
                 }
             } catch (e) {
                 console.log('[Init] Using default quality');
+            } finally {
+                // The HTML default is only a placeholder. Reveal the control
+                // after the saved-quality request settles, even on failure.
+                const menu = document.getElementById('qualityMenu');
+                if (menu) {
+                    menu.classList.remove('is-loading');
+                    menu.removeAttribute('aria-busy');
+                }
             }
         }
 
