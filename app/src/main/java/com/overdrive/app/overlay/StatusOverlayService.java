@@ -98,13 +98,16 @@ public class StatusOverlayService extends Service {
     private int appliedIconOpacity = -1;
     private int appliedIconSizeDp = -1;
     private int appliedChipOpacity = -1;
+    private static volatile StatusOverlayService activeInstance;
+    /** In-memory overrides while the settings sliders move (no config write). */
+    private volatile int iconOpacityPreview = -1;
+    private volatile int iconSizeDpPreview = -1;
     private static final int ICON_OPACITY_MIN = 20;
     private static final int ICON_OPACITY_MAX = 100;
     private static final int ICON_OPACITY_DEFAULT = 100;
     private static final int CHIP_OPACITY_DEFAULT = 100;
     /** Live chip slider preview; when >= 0 overrides config until cleared. */
     private volatile int chipOpacityPreview = -1;
-    private static volatile StatusOverlayService activeInstance;
     private static final int ICON_SIZE_MIN_DP = 12;
     private static final int ICON_SIZE_MAX_DP = 32;
     private static final int ICON_SIZE_DEFAULT_DP = 18;
@@ -997,6 +1000,8 @@ public class StatusOverlayService extends Service {
     public void onDestroy() {
         activeInstance = null;
         chipOpacityPreview = -1;
+        iconOpacityPreview = -1;
+        iconSizeDpPreview = -1;
         // Order matters here:
         //  1. Flip running BEFORE we touch the executor or the controller.
         //     Any in-flight reconcile that's already on the executor reads
@@ -2060,6 +2065,12 @@ public class StatusOverlayService extends Service {
         if (chipOpacityPreview >= 0) {
             chipOpacity = chipOpacityPreview;
         }
+        if (iconOpacityPreview >= 0) {
+            iconOpacity = iconOpacityPreview;
+        }
+        if (iconSizeDpPreview >= 0) {
+            iconSizeDp = iconSizeDpPreview;
+        }
 
         boolean recConfigured = !"NONE".equals(configuredMode) && !"UNKNOWN".equals(configuredMode);
         // While the user is interacting with the action bar we keep the
@@ -2668,6 +2679,91 @@ public class StatusOverlayService extends Service {
             svc.chipOpacityPreview = -1;
             svc.appliedChipOpacity = -1;
         });
+    }
+
+    /** In-memory icon opacity while the settings slider moves (no config write). */
+    public static void previewIconOpacity(int storedOpacityPct) {
+        StatusOverlayService svc = activeInstance;
+        if (svc == null) return;
+        final int opacity = StatusOverlayIconAppearance.clampStoredOpacity(storedOpacityPct);
+        svc.runOnOverlayMain(() -> {
+            if (activeInstance != svc) return;
+            svc.iconOpacityPreview = opacity;
+            svc.applyResolvedIconAppearance();
+        });
+    }
+
+    /** In-memory icon size while the settings slider moves (no config write). */
+    public static void previewIconSizeDp(int sizeDp) {
+        StatusOverlayService svc = activeInstance;
+        if (svc == null) return;
+        final int clamped = StatusOverlayIconAppearance.clampStoredSizeDp(sizeDp);
+        svc.runOnOverlayMain(() -> {
+            if (activeInstance != svc) return;
+            svc.iconSizeDpPreview = clamped;
+            svc.applyResolvedIconAppearance();
+        });
+    }
+
+    public static void clearIconOpacityPreview() {
+        StatusOverlayService svc = activeInstance;
+        if (svc == null) return;
+        svc.runOnOverlayMain(() -> {
+            if (activeInstance != svc) return;
+            svc.iconOpacityPreview = -1;
+            svc.appliedIconOpacity = -1;
+            svc.applyResolvedIconAppearance();
+        });
+    }
+
+    public static void clearIconSizeDpPreview() {
+        StatusOverlayService svc = activeInstance;
+        if (svc == null) return;
+        svc.runOnOverlayMain(() -> {
+            if (activeInstance != svc) return;
+            svc.iconSizeDpPreview = -1;
+            svc.appliedIconSizeDp = -1;
+            svc.applyResolvedIconAppearance();
+        });
+    }
+
+    public static void clearIconAppearancePreview() {
+        StatusOverlayService svc = activeInstance;
+        if (svc == null) return;
+        svc.runOnOverlayMain(() -> {
+            if (activeInstance != svc) return;
+            svc.iconOpacityPreview = -1;
+            svc.iconSizeDpPreview = -1;
+            svc.appliedIconOpacity = -1;
+            svc.appliedIconSizeDp = -1;
+            svc.applyResolvedIconAppearance();
+        });
+    }
+
+    private void applyResolvedIconAppearance() {
+        int iconOpacity = ICON_OPACITY_DEFAULT;
+        int iconSizeDp = ICON_SIZE_DEFAULT_DP;
+        try {
+            JSONObject statusOverlayCfg =
+                com.overdrive.app.config.UnifiedConfigManager.loadConfig()
+                    .optJSONObject("statusOverlay");
+            if (statusOverlayCfg != null) {
+                iconOpacity = clamp(statusOverlayCfg.optInt("iconOpacity", ICON_OPACITY_DEFAULT),
+                        ICON_OPACITY_MIN, ICON_OPACITY_MAX);
+                iconSizeDp = clamp(statusOverlayCfg.optInt("iconSizeDp", ICON_SIZE_DEFAULT_DP),
+                        ICON_SIZE_MIN_DP, ICON_SIZE_MAX_DP);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to read icon appearance prefs: " + e.getMessage());
+        }
+        if (iconOpacityPreview >= 0) {
+            iconOpacity = iconOpacityPreview;
+        }
+        if (iconSizeDpPreview >= 0) {
+            iconSizeDp = iconSizeDpPreview;
+        }
+        if (overlayView == null) return;
+        applyIconAppearance(iconOpacity, iconSizeDp);
     }
 
     private void runOnOverlayMain(Runnable action) {
