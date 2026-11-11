@@ -158,10 +158,10 @@ func (s *socksServer) handle(c net.Conn) {
 		}
 	}
 	if !noAuth {
-		_, _ = c.Write([]byte{socksVersion, 0xff})
+		_ = writeAll(c, []byte{socksVersion, 0xff})
 		return
 	}
-	if _, err := c.Write([]byte{socksVersion, 0}); err != nil {
+	if err := writeAll(c, []byte{socksVersion, 0}); err != nil {
 		return
 	}
 
@@ -257,9 +257,27 @@ func validHost(h string) bool {
 	return true
 }
 
+// writeAll sends the entire protocol message, including when a writer reports
+// a short write without an error. A zero-progress write must not spin forever.
+func writeAll(w io.Writer, data []byte) error {
+	for len(data) > 0 {
+		n, err := w.Write(data)
+		if n < 0 || n > len(data) {
+			return io.ErrShortWrite
+		}
+		data = data[n:]
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+	}
+	return nil
+}
+
 func reply(w io.Writer, code byte) error {
-	_, err := w.Write([]byte{socksVersion, code, 0, atypIPv4, 0, 0, 0, 0, 0, 0})
-	return err
+	return writeAll(w, []byte{socksVersion, code, 0, atypIPv4, 0, 0, 0, 0, 0, 0})
 }
 
 func errToReply(err error) byte {
@@ -342,7 +360,7 @@ func dialViaConnect(ctx context.Context, proxy, target string) (net.Conn, error)
 		_ = c.SetDeadline(dl)
 	}
 	req := "CONNECT " + target + " HTTP/1.1\r\nHost: " + target + "\r\n\r\n"
-	if _, err := io.WriteString(c, req); err != nil {
+	if err := writeAll(c, []byte(req)); err != nil {
 		c.Close()
 		return nil, err
 	}
