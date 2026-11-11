@@ -1090,7 +1090,8 @@
     "mqtt_trigger": "ข้อความ MQTT",
     "mqtt_trigger_description": "ทำงานเมื่อ MQTT broker ของคุณเผยแพร่ไปยัง <base>/automation/<channel> (เช่น จาก Home Assistant) ใส่ชื่อ channel และจับคู่กับค่าของมัน",
     "mqtt_channel": "ช่อง",
-    "mqtt_value": "ค่า"
+    "mqtt_value": "ค่า",
+    "safekeep_clip_saved_description": "ทำงานเมื่อคลิปเฝ้าระวัง คลิปตรวจจับระยะใกล้ หรือคลิปที่บันทึกไว้ ได้รับการอัปโหลดไปยังพื้นที่จัดเก็บข้อมูลของคุณแล้ว"
   },
   "messages": {
     "logged_out": "ออกจากระบบแล้ว",

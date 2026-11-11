@@ -1365,4 +1365,6 @@
     <string name="voice_overlay_blocked_moving">ใช้งานไม่ได้ขณะขับรถ</string>
     <string name="voice_overlay_refused">ทำสิ่งนี้ด้วยเสียงไม่ได้</string>
     <string name="voice_overlay_failed">ทำรายการนี้ไม่สำเร็จ</string>
+    <string name="nav_page_remote_access">Proximity</string>
+    <string name="overlay_mode_proximity_label">PROX</string>
 </resources>
