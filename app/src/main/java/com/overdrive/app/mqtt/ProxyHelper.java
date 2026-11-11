@@ -78,6 +78,18 @@ public class ProxyHelper {
     private static volatile boolean egressAvailable = false;
     private static volatile long lastEgressProbeTime = 0;
 
+    // Upstream SOCKS5 reachability gate for sing-box (:8119). A listening local port
+    // proves only that sing-box bound loopback, not that its VLESS Reality upstream
+    // is reachable; gating on a bounded SOCKS5 CONNECT handshake prevents dead VLESS
+    // endpoints from blackholing Tailscale, MQTT, ABRP, and HTTP egress.
+    private static final int UPSTREAM_PROBE_TIMEOUT_MS = 1_500;
+    private static final long UPSTREAM_NEG_CACHE_DURATION_MS = 10_000;
+    private static final byte[] UPSTREAM_PROBE_TARGET_IPV4 = { 8, 8, 8, 8 };
+    private static final int UPSTREAM_PROBE_TARGET_PORT = 443;
+    private static volatile boolean upstreamChecked = false;
+    private static volatile boolean upstreamHealthy = false;
+    private static volatile long lastUpstreamProbeTime = 0;
+
     /**
      * Guards the process-global {@code socksProxyHost}/{@code socksProxyPort} JVM
      * properties across the window where they matter: from the set/clear until the
@@ -132,7 +144,7 @@ public class ProxyHelper {
             proxyAvailable = true;
             proxyPort = WIREGUARD_PROXY_PORT;
             logger.info("Proxy probe: WireGuard proxy available on port " + WIREGUARD_PROXY_PORT);
-        } else if (probePort(PROXY_PORT)) {
+        } else if (probePort(PROXY_PORT) && probeEgressUpstream()) {
             proxyAvailable = true;
             proxyPort = PROXY_PORT;
             logger.info("Proxy probe: sing-box available on port " + PROXY_PORT);
@@ -154,9 +166,84 @@ public class ProxyHelper {
     }
 
     /**
-     * Whether sing-box, the only general-egress proxy, is listening (same asymmetric cache as
-     * {@link #isProxyAvailable()}). The Tailscale listener is never egress: the bundled CGO-free
-     * tailscaled cannot resolve public hostnames on Android.
+     * Bounded SOCKS5 CONNECT health probe through sing-box (:8119) to verify that its
+     * VLESS upstream is actually accepting connections before routing daemons/HTTP through it.
+     */
+    static boolean probeEgressUpstream() {
+        long now = System.currentTimeMillis();
+        if (upstreamChecked) {
+            long ttl = upstreamHealthy ? CACHE_DURATION_MS : UPSTREAM_NEG_CACHE_DURATION_MS;
+            if ((now - lastUpstreamProbeTime) < ttl) {
+                return upstreamHealthy;
+            }
+        }
+        boolean healthy = probeSocks5Connect(
+                PROXY_HOST,
+                PROXY_PORT,
+                UPSTREAM_PROBE_TARGET_IPV4,
+                UPSTREAM_PROBE_TARGET_PORT,
+                UPSTREAM_PROBE_TIMEOUT_MS);
+        upstreamHealthy = healthy;
+        lastUpstreamProbeTime = now;
+        upstreamChecked = true;
+        if (!healthy) {
+            logger.warn("Proxy probe: sing-box port " + PROXY_PORT
+                    + " is listening, but VLESS upstream failed SOCKS5 CONNECT health check — bypassing proxy");
+        }
+        return healthy;
+    }
+
+    /**
+     * Perform a minimal SOCKS5 no-auth greeting + IPv4 CONNECT handshake against {@code host:port}
+     * and verify a {@code REP == 0x00} reply within {@code timeoutMs}. Package-private for unit tests.
+     */
+    static boolean probeSocks5Connect(
+            String host, int port, byte[] ipv4, int targetPort, int timeoutMs) {
+        if (ipv4 == null || ipv4.length != 4) return false;
+        try (Socket sock = new Socket()) {
+            sock.connect(new InetSocketAddress(host, port), Math.min(PROBE_TIMEOUT_MS, timeoutMs));
+            sock.setSoTimeout(timeoutMs);
+            OutputStream out = sock.getOutputStream();
+            InputStream in = sock.getInputStream();
+
+            // Greeting: VER=5, NMETHODS=1, METHOD=0x00 (no auth)
+            out.write(new byte[] { 0x05, 0x01, 0x00 });
+            out.flush();
+            byte[] methodReply = readExact(in, 2);
+            if (methodReply == null || methodReply[0] != 0x05 || methodReply[1] != 0x00) {
+                return false;
+            }
+
+            // CONNECT request: VER=5, CMD=1 (CONNECT), RSV=0, ATYP=1 (IPv4), DST.ADDR, DST.PORT
+            out.write(new byte[] {
+                0x05, 0x01, 0x00, 0x01,
+                ipv4[0], ipv4[1], ipv4[2], ipv4[3],
+                (byte) ((targetPort >> 8) & 0xFF),
+                (byte) (targetPort & 0xFF)
+            });
+            out.flush();
+            byte[] connectReply = readExact(in, 4);
+            return connectReply != null && connectReply[0] == 0x05 && connectReply[1] == 0x00;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static byte[] readExact(InputStream in, int len) throws IOException {
+        byte[] buf = new byte[len];
+        int off = 0;
+        while (off < len) {
+            int n = in.read(buf, off, len - off);
+            if (n < 0) return null;
+            off += n;
+        }
+        return buf;
+    }
+
+    /**
+     * Whether sing-box, the only general-egress proxy, is listening AND its VLESS upstream is
+     * reachable (same asymmetric cache as {@link #isProxyAvailable()}). The Tailscale listener
+     * is never egress: the bundled CGO-free tailscaled cannot resolve public hostnames on Android.
      */
     public static boolean isEgressProxyAvailable() {
         long now = System.currentTimeMillis();
@@ -166,7 +253,7 @@ public class ProxyHelper {
                 return egressAvailable;
             }
         }
-        boolean up = probePort(PROXY_PORT);
+        boolean up = probePort(PROXY_PORT) && probeEgressUpstream();
         egressAvailable = up;
         lastEgressProbeTime = now;
         egressChecked = true;
@@ -210,6 +297,8 @@ public class ProxyHelper {
         proxyChecked = false;
         egressAvailable = false;
         egressChecked = false;
+        upstreamHealthy = false;
+        upstreamChecked = false;
     }
 
     /**

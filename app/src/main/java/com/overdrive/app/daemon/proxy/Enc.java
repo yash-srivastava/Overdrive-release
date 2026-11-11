@@ -14,20 +14,20 @@ public final class Enc {
     /** VLESS Reality proxy credentials - UPDATE THESE WITH YOUR ACTUAL VALUES */
     public static final String _comment = Safe.s("+8pFEgfG6yvoKU3Gr2BHEXfHmQxvpmJ5oXAlnZN/PKMmjjw+9twIbfFF2kdfM4ECs6INr1rYQV5oC4FwQ0hI/d+dzScifJZKPdK5YTN6DJQ=");
 
-    /** YOUR_SERVER_IP_HERE */
-    public static final String PROXY_SERVER_IP = Safe.s("WVJRYpvmp/XFscpjqdmcePpGqLDp4uKlgO+VwJvufCk=");
+    /** [VLESS server IP] */
+    public static final String PROXY_SERVER_IP = Safe.s("Z1e89edb4BHkcdq18ZwS4g==");
 
     /** 443 */
     public static final String PROXY_SERVER_PORT = Safe.s("ZZD4D7Z+dJSdHTjoW8VW7Q==");
 
-    /** YOUR_UUID_HERE */
-    public static final String PROXY_UUID = Safe.s("vv2W+bqJQTnU0s9t1THlpg==");
+    /** [VLESS UUID] */
+    public static final String PROXY_UUID = Safe.s("Y4LjDZ/o19unOrs5FoJBf5MjCDMSI/PGZXX9WqDp2Y4JJPBSUh2sYkt1ymAV0v2L");
 
-    /** YOUR_SHORT_ID_HERE */
-    public static final String PROXY_SHORT_ID = Safe.s("lgWj2tUxBIeuYAVkw5iBY4GcSCCWQ9VfgBFiVw8J6vc=");
+    /** [VLESS short_id] */
+    public static final String PROXY_SHORT_ID = Safe.s("o/bXp+lFk608hy8OWTfuELQgU4pZxSk/2VDwpg+KW/o=");
 
-    /** YOUR_PUBLIC_KEY_HERE */
-    public static final String PROXY_PUBLIC_KEY = Safe.s("F4OAFgiNRz2FNlpdurBjCqnXB5ZP1NjWZN+eJQlkpkA=");
+    /** [VLESS public_key] */
+    public static final String PROXY_PUBLIC_KEY = Safe.s("A37D/HxqBdi7vuJ5cyw8gh2VvwTgbS9cbhEaDv78GqpZznF3x5JiRMDj9WJpQ7Gm");
 
     /** google.com */
     public static final String PROXY_SNI = Safe.s("u7674GDA85JNqEffkyiqRg==");

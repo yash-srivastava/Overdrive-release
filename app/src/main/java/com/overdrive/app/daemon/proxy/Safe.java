@@ -66,8 +66,17 @@ public class Safe {
             IvParameterSpec ivSpec = new IvParameterSpec(I_RAW);
             cipher.init(Cipher.DECRYPT_MODE, keySpec, ivSpec);
             
-            // Decode Base64 and decrypt
-            byte[] decoded = Base64.decode(encrypted, Base64.NO_WRAP);
+            // Decode Base64 and decrypt (fall back to java.util.Base64 in JVM unit tests
+            // where android.util.Base64 stubs return null or throw RuntimeException)
+            byte[] decoded = null;
+            try {
+                decoded = Base64.decode(encrypted, Base64.NO_WRAP);
+            } catch (RuntimeException ignored) {
+                // JVM unit test stub
+            }
+            if (decoded == null) {
+                decoded = java.util.Base64.getDecoder().decode(encrypted);
+            }
             byte[] decrypted = cipher.doFinal(decoded);
             
             return new String(decrypted, "UTF-8");

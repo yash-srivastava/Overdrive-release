@@ -126,58 +126,22 @@ public class AbrpTelemetryService {
         this.totalUploads = 0;
         this.failedUploads = 0;
 
-        // Default client without proxy — proxy configured lazily on first upload
+        // Route via ProxyHelper.chainProxySelector() so ABRP uses sing-box (:8119)
+        // when its upstream is healthy and falls back to DIRECT within the same call
+        // if the proxy leg times out or dies.
         this.httpClient = new OkHttpClient.Builder()
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .readTimeout(10, TimeUnit.SECONDS)
+                .proxySelector(com.overdrive.app.mqtt.ProxyHelper.chainProxySelector())
                 .build();
     }
     
     /**
-     * Get HTTP client with sing-box proxy if available.
-     * Probes port 8119 once on first call, caches result.
-     * Called from background thread only (never main thread).
+     * Get HTTP client backed by {@link com.overdrive.app.mqtt.ProxyHelper#chainProxySelector()}.
+     * Evaluates egress proxy health per request with automatic DIRECT fallback while
+     * preserving OkHttp connection pooling.
      */
     private OkHttpClient getProxiedClient() {
-        // Re-check proxy availability periodically (proxy may go up/down with ACC state)
-        long now = System.currentTimeMillis();
-        if (proxyChecked && (now - lastProxyCheckTime) < 60_000) return httpClient;
-        // !proxyChecked = first use or an upload error invalidated the client: always rebuild.
-        boolean invalidated = !proxyChecked;
-        proxyChecked = true;
-        lastProxyCheckTime = now;
-
-        boolean proxyAvailable = false;
-        try {
-            java.net.Socket probe = new java.net.Socket();
-            probe.connect(new java.net.InetSocketAddress("127.0.0.1", 8119), 200);
-            probe.close();
-            proxyAvailable = true;
-        } catch (Exception e) {
-            // Proxy not available
-        }
-        // Unchanged route: keep the pooled connection instead of a fresh TLS handshake.
-        if (!invalidated && lastProxyAvailable != null
-                && lastProxyAvailable == proxyAvailable) {
-            return httpClient;
-        }
-        lastProxyAvailable = proxyAvailable;
-
-        if (proxyAvailable) {
-            httpClient = new OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(10, TimeUnit.SECONDS)
-                .proxy(new java.net.Proxy(java.net.Proxy.Type.HTTP,
-                    new java.net.InetSocketAddress("127.0.0.1", 8119)))
-                .build();
-            logger.info("Using sing-box proxy for ABRP uploads");
-        } else {
-            httpClient = new OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(10, TimeUnit.SECONDS)
-                .build();
-            logger.info("No proxy, using direct connection for ABRP");
-        }
         return httpClient;
     }
 
@@ -544,6 +508,7 @@ public class AbrpTelemetryService {
                     consecutiveFailures++;
                     // Invalidate proxy cache on HTTP error — may need to switch proxy mode
                     proxyChecked = false;
+                    com.overdrive.app.mqtt.ProxyHelper.invalidateCache();
                     logger.warn("Upload failed: HTTP " + response.code() + " - " + responseBody);
                     return false;
                 }
@@ -555,6 +520,7 @@ public class AbrpTelemetryService {
             // Invalidate proxy cache on connection error — proxy state may have changed
             // (e.g., singbox started after we cached a direct connection)
             proxyChecked = false;
+            com.overdrive.app.mqtt.ProxyHelper.invalidateCache();
             logger.error("Upload error: " + e.getMessage());
             return false;
         }
