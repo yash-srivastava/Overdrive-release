@@ -306,6 +306,24 @@ public class ChargingFrontendContractTest {
     }
 
     @Test
+    public void sessionFiltersAndDetailNavStayStickyUnderSectionTabs()
+            throws IOException {
+        String html = readRepositoryFile(
+                "app/src/main/assets/web/local/charging.html");
+
+        assertTrue(html.contains("#sessionFilters"));
+        assertTrue(html.contains("position: -webkit-sticky"));
+        assertTrue(html.contains("position: sticky"));
+        assertTrue(html.contains(".ch-detail-nav"));
+        assertTrue(html.contains("body.charging-detail-open .ch-detail-nav"));
+        assertTrue(html.contains("background: var(--page)"));
+        assertTrue(html.contains(
+                "body.charging-page .main-content > .page-body"));
+        assertTrue(html.contains("body.charging-page .app-layout"));
+        assertTrue(html.contains("overflow: visible"));
+    }
+
+    @Test
     public void importedChargingViewKeepsLabelsAndLegacySocReadable()
             throws IOException {
         String charging = readRepositoryFile(

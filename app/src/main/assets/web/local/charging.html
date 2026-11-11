@@ -134,6 +134,20 @@
             #chargeCustomTab:hover { background: var(--well-2); }
             #chargeCustomTab.active:hover { background: var(--secondary-container); }
         }
+        /* Sessions period bar (7d / 30d / all / custom): pinned under the page
+           header and sticky section tabs while the session list scrolls. */
+        #sessionFilters {
+            position: -webkit-sticky;
+            position: sticky;
+            top: calc(var(--page-header-h, 64px) + var(--tabs-h, 48px) + 8px);
+            z-index: 5;
+            margin-bottom: 4px;
+            padding: 4px 0 8px;
+            background: var(--page);
+        }
+        :root[data-app-shell="1"] #sessionFilters {
+            top: calc(var(--tabs-h, 48px) + 8px);
+        }
         /* Custom From → To range. Collapsed by default; .open reveals it with a
            height + fade transition (display:none cannot animate). Phones stack
            the dates over a full-width Apply; wider screens put them in one row. */
@@ -873,8 +887,32 @@
         @media (hover: none) { .session-delete-btn { opacity: .7; } }
         @media (pointer: coarse) { .session-delete-btn { width: 44px; height: 44px; } }
         #chargingDetail { width: 100%; max-width: 1900px; margin-right: auto; margin-left: auto; }
-        /* Back link (mock .back-link). */
-        .ch-detail-nav { display: flex; align-items: center; min-height: 44px; margin: -6px 0 8px; }
+        /* Back link (mock .back-link) — stays reachable while session detail scrolls. */
+        .ch-detail-nav {
+            display: flex; align-items: center; min-height: 44px;
+            position: -webkit-sticky;
+            position: sticky;
+            top: calc(var(--page-header-h, 64px) + var(--tabs-h, 48px) + 8px);
+            z-index: 5;
+            margin: 0 0 8px;
+            padding: 6px 0 10px;
+            background: var(--page);
+        }
+        body.charging-detail-open .ch-detail-nav {
+            top: calc(var(--tabs-h, 48px) + 12px);
+        }
+        :root[data-app-shell="1"] .ch-detail-nav {
+            top: calc(var(--tabs-h, 48px) + 12px);
+        }
+        /* Document scrolls (app-tabs.js). Sticky needs every ancestor up to the
+           viewport to avoid a scrollport; body { overflow-x: hidden } in
+           styles.css forces overflow-y: auto on body and breaks sticky. */
+        body.charging-page,
+        body.charging-page .app-layout,
+        body.charging-page .main-content,
+        body.charging-page .main-content > .page-body {
+            overflow: visible;
+        }
         .ch-back-btn {
             display: inline-flex; align-items: center;   /* svg+span spacing via sibling margin (Chrome-58: flex gap unsupported) */
             min-height: 44px; margin-left: -6px; padding: 0 12px 0 6px;
