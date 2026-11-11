@@ -225,6 +225,10 @@ class RoadSenseController @JvmOverloads constructor(
     // Sidecar stall-recovery relaunch throttle (daemon tick thread only) — don't spam
     // `am start` while a just-relaunched sidecar is still coming up.
     private var lastSidecarRelaunchMs = 0L
+    // Last confirmed forward gear + timestamp so transient UNAVAILABLE/0 staleness blips
+    // from GearMonitor (e.g. DiLink 5 bridge jitter) don't thrash DRIVING ↔ RELAXED.
+    private var lastForwardGear = 0
+    private var lastForwardGearAtMs = 0L
 
     // Rolling candidate rate for washboard rejection (events in the last window).
     private val recentCandidateMs = ArrayDeque<Long>()
@@ -675,9 +679,11 @@ class RoadSenseController @JvmOverloads constructor(
         // use the collector's gearMode (which reads the same HAL getter and is correctly
         // UNAVAILABLE→non-forward before it has a real reading).
         val gm = com.overdrive.app.monitor.GearMonitor.getInstance()
-        val gear = try {
-            if (gm.isRunning) gm.currentGear else (dyn?.gearMode ?: 0)
+        val rawGear = try {
+            val monitored = if (gm.isRunning) gm.currentGear else com.overdrive.app.byd.BydVehicleData.UNAVAILABLE
+            resolveRawGear(gm.isRunning, monitored, dyn?.gearMode ?: 0)
         } catch (_: Throwable) { dyn?.gearMode ?: 0 }
+        val gear = stabilizeDrivingGear(rawGear, accOn, accAuth, now)
 
         // Feature disabled ⇒ treat as OFF regime regardless of gear/ACC: no sidecar,
         // no IMU, no pipeline. This is the master switch's teeth.
@@ -1876,9 +1882,56 @@ class RoadSenseController @JvmOverloads constructor(
         }
     }
 
+    private fun stabilizeDrivingGear(rawGear: Int, accOn: Boolean, accAuth: Boolean, now: Long): Int {
+        if (!accOn || !accAuth) {
+            lastForwardGear = 0
+            lastForwardGearAtMs = 0L
+            return rawGear
+        }
+        if (isForwardGear(rawGear)) {
+            lastForwardGear = rawGear
+            lastForwardGearAtMs = now
+            return rawGear
+        }
+        // Explicit P (1), R (2), or N (3) transitions to RELAXED immediately.
+        if (rawGear in 1..3) {
+            lastForwardGear = 0
+            lastForwardGearAtMs = 0L
+            return rawGear
+        }
+        // Transient UNAVAILABLE / 0 staleness blip while already DRIVING: hold last forward gear briefly.
+        if (regime == VehicleStateGate.Regime.DRIVING &&
+            shouldHoldForwardGearOnBlip(rawGear, lastForwardGear, now, lastForwardGearAtMs)
+        ) {
+            return lastForwardGear
+        }
+        return rawGear
+    }
+
     companion object {
         private const val TAG = "RoadSense/Controller"
         private const val GPS_POLL_MS = 500L
+        /** Hold window across transient UNAVAILABLE/0 gear blips while ACC is ON and DRIVING. */
+        internal const val GEAR_STALE_HOLD_MS = 3_000L
+
+        internal fun isForwardGear(gear: Int): Boolean =
+            VehicleStateGate.evaluate(accOn = true, accAuthoritative = true, gearMode = gear) ==
+                VehicleStateGate.Regime.DRIVING
+
+        internal fun resolveRawGear(monitorRunning: Boolean, monitorGear: Int, collectorGear: Int): Int {
+            return if (monitorRunning && monitorGear > 0) monitorGear else collectorGear
+        }
+
+        internal fun shouldHoldForwardGearOnBlip(
+            rawGear: Int,
+            lastForwardGear: Int,
+            nowMs: Long,
+            lastForwardGearAtMs: Long,
+        ): Boolean {
+            if (rawGear > 0 || !isForwardGear(lastForwardGear)) return false
+            val age = nowMs - lastForwardGearAtMs
+            return lastForwardGearAtMs > 0L && age in 0L..GEAR_STALE_HOLD_MS
+        }
         /** Vehicle-dynamics cache refresh (~2 Hz). Source only updates ~5 s (F-011),
          *  so this is generous; keeps brakeAgeMs fresh enough for rejection. */
         private const val VEHICLE_POLL_MS = 500L

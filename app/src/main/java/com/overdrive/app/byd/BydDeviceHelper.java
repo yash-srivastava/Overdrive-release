@@ -744,7 +744,30 @@ public final class BydDeviceHelper {
             if (m != null) {
                 Class<?>[] params = m.getParameterTypes();
                 if (params.length == 2 && params[0] == int[].class) {
-                    return m.invoke(device, new int[]{featureId}, normalizePrimitive(returnType));
+                    maybeResetProbeBackoffOnAccChange();
+                    Class<?> normalized = normalizePrimitive(returnType);
+                    long key = directProbeKey(featureId, normalized);
+                    long nowNs = System.nanoTime();
+                    ProbeSlot slot = getOrCreateProbeSlot(device, key);
+                    if (slot != null && slot.isBackedOff(nowNs)) {
+                        return null;
+                    }
+                    try {
+                        Object value = m.invoke(device, new int[]{featureId}, normalized);
+                        if (slot != null) {
+                            if (value != null) {
+                                slot.recordHit(normalized);
+                            } else {
+                                slot.recordMiss(nowNs, DIRECT_GET_BACKOFF_THRESHOLD);
+                            }
+                        }
+                        return value;
+                    } catch (Exception invokeErr) {
+                        if (slot != null) {
+                            slot.recordMiss(nowNs, DIRECT_GET_BACKOFF_THRESHOLD);
+                        }
+                        throw invokeErr;
+                    }
                 } else if (params.length == 2 && params[0] == int.class) {
                     return m.invoke(device, featureId, 0);
                 }
@@ -856,13 +879,40 @@ public final class BydDeviceHelper {
             }
             return null;
         }
+        maybeResetProbeBackoffOnAccChange();
+        long key = ladderProbeKey(featureId, intFirst);
+        long nowNs = System.nanoTime();
+        ProbeSlot slot = getOrCreateProbeSlot(device, key);
+        if (slot != null && slot.isBackedOff(nowNs)) {
+            return null;
+        }
+        Class<?> cachedWidth = slot != null ? slot.winningWidth : null;
+        if (cachedWidth != null) {
+            try {
+                Object fast = m.invoke(device, new int[]{featureId}, cachedWidth);
+                if (fast != null) {
+                    slot.recordHit(cachedWidth);
+                    return fast;
+                }
+            } catch (IllegalArgumentException ignored) {
+                // Firmware width changed — fall back to full ladder below.
+            } catch (Exception e) {
+                logger.debug("callGetProbing cached id=0x" + Integer.toHexString(featureId)
+                        + " type=" + cachedWidth.getSimpleName() + " failed: " + e.getMessage());
+            }
+            slot.winningWidth = null;
+        }
         Class<?>[] ladder = intFirst
                 ? new Class<?>[]{ Integer.TYPE, Long.TYPE, Double.TYPE, Float.TYPE }
                 : new Class<?>[]{ Double.TYPE, Float.TYPE, Integer.TYPE, Long.TYPE };
         for (Class<?> t : ladder) {
+            if (t == cachedWidth) continue;
             try {
                 Object r = m.invoke(device, new int[]{featureId}, t);
-                if (r != null) return r;
+                if (r != null) {
+                    if (slot != null) slot.recordHit(t);
+                    return r;
+                }
             } catch (IllegalArgumentException iae) {
                 // HAL refused this width — try the next, exactly as the OEM reader does.
             } catch (Exception e) {
@@ -870,7 +920,103 @@ public final class BydDeviceHelper {
                         + " type=" + t.getSimpleName() + " failed: " + e.getMessage());
             }
         }
+        if (slot != null) {
+            slot.recordMiss(nowNs, LADDER_PROBE_BACKOFF_THRESHOLD);
+        }
         return null;
+    }
+
+    private static final int LADDER_PROBE_BACKOFF_THRESHOLD = 2;
+    private static final int DIRECT_GET_BACKOFF_THRESHOLD = 3;
+    private static final int MAX_PROBE_SLOTS_PER_DEVICE = 512;
+    private static final long[] PROBE_BACKOFF_NS = {
+            15_000_000_000L,
+            30_000_000_000L,
+            60_000_000_000L
+    };
+    private static final java.util.Map<Object, java.util.concurrent.ConcurrentHashMap<Long, ProbeSlot>>
+            deviceProbeCache = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+    private static volatile Boolean lastObservedAccOn = null;
+
+    static final class ProbeSlot {
+        volatile Class<?> winningWidth;
+        int consecutiveMisses;
+        long retryAfterNs;
+
+        synchronized boolean isBackedOff(long nowNs) {
+            return retryAfterNs != 0L && (retryAfterNs - nowNs) > 0L;
+        }
+
+        synchronized void recordHit(Class<?> width) {
+            winningWidth = width;
+            consecutiveMisses = 0;
+            retryAfterNs = 0L;
+        }
+
+        synchronized void recordMiss(long nowNs, int threshold) {
+            consecutiveMisses++;
+            if (consecutiveMisses >= threshold) {
+                int step = Math.min(consecutiveMisses - threshold, PROBE_BACKOFF_NS.length - 1);
+                retryAfterNs = nowNs + PROBE_BACKOFF_NS[step];
+            }
+        }
+
+        synchronized void clearBackoff() {
+            consecutiveMisses = 0;
+            retryAfterNs = 0L;
+        }
+    }
+
+    private static long ladderProbeKey(int featureId, boolean intFirst) {
+        return ((intFirst ? 2L : 1L) << 32) | (featureId & 0xFFFFFFFFL);
+    }
+
+    private static long directProbeKey(int featureId, Class<?> normalizedType) {
+        long typeHash = normalizedType == null ? 0L : (System.identityHashCode(normalizedType) & 0x7FFFFFFFL);
+        return ((typeHash | 0x80000000L) << 32) | (featureId & 0xFFFFFFFFL);
+    }
+
+    private static ProbeSlot getOrCreateProbeSlot(Object device, long key) {
+        java.util.concurrent.ConcurrentHashMap<Long, ProbeSlot> perDevice;
+        synchronized (deviceProbeCache) {
+            perDevice = deviceProbeCache.get(device);
+            if (perDevice == null) {
+                perDevice = new java.util.concurrent.ConcurrentHashMap<>();
+                deviceProbeCache.put(device, perDevice);
+            }
+        }
+        ProbeSlot existing = perDevice.get(key);
+        if (existing != null) return existing;
+        if (perDevice.size() >= MAX_PROBE_SLOTS_PER_DEVICE) return null;
+        ProbeSlot created = new ProbeSlot();
+        ProbeSlot raced = perDevice.putIfAbsent(key, created);
+        return raced != null ? raced : created;
+    }
+
+    static void clearFeatureProbeBackoff() {
+        synchronized (deviceProbeCache) {
+            for (java.util.concurrent.ConcurrentHashMap<Long, ProbeSlot> map : deviceProbeCache.values()) {
+                if (map == null) continue;
+                for (ProbeSlot slot : map.values()) {
+                    slot.clearBackoff();
+                }
+            }
+        }
+    }
+
+    private static void maybeResetProbeBackoffOnAccChange() {
+        try {
+            boolean accOn = com.overdrive.app.monitor.AccMonitor.isAccOn();
+            Boolean prev = lastObservedAccOn;
+            if (prev == null) {
+                lastObservedAccOn = accOn;
+            } else if (prev.booleanValue() != accOn) {
+                lastObservedAccOn = accOn;
+                clearFeatureProbeBackoff();
+            }
+        } catch (Throwable ignored) {
+            // Pure JVM unit tests or early daemon bootstrap without AccMonitor.
+        }
     }
 
     /**
