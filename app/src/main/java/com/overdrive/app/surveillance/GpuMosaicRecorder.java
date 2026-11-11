@@ -94,9 +94,12 @@ public class GpuMosaicRecorder {
     private int uRectifyAspectLocation;
     private int uRecordLayoutLocation;
     // Optional dedicated windshield camera (dashcam top band). uWindshieldTex
-    // is bound to GL_TEXTURE2 in drawFrame; uWindshieldReady gates its use.
+    // is bound to GL_TEXTURE2 in drawFrame; uTextureReady.x gates its use.
     private int uWindshieldTexLocation;
-    private int uWindshieldReadyLocation;
+    // x = dedicated windshield frame ready, y = telemetry overlay ready.
+    // Packed into one vec2 to keep fragment-uniform usage bounded on GLES 2.0.
+    private int uTextureReadyLocation;
+    private int uOverlayTexLocation;
     private int aPositionLocation;
     private int aTexCoordLocation;
 
@@ -207,14 +210,8 @@ public class GpuMosaicRecorder {
     private long lastFrameTime = 0;
     private long frameCount = 0;
     
-    // Overlay GL resources
+    // Telemetry overlay texture, sampled by the mosaic shader (texture unit 1).
     private int overlayTextureId;
-    private int overlayProgramId;
-    private int overlayAPositionLoc;
-    private int overlayATexCoordLoc;
-    private int overlayUTextureLoc;
-    private FloatBuffer overlayVertexBuffer;
-    private FloatBuffer overlayTexCoordBuffer;
 
     // Overlay state
     private volatile boolean overlayEnabled = false;
@@ -288,11 +285,10 @@ public class GpuMosaicRecorder {
 
     // Per-stage timing diagnostic for drawFrame.
     //
-    // The encoder GL thread's drawFrame() bundles five distinct GPU/CPU
-    // operations under one timer in PanoramicCameraGpu.renderLoop's stage
-    // log: makeCurrent + clear + mosaic-shader-draw + overlay-upload-and-
-    // draw + eglSwapBuffersWithTimestamp. When the bundled "mosaic+swap"
-    // worst-frame goes high, we can't tell which sub-stage was responsible.
+    // The encoder GL thread's drawFrame() bundles GPU/CPU operations under
+    // one timer in PanoramicCameraGpu.renderLoop's stage log. The telemetry
+    // overlay is sampled by the mosaic shader, so its bitmap upload is
+    // measured separately while the merged draw is counted in "shd".
     //
     // This per-stage timer logs the worst frame in a 30s window (matching
     // the parent stage timer's cadence) and breaks out:
@@ -304,8 +300,8 @@ public class GpuMosaicRecorder {
     //            non-trivial rt is encoder-input backpressure (the render
     //            target could not be acquired), NOT clearing cost. (This was
     //            previously mislabeled "cls" — see issue #176.)
-    //   - shd:   mosaic shader bind + draw
-    //   - ovl:   overlay (texSubImage2D upload + composite draw)
+    //   - shd:   mosaic shader bind + draw, including overlay composition
+    //   - ovl:   overlay bitmap upload only (texImage2D / texSubImage2D)
     //   - swap:  eglSwapBuffersWithTimestamp itself (also blocks on encoder
     //            input-pool backpressure)
     //
@@ -313,9 +309,8 @@ public class GpuMosaicRecorder {
     // (queue), depending on when MediaCodec returns an input buffer — treat
     // rt+swap together as the encoder-queue wait.
     //
-    // Once a stutter event is captured, the dominant sub-stage tells us
-    // where to look — overlay upload vs shader draw vs encoder backpressure
-    // produce identical "mosaic+swap=207ms" symptoms in the parent log.
+    // Once a stutter event is captured, the dominant sub-stage distinguishes
+    // overlay upload, merged shader work, and encoder backpressure.
     private static final long DRAW_STAGE_LOG_INTERVAL_MS = 30_000L;
     private long drawStageWindowStartMs = 0;
     private long drawStageWorstTotalNs = 0;
@@ -344,6 +339,12 @@ public class GpuMosaicRecorder {
     // occupies (top band). MUST match the shader's `float split` and the
     // players' DASHCAM_SPLIT.
     private static final float DASHCAM_SPLIT = 0.70f;
+    // Match the top strip previously covered by the second overlay quad.
+    private static final float OVERLAY_BOTTOM_NDC = 0.8333f;
+    private static final float OVERLAY_TOP_SCREEN_Y =
+        (OVERLAY_BOTTOM_NDC + 1.0f) * 0.5f;
+    private static final float OVERLAY_SCREEN_HEIGHT =
+        (1.0f - OVERLAY_BOTTOM_NDC) * 0.5f;
     // Dedicated windshield camera native aspect (1920x1080 = 16:9). Used to
     // crop it vertically into the dashcam top band without stretch.
     private static final float WINDSHIELD_SOURCE_ASPECT = 1.7777778f;
@@ -393,8 +394,10 @@ public class GpuMosaicRecorder {
         "uniform mat4 uTexMatrix;\n" +
         "uniform float uApplyManualYFlip;\n" +
         "varying vec2 vTexCoord;\n" +
+        "varying vec2 vScreenCoord;\n" +
         "void main() {\n" +
         "    gl_Position = aPosition;\n" +
+        "    vScreenCoord = aPosition.xy * 0.5 + 0.5;\n" +
         "    vec2 src = aTexCoord;\n" +
         "    if (uApplyManualYFlip > 0.5) src.y = 1.0 - src.y;\n" +
         "    vTexCoord = (uTexMatrix * vec4(src, 0.0, 1.0)).xy;\n" +
@@ -412,25 +415,6 @@ public class GpuMosaicRecorder {
      *  user role mapping. 3-cam and APA branches are layout-independent so
      *  they stay as-is. */
     
-    // Overlay vertex shader - simple 2D passthrough
-    private static final String OVERLAY_VERTEX_SHADER =
-        "attribute vec4 aPosition;\n" +
-        "attribute vec2 aTexCoord;\n" +
-        "varying vec2 vTexCoord;\n" +
-        "void main() {\n" +
-        "    gl_Position = aPosition;\n" +
-        "    vTexCoord = aTexCoord;\n" +
-        "}\n";
-    
-    // Overlay fragment shader - standard sampler2D with alpha (NOT OES)
-    private static final String OVERLAY_FRAGMENT_SHADER =
-        "precision mediump float;\n" +
-        "varying vec2 vTexCoord;\n" +
-        "uniform sampler2D uTexture;\n" +
-        "void main() {\n" +
-        "    gl_FragColor = texture2D(uTexture, vTexCoord);\n" +
-        "}\n";
-
     private final boolean isTexture2D;
     // Sampler type for the dedicated windshield texture (unit 2). Independent
     // of isTexture2D because DiLink 5 (isTexture2D=true) still feeds an
@@ -673,7 +657,8 @@ public class GpuMosaicRecorder {
         uRectifyAspectLocation = GLES20.glGetUniformLocation(programId, "uRectifyAspect");
         uRecordLayoutLocation = GLES20.glGetUniformLocation(programId, "uRecordLayout");
         uWindshieldTexLocation = GLES20.glGetUniformLocation(programId, "uWindshieldTex");
-        uWindshieldReadyLocation = GLES20.glGetUniformLocation(programId, "uWindshieldReady");
+        uTextureReadyLocation = GLES20.glGetUniformLocation(programId, "uTextureReady");
+        uOverlayTexLocation = GLES20.glGetUniformLocation(programId, "uOverlayTex");
 
         GlUtil.checkGlError("glGetLocation");
         
@@ -682,50 +667,25 @@ public class GpuMosaicRecorder {
         texCoordBuffer = GlUtil.createFloatBuffer(TEX_COORDS);
         
         // --- Overlay GL resource initialization ---
-        overlayProgramId = GlUtil.createProgram(OVERLAY_VERTEX_SHADER, OVERLAY_FRAGMENT_SHADER);
-        if (overlayProgramId == 0) {
-            logger.error("Failed to create overlay shader program - overlay disabled");
-            overlayEnabled = false;
-        } else {
-            overlayAPositionLoc = GLES20.glGetAttribLocation(overlayProgramId, "aPosition");
-            overlayATexCoordLoc = GLES20.glGetAttribLocation(overlayProgramId, "aTexCoord");
-            overlayUTextureLoc = GLES20.glGetUniformLocation(overlayProgramId, "uTexture");
-            
-            // Generate overlay texture
-            int[] texIds = new int[1];
-            GLES20.glGenTextures(1, texIds, 0);
-            overlayTextureId = texIds[0];
-            
-            // Overlay quad: top 160px of 1920px frame
-            // NDC Y: +1.0 (top) down to +1.0 - 0.1667 = +0.8333
-            float[] overlayVertexCoords = {
-                -1.0f,  0.8333f,
-                 1.0f,  0.8333f,
-                -1.0f,  1.0f,
-                 1.0f,  1.0f
-            };
-            // Tex coords flipped Y for correct orientation
-            float[] overlayTexCoords = {
-                0.0f, 1.0f,
-                1.0f, 1.0f,
-                0.0f, 0.0f,
-                1.0f, 0.0f
-            };
-            overlayVertexBuffer = GlUtil.createFloatBuffer(overlayVertexCoords);
-            overlayTexCoordBuffer = GlUtil.createFloatBuffer(overlayTexCoords);
+        // The overlay is sampled by the mosaic shader on texture unit 1, so
+        // there is no second shader program, quad, blend-state transition, or
+        // additional draw call.
+        int[] texIds = new int[1];
+        GLES20.glGenTextures(1, texIds, 0);
+        overlayTextureId = texIds[0];
+        overlayTextureReady = false;
+        overlayTextureInitialized = false;
 
-            // On an encoder REINIT (init() re-run on an existing recorder, e.g.
-            // a mid-recording quality/codec change), tear down the prior renderer
-            // first — stop+join its raster worker and recycle its bitmaps — so we
-            // don't orphan a 2Hz daemon thread + ~0.8MB of bitmaps per reinit.
-            if (overlayRenderer != null) {
-                overlayRenderer.stopWorker();
-                overlayRenderer.release();
-            }
-            // Create bitmap renderer
-            overlayRenderer = new OverlayBitmapRenderer();
-            overlayTextureInitialized = false;
+        // On an encoder REINIT (init() re-run on an existing recorder, e.g.
+        // a mid-recording quality/codec change), tear down the prior renderer
+        // first — stop+join its raster worker and recycle its bitmaps — so we
+        // don't orphan a 2Hz daemon thread + ~0.8MB of bitmaps per reinit.
+        if (overlayRenderer != null) {
+            overlayRenderer.stopWorker();
+            overlayRenderer.release();
         }
+        // Create bitmap renderer.
+        overlayRenderer = new OverlayBitmapRenderer();
 
         // Start the off-GL-thread raster worker if the overlay is already active
         // at init time. The 3 overlay setters run at recorder-CONFIG time (before
@@ -910,7 +870,7 @@ public class GpuMosaicRecorder {
         // Bind the optional windshield texture to unit 2 (dashcam top band).
         // Fall back to the camera texture when no windshield frame is ready so
         // the external sampler always has a valid binding; the shader gates
-        // actual use on uWindshieldReady. Bind target follows the sampler type
+        // actual use on uTextureReady.x. Bind target follows the sampler type
         // baked into the shader (windshieldTexture2D — decoupled encoder lane
         // ring copies are plain 2D; legacy + DiLink 5 stay EXTERNAL_OES).
         GLES20.glActiveTexture(GLES20.GL_TEXTURE2);
@@ -923,10 +883,62 @@ public class GpuMosaicRecorder {
         if (uWindshieldTexLocation >= 0) {
             GLES20.glUniform1i(uWindshieldTexLocation, 2);
         }
-        if (uWindshieldReadyLocation >= 0) {
-            GLES20.glUniform1f(uWindshieldReadyLocation,
-                (windshieldReady && windshieldTextureId != 0) ? 1.0f : 0.0f);
+        // Upload telemetry bitmap before the mosaic draw so the main shader
+        // can composite it in the same full-screen pass. The CPU Canvas raster
+        // remains on OverlayBitmapRenderer's background worker; the GL thread
+        // only uploads a newly swapped bitmap and binds the cached texture.
+        long tBeforeOverlayUploadNs = System.nanoTime();
+        boolean overlayCompositeReady = false;
+        if (overlayEnabled && overlayRecordingModeAllowed && overlayRenderer != null) {
+            overlayFrameCounter++;
+            try {
+                android.graphics.Bitmap overlayBitmap = overlayRenderer.swapAndGetFront();
+                if (overlayBitmap != null && !overlayBitmap.isRecycled()) {
+                    GLES20.glActiveTexture(GLES20.GL_TEXTURE1);
+                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTextureId);
+                    if (!overlayTextureInitialized) {
+                        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, overlayBitmap, 0);
+                        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,
+                            GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+                        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,
+                            GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+                        overlayTextureInitialized = true;
+                    } else {
+                        GLUtils.texSubImage2D(
+                            GLES20.GL_TEXTURE_2D, 0, 0, 0, overlayBitmap);
+                    }
+                    overlayTextureReady = true;
+
+                    if (overlayFrameCounter <= 3) {
+                        logger.info("Overlay: uploaded frame " + overlayFrameCounter
+                            + " bitmap=" + overlayBitmap.getWidth() + "x"
+                            + overlayBitmap.getHeight());
+                    }
+                }
+
+                if (overlayTextureReady) {
+                    GLES20.glActiveTexture(GLES20.GL_TEXTURE1);
+                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTextureId);
+                    if (uOverlayTexLocation >= 0) {
+                        GLES20.glUniform1i(uOverlayTexLocation, 1);
+                    }
+                    overlayCompositeReady = true;
+                }
+            } catch (Exception e) {
+                // Preserve the camera frame if an overlay upload fails.
+                // The overlay is simply omitted for this frame.
+                if (overlayFrameCounter <= 5) {
+                    logger.error("Overlay upload error: " + e.getMessage(), e);
+                }
+            }
         }
+        if (uTextureReadyLocation >= 0) {
+            GLES20.glUniform2f(
+                uTextureReadyLocation,
+                (windshieldReady && windshieldTextureId != 0) ? 1.0f : 0.0f,
+                overlayCompositeReady ? 1.0f : 0.0f);
+        }
+        long tAfterOverlayUploadNs = System.nanoTime();
         // uApaMode uniform: rewrite only on layout change. Per GLES2 spec
         // uniform values are part of the program object and persist across
         // glUseProgram of the same program. setCameraLayout sets the dirty
@@ -1018,72 +1030,9 @@ public class GpuMosaicRecorder {
         GLES20.glDisableVertexAttribArray(aTexCoordLocation);
         long tAfterShaderNs = System.nanoTime();
 
-        // OVERLAY PASS: Composite telemetry overlay if enabled
-        if (overlayEnabled && overlayRecordingModeAllowed && overlayRenderer != null) {
-            overlayFrameCounter++;
-            try {
-                // The software Canvas raster (renderFrame) now runs on
-                // OverlayBitmapRenderer's dedicated 2 Hz background worker
-                // (started in setOverlayEnabled), NOT here — the GL thread used
-                // to eat that per-icon Gaussian-blur raster every ~8th frame
-                // right before eglSwap. The GL thread now does ONLY the cheap
-                // half: swapAndGetFront() + texSubImage2D upload + composite.
-                //
-                // Upload new bitmap to texture ONLY when the double buffer actually swapped.
-                // swapAndGetFront() returns null when no new content is available,
-                // avoiding the expensive texImage2D/texSubImage2D call on unchanged frames.
-                android.graphics.Bitmap overlayBitmap = overlayRenderer.swapAndGetFront();
-                if (overlayBitmap != null && !overlayBitmap.isRecycled()) {
-                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTextureId);
-                    if (!overlayTextureInitialized) {
-                        // First upload: allocate GPU texture storage with texImage2D
-                        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, overlayBitmap, 0);
-                        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
-                        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
-                        overlayTextureInitialized = true;
-                    } else {
-                        // Subsequent uploads: reuse existing texture storage with texSubImage2D
-                        // This avoids GPU texture reallocation on every update
-                        GLUtils.texSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, overlayBitmap);
-                    }
-                    overlayTextureReady = true;
-                    
-                    if (overlayFrameCounter <= 3) {
-                        logger.info("Overlay: uploaded frame " + overlayFrameCounter + 
-                            " bitmap=" + overlayBitmap.getWidth() + "x" + overlayBitmap.getHeight());
-                    }
-                }
-                
-                // Draw overlay quad EVERY frame (reuses last uploaded texture)
-                if (overlayTextureReady) {
-                    GLES20.glEnable(GLES20.GL_BLEND);
-                    GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
-                    
-                    GLES20.glUseProgram(overlayProgramId);
-                    
-                    GLES20.glActiveTexture(GLES20.GL_TEXTURE1);
-                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTextureId);
-                    GLES20.glUniform1i(overlayUTextureLoc, 1);
-                    
-                    GLES20.glEnableVertexAttribArray(overlayAPositionLoc);
-                    GLES20.glVertexAttribPointer(overlayAPositionLoc, 2, GLES20.GL_FLOAT, false, 0, overlayVertexBuffer);
-                    GLES20.glEnableVertexAttribArray(overlayATexCoordLoc);
-                    GLES20.glVertexAttribPointer(overlayATexCoordLoc, 2, GLES20.GL_FLOAT, false, 0, overlayTexCoordBuffer);
-                    
-                    GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-                    
-                    GLES20.glDisableVertexAttribArray(overlayAPositionLoc);
-                    GLES20.glDisableVertexAttribArray(overlayATexCoordLoc);
-                    GLES20.glDisable(GLES20.GL_BLEND);
-                }
-            } catch (Exception e) {
-                // Skip overlay on error, never drop frame
-                if (overlayFrameCounter <= 5) {
-                    logger.error("Overlay draw error: " + e.getMessage(), e);
-                }
-            }
-        }
-        long tAfterOverlayNs = System.nanoTime();
+        // Telemetry overlay is composited inside the mosaic fragment shader.
+        // No second program switch, blend-state change, quad setup, or draw.
+        long tAfterOverlayNs = tAfterShaderNs;
 
         // Push the HAL sensor timestamp straight through. MediaCodec uses the
         // value stamped on the encoder surface via eglPresentationTimeANDROID
@@ -1151,8 +1100,8 @@ public class GpuMosaicRecorder {
         long stageMakeNs     = tAfterMakeCurrentNs - t0;
         long stageViewportNs = tAfterViewportNs   - tAfterMakeCurrentNs;
         long stageRtNs       = tAfterClearNs      - tAfterViewportNs;
-        long stageShaderNs   = tAfterShaderNs     - tAfterClearNs;
-        long stageOverlayNs  = tAfterOverlayNs    - tAfterShaderNs;
+        long stageOverlayNs  = tAfterOverlayUploadNs - tBeforeOverlayUploadNs;
+        long stageShaderNs   = (tAfterShaderNs - tAfterClearNs) - stageOverlayNs;
         long stageSwapNs     = tAfterSwapNs       - tAfterOverlayNs;
         drawStageWindowFrames++;
         if (stageTotalNs > drawStageWorstTotalNs) {
@@ -2102,11 +2051,7 @@ public class GpuMosaicRecorder {
             programId = 0;
         }
         
-        // Release overlay resources
-        if (overlayProgramId != 0) {
-            GLES20.glDeleteProgram(overlayProgramId);
-            overlayProgramId = 0;
-        }
+        // Release merged telemetry overlay texture.
         if (overlayTextureId != 0) {
             GLES20.glDeleteTextures(1, new int[]{overlayTextureId}, 0);
             overlayTextureId = 0;
@@ -2173,7 +2118,9 @@ public class GpuMosaicRecorder {
             "precision mediump float;\n" +
             cameraSampler +
             windshieldSampler +
-            "uniform float uWindshieldReady;\n" +
+            // x = windshield frame ready, y = telemetry overlay texture ready.
+            "uniform vec2 uTextureReady;\n" +
+            "uniform sampler2D uOverlayTex;\n" +
             "uniform float uApaMode;\n" +
             "uniform vec2 uProducerForFront;\n" +
             "uniform vec2 uProducerForRight;\n" +
@@ -2209,6 +2156,7 @@ public class GpuMosaicRecorder {
             "uniform float uRectifyAspect;\n" +
             "uniform float uRecordLayout;\n" +
             "varying vec2 vTexCoord;\n" +
+            "varying vec2 vScreenCoord;\n" +
             // NOTE: the previous revision of this file had a 4-tap
             // Catmull-Rom bicubic sampler here, gated on uRectifyK1 > 0.
             // It saturated the Adreno 610 command queue at 2560×1920 and
@@ -2242,6 +2190,19 @@ public class GpuMosaicRecorder {
             "    vec2 srcTile = vec2(srcAspect.x, srcAspect.y / uRectifyAspect);\n" +
             "    vec2 camUV = srcTile * 0.5 + 0.5;\n" +
             "    return clamp(camUV, vec2(0.0), vec2(1.0));\n" +
+            "}\n" +
+            // Match the former overlay quad's top-strip coverage and
+            // GL_SRC_ALPHA / GL_ONE_MINUS_SRC_ALPHA blend equation. The
+            // helper is shared by the normal camera and windshield paths.
+            "vec4 compositeTelemetryOverlay(vec4 baseColor) {\n" +
+            "    if (uTextureReady.y > 0.5 && vScreenCoord.y >= %.5f) {\n" +
+            "        vec2 overlayUv = vec2(vScreenCoord.x, (1.0 - vScreenCoord.y) / %.5f);\n" +
+            "        vec4 overlayColor = texture2D(uOverlayTex, overlayUv);\n" +
+            "        baseColor = vec4(\n" +
+            "            overlayColor.rgb * overlayColor.a + baseColor.rgb * (1.0 - overlayColor.a),\n" +
+            "            overlayColor.a * overlayColor.a + baseColor.a * (1.0 - overlayColor.a));\n" +
+            "    }\n" +
+            "    return baseColor;\n" +
             "}\n" +
             "void main() {\n" +
             "    vec2 samplePos;\n" +
@@ -2306,13 +2267,13 @@ public class GpuMosaicRecorder {
             "        if (vTexCoord.y < split) {\n" +
             "            float ly = vTexCoord.y / split;\n" +
             // Optional dedicated windshield camera for the top band. When a
-            // windshield frame is bound (uWindshieldReady), sample it directly
+            // windshield frame is bound (uTextureReady.x), sample it directly
             // (vertically cropped to the band aspect via cropY) and skip the
             // 360 front slice. Otherwise fall through to the 360 front slice.
-            "            if (uWindshieldReady > 0.5) {\n" +
+            "            if (uTextureReady.x > 0.5) {\n" +
             "                float cropY = %.5f;\n" +
             "                vec2 wuv = vec2(vTexCoord.x, cropY + ly * (1.0 - cropY * 2.0));\n" +
-            "                gl_FragColor = texture2D(uWindshieldTex, wuv);\n" +
+            "                gl_FragColor = compositeTelemetryOverlay(texture2D(uWindshieldTex, wuv));\n" +
             "                return;\n" +
             "            }\n" +
             "            vec2 camUV = rectifyTile(vec2(vTexCoord.x, ly));\n" +
@@ -2400,8 +2361,9 @@ public class GpuMosaicRecorder {
             "    vec4 src = texture2D(uCameraTex, samplePos);\n" +
             // Shared red-overlay suppression. See GlUtil.RED_MASK_GLSL.
             com.overdrive.app.camera.GlUtil.RED_MASK_GLSL +
-            "    gl_FragColor = src;\n" +
+            "    gl_FragColor = compositeTelemetryOverlay(src);\n" +
             "}\n",
+            OVERLAY_TOP_SCREEN_Y, OVERLAY_SCREEN_HEIGHT,
             offsets[0], offsets[1], offsets[2], offsets[3], windshieldCropY);
     }
 
