@@ -121,6 +121,15 @@ public class AccMonitorDiLink5Test {
                 AccMonitor.resolveDiLink5AccObservation(
                         -1, false, true, true, "test");
         assertNull(lifecycleConflict.accOn);
+
+        AccMonitor.DiLink5AccObservation pendingSources =
+                AccMonitor.resolveDiLink5AccObservation(
+                        -1, false, false, false,
+                        "accanim=<empty>, sysPower=<empty>, dumpPower=current 4=PowerMode Standby");
+        assertNull(pendingSources.accOn);
+        assertTrue(pendingSources.detail.contains("all local power sources unavailable"));
+        assertTrue(pendingSources.detail.contains("dumpPower=current 4=PowerMode Standby"));
+        assertTrue(pendingSources.summary().contains("raw={all local power sources unavailable; "));
     }
 
     @Test

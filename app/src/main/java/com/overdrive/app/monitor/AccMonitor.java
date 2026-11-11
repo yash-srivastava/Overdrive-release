@@ -808,7 +808,10 @@ public class AccMonitor {
                     "IVI PowerMode awake", detail);
         }
         return DiLink5AccObservation.unknown(
-                "no source", "all local power sources unavailable");
+                "no source",
+                detail.isEmpty()
+                        ? "all local power sources unavailable"
+                        : "all local power sources unavailable; " + detail);
     }
 
     static Boolean admitDiLink5AccObservation(

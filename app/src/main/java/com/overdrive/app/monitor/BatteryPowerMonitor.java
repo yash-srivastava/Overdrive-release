@@ -25,6 +25,7 @@ public class BatteryPowerMonitor extends BaseDeviceMonitor<BatteryPowerData> {
     // that never clears; reconnecting every 30 s only floods the log.
     private static final long DI5_DAEMON_DENIED_RECONNECT_MS = 10 * 60_000L;
     private volatile boolean bindDeniedOnDi5Daemon = false;
+    private volatile boolean carSvcPollingMode = false;
     
     public BatteryPowerMonitor() {
         super("BatteryPowerMonitor");
@@ -34,8 +35,22 @@ public class BatteryPowerMonitor extends BaseDeviceMonitor<BatteryPowerData> {
     public void init(Context context) {
         this.context = context;
         bindDeniedOnDi5Daemon = false;
+        carSvcPollingMode = false;
         
         try {
+            if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()
+                    && android.os.Process.myUid() < android.os.Process.FIRST_APPLICATION_UID) {
+                carSvcPollingMode = true;
+                float initialVolts = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.batteryVoltage12v();
+                if (initialVolts >= 6.0f && initialVolts <= 17.0f) {
+                    cachedData.set(new BatteryPowerData(initialVolts));
+                    log("Initial battery power voltage (CarSvcTelemetry): " + initialVolts + "V");
+                }
+                markAvailable();
+                log("Initialized in DiLink 5 CarSvcTelemetry VHAL polling mode");
+                return;
+            }
+
             log("Initializing BYDAutoOtaDevice via reflection...");
             
             // Context is already PermissionBypassContext from AccSentryDaemon
@@ -87,7 +102,7 @@ public class BatteryPowerMonitor extends BaseDeviceMonitor<BatteryPowerData> {
     
     @Override
     public void start() {
-        if (device == null) {
+        if (device == null && !carSvcPollingMode) {
             logError("Cannot start - device not initialized", null);
             return;
         }
@@ -103,10 +118,20 @@ public class BatteryPowerMonitor extends BaseDeviceMonitor<BatteryPowerData> {
             
             while (isRunning.get()) {
                 try {
-                    // Poll voltage via reflection
-                    Class<?> deviceClass = device.getClass();
-                    Method getBatteryPowerVoltage = deviceClass.getMethod("getBatteryPowerVoltage");
-                    double voltage = (Double) getBatteryPowerVoltage.invoke(device);
+                    double voltage;
+                    if (carSvcPollingMode) {
+                        float vhalVolts = com.overdrive.app.byd.CarSvcTelemetry.INSTANCE.batteryVoltage12v();
+                        if (vhalVolts < 6.0f || vhalVolts > 17.0f) {
+                            Thread.sleep(POLL_INTERVAL_MS);
+                            continue;
+                        }
+                        voltage = vhalVolts;
+                    } else {
+                        // Poll voltage via reflection
+                        Class<?> deviceClass = device.getClass();
+                        Method getBatteryPowerVoltage = deviceClass.getMethod("getBatteryPowerVoltage");
+                        voltage = (Double) getBatteryPowerVoltage.invoke(device);
+                    }
                     
                     BatteryPowerData oldData = cachedData.get();
                     BatteryPowerData newData = new BatteryPowerData(voltage);
