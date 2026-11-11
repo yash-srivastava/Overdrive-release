@@ -149,6 +149,8 @@ public class DeterrentActivity extends Activity {
                 if (awake != null) {
                     com.overdrive.app.byd.dilink5.Dilink5PanelPower.report(
                             "deterrent-skipped", "car awake: " + awake);
+                    writeGate(java.util.Collections.singletonMap(
+                            "screenDeterrentCarAwakeElapsedMs", SystemClock.elapsedRealtime()));
                     mainHandler.post(this::finishCleanly);
                     return;
                 }

@@ -38,6 +38,7 @@ object GoogleTileSessions {
     private const val MIN_VALIDITY_MS = 3_600_000L
     private const val CREATE_INTERVAL_MS = 60_000L
     private const val REGION_TTL_MS = 600_000L
+    private const val VIEWPORT_WARN_INTERVAL_NS = 60_000_000_000L
     private const val HEX = "0123456789abcdef"
     private val JSON_TYPE = "application/json; charset=utf-8".toMediaType()
 
@@ -45,6 +46,8 @@ object GoogleTileSessions {
     private val memory = HashMap<String, TileSession>()          // guarded by lock
     private val lastCreateMs = ConcurrentHashMap<String, Long>()
     private val specLocks = ConcurrentHashMap<String, Any>()
+    @Volatile private var lastViewportWarnNs = 0L
+    private val suppressedViewportFailures = java.util.concurrent.atomic.AtomicInteger(0)
     @Volatile private var prefsRef: SharedPreferences? = null
     @Volatile private var regionCache: String? = null
     @Volatile private var regionAtMs = 0L
@@ -106,11 +109,33 @@ object GoogleTileSessions {
             GoogleHttp.client().newCall(Request.Builder().url(url).get().build()).execute().use { resp ->
                 if (!resp.isSuccessful) return null
                 val body = resp.body?.string() ?: return null
-                JSONObject(body).optString("copyright", "").trim().takeIf { it.isNotEmpty() }
+                val copyright = JSONObject(body).optString("copyright", "").trim().takeIf { it.isNotEmpty() }
+                if (copyright != null) {
+                    val suppressed = suppressedViewportFailures.getAndSet(0)
+                    if (suppressed > 0) {
+                        Log.i(TAG, "viewport recovered ($suppressed failure(s) suppressed)")
+                    }
+                }
+                copyright
             }
         } catch (t: Throwable) {
-            Log.w(TAG, "viewport failed: ${t.javaClass.simpleName}")
+            logViewportFailureThrottled(t.javaClass.simpleName)
             null
+        }
+    }
+
+    internal fun shouldEmitViewportWarning(nowNs: Long, lastWarnNs: Long): Boolean =
+        lastWarnNs == 0L || nowNs - lastWarnNs >= VIEWPORT_WARN_INTERVAL_NS
+
+    private fun logViewportFailureThrottled(reason: String) {
+        val nowNs = System.nanoTime()
+        if (shouldEmitViewportWarning(nowNs, lastViewportWarnNs)) {
+            val suppressed = suppressedViewportFailures.getAndSet(0)
+            lastViewportWarnNs = nowNs
+            val suffix = if (suppressed > 0) " ($suppressed similar suppressed)" else ""
+            Log.w(TAG, "viewport failed: $reason$suffix")
+        } else {
+            suppressedViewportFailures.incrementAndGet()
         }
     }
 

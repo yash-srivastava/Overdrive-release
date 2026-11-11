@@ -105,6 +105,8 @@ class GoogleMapController(context: Context, private val clusterMode: Boolean, pr
     private var copyrightText: String? = null
     private var lastViewport: Viewport? = null
     private var lastCopyrightMs = 0L
+    private var copyrightFailures = 0
+    private var copyrightRetryAtMs = 0L
 
     private val budgetListener = Runnable {
         if (!destroyed && reevalPosted.compareAndSet(false, true)) {
@@ -563,12 +565,15 @@ class GoogleMapController(context: Context, private val clusterMode: Boolean, pr
     private fun clearCopyright() {
         copyrightText = null
         lastViewport = null
+        copyrightFailures = 0
+        copyrightRetryAtMs = 0L
     }
 
     private fun scheduleCopyright() {
         val h = host.mainHandler()
         h.removeCallbacks(copyrightRunnable)
-        val wait = COPYRIGHT_MIN_MS - (SystemClock.elapsedRealtime() - lastCopyrightMs)
+        val now = SystemClock.elapsedRealtime()
+        val wait = nextCopyrightWaitMs(now, lastCopyrightMs, copyrightRetryAtMs)
         if (wait > 0L) h.postDelayed(copyrightRunnable, wait) else fetchCopyright()
     }
 
@@ -576,18 +581,31 @@ class GoogleMapController(context: Context, private val clusterMode: Boolean, pr
         if (destroyed || !googleStyleActive) return
         val session = activeBase ?: return
         val map = lastMap?.get() ?: return
+        val now = SystemClock.elapsedRealtime()
+        if (now < copyrightRetryAtMs) {
+            scheduleCopyright()
+            return
+        }
         val vp = try { viewport(map, session.token) } catch (_: Throwable) { null } ?: return
         if (lastViewport?.let { near(it, vp) } == true) return
-        lastCopyrightMs = SystemClock.elapsedRealtime()
+        lastCopyrightMs = now
         submit {
             val text = GoogleTileSessions.fetchCopyright(session, vp.zoom, vp.north, vp.south, vp.east, vp.west)
-            if (text != null && !destroyed) {
+            if (!destroyed) {
                 host.mainHandler().post {
                     if (destroyed || activeBase?.token != session.token) return@post
-                    lastViewport = vp
-                    if (text != copyrightText) {
-                        copyrightText = text
-                        host.onAttributionChanged()
+                    if (text != null) {
+                        copyrightFailures = 0
+                        copyrightRetryAtMs = 0L
+                        lastViewport = vp
+                        if (text != copyrightText) {
+                            copyrightText = text
+                            host.onAttributionChanged()
+                        }
+                    } else {
+                        val backoff = copyrightBackoffMs(copyrightFailures)
+                        copyrightFailures++
+                        copyrightRetryAtMs = SystemClock.elapsedRealtime() + backoff
                     }
                 }
             }
@@ -609,27 +627,36 @@ class GoogleMapController(context: Context, private val clusterMode: Boolean, pr
             abs(a.east - b.east) <= lngTol && abs(a.west - b.west) <= lngTol
     }
 
-    private companion object {
-        const val TAG = "GoogleMapController"
-        const val PREFS_NAVMAP = "navmap_ui"
-        const val KEY_TRAFFIC = "map_traffic"
-        const val KEY_MAP_TYPE = "google_map_type"
-        const val KEY_BASEMAP = "google_basemap"
-        const val ROADSENSE_LAYER_PREFIX = "roadsense-"
-        const val GLASS_LAYER_PREFIX = "od-"
-        const val DEFAULT_BACKGROUND = "#E5E3DF"
-        const val POLL_MS = 10_000L
-        const val SWAP_MIN_MS = 120_000L
-        const val RELOAD_RETRY_MS = 10_000L
-        const val FALLBACK_FAILURES = 6
-        const val FALLBACK_NO_SUCCESS_MS = 30_000L
-        const val HEALTHY_RESET_MS = 60_000L
-        const val COPYRIGHT_MIN_MS = 3_000L
-        const val VIEWPORT_TOLERANCE = 0.25
-        val ROAD_LAYER = Regex("road|highway|bridge|tunnel|motorway|street")
-        val BACKOFF_MS = longArrayOf(120_000L, 240_000L, 480_000L, 900_000L)
+    companion object {
+        private const val TAG = "GoogleMapController"
+        private const val PREFS_NAVMAP = "navmap_ui"
+        private const val KEY_TRAFFIC = "map_traffic"
+        private const val KEY_MAP_TYPE = "google_map_type"
+        private const val KEY_BASEMAP = "google_basemap"
+        private const val ROADSENSE_LAYER_PREFIX = "roadsense-"
+        private const val GLASS_LAYER_PREFIX = "od-"
+        private const val DEFAULT_BACKGROUND = "#E5E3DF"
+        private const val POLL_MS = 10_000L
+        private const val SWAP_MIN_MS = 120_000L
+        private const val RELOAD_RETRY_MS = 10_000L
+        private const val FALLBACK_FAILURES = 6
+        private const val FALLBACK_NO_SUCCESS_MS = 30_000L
+        private const val HEALTHY_RESET_MS = 60_000L
+        private const val COPYRIGHT_MIN_MS = 3_000L
+        private const val VIEWPORT_TOLERANCE = 0.25
+        private val ROAD_LAYER = Regex("road|highway|bridge|tunnel|motorway|street")
+        private val BACKOFF_MS = longArrayOf(120_000L, 240_000L, 480_000L, 900_000L)
+        private val COPYRIGHT_BACKOFF_MS = longArrayOf(15_000L, 30_000L, 60_000L, 180_000L)
 
         // Notice day keys shared by every controller in the process ("mode/notice" -> PT reset ms).
-        val noticeDays = ConcurrentHashMap<String, Long>()
+        private val noticeDays = ConcurrentHashMap<String, Long>()
+
+        internal fun copyrightBackoffMs(consecutiveFailures: Int): Long =
+            COPYRIGHT_BACKOFF_MS[consecutiveFailures.coerceIn(0, COPYRIGHT_BACKOFF_MS.lastIndex)]
+
+        internal fun nextCopyrightWaitMs(nowMs: Long, lastAttemptMs: Long, retryAtMs: Long): Long {
+            val earliest = maxOf(lastAttemptMs + COPYRIGHT_MIN_MS, retryAtMs)
+            return maxOf(0L, earliest - nowMs)
+        }
     }
 }
