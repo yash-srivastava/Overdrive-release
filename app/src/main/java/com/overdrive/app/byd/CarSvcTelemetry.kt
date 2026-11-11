@@ -1172,6 +1172,95 @@ object CarSvcTelemetry {
 
     }
 
+    /**
+     * Daemon-side non-spawning snapshot overlay for DiLink 5 bridge consumers.
+     * Uses ONLY [cachedDump] (never invokes `dumpsys`) to enrich parked/daemon
+     * snapshots with float 12V battery voltage, per-door lock states (falling back
+     * to [fallbackDoorLockState] when VHAL lock properties are absent), and VHAL
+     * charging power/gun/BMS state.
+     */
+    @JvmStatic
+    fun applyCachedDaemonOverlay(
+        data: BydVehicleData?,
+        nowElapsedMs: Long,
+        maxAgeMs: Long,
+        fallbackDoorLockState: Int
+    ): BydVehicleData? {
+        if (data == null) return null
+        val dump = cachedDump()
+        val dumpFresh = dump != null
+            && nowElapsedMs >= dump.observedAtElapsedMs
+            && (nowElapsedMs - dump.observedAtElapsedMs) <= maxAgeMs
+        return applyDaemonOverlayFromDump(
+            data,
+            if (dumpFresh) dump?.text else null,
+            fallbackDoorLockState
+        )
+    }
+
+    @JvmStatic
+    fun applyDaemonOverlayFromDump(
+        data: BydVehicleData?,
+        dumpText: String?,
+        fallbackDoorLockState: Int
+    ): BydVehicleData? {
+        if (data == null) return null
+        val builder = data.toBuilder()
+        var changed = false
+
+        val mergedLocks = data.doorLockStatus?.copyOf(maxOf(7, data.doorLockStatus.size))
+            ?: IntArray(7) { BydVehicleData.UNAVAILABLE }
+        var locksUpdated = false
+
+        if (!dumpText.isNullOrBlank()) {
+            val v12 = batteryVoltage12v(dumpText)
+            if (v12 in 8f..16f && (data.voltage12v.isNaN() || data.voltage12v == Math.floor(data.voltage12v))) {
+                builder.voltage12v(v12.toDouble())
+                changed = true
+            }
+            val locks = doorsArray(dumpText)
+            if (locks.any { it == 1 || it == 2 }) {
+                for (i in locks.indices) {
+                    if (locks[i] >= 0 && mergedLocks[i] < 0) {
+                        mergedLocks[i] = locks[i]
+                        locksUpdated = true
+                    }
+                }
+            }
+            val chg = parseChargingObservation(dumpText)
+            if (chg.isAvailable()) {
+                if (data.chargingGunState == BydVehicleData.UNAVAILABLE && chg.gunState != BydVehicleData.UNAVAILABLE) {
+                    builder.chargingGunState(chg.gunState)
+                    changed = true
+                }
+                if (data.chargingState == BydVehicleData.UNAVAILABLE && chg.bmsState != BydVehicleData.UNAVAILABLE) {
+                    builder.chargingState(chg.bmsState)
+                    changed = true
+                }
+                if (chg.charging && chg.powerKw.isFinite() && (data.chargingPowerKw.isNaN() || data.chargingPowerKw <= 0.0)) {
+                    builder.chargingPowerKw(chg.powerKw)
+                        .chargingPowerAtMs(System.currentTimeMillis())
+                    changed = true
+                }
+            }
+        }
+
+        val cabinLocksMissing = (0..3).all { mergedLocks[it] < 0 }
+        if (cabinLocksMissing && (fallbackDoorLockState == 1 || fallbackDoorLockState == 2)) {
+            for (i in 0..3) mergedLocks[i] = fallbackDoorLockState
+            if (mergedLocks.size > 6 && mergedLocks[6] < 0) {
+                mergedLocks[6] = fallbackDoorLockState
+            }
+            locksUpdated = true
+        }
+        if (locksUpdated) {
+            builder.doorLockStatus(mergedLocks)
+            changed = true
+        }
+
+        return if (changed) builder.buildPreservingTimestamp() else data
+    }
+
     private fun applyTurn(builder: BydVehicleData.Builder, turn: Int) {
         builder.leftTurnState(if (turn == 2 || turn == 3 || turn >= 6) 1 else 0)
         builder.rightTurnState(if (turn == 4 || turn == 5 || turn >= 6) 1 else 0)

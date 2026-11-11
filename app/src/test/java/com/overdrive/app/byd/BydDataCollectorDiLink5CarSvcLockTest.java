@@ -339,7 +339,7 @@ public class BydDataCollectorDiLink5CarSvcLockTest {
                         + "        return diLink5BridgeConsumer && isDiLink5Vehicle() && !isMainAppProcess();\n"
                         + "    }"));
         assertTrue(collector.contains(
-                "    private static boolean isDiLink5Vehicle() {\n"
+                "    public static boolean isDiLink5Vehicle() {\n"
                         + "        return com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();"));
         assertTrue(collector.contains(
                 "    private void pollDiLink5CarSvcLock() {\n"

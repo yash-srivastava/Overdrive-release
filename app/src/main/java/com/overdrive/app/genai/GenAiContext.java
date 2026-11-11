@@ -1101,6 +1101,24 @@ public final class GenAiContext {
         try {
             out.put("available", true);
             out.put("vehicle", currentVehicle());
+            try {
+                com.overdrive.app.monitor.ChargingDetector.StateSnapshot cs =
+                        com.overdrive.app.monitor.ChargingDetector.getInstance().getStateSnapshot();
+                if (cs != null) {
+                    JSONObject liveCharging = new JSONObject()
+                            .put("charging", cs.charging)
+                            .put("physicalStop", cs.physicalStop);
+                    if (cs.source != null && !cs.source.isEmpty()) {
+                        liveCharging.put("source", cs.source);
+                    }
+                    if (cs.observedAtMs > 0L) {
+                        liveCharging.put("observedAgeMs",
+                                Math.max(0L, System.currentTimeMillis() - cs.observedAtMs));
+                    }
+                    out.put("chargingDetector", liveCharging);
+                }
+            } catch (Throwable ignored) {
+            }
             JSONObject performance =
                     PerformanceMonitor.getInstance().getLatestAsJson();
             if (performance.length() > 0) {
@@ -1237,10 +1255,42 @@ public final class GenAiContext {
         return out;
     }
 
+    static final long MAX_DIAGNOSTIC_LOG_AGE_MS = 48L * 3600_000L;
+    private static final java.util.regex.Pattern DIAGNOSTIC_LINE_TS_PATTERN =
+            java.util.regex.Pattern.compile(
+                    "(?:([+-]\\d{4})\\s+)?(\\d{4})[-/](\\d{2})[-/](\\d{2})[T\\s](\\d{2}):(\\d{2}):(\\d{2})");
+
+    static long parseDiagnosticLineTimestampMs(String line) {
+        if (line == null || line.isEmpty()) return 0L;
+        java.util.regex.Matcher m = DIAGNOSTIC_LINE_TS_PATTERN.matcher(line);
+        if (!m.find()) return 0L;
+        try {
+            int year = Integer.parseInt(m.group(2));
+            int month = Integer.parseInt(m.group(3));
+            int day = Integer.parseInt(m.group(4));
+            int hour = Integer.parseInt(m.group(5));
+            int minute = Integer.parseInt(m.group(6));
+            int second = Integer.parseInt(m.group(7));
+            java.time.LocalDateTime ldt = java.time.LocalDateTime.of(
+                    year, month, day, hour, minute, second);
+            String tz = m.group(1);
+            if (tz != null && tz.length() == 5) {
+                java.time.ZoneOffset offset = java.time.ZoneOffset.of(tz);
+                return ldt.toInstant(offset).toEpochMilli();
+            }
+            return ldt.atZone(java.time.ZoneId.systemDefault())
+                    .toInstant().toEpochMilli();
+        } catch (Throwable ignored) {
+            return 0L;
+        }
+    }
+
     private static JSONObject diagnosticLogs() {
         JSONObject out = new JSONObject();
         JSONArray sources = new JSONArray();
+        JSONArray skippedStaleComponents = new JSONArray();
         int totalLines = 0;
+        long nowMs = System.currentTimeMillis();
         try {
             for (String component : new String[]{
                     "camera", "sentry", "accsentry",
@@ -1249,21 +1299,31 @@ public final class GenAiContext {
                 if (path == null) continue;
                 java.io.File file = new java.io.File(path);
                 if (!file.isFile() || file.length() <= 0) continue;
+                long lastModifiedMs = file.lastModified();
+                if (nowMs > 0L && lastModifiedMs > 0L
+                        && nowMs - lastModifiedMs > MAX_DIAGNOSTIC_LOG_AGE_MS) {
+                    skippedStaleComponents.put(component);
+                    continue;
+                }
                 String tail = LogUploader.readRedactedTail(
                         path, 24 * 1024L);
-                JSONArray lines = selectDiagnosticLines(tail, 28);
+                JSONArray lines = selectDiagnosticLines(tail, 28, nowMs);
                 if (lines.length() == 0) continue;
                 totalLines += lines.length();
                 sources.put(new JSONObject()
                         .put("component", component)
-                        .put("lastModifiedMs", file.lastModified())
+                        .put("lastModifiedMs", lastModifiedMs)
                         .put("lines", lines));
             }
             out.put("available", sources.length() > 0);
             out.put("sources", sources);
             out.put("lineCount", totalLines);
+            out.put("maxAgeHours", 48);
+            if (skippedStaleComponents.length() > 0) {
+                out.put("skippedStaleComponents", skippedStaleComponents);
+            }
             out.put("selection",
-                    "Recent bounded tails; warning/error-like lines plus short stack continuations only.");
+                    "Recent bounded tails (last 48h); warning/error-like lines plus short stack continuations only.");
             out.put("privacy",
                     "Known tokens, credentials, device identifiers, URLs, email addresses, VIN-like identifiers, IP addresses, and long opaque values were redacted locally.");
         } catch (Throwable t) {
@@ -1273,6 +1333,10 @@ public final class GenAiContext {
     }
 
     static JSONArray selectDiagnosticLines(String raw, int maxLines) {
+        return selectDiagnosticLines(raw, maxLines, 0L);
+    }
+
+    static JSONArray selectDiagnosticLines(String raw, int maxLines, long nowMs) {
         JSONArray out = new JSONArray();
         if (raw == null || raw.trim().isEmpty() || maxLines <= 0) {
             return out;
@@ -1284,6 +1348,13 @@ public final class GenAiContext {
         for (int i = Math.max(0, lines.length - 500);
              i < lines.length; i++) {
             String line = lines[i] == null ? "" : lines[i].trim();
+            if (nowMs > 0L) {
+                long lineTsMs = parseDiagnosticLineTimestampMs(line);
+                if (lineTsMs > 0L && nowMs - lineTsMs > MAX_DIAGNOSTIC_LOG_AGE_MS) {
+                    continuationBudget = 0;
+                    continue;
+                }
+            }
             boolean diagnostic = isDiagnosticLine(line);
             boolean continuation = continuationBudget > 0
                     && (line.startsWith("at ")
@@ -1343,7 +1414,7 @@ public final class GenAiContext {
                 "(?i)\\b[A-Z]:\\\\[^\\s\"']+",
                 "[REDACTED_PATH]");
         value = value.replaceAll(
-                "(?i)\\b[^\\s/\\\\]+\\.(?:mp4|mkv|mov|ts|jpg|jpeg|png|webp|srt)\\b",
+                "(?i)\\b[^\\s/\\\\]+\\.(?:mp4|mkv|mov|ts|jpg|jpeg|png|webp|srt)\\b(?!\\.[A-Za-z0-9_])",
                 "[REDACTED_MEDIA]");
         value = value.replaceAll(
                 "\\b[A-Za-z0-9_\\-+/=]{40,}\\b",

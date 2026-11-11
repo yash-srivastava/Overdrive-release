@@ -2682,26 +2682,35 @@
 
         usageLabel: function (usage) {
             if (!usage) return '';
-            var input = Number(
-                usage.input_tokens != null
-                    ? usage.input_tokens
-                    : (usage.prompt_tokens != null
-                        ? usage.prompt_tokens
-                        : (usage.inputTokenCount != null
-                            ? usage.inputTokenCount
-                            : usage.promptTokenCount)));
-            var output = Number(
-                usage.output_tokens != null
-                    ? usage.output_tokens
-                    : (usage.completion_tokens != null
-                        ? usage.completion_tokens
-                        : (usage.outputTokenCount != null
-                            ? usage.outputTokenCount
-                            : usage.candidatesTokenCount)));
-            var total = Number(
-                usage.total_tokens != null
-                    ? usage.total_tokens
-                    : usage.totalTokenCount);
+            function pickCount(keys) {
+                for (var i = 0; i < keys.length; i++) {
+                    var raw = usage[keys[i]];
+                    if (raw === null || raw === undefined || raw === '' || typeof raw === 'boolean') {
+                        continue;
+                    }
+                    var n = Number(raw);
+                    if (isFinite(n) && n >= 0) return n;
+                }
+                return NaN;
+            }
+            var input = pickCount([
+                'input_tokens',
+                'total_input_tokens',
+                'prompt_tokens',
+                'inputTokenCount',
+                'promptTokenCount'
+            ]);
+            var output = pickCount([
+                'output_tokens',
+                'total_output_tokens',
+                'completion_tokens',
+                'outputTokenCount',
+                'candidatesTokenCount'
+            ]);
+            var total = pickCount([
+                'total_tokens',
+                'totalTokenCount'
+            ]);
             var parts = [];
             if (isFinite(input) && input >= 0) {
                 parts.push(t('genai.usage_input', { count: Math.round(input) }));

@@ -126,11 +126,16 @@ public final class LogUploader {
         // Bearer / Authorization tokens
         Pattern.compile("(?i)(bearer\\s+)[A-Za-z0-9._-]{12,}"),
         // key=value or "key":"value" / key: value for sensitive key names.
-        // `device` (not just deviceid/did) catches "Device: <id>" — the
-        // AuthManager logs the device id in that prose form.
-        Pattern.compile("(?i)(token|secret|password|passwd|apikey|api_key|auth|device|deviceid|device_id|did|chat_?id)" +
+        // Require a leading word boundary so camelCase identifiers such as
+        // `resolveLeaseSpecialDevice: BYDAutoSpecialDevice` or `isAccStateAuthoritative`
+        // do not match mid-identifier, while still redacting `Device: <id>` prose lines
+        // when `Device` is a standalone token and the value is not a dotted Java FQN.
+        Pattern.compile("(?i)\\b(token|secret|password|passwd|apikey|api_key|authorization|auth_?token|deviceid|device_id|did|chat_?id)" +
                 "(\"?\\s*[:=]\\s*\"?)([A-Za-z0-9._:\\-]{4,})"),
     };
+
+    private static final Pattern PROSE_DEVICE_ID_REDACTOR =
+            Pattern.compile("(?i)(?<![A-Za-z0-9_.])(device)(\\s*:\\s*)([A-Za-z0-9_\\-]{8,})(?![A-Za-z0-9_.])");
 
     // Signed thumb / parking-asset tokens in a logged request line: /thumb/x.jpg?t=<jws>.
     // The key name is a bare "t" so the sensitive-key pattern above misses it. Length bound
@@ -154,6 +159,7 @@ public final class LogUploader {
         }
         m.appendTail(sb);
         out = sb.toString();
+        out = PROSE_DEVICE_ID_REDACTOR.matcher(out).replaceAll("$1$2[REDACTED]");
         // Query-param thumb tokens → keep the key, mask the value.
         return QUERY_TOKEN_REDACTOR.matcher(out).replaceAll("$1[REDACTED]");
     }

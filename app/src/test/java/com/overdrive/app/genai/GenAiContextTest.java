@@ -140,6 +140,35 @@ public class GenAiContextTest {
     }
 
     @Test
+    public void diagnosticLogSelectionPreservesTsPackagesAndFiltersStaleTimestamps() {
+        long nowMs = GenAiContext.parseDiagnosticLineTimestampMs(
+                "+0100 2026-11-10 17:02:33 ERROR connection");
+        assertTrue(nowMs > 0L);
+
+        JSONArray lines = GenAiContext.selectDiagnosticLines(
+                "[2026-11-03 08:06:53.084] BatteryPowerMonitor: SecurityException when binding "
+                        + "Intent { act=android.Otasdk.OtaTsUpdateService cmp=com.ts.ota.otasdkmgr/.OtaService }\n"
+                        + "at android.app.ContextImpl.bindServiceCommon(ContextImpl.java:1921)\n"
+                        + "2026/11/03 07:02:27 controlhttp: all connection attempts failed\n"
+                        + "[2026-11-10 16:55:00.120] BatteryPowerMonitor: SecurityException when binding "
+                        + "com.ts.ota.otasdkmgr clip_001.ts\n"
+                        + "+0100 2026-11-10 17:02:31 ERROR connection: i/o timeout\n",
+                10,
+                nowMs);
+
+        assertEquals(2, lines.length());
+        String joined = lines.toString();
+        assertTrue(joined.contains("com.ts.ota.otasdkmgr"));
+        assertFalse(joined.contains("[REDACTED_MEDIA].ota.otasdkmgr"));
+        assertTrue(joined.contains("[REDACTED_MEDIA]"));
+        assertFalse(joined.contains("clip_001.ts"));
+        assertFalse(joined.contains("2026-11-03"));
+        assertFalse(joined.contains("2026/11/03"));
+        assertFalse(joined.contains("ContextImpl.bindServiceCommon"));
+        assertTrue(joined.contains("2026-11-10 17:02:31"));
+    }
+
+    @Test
     public void tripComparisonUsesMedianAndOmitsRouteCoordinates()
             throws Exception {
         JSONObject latest = trip(1, 10, 0.22, 42)
