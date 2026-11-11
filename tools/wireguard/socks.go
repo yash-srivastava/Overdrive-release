@@ -116,7 +116,7 @@ func (s *socksServer) serve(ln net.Listener) error {
 		// The accept-loop fix only survives EMFILE; the cap keeps the daemon
 		// away from the fd limit in the first place (a direct SOCKS session
 		// costs two fds, a tunnel session one).
-		if s.max > 0 && s.active.Load() >= s.max {
+		if !s.reserveConnection() {
 			_ = c.Close()
 			s.rejected.Add(1)
 			if time.Since(lastLog) >= acceptLogEvery {
@@ -131,12 +131,30 @@ func (s *socksServer) serve(ln net.Listener) error {
 			}
 			return
 		}
-		s.active.Add(1)
 		go func() {
 			defer s.active.Add(-1)
 			s.handle(c)
 		}()
 	})
+}
+
+// reserveConnection atomically enforces the connection cap even when
+// multiple accept loops share the same server. A rejected connection does
+// not change the active count.
+func (s *socksServer) reserveConnection() bool {
+	if s.max <= 0 {
+		s.active.Add(1)
+		return true
+	}
+	for {
+		active := s.active.Load()
+		if active >= s.max {
+			return false
+		}
+		if s.active.CompareAndSwap(active, active+1) {
+			return true
+		}
+	}
 }
 
 func (s *socksServer) handle(c net.Conn) {
