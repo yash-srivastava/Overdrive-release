@@ -536,7 +536,8 @@ public final class HighResPreviewSampler {
         }
         final Object lock = new Object();
         final AtomicReference<byte[]> result = new AtomicReference<>();
-        handler.post(() -> {
+        final boolean[] completed = {false};
+        boolean accepted = handler.post(() -> {
             try {
                 Object activeSourceLock = sourceLock;
                 SourceGuard activeSourceGuard = sourceGuard;
@@ -554,12 +555,33 @@ public final class HighResPreviewSampler {
             } catch (Throwable t) {
                 logger.warn("GL job failed: " + t.getMessage());
             } finally {
-                synchronized (lock) { lock.notifyAll(); }
+                synchronized (lock) {
+                    completed[0] = true;
+                    lock.notifyAll();
+                }
             }
         });
+        if (!accepted) {
+            logger.warn("Sampler GL thread rejected preview job");
+            return null;
+        }
+
+        // Object.wait() may wake spuriously. Wait for the actual completion
+        // signal, but retain the existing bounded request latency.
+        long deadline = android.os.SystemClock.elapsedRealtime() + 1500L;
         synchronized (lock) {
-            try { lock.wait(1500); } catch (InterruptedException ignored) {
-                Thread.currentThread().interrupt();
+            while (!completed[0]) {
+                long remaining = deadline - android.os.SystemClock.elapsedRealtime();
+                if (remaining <= 0) {
+                    logger.warn("Sampler GL job timed out");
+                    return null;
+                }
+                try {
+                    lock.wait(remaining);
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                    return null;
+                }
             }
         }
         return result.get();
