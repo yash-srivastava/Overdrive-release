@@ -431,10 +431,14 @@ public class AppAudioCaptureController {
 
         AppAudioCaptureController current = owner;
         boolean needsIngest = recordingDemand || listenerDemand;
-        int desiredCaptureRate =
-                listenerDemand && listenerDiPlusCompatibility
+        // Recording quality takes priority over the remote listener's low-bandwidth
+        // navigation compatibility mode. Never capture at 8 kHz while a recording
+        // is active: repeating those samples to 48 kHz cannot restore lost detail.
+        int desiredCaptureRate = recordingDemand
+                ? SAMPLE_RATE
+                : (listenerDemand && listenerDiPlusCompatibility
                         ? LISTENER_CAPTURE_RATE
-                        : (needsIngest ? SAMPLE_RATE : WAKE_CAPTURE_RATE);
+                        : (needsIngest ? SAMPLE_RATE : WAKE_CAPTURE_RATE));
         // The requested input, or plain MIC once the head unit refused it (failedAudioSource):
         // a capture that already fell back to MIC is therefore not stale and is kept.
         int source = effectiveAudioSource();
