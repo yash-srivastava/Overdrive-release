@@ -187,6 +187,12 @@ func (s *socksServer) handle(c net.Conn) {
 	if _, err := io.ReadFull(c, req[:]); err != nil || req[0] != socksVersion {
 		return
 	}
+	// RFC 1928 requires the request's reserved byte to be zero.
+	// Reject malformed requests before parsing or dialing their destination.
+	if req[2] != 0 {
+		reply(c, repGeneralFailure)
+		return
+	}
 	if req[1] != cmdConnect {
 		reply(c, repCmdNotSupported)
 		return
