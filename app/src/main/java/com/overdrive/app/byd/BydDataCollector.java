@@ -4748,7 +4748,10 @@ public class BydDataCollector {
             t.setDaemon(true);
             return t;
         });
-        pollScheduler.scheduleAtFixedRate(() -> {
+        // A broad HAL sweep can exceed its interval on slow head units.
+        // Leave an idle gap instead of running overdue sweeps back-to-back.
+        // The separate fast/event-driven telemetry paths are unchanged.
+        pollScheduler.scheduleWithFixedDelay(() -> {
             try {
                 if (!collectAllFromScheduler(schedulerGeneration)) return;
                 // Log when data actually changes
@@ -5298,7 +5301,10 @@ public class BydDataCollector {
                 t.setDaemon(true);
                 return t;
             });
-            pollScheduler.scheduleAtFixedRate(() -> {
+            // A broad HAL sweep can exceed its interval on slow head units.
+            // Leave an idle gap instead of running overdue sweeps back-to-back.
+            // The separate fast/event-driven telemetry paths are unchanged.
+            pollScheduler.scheduleWithFixedDelay(() -> {
                 try {
                     if (!collectAllFromScheduler(schedulerGeneration)) return;
                     logChangedPollSummary(snapshot.get());
