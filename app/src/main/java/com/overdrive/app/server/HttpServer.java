@@ -65,41 +65,65 @@ public class HttpServer {
         this.port = port;
     }
 
-    /**
-     * Extracts web assets from APK to filesystem.
-     * Call this during initialization with a valid AssetManager.
-     */
+    // Re-extracting the entire bundled web UI (including translations and the 3D
+    // model) on every daemon restart causes avoidable flash writes and startup
+    // stalls. A completed extraction is reusable until the installed APK changes.
+    // The stamp is committed LAST: a failed/aborted extraction cannot mark an
+    // incomplete web tree as current. The external overlay icons are checked too.
+    private static final String WEB_ASSET_STAMP = ".overdrive-apk-assets-v1";
+
+    /** Compatibility entry point without an APK identity: always refresh. */
     public static void extractWebAssets(AssetManager assetManager) {
+        extractWebAssets(assetManager, null);
+    }
+
+    /**
+     * Extract APK web assets once per APK installation, not once per daemon start.
+     * A missing/changed APK identity or incomplete extraction uses the original
+     * full-refresh path. The APK path comes from the daemon's own classpath.
+     */
+    public static synchronized void extractWebAssets(AssetManager assetManager, String apkPath) {
         if (assetManager == null) {
             CameraDaemon.log("AssetManager is null, skipping web asset extraction");
             return;
         }
-        
+
+        String expectedStamp = apkAssetStamp(apkPath);
         try {
             File webRoot = new File(WEB_ROOT);
+            boolean cacheHit = expectedStamp != null
+                    && webAssetCacheValid(webRoot, expectedStamp);
+            if (cacheHit) {
+                CameraDaemon.log("Reusing existing web assets (APK unchanged)");
+            } else {
+                // APK changed, the extracted files were removed, or the last
+                // extraction did not finish. Keep the existing full-refresh path.
+                if (webRoot.exists()) {
+                    deleteRecursive(webRoot);
+                    CameraDaemon.log("Deleted existing web assets for fresh extraction");
+                }
+                if (!webRoot.mkdirs() && !webRoot.isDirectory()) {
+                    throw new java.io.IOException("Cannot create web assets directory: " + webRoot);
+                }
             
-            // Always delete and recreate to ensure fresh files on app update
-            if (webRoot.exists()) {
-                deleteRecursive(webRoot);
-                CameraDaemon.log("Deleted existing web assets for fresh extraction");
-            }
-            webRoot.mkdirs();
-            
-            // Extract web/local and web/shared directories
-            extractAssetDir(assetManager, "web/local", new File(WEB_ROOT, "local"));
-            extractAssetDir(assetManager, "web/shared", new File(WEB_ROOT, "shared"));
-            // Extract i18n catalogs (one JSON per supported locale).
-            // The web/i18n directory is created by the NLLB translation pipeline
-            // — at minimum web/i18n/en.json must exist for the runtime to load.
-            extractAssetDir(assetManager, "web/i18n", new File(WEB_ROOT, "i18n"));
-            // Extract server-side i18n catalogs (Messages.java lookup source).
-            // Kept distinct from web/i18n so the HTTP /i18n/ route doesn't accidentally
-            // expose internal error keys, and the two catalogs can diverge if needed.
-            extractAssetDir(assetManager, "server-i18n", new File(WEB_ROOT, "server-i18n"));
+                // Extract web/local and web/shared directories
+                extractAssetDir(assetManager, "web/local", new File(WEB_ROOT, "local"));
+                extractAssetDir(assetManager, "web/shared", new File(WEB_ROOT, "shared"));
+                // Extract i18n catalogs (one JSON per supported locale).
+                // The web/i18n directory is created by the NLLB translation pipeline
+                // — at minimum web/i18n/en.json must exist for the runtime to load.
+                extractAssetDir(assetManager, "web/i18n", new File(WEB_ROOT, "i18n"));
+                // Extract server-side i18n catalogs (Messages.java lookup source).
+                // Kept distinct from web/i18n so the HTTP /i18n/ route doesn't accidentally
+                // expose internal error keys, and the two catalogs can diverge if needed.
+                extractAssetDir(assetManager, "server-i18n", new File(WEB_ROOT, "server-i18n"));
 
-            // Extract overlay icons for telemetry overlay
-            extractAssetDir(assetManager, "overlay", new File(com.overdrive.app.util.ScratchRoot.path("overlay")));
+                // Extract overlay icons for telemetry overlay
+                extractAssetDir(assetManager, "overlay", new File(com.overdrive.app.util.ScratchRoot.path("overlay")));
             
+            }
+
+            // Validate external crypto tables on every boot, even on a web cache hit.
             // Extract BYD cloud crypto tables — re-extract whenever the cache
             // is missing or fails magic/size validation, so a stale or
             // truncated /data/local/tmp file from a prior build can't poison
@@ -133,12 +157,73 @@ public class HttpServer {
                 CameraDaemon.log("Could not extract BYD WBSK tables: " + e.getMessage());
             }
             
-            CameraDaemon.log("Web assets extracted to " + WEB_ROOT);
+            // Publish the stamp only after all web catalogs and overlay icons
+            // were extracted successfully. A crash before rename will cause
+            // the next daemon start to retry the full extraction.
+            if (!cacheHit && expectedStamp != null) {
+                writeWebAssetStamp(webRoot, expectedStamp);
+            }
+            if (!cacheHit) CameraDaemon.log("Web assets extracted to " + WEB_ROOT);
         } catch (Exception e) {
             CameraDaemon.log("Failed to extract web assets: " + e.getMessage());
         }
     }
-    
+
+    /** Hash APK metadata, not APK contents (hashing the APK defeats this optimization). */
+    private static String apkAssetStamp(String apkPath) {
+        if (apkPath == null || apkPath.isEmpty()) return null;
+        try {
+            File apk = new File(apkPath);
+            if (!apk.isFile() || apk.length() <= 0L || apk.lastModified() <= 0L) return null;
+            String identity = "v1\n" + apk.getCanonicalPath() + "\n"
+                    + apk.length() + "\n" + apk.lastModified();
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(
+                    identity.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                hex.append(Character.forDigit((b >>> 4) & 0x0f, 16));
+                hex.append(Character.forDigit(b & 0x0f, 16));
+            }
+            return hex.toString();
+        } catch (Exception e) {
+            CameraDaemon.log("Could not identify APK assets; extracting normally: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static boolean webAssetCacheValid(File webRoot, String expectedStamp) {
+        // Representative files from every extraction root, including the overlay
+        // outside WEB_ROOT, detect missing trees even when a stale stamp remains.
+        if (!new File(webRoot, "local/index.html").isFile()
+                || !new File(webRoot, "shared/app-shell.js").isFile()
+                || !new File(webRoot, "i18n/en.json").isFile()
+                || !new File(webRoot, "server-i18n/en.json").isFile()
+                || !new File(com.overdrive.app.util.ScratchRoot.path("overlay"),
+                        "seat-belt.png").isFile()) {
+            return false;
+        }
+        File marker = new File(webRoot, WEB_ASSET_STAMP);
+        if (!marker.isFile()) return false;
+        try (BufferedReader in = new BufferedReader(new InputStreamReader(
+                new FileInputStream(marker), java.nio.charset.StandardCharsets.UTF_8))) {
+            return expectedStamp.equals(in.readLine()) && in.readLine() == null;
+        } catch (java.io.IOException ignored) {
+            return false;
+        }
+    }
+
+    private static void writeWebAssetStamp(File webRoot, String stamp) throws java.io.IOException {
+        File marker = new File(webRoot, WEB_ASSET_STAMP);
+        File pending = new File(webRoot, WEB_ASSET_STAMP + ".tmp");
+        try (FileOutputStream out = new FileOutputStream(pending)) {
+            out.write((stamp + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            out.getFD().sync();
+        }
+        if (!pending.renameTo(marker)) {
+            throw new java.io.IOException("Cannot finalize web asset stamp: " + marker);
+        }
+    }
+
     private static void deleteRecursive(File file) {
         if (file.isDirectory()) {
             File[] children = file.listFiles();
