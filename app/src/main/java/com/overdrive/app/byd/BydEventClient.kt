@@ -5,232 +5,304 @@ import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.PrintWriter
+import java.net.InetSocketAddress
 import java.net.Socket
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Client that connects to BydEventDaemon and dispatches events to listeners.
- * 
+ *
  * Usage:
  *   BydEventClient.addListener(myListener)
  *   BydEventClient.connect()
  */
 object BydEventClient {
-    
+
     private const val TAG = "BydEventClient"
     private const val DAEMON_HOST = "127.0.0.1"
     private const val DAEMON_PORT = 19878
-    private const val RECONNECT_DELAY_MS = 5000L
-    
+    private const val CONNECT_TIMEOUT_MS = 3_000
+    private const val RECONNECT_DELAY_MS = 5_000L
+
     private val logger = LogManager.getInstance()
-    private val executor = Executors.newSingleThreadExecutor()
+    private val executor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "BydEventClient").apply { isDaemon = true }
+    }
     private val running = AtomicBoolean(false)
-    private var socket: Socket? = null
-    private var writer: PrintWriter? = null
-    
+    // At most one connection-loop task may be queued or running. Rapid
+    // disconnect/connect cycles must not accumulate stale loop tasks in the
+    // single-thread executor's otherwise unbounded work queue.
+    private val loopScheduled = AtomicBoolean(false)
+    // Publish and retire the socket/writer as one state transition. The reader
+    // keeps its own local socket reference so disconnect closes the connection
+    // that the current loop is actually reading.
+    private val connectionLock = Any()
+    @Volatile private var socket: Socket? = null
+    @Volatile private var writer: PrintWriter? = null
+
     private val listeners = CopyOnWriteArrayList<EventListener>()
-    
+
     private fun log(msg: String) {
         logger.info(TAG, msg)
     }
-    
-    // ==================== LISTENER INTERFACE ====================
-    
+
     interface EventListener {
-        /** Called when connected to daemon */
         fun onConnected() {}
-        
-        /** Called when disconnected from daemon */
         fun onDisconnected() {}
-        
-        /** Called when power level changes (OFF=0, ACC=1, ON=2) */
         fun onPowerLevelChanged(level: Int, levelName: String) {}
-        
-        /** Called when radar detects obstacle */
         fun onRadarEvent(area: Int, areaName: String, state: Int, stateName: String) {}
-        
-        /** Called when door state changes */
         fun onDoorEvent(area: Int, open: Boolean) {}
-        
-        /** Called when window state changes */
         fun onWindowEvent(area: Int, open: Boolean) {}
-        
-        /** Called when alarm triggers */
         fun onAlarmEvent(active: Boolean) {}
-        
-        /** Called when battery voltage level changes (LOW/NORMAL/INVALID) */
         fun onBatteryVoltageLevelChanged(level: Int, levelName: String) {}
-        
-        /** Called with battery info (voltage level + actual voltage) */
         fun onBatteryInfo(voltageLevel: Int, voltageLevelName: String, voltage: Double) {}
-        
-        /** Called for any event (raw JSON) */
         fun onRawEvent(event: JSONObject) {}
     }
-    
-    // ==================== PUBLIC API ====================
-    
+
     fun addListener(listener: EventListener) {
-        listeners.add(listener)
+        listeners.addIfAbsent(listener)
     }
-    
+
     fun removeListener(listener: EventListener) {
         listeners.remove(listener)
     }
-    
+
     fun connect() {
-        if (running.getAndSet(true)) {
+        if (!running.compareAndSet(false, true)) {
             log("Already running")
             return
         }
-        executor.execute { connectionLoop() }
+        startConnectionLoopIfNeeded()
     }
-    
+
+    private fun startConnectionLoopIfNeeded() {
+        if (!running.get() || !loopScheduled.compareAndSet(false, true)) return
+        try {
+            executor.execute {
+                try {
+                    connectionLoop()
+                } finally {
+                    loopScheduled.set(false)
+                    // connect() may have raced with the loop's final exit. If
+                    // the desired state is running again, exactly one new loop
+                    // is scheduled after the old one has relinquished ownership.
+                    if (running.get()) startConnectionLoopIfNeeded()
+                }
+            }
+        } catch (e: RejectedExecutionException) {
+            loopScheduled.set(false)
+            running.set(false)
+            logger.error(TAG, "Unable to start connection loop", e)
+        }
+    }
+
     fun disconnect() {
-        running.set(false)
-        socket?.close()
-    }
-    
-    fun isConnected(): Boolean = socket?.isConnected == true && !socket!!.isClosed
-    
-    /** Send a command to the daemon */
-    fun sendCommand(cmd: String): Boolean {
-        return try {
-            writer?.println("""{"cmd":"$cmd"}""")
-            true
+        val activeSocket = synchronized(connectionLock) {
+            running.set(false)
+            writer = null
+            socket.also { socket = null }
+        }
+        try {
+            activeSocket?.close()
         } catch (e: Exception) {
-            log("Send failed: ${e.message}")
+            logger.warn(TAG, "Socket close failed: ${e.message}")
+        }
+    }
+
+    fun isConnected(): Boolean {
+        val activeSocket = socket ?: return false
+        return activeSocket.isConnected && !activeSocket.isClosed
+    }
+
+    /** Send a command as JSON, returning false when disconnected or the write fails. */
+    fun sendCommand(cmd: String): Boolean = synchronized(connectionLock) {
+        val activeSocket = socket ?: return@synchronized false
+        val activeWriter = writer ?: return@synchronized false
+        if (!activeSocket.isConnected || activeSocket.isClosed) return@synchronized false
+        try {
+            // JSONObject correctly escapes quotes, backslashes and control
+            // characters; PrintWriter otherwise hides I/O failures unless checked.
+            activeWriter.println(JSONObject().put("cmd", cmd).toString())
+            val success = !activeWriter.checkError()
+            if (!success) {
+                log("Send failed: writer reported an I/O error")
+                try { activeSocket.close() } catch (_: Exception) {}
+            }
+            success
+        } catch (e: Exception) {
+            logger.warn(TAG, "Send failed: ${e.message}")
+            try { activeSocket.close() } catch (_: Exception) {}
             false
         }
     }
-    
-    // ==================== CONNECTION LOOP ====================
-    
+
     private fun connectionLoop() {
         log("Connection loop started")
-        
+
         while (running.get()) {
+            var candidate: Socket? = null
             try {
                 log("Connecting to daemon at $DAEMON_HOST:$DAEMON_PORT...")
-                socket = Socket(DAEMON_HOST, DAEMON_PORT).apply {
-                    soTimeout = 0 // No read timeout for event stream
-                }
-                writer = PrintWriter(socket!!.outputStream, true)
-                val reader = BufferedReader(InputStreamReader(socket!!.inputStream))
-                
-                log("Connected to BydEventDaemon!")
-                notifyConnected()
-                
-                // Read events
-                var line: String? = null
-                while (running.get() && reader.readLine().also { line = it } != null) {
-                    try {
-                        val event = JSONObject(line!!)
-                        dispatchEvent(event)
-                    } catch (e: Exception) {
-                        log("Failed to parse event: $line - ${e.message}")
+                val newSocket = Socket()
+                candidate = newSocket
+                // Do not let an absent daemon pin the only client worker in connect().
+                newSocket.connect(
+                    InetSocketAddress(DAEMON_HOST, DAEMON_PORT),
+                    CONNECT_TIMEOUT_MS
+                )
+                newSocket.soTimeout = 0 // Event stream remains open until disconnect.
+                val newWriter = PrintWriter(newSocket.getOutputStream(), true)
+                val reader = BufferedReader(
+                    InputStreamReader(newSocket.getInputStream(), StandardCharsets.UTF_8)
+                )
+
+                // disconnect() and publication are serialized. If disconnect
+                // won while connect() was in progress, close this candidate
+                // rather than publishing a socket after shutdown.
+                val published = synchronized(connectionLock) {
+                    if (!running.get()) {
+                        false
+                    } else {
+                        socket = newSocket
+                        writer = newWriter
+                        true
                     }
                 }
-                
+                if (!published) break
+
+                log("Connected to BydEventDaemon!")
+                notifyConnected()
+
+                while (running.get()) {
+                    val line = reader.readLine() ?: break
+                    try {
+                        dispatchEvent(JSONObject(line))
+                    } catch (e: Exception) {
+                        log("Failed to process event: ${e.message}")
+                    }
+                }
             } catch (e: Exception) {
-                log("Connection error: ${e.message}")
+                if (running.get()) log("Connection error: ${e.message}")
             } finally {
-                socket?.close()
-                socket = null
-                writer = null
+                val retired = candidate
+                if (retired != null) {
+                    synchronized(connectionLock) {
+                        if (socket === retired) {
+                            socket = null
+                            writer = null
+                        }
+                    }
+                    try { retired.close() } catch (_: Exception) {}
+                }
                 notifyDisconnected()
             }
-            
-            // Reconnect after delay
+
             if (running.get()) {
                 log("Reconnecting in ${RECONNECT_DELAY_MS}ms...")
-                Thread.sleep(RECONNECT_DELAY_MS)
+                try {
+                    Thread.sleep(RECONNECT_DELAY_MS)
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    if (!running.get()) break
+                }
             }
         }
-        
+
         log("Connection loop ended")
     }
-    
-    // ==================== EVENT DISPATCH ====================
-    
+
     private fun dispatchEvent(event: JSONObject) {
         val type = event.optString("type", "")
         log("Event received: $type - $event")
-        
-        // Notify raw event
-        listeners.forEach { it.onRawEvent(event) }
-        
-        // Dispatch typed events
+
+        notifyListeners("raw event") { it.onRawEvent(event) }
+
         when (type) {
             "powerLevel" -> {
                 val level = event.optInt("level", -1)
                 val levelName = event.optString("levelName", "UNKNOWN")
-                listeners.forEach { it.onPowerLevelChanged(level, levelName) }
+                notifyListeners("power level") { it.onPowerLevelChanged(level, levelName) }
             }
-            
             "radar" -> {
                 val area = event.optInt("area", -1)
                 val areaName = event.optString("areaName", "")
                 val state = event.optInt("state", -1)
                 val stateName = event.optString("stateName", "")
-                listeners.forEach { it.onRadarEvent(area, areaName, state, stateName) }
+                notifyListeners("radar") { it.onRadarEvent(area, areaName, state, stateName) }
             }
-            
             "door" -> {
                 val area = event.optInt("area", -1)
                 val open = event.optBoolean("open", false)
-                listeners.forEach { it.onDoorEvent(area, open) }
+                notifyListeners("door") { it.onDoorEvent(area, open) }
             }
-            
             "window" -> {
                 val area = event.optInt("area", -1)
                 val open = event.optBoolean("open", false)
-                listeners.forEach { it.onWindowEvent(area, open) }
+                notifyListeners("window") { it.onWindowEvent(area, open) }
             }
-            
             "alarm" -> {
                 val active = event.optBoolean("active", false)
-                listeners.forEach { it.onAlarmEvent(active) }
+                notifyListeners("alarm") { it.onAlarmEvent(active) }
             }
-            
             "state" -> {
-                // Initial state on connect - contains powerLevel, radar states, and battery info
                 val level = event.optInt("powerLevel", -1)
                 val levelName = event.optString("powerLevelName", "UNKNOWN")
                 if (level >= 0) {
-                    listeners.forEach { it.onPowerLevelChanged(level, levelName) }
+                    notifyListeners("power level") { it.onPowerLevelChanged(level, levelName) }
                 }
-                // Also dispatch battery info from initial state
                 val batteryVoltageLevel = event.optInt("batteryVoltageLevel", -1)
                 val batteryVoltageLevelName = event.optString("batteryVoltageLevelName", "UNKNOWN")
                 val batteryVoltage = event.optDouble("batteryVoltage", 0.0)
                 if (batteryVoltageLevel >= 0 || batteryVoltage > 0) {
-                    listeners.forEach { it.onBatteryInfo(batteryVoltageLevel, batteryVoltageLevelName, batteryVoltage) }
+                    notifyListeners("initial battery info") {
+                        it.onBatteryInfo(
+                            batteryVoltageLevel,
+                            batteryVoltageLevelName,
+                            batteryVoltage
+                        )
+                    }
                 }
             }
-            
             "batteryVoltage" -> {
                 val level = event.optInt("level", -1)
                 val levelName = event.optString("levelName", "UNKNOWN")
-                listeners.forEach { it.onBatteryVoltageLevelChanged(level, levelName) }
+                notifyListeners("battery voltage") {
+                    it.onBatteryVoltageLevelChanged(level, levelName)
+                }
             }
-            
             "batteryInfo" -> {
                 val voltageLevel = event.optInt("voltageLevel", -1)
                 val voltageLevelName = event.optString("voltageLevelName", "UNKNOWN")
                 val voltage = event.optDouble("voltage", 0.0)
-                listeners.forEach { it.onBatteryInfo(voltageLevel, voltageLevelName, voltage) }
+                notifyListeners("battery info") {
+                    it.onBatteryInfo(voltageLevel, voltageLevelName, voltage)
+                }
             }
         }
     }
-    
-    private fun notifyConnected() {
-        listeners.forEach { it.onConnected() }
+
+    private fun notifyListeners(
+        eventName: String,
+        callback: (EventListener) -> Unit
+    ) {
+        listeners.forEach { listener ->
+            try {
+                callback(listener)
+            } catch (e: Exception) {
+                logger.error(TAG, "Listener failed during $eventName", e)
+            }
+        }
     }
-    
+
+    private fun notifyConnected() {
+        notifyListeners("connect") { it.onConnected() }
+    }
+
     private fun notifyDisconnected() {
-        listeners.forEach { it.onDisconnected() }
+        notifyListeners("disconnect") { it.onDisconnected() }
     }
 }

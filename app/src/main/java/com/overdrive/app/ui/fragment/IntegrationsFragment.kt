@@ -23,7 +23,11 @@ import com.overdrive.app.util.DaemonHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Integrations roll-up: Telegram / ABRP / MQTT / BYD Cloud cards. Each card
@@ -48,12 +52,21 @@ import java.util.concurrent.Executors
  */
 class IntegrationsFragment : Fragment() {
 
-    private val executor = Executors.newSingleThreadExecutor()
+    // Create the worker only while this Fragment owns a view. The previous
+    // executor was never shut down, so navigating away could leave its thread
+    // alive for the remainder of the process.
+    private var executor: ExecutorService? = null
+    private var pollInFlight = AtomicBoolean(false)
+    private val pollGeneration = AtomicInteger()
+    private var pollActive = false
     private val mainHandler = Handler(Looper.getMainLooper())
     private val daemonPoll = object : Runnable {
         override fun run() {
+            if (!pollActive) return
             refreshDaemonStatuses()
-            mainHandler.postDelayed(this, POLL_INTERVAL_MS)
+            // onPause can race with a running tick. Recheck before reposting so
+            // a callback cannot resurrect the poll loop after it was removed.
+            if (pollActive) mainHandler.postDelayed(this, POLL_INTERVAL_MS)
         }
     }
 
@@ -91,16 +104,33 @@ class IntegrationsFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
+        pollActive = true
         // Telegram is a same-process encrypted-prefs read; safe on main thread.
         refreshTelegramStatus()
         // ABRP and MQTT live in the daemon — kick off an immediate poll and
         // schedule periodic refreshes so reconnects/disconnects show up.
+        mainHandler.removeCallbacks(daemonPoll)
         mainHandler.post(daemonPoll)
     }
 
     override fun onPause() {
-        super.onPause()
+        pollActive = false
+        pollGeneration.incrementAndGet()
         mainHandler.removeCallbacks(daemonPoll)
+        super.onPause()
+    }
+
+    override fun onDestroyView() {
+        pollActive = false
+        pollGeneration.incrementAndGet()
+        mainHandler.removeCallbacks(daemonPoll)
+        // Detach the in-flight flag from this view generation. shutdownNow()
+        // can remove a queued Runnable before its finally block executes; a new
+        // view must not inherit that old flag in the permanently-true state.
+        pollInFlight = AtomicBoolean(false)
+        executor?.shutdownNow()
+        executor = null
+        super.onDestroyView()
     }
 
     // ============== Refresh ==============
@@ -119,31 +149,52 @@ class IntegrationsFragment : Fragment() {
     }
 
     private fun refreshDaemonStatuses() {
-        executor.execute {
-            // Telegram lives in the unified config (cross-process); a forceReload
-            // before reading guarantees the dot tracks daemon-side writes that
-            // happen while this Fragment is still on screen (e.g. user saves a
-            // token in another web tab). Cheap — one JSON re-parse.
-            val ctx = context
-            val telegram = ctx?.let { isTelegramConfigured(it) } ?: telegramConfigured
-            val abrp = fetchAbrpRunning()
-            val mqtt = fetchMqttAnyConnected()
-            val bydCloud = fetchBydCloudConfigured()
-            val safeKeep = fetchSafeKeepOn()
-            mainHandler.post {
-                val v = view ?: return@post
-                telegramConfigured = telegram
-                abrpConnected = abrp
-                mqttConnected = mqtt
-                bydCloudConfigured = bydCloud
-                safeKeepOn = safeKeep
-                bindStatus(v, R.id.dotTelegram, R.id.tvTelegramStatus, telegramConfigured)
-                bindStatus(v, R.id.dotAbrp, R.id.tvAbrpStatus, abrpConnected)
-                bindStatus(v, R.id.dotMqtt, R.id.tvMqttStatus, mqttConnected)
-                bindStatus(v, R.id.dotBydCloud, R.id.tvBydCloudStatus, bydCloudConfigured)
-                bindStatus(v, R.id.dotSafeKeep, R.id.tvSafeKeepStatus, safeKeepOn)
-                bindHero(v)
+        // Each sweep makes several sequential daemon requests. A fixed-rate UI
+        // tick must not enqueue another sweep while the previous one is still
+        // waiting on a slow daemon; otherwise the single-thread queue can grow
+        // without bound and display increasingly stale status.
+        val inFlight = pollInFlight
+        if (!inFlight.compareAndSet(false, true)) return
+        val generation = pollGeneration.get()
+        val appContext = context?.applicationContext
+        val worker = executor ?: Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "IntegrationsStatus").apply { isDaemon = true }
+        }.also { executor = it }
+
+        try {
+            worker.execute {
+                try {
+                    // Telegram lives in the unified config (cross-process); a
+                    // forceReload before reading tracks daemon-side writes while
+                    // this Fragment is visible. All probes remain off the looper.
+                    val telegram = appContext?.let { isTelegramConfigured(it) } ?: telegramConfigured
+                    val abrp = fetchAbrpRunning()
+                    val mqtt = fetchMqttAnyConnected()
+                    val bydCloud = fetchBydCloudConfigured()
+                    val safeKeep = fetchSafeKeepOn()
+                    mainHandler.post {
+                        if (!isAdded || view == null || generation != pollGeneration.get()) {
+                            return@post
+                        }
+                        val v = view ?: return@post
+                        telegramConfigured = telegram
+                        abrpConnected = abrp
+                        mqttConnected = mqtt
+                        bydCloudConfigured = bydCloud
+                        safeKeepOn = safeKeep
+                        bindStatus(v, R.id.dotTelegram, R.id.tvTelegramStatus, telegramConfigured)
+                        bindStatus(v, R.id.dotAbrp, R.id.tvAbrpStatus, abrpConnected)
+                        bindStatus(v, R.id.dotMqtt, R.id.tvMqttStatus, mqttConnected)
+                        bindStatus(v, R.id.dotBydCloud, R.id.tvBydCloudStatus, bydCloudConfigured)
+                        bindStatus(v, R.id.dotSafeKeep, R.id.tvSafeKeepStatus, safeKeepOn)
+                        bindHero(v)
+                    }
+                } finally {
+                    inFlight.set(false)
+                }
             }
+        } catch (_: RejectedExecutionException) {
+            inFlight.set(false)
         }
     }
 

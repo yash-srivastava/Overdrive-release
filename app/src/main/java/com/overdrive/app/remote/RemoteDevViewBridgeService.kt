@@ -11,10 +11,15 @@ import java.io.InputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
+import java.net.SocketTimeoutException
 import java.net.Socket
 import java.nio.charset.StandardCharsets
 import java.util.LinkedHashMap
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ExecutorService
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.Executors
 
 /**
@@ -28,9 +33,23 @@ class RemoteDevViewBridgeService : Service() {
     private val listener: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "remote-dev-view-listener").apply { isDaemon = true }
     }
-    private val clients: ExecutorService = Executors.newFixedThreadPool(CLIENT_THREADS) { runnable ->
-        Thread(runnable, "remote-dev-view-client").apply { isDaemon = true }
-    }
+    // A fixed pool created by Executors.newFixedThreadPool has an unbounded
+    // LinkedBlockingQueue. Loopback clients that connect and then stall can
+    // therefore accumulate an unbounded number of queued sockets. Bound both
+    // active and waiting clients, and explicitly close sockets on rejection.
+    private val clients = ThreadPoolExecutor(
+        CLIENT_THREADS,
+        CLIENT_THREADS,
+        0L,
+        TimeUnit.MILLISECONDS,
+        ArrayBlockingQueue(CLIENT_QUEUE_CAPACITY),
+        { runnable -> Thread(runnable, "remote-dev-view-client").apply { isDaemon = true } },
+        ThreadPoolExecutor.AbortPolicy(),
+    )
+    private val clientLock = Any()
+    private val activeClients = HashSet<Socket>()
+    @Volatile private var stopping = false
+    private var listenerStarting = false
     @Volatile private var serverSocket: ServerSocket? = null
     private val usedNonces = LinkedHashMap<String, Long>()
 
@@ -65,7 +84,21 @@ class RemoteDevViewBridgeService : Service() {
             com.overdrive.app.remoteaccess.KeyFobAccessMonitor.stop()
         }
         RemoteDevVirtualDisplay.stop()
-        try { serverSocket?.close() } catch (_: Exception) {}
+        synchronized(this) {
+            stopping = true
+            // Serialize with listener publication so a socket bound during
+            // onDestroy cannot be published after the close check.
+            try { serverSocket?.close() } catch (_: Exception) {}
+        }
+        synchronized(clientLock) {
+            // Includes active handlers and sockets waiting in the bounded
+            // queue. Closing them before shutdown unblocks reads and prevents
+            // queued-but-never-run tasks from leaving accepted sockets open.
+            activeClients.forEach { client ->
+                try { client.close() } catch (_: Exception) {}
+            }
+            activeClients.clear()
+        }
         listener.shutdownNow()
         clients.shutdownNow()
         super.onDestroy()
@@ -73,23 +106,63 @@ class RemoteDevViewBridgeService : Service() {
 
     @Synchronized
     private fun ensureListening() {
-        if (serverSocket != null) return
-        listener.execute {
-            try {
-                val server = ServerSocket().apply {
-                    reuseAddress = true
-                    bind(InetSocketAddress(InetAddress.getLoopbackAddress(), PORT), BACKLOG)
+        if (stopping || serverSocket != null || listenerStarting) return
+        listenerStarting = true
+        try {
+            listener.execute {
+                var createdServer: ServerSocket? = null
+                try {
+                    val server = ServerSocket().apply {
+                        reuseAddress = true
+                        bind(InetSocketAddress(InetAddress.getLoopbackAddress(), PORT), BACKLOG)
+                    }
+                    createdServer = server
+                    val published = synchronized(this@RemoteDevViewBridgeService) {
+                        if (stopping) false else {
+                            serverSocket = server
+                            true
+                        }
+                    }
+                    if (!published) {
+                        try { server.close() } catch (_: Exception) {}
+                        return@execute
+                    }
+                    while (serverSocket === server && !stopping) {
+                        val socket = try { server.accept() } catch (_: Exception) { break }
+                        val tracked = synchronized(clientLock) {
+                            if (stopping) false else activeClients.add(socket)
+                        }
+                        if (!tracked) {
+                            try { socket.close() } catch (_: Exception) {}
+                            break
+                        }
+                        try {
+                            clients.execute {
+                                try {
+                                    handleClient(socket)
+                                } finally {
+                                    synchronized(clientLock) { activeClients.remove(socket) }
+                                }
+                            }
+                        } catch (_: RejectedExecutionException) {
+                            synchronized(clientLock) { activeClients.remove(socket) }
+                            try { socket.close() } catch (_: Exception) {}
+                            Log.w(TAG, "Bridge client capacity reached; rejected connection")
+                        }
+                    }
+                } catch (error: Throwable) {
+                    if (!stopping) Log.e(TAG, "Bridge listener stopped", error)
+                } finally {
+                    synchronized(this@RemoteDevViewBridgeService) {
+                        if (serverSocket === createdServer) serverSocket = null
+                        listenerStarting = false
+                    }
+                    try { createdServer?.close() } catch (_: Exception) {}
                 }
-                serverSocket = server
-                while (serverSocket === server) {
-                    val socket = try { server.accept() } catch (_: Exception) { break }
-                    clients.execute { handleClient(socket) }
-                }
-            } catch (error: Throwable) {
-                Log.e(TAG, "Bridge listener stopped", error)
-            } finally {
-                serverSocket = null
             }
+        } catch (error: RejectedExecutionException) {
+            listenerStarting = false
+            if (!stopping) Log.w(TAG, "Bridge listener could not be scheduled", error)
         }
     }
 
@@ -99,7 +172,7 @@ class RemoteDevViewBridgeService : Service() {
             val response = JSONObject()
             var payload: ByteArray? = null
             try {
-                val line = readLineLimited(client.getInputStream(), MAX_REQUEST_BYTES)
+                val line = readLineLimited(client, MAX_REQUEST_BYTES)
                 val authenticated = RemoteDevViewBridgeAuth.verify(line)
                 rememberNonce(authenticated.nonce, authenticated.timestampMs)
                 val request = authenticated.request
@@ -232,9 +305,15 @@ class RemoteDevViewBridgeService : Service() {
         if (result.detail != null) target.put("detail", result.detail)
     }
 
-    private fun readLineLimited(input: InputStream, maxBytes: Int): String {
+    private fun readLineLimited(client: Socket, maxBytes: Int): String {
+        val input = client.getInputStream()
         val output = ByteArrayOutputStream()
+        val deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(REQUEST_DEADLINE_MS)
         while (output.size() < maxBytes) {
+            val remainingNanos = deadlineNanos - System.nanoTime()
+            if (remainingNanos <= 0L) throw SocketTimeoutException("Bridge request deadline exceeded")
+            val remainingMs = TimeUnit.NANOSECONDS.toMillis(remainingNanos).coerceAtLeast(1L)
+            client.soTimeout = minOf(SOCKET_TIMEOUT_MS.toLong(), remainingMs).toInt()
             val value = input.read()
             if (value == -1 || value == '\n'.code) break
             if (value != '\r'.code) output.write(value)
@@ -262,7 +341,9 @@ class RemoteDevViewBridgeService : Service() {
         private const val TAG = "RemoteDevViewBridge"
         private const val BACKLOG = 8
         private const val CLIENT_THREADS = 4
+        private const val CLIENT_QUEUE_CAPACITY = 16
         private const val SOCKET_TIMEOUT_MS = 8_000
+        private const val REQUEST_DEADLINE_MS = 8_000L
         private const val MAX_REQUEST_BYTES = 16 * 1024
         private const val MIN_WIDTH = 320
         private const val MAX_WIDTH = 1920
