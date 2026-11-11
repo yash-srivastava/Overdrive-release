@@ -30,15 +30,23 @@ const NetworkPage = {
 
     init() {
         this.refresh();
-        this.pollTimer = setInterval(() => {
-            if (!document.hidden) this.refresh();
-        }, this.POLL_MS);
-        this.uiTimer = setInterval(() => {
-            if (!document.hidden) this.renderUptime();
-        }, this.UI_TICK_MS);
-        document.addEventListener('visibilitychange', () => {
-            if (!document.hidden) this.refresh();
-        });
+        // Reinitialization must not multiply the HTTP and uptime timers.
+        if (this.pollTimer === null) {
+            this.pollTimer = setInterval(() => {
+                if (!document.hidden) this.refresh();
+            }, this.POLL_MS);
+        }
+        if (this.uiTimer === null) {
+            this.uiTimer = setInterval(() => {
+                if (!document.hidden) this.renderUptime();
+            }, this.UI_TICK_MS);
+        }
+        if (!this._visibilityListenerInstalled) {
+            this._visibilityListenerInstalled = true;
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) this.refresh();
+            });
+        }
     },
 
     // ============== Fetch / render ==============
