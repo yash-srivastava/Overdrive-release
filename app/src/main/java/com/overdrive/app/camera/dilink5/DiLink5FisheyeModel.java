@@ -22,10 +22,18 @@ import java.util.Locale;
  *
  * <p><b>The model:</b> equidistant fisheye ({@code r_src = R · θ / θmax})
  * re-projected to a pinhole view ({@code r_out ∝ tan θ}) that fills the WHOLE
- * tile (so the grey padding disappears whenever the correction is on). The
- * {@code rectifyStrength} slider (0..100) picks the output horizontal half-FOV:
- * 0 = off (bit-exact passthrough), 1 = widest ({@link #HALF_FOV_MILD_DEG}),
- * 100 = narrowest/straightest ({@link #HALF_FOV_STRONG_DEG}).
+ * tile (so the grey padding disappears whenever the correction is on). Its own
+ * setting {@code recording.dilink5FisheyeStrength} (0..100, default 0 = off)
+ * picks the output horizontal half-FOV: 0 = off (bit-exact passthrough),
+ * 1 = widest ({@link #HALF_FOV_MILD_DEG}), 100 = narrowest/straightest
+ * ({@link #HALF_FOV_STRONG_DEG}).
+ *
+ * <p><b>Tang only:</b> the constants above were measured on a Tang 2025, so the
+ * un-warp is applied only when the owner has selected the Tang as the vehicle
+ * model ({@link #effectiveStrength}). Every other DiLink 5 car (e.g. the
+ * Sealion 7, which uses a different sensor geometry) gets 0. It deliberately
+ * does NOT reuse {@code recording.rectifyStrength}, so a value someone set on
+ * the legacy slider never switches this on.
  *
  * <p>Coordinates: tile-local UV with v = 0 at the image BOTTOM (the DiLink 5
  * texture is bottom-origin, see {@link DiLink5MosaicLayout}). {@link #GLSL} is
@@ -53,6 +61,45 @@ public final class DiLink5FisheyeModel {
     public static final float HALF_FOV_MILD_DEG = 70f;
     /** Output horizontal half-FOV at slider 100 (straightest). */
     public static final float HALF_FOV_STRONG_DEG = 40f;
+
+    /** Unified-config key in the {@code recording} section. Absent = 0 = off. */
+    public static final String CONFIG_KEY = "dilink5FisheyeStrength";
+    /** The only vehicle model these constants were measured on. */
+    public static final String SUPPORTED_MODEL_ID = "tang";
+
+    /**
+     * The strength the pipelines should push: the configured value (clamped to
+     * 0..100) on a DiLink 5 car whose owner selected the Tang, 0 otherwise. A
+     * renderer fallback model ({@code modelSource=unset}) does not count. Pure,
+     * so the gate is unit-tested without Android.
+     */
+    public static float effectiveStrength(boolean dilink5, String modelId,
+                                          String modelSource, int configured) {
+        if (!dilink5 || configured <= 0) return 0f;
+        String model = com.overdrive.app.config.VehicleModelSelection
+                .resolvedModelId(modelId, modelSource);
+        if (model == null || !SUPPORTED_MODEL_ID.equals(model.toLowerCase(Locale.US))) {
+            return 0f;
+        }
+        return Math.min(100, configured);
+    }
+
+    /** {@link #effectiveStrength} from the live config; 0 if it can't be read. */
+    public static float configuredStrength() {
+        try {
+            org.json.JSONObject recording =
+                    com.overdrive.app.config.UnifiedConfigManager.getRecording();
+            org.json.JSONObject vehicle =
+                    com.overdrive.app.config.UnifiedConfigManager.getVehicle();
+            return effectiveStrength(
+                    DiLink5Platform.isSelected(),
+                    vehicle == null ? "" : vehicle.optString("modelId", ""),
+                    vehicle == null ? "" : vehicle.optString("modelSource", ""),
+                    recording == null ? 0 : recording.optInt(CONFIG_KEY, 0));
+        } catch (Throwable t) {
+            return 0f;
+        }
+    }
 
     /**
      * Shader uniform value for a slider strength: tan(output half-FOV), or 0

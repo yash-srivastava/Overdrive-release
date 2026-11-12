@@ -70,4 +70,25 @@ public class DiLink5FisheyeModelTest {
         assertTrue(g.contains("vec2 dl5Unfish(vec2 t)"));
         assertTrue(g.contains("vec2 dl5UnfishMosaic(vec2 uv)"));
     }
+
+    @Test
+    public void onlyTheTangOnDiLink5GetsTheUnwarp() {
+        assertEquals(40f, DiLink5FisheyeModel.effectiveStrength(true, "tang", "user", 40), 0f);
+        assertEquals(40f, DiLink5FisheyeModel.effectiveStrength(true, " Tang ", "auto", 40), 0f);
+        // Other DiLink 5 cars use a different sensor geometry.
+        assertEquals(0f, DiLink5FisheyeModel.effectiveStrength(true, "sealion7", "user", 40), 0f);
+        // The renderer's cosmetic fallback is not the owner's choice.
+        assertEquals(0f, DiLink5FisheyeModel.effectiveStrength(true, "tang", "unset", 40), 0f);
+        assertEquals(0f, DiLink5FisheyeModel.effectiveStrength(true, "", "user", 40), 0f);
+        // Not DiLink 5: never.
+        assertEquals(0f, DiLink5FisheyeModel.effectiveStrength(false, "tang", "user", 40), 0f);
+    }
+
+    @Test
+    public void ownSettingStartsOffAndIsClamped() {
+        assertEquals(0f, DiLink5FisheyeModel.effectiveStrength(true, "tang", "user", 0), 0f);
+        assertEquals(0f, DiLink5FisheyeModel.effectiveStrength(true, "tang", "user", -3), 0f);
+        assertEquals(100f, DiLink5FisheyeModel.effectiveStrength(true, "tang", "user", 250), 0f);
+        assertEquals("dilink5FisheyeStrength", DiLink5FisheyeModel.CONFIG_KEY);
+    }
 }

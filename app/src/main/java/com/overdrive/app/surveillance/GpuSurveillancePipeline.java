@@ -1616,12 +1616,13 @@ public class GpuSurveillancePipeline {
             rec.setRedMaskEnabled(false);
             rec.setApaCenterInset(0.0f);
             // DiLink 5 hands over the raw circular fisheyes as a 2x2 on the
-            // full-frame path, where the legacy rectify never runs; the same
-            // slider drives the DiLink 5 un-warp. Here (not only at init) so an
-            // encoder reinit's fresh recorder keeps it.
+            // full-frame path, where the legacy rectify never runs. Its own
+            // setting (recording.dilink5FisheyeStrength, Tang only, default off)
+            // drives the un-warp. Here (not only at init) so an encoder reinit's
+            // fresh recorder keeps it.
             try {
-                rec.setDiLink5FisheyeStrength((float) com.overdrive.app.config
-                    .UnifiedConfigManager.getRectifyStrength());
+                rec.setDiLink5FisheyeStrength(com.overdrive.app.camera.dilink5
+                    .DiLink5FisheyeModel.configuredStrength());
             } catch (Throwable t) {
                 logger.warn("DiLink 5 recorder fisheye strength: " + t.getMessage());
             }
@@ -2469,20 +2470,22 @@ public class GpuSurveillancePipeline {
                     .removeListener(rectifyConfigListener);
             }
             rectifyConfigListener = (section, sectionConfig) -> {
-                if (!"recording".equals(section)) return;
-                int strength = sectionConfig.optInt("rectifyStrength", 0);
-                if (strength < 0) strength = 0;
-                if (strength > 100) strength = 100;
-                boolean dl5 = com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected();
+                boolean recordingSection = "recording".equals(section);
+                // The DiLink 5 un-warp also depends on the selected vehicle model.
+                if (!recordingSection && !"vehicle".equals(section)) return;
                 GpuMosaicRecorder activeRecorder = recorder;
-                if (activeRecorder != null) {
+                if (recordingSection && activeRecorder != null) {
+                    int strength = sectionConfig.optInt("rectifyStrength", 0);
+                    if (strength < 0) strength = 0;
+                    if (strength > 100) strength = 100;
                     activeRecorder.setRectifyStrength((float) strength);
-                    if (dl5) activeRecorder.setDiLink5FisheyeStrength((float) strength);
                 }
+                if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) return;
+                float dl5 = com.overdrive.app.camera.dilink5.DiLink5FisheyeModel
+                        .configuredStrength();
+                if (activeRecorder != null) activeRecorder.setDiLink5FisheyeStrength(dl5);
                 com.overdrive.app.streaming.GpuStreamScaler activeStream = streamScaler;
-                if (dl5 && activeStream != null) {
-                    activeStream.setDiLink5FisheyeStrength((float) strength);
-                }
+                if (activeStream != null) activeStream.setDiLink5FisheyeStrength(dl5);
             };
             com.overdrive.app.config.UnifiedConfigManager
                 .addListener(rectifyConfigListener);
@@ -5088,8 +5091,8 @@ public class GpuSurveillancePipeline {
         // DiLink 5: live view gets the same raw-fisheye un-warp as recordings.
         if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
             try {
-                streamScaler.setDiLink5FisheyeStrength((float) com.overdrive.app.config
-                    .UnifiedConfigManager.getRectifyStrength());
+                streamScaler.setDiLink5FisheyeStrength(com.overdrive.app.camera.dilink5
+                    .DiLink5FisheyeModel.configuredStrength());
             } catch (Throwable t) {
                 logger.warn("DiLink 5 stream fisheye strength: " + t.getMessage());
             }
