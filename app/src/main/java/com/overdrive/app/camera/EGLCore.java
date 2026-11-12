@@ -99,6 +99,25 @@ public class EGLCore {
      * @param parent     null = create a fresh display + ungrouped context.
      *                   non-null = inherit display + share textures/programs.
      */
+    /**
+     * Constructor-failure cleanup for a display initialized by this instance.
+     *
+     * A Java constructor that throws never publishes the partially-created
+     * object, so callers cannot invoke release(). Shared child contexts must
+     * not terminate the parent's display.
+     */
+    private void terminateOwnedDisplayAfterConstructorFailure() {
+        if (ownsDisplay && eglDisplay != EGL14.EGL_NO_DISPLAY) {
+            try {
+                EGL14.eglTerminate(eglDisplay);
+            } catch (Throwable t) {
+                logger.warn("EGL display cleanup after constructor failure: " + t.getMessage());
+            } finally {
+                eglDisplay = EGL14.EGL_NO_DISPLAY;
+            }
+        }
+    }
+
     private EGLCore(int glesVersion, boolean recordable, EGLCore parent) {
         if (glesVersion != 2 && glesVersion != 3) {
             throw new IllegalArgumentException("glesVersion must be 2 or 3, got " + glesVersion);
@@ -142,6 +161,7 @@ public class EGLCore {
             eglConfig = chooseConfigOrFallback(eglDisplay, actualGles, recordable);
         }
         if (eglConfig == null) {
+            terminateOwnedDisplayAfterConstructorFailure();
             throw new RuntimeException("No EGL configs found (gles=" + glesVersion
                 + ", recordable=" + recordable + ")");
         }
@@ -196,6 +216,7 @@ public class EGLCore {
 
             if (eglContext == EGL14.EGL_NO_CONTEXT) {
                 recordContextCreateFailure(eglError);
+                terminateOwnedDisplayAfterConstructorFailure();
                 throw new RuntimeException("Failed to create EGL context (gles=" + actualGles
                     + ", recordable=" + recordable + ", shared=" + (parent != null)
                     + ", error=" + eglErrorString(eglError) + ")");
