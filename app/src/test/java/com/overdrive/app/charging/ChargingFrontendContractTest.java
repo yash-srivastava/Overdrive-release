@@ -1,5 +1,6 @@
 package com.overdrive.app.charging;
 
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
@@ -14,29 +15,30 @@ import org.junit.Test;
 public class ChargingFrontendContractTest {
 
     @Test
-    public void dashboardClearsMissingStateAndPrioritizesActiveTaper() throws IOException {
+    public void dashboardConsolidatesChargingDetailsIntoVehicleGlance() throws IOException {
         String dashboard = readRepositoryFile("app/src/main/assets/web/local/index.html");
 
-        assertTrue(dashboard.contains("c.charging ? 'charge.state_charging'"));
-        assertTrue(dashboard.contains("c.full ? 'charge.state_full'"));
-        assertTrue(dashboard.indexOf("c.charging ? 'charge.state_charging'")
-                < dashboard.indexOf("c.full ? 'charge.state_full'"));
-        assertTrue(dashboard.contains("idleDot.className = 'ic_status_dot dot-idle'"));
-        assertTrue(dashboard.contains("setText('dashChargePower', '--')"));
-        assertTrue(dashboard.contains(
-                "c.powerSource !== 'nominalPlaceholder'"));
-        assertTrue(dashboard.contains(
-                "(c.isEstimated ? '~' : '') + dashboardPower.toFixed(1) + ' kW'"));
-        assertTrue(dashboard.contains(
-                "c.sessionEnergyIncomplete === true"));
-        assertTrue(dashboard.contains(
-                "c.sessionEnergyEstimated === true"));
-        assertTrue(dashboard.contains(
-                "c.sessionEnergySource !== 'metered_counter'"));
-        assertTrue(dashboard.contains(
-                "(dashboardEnergyApproximate ? '~' : '')"));
-        assertTrue(dashboard.contains("setText('dashChargeKwh', '--')"));
-        assertTrue(dashboard.contains("setText('dashChargeTtf', '--')"));
+        assertTrue(dashboard.contains("setCharging: function(c)"));
+        assertTrue(dashboard.contains("dashboard.glance_time_to_full"));
+        assertTrue(dashboard.contains("charge.metric_session"));
+        assertTrue(dashboard.contains("id=\"dashGlanceCharge\" hidden"));
+        assertTrue(dashboard.contains("id=\"dashGlanceChargeText\""));
+        assertTrue(dashboard.indexOf("id=\"dashSocBarFill\"")
+                < dashboard.indexOf("id=\"dashGlanceCharge\""));
+        assertTrue(dashboard.contains("href=\"charging.html\""));
+        assertTrue(dashboard.contains("data-i18n=\"charge.open\""));
+        assertTrue(dashboard.contains("detailKey = 'dashboard.drive_detail_charging'"));
+        assertTrue(dashboard.contains("charging.powerSource !== 'nominalPlaceholder'"));
+        assertTrue(dashboard.contains("(charging.isEstimated ? '~' : '')"));
+        assertTrue(dashboard.contains("c.sessionEnergyIncomplete === true"));
+        assertTrue(dashboard.contains("c.sessionEnergyEstimated === true"));
+        assertTrue(dashboard.contains("c.sessionEnergySource !== 'metered_counter'"));
+        assertTrue(dashboard.contains("strip.hidden = true"));
+        assertTrue(dashboard.contains("strip.hidden = false"));
+        assertFalse(dashboard.contains("data-card-id=\"charging\""));
+        assertFalse(dashboard.contains("dash-charge-card"));
+        assertFalse(dashboard.contains("dashChargeTtf"));
+        assertFalse(dashboard.contains("dashChargePower"));
     }
 
     @Test

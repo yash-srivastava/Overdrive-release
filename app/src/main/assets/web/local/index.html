@@ -51,11 +51,11 @@
                       lock pills + per-corner tyre pressure and temperature from /api/vehicle/state
                       (polled every 6s by refreshVehicleState), an SoC ring +
                       range fed by /api/status, and glance rows for climate /
-                      windows / tyres. When a charge session is live the panel
-                      gains a charging strip (power · time-to-full · kWh) —
-                      the "what matters right now" takeover. The drive state
-                      and status chips live here too, so the schematic sits
-                      beside them in one grid.
+                      windows / tyres. The drive state and status chips live
+                      here too, so the schematic sits beside them in one grid.
+                      While charging, time-to-full and energy added appear
+                      below the SoC bar with a link to charging history; power
+                      remains in the drive-state detail above.
                     -->
                     <div class="dash-glance" id="dashGlance">
                     <div class="dash-hero-main">
@@ -150,6 +150,11 @@
                                 </div>
                             </div>
                             <div class="dash-soc-bar" aria-hidden="true"><i id="dashSocBarFill"></i></div>
+                            <div class="dash-glance-charge" id="dashGlanceCharge" hidden aria-live="polite">
+                                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><path d="M13 2 3 14h7l-1 8 11-13h-7l1-7z"/></svg>
+                                <span id="dashGlanceChargeText"></span>
+                                <a class="dash-glance-charge-link" href="charging.html" data-i18n="charge.open">Charging details</a>
+                            </div>
                             <div class="dash-range-intel" id="dashRangeIntel" hidden aria-live="polite">
                                 <div class="dash-range-values">
                                     <div class="dash-range-value dash-range-value--personalized">
@@ -212,10 +217,6 @@
                                 <span data-i18n="dashboard.glance_sentry">Sentry</span>
                                 <strong id="glSentryText">--</strong>
                             </div>
-                        </div>
-                        <div class="dash-glance-charge" id="dashGlanceCharge" hidden>
-                            <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><path d="M13 2 3 14h7l-1 8 11-13h-7l1-7z"/></svg>
-                            <span id="dashGlanceChargeText">--</span>
                         </div>
                     </div>
                 </section>
@@ -320,42 +321,6 @@
                         </div>
                     </article>
 
-                    <!-- Charging card — live plug/charge state + key metrics,
-                         tap-through to the full charging.html history page. -->
-                    <article class="dash-card dash-info-card dash-charge-card" data-card-id="charging">
-                        <div class="dash-card-head">
-                            <span class="dash-tile-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 L4 14 h7 l-1 8 9-12 h-7 z"/></svg>
-                            </span>
-                            <div>
-                                <span class="dash-card-kicker" data-i18n="charge.kicker">Energy</span>
-                                <h2 data-i18n="charge.card_title">Charging</h2>
-                            </div>
-                            <button class="dash-card-grip" type="button" aria-label="Drag to reorder" tabindex="-1" data-i18n-attr="aria-label:dashboard.drag_to_reorder">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>
-                            </button>
-                        </div>
-                        <div class="dash-charge-chip" id="dashChargeChip">
-                            <span class="ic_status_dot dot-idle" id="dashChargeDot"></span>
-                            <span id="dashChargeState" data-i18n="charge.state_idle">Idle</span>
-                        </div>
-                        <div class="dash-charge-big">
-                            <strong id="dashChargeTtf">--</strong>
-                            <span data-i18n="charge.metric_ttf">Time to full</span>
-                        </div>
-                        <div class="dash-mini-bar" aria-hidden="true"><i id="dashChargeSocBar"></i></div>
-                        <div class="dash-metric-grid dash-metric-grid--4">
-                            <div class="dash-metric"><span data-i18n="charge.metric_soc">SoC</span><strong id="dashChargeSoc">--</strong></div>
-                            <div class="dash-metric"><span data-i18n="charge.metric_power">Power</span><strong id="dashChargePower">--</strong></div>
-                            <div class="dash-metric"><span data-i18n="charge.metric_session">Session</span><strong id="dashChargeKwh">--</strong></div>
-                        </div>
-                        <div class="dash-action-row">
-                            <button class="dash-primary-btn dash-tile-link" type="button" onclick="location.href='charging.html'">
-                                <span data-i18n="charge.open">Charging details</span>
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-                            </button>
-                        </div>
-                    </article>
 
                     <article class="dash-card dash-location-card" data-card-id="location">
                         <div class="dash-card-head">
@@ -479,8 +444,8 @@
            cards. Spans sit on classes (the drag ghost copies the card's
            className) and dense auto-flow keeps every row full in any
            saved order:
-             3 columns  hero 2x2; AI, location, charging 1; commands 2;
-                        main info full width, or 1 while the AI tile is
+             3 columns  hero 2x2; AI, location; commands 2; main info
+                        full width, or 1 while the AI tile is
                         hidden (it then fills the ninth cell)
              2 columns  hero full width; every card 1; main info full
                         width while the AI tile is shown
@@ -496,7 +461,6 @@
         .dash-grid > .dash-hero { grid-column: span 2; grid-row: span 2; }
         .dash-grid > .dash-actions-card { grid-column: span 2; }
         .dash-grid > .dash-info-card { grid-column: 1 / -1; }
-        .dash-grid > .dash-charge-card,
         #dashAiInsight[hidden] ~ .dash-info-card { grid-column: auto; }
 
         /* Tiles (mock .tile): hero and cards; the AI insight button below. */
@@ -851,44 +815,6 @@
             padding-top: 16px;
         }
 
-        /* Charging card live-state chip + status dot. The dot colour maps to
-           the charge state (idle/plugged/charging/full/fault). */
-        .dash-charge-chip {
-            display: inline-flex;
-            align-items: center;
-            align-self: flex-start;
-            box-sizing: border-box;
-            max-width: 100%;
-            min-height: 32px;
-            margin-bottom: 14px;
-            padding: 6px 12px;
-            border-radius: var(--radius-full);
-            background: var(--well);
-            font-size: var(--fs-label);
-            font-weight: 600;
-            color: var(--on-surface-variant);
-        }
-        .dash-charge-chip .ic_status_dot { margin-right: 8px; }
-        [dir="rtl"] .dash-charge-chip .ic_status_dot { margin-right: 0; margin-left: 8px; }
-        .ic_status_dot {
-            width: 9px;
-            height: 9px;
-            border-radius: 50%;
-            background: var(--outline);
-            flex: 0 0 auto;
-        }
-        .ic_status_dot.dot-idle   { background: var(--outline); }
-        .ic_status_dot.dot-warn   { background: var(--warning); }
-        .ic_status_dot.dot-active {
-            background: var(--tertiary);
-            animation: dashChargePulse 1.8s ease-in-out infinite;
-        }
-        .ic_status_dot.dot-good   { background: var(--status-success); }
-        .ic_status_dot.dot-danger { background: var(--danger); }
-        @keyframes dashChargePulse {
-            0%, 100% { opacity: 1; }
-            50%      { opacity: 0.4; }
-        }
 
         /* Status chips (mock .chip): they wrap rather than scroll sideways. */
         .dash-hero-status {
@@ -922,21 +848,21 @@
 
         /* ── Vehicle glance (the hero's content) ─────────────────────
            Mock hero: drive state and chips, then SoC and learned range
-           on the left, the top-down schematic on the right, the five
-           status tiles across the bottom, then the charging strip.
+           on the left, the top-down schematic on the right, and the five
+           status tiles across the bottom. Charging details are nested below
+           the SoC bar so they stay with the battery reading.
            Optional blocks space themselves with margins, not row gaps,
            so a hidden one leaves no trace. */
         .dash-glance {
             display: grid;
             flex: 1 1 auto;
             grid-template-columns: minmax(0, 1fr) 220px;
-            grid-template-rows: auto 1fr auto auto auto;
+            grid-template-rows: auto 1fr auto auto;
             grid-template-areas:
                 "main   car"
                 "soc    car"
                 "range  car"
-                "rows   rows"
-                "charge charge";
+                "rows   rows";
             grid-column-gap: 20px;
             min-width: 0;
         }
@@ -1275,32 +1201,46 @@
         [dir="rtl"] .dash-range-meta span { margin-right: 0; margin-left: 12px; }
         .dash-range-meta span:empty { display: none; }
 
-        /* Charging takeover strip — full width under the status tiles. */
+        /* Charging details sit immediately below the SoC bar and only appear
+           during an active session; the drive-state line already shows power. */
         .dash-glance-charge {
-            grid-area: charge;
             display: flex;
+            flex-wrap: wrap;
             align-items: center;
             margin-top: 12px;
-            padding: 10px 14px;
+            padding: 10px 12px;
             border-radius: var(--radius-md);
             background: var(--tertiary-soft);
             color: var(--tertiary);
-            font-size: var(--fs-label);
+            font-size: var(--fs-caption);
             font-weight: 600;
-            line-height: 1.3;
+            line-height: 1.35;
         }
         .dash-glance-charge[hidden] { display: none; }
         .dash-glance-charge svg {
+            flex: 0 0 auto;
             width: 16px;
             height: 16px;
             margin-right: 8px;
-            flex: 0 0 auto;
-            animation: dashBoltPulse 1.4s ease-in-out infinite;
         }
         [dir="rtl"] .dash-glance-charge svg { margin-right: 0; margin-left: 8px; }
-        @keyframes dashBoltPulse {
-            0%, 100% { opacity: 1; }
-            50%      { opacity: 0.45; }
+        .dash-glance-charge > span {
+            flex: 1 1 120px;
+            min-width: 0;
+            margin-right: 12px;
+        }
+        [dir="rtl"] .dash-glance-charge > span { margin-right: 0; margin-left: 12px; }
+        .dash-glance-charge-link {
+            color: var(--primary);
+            font-weight: 700;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+        .dash-glance-charge-link:hover { text-decoration: underline; }
+        .dash-glance-charge-link:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: 3px;
+            border-radius: 2px;
         }
 
         /* Location tile: the map runs edge to edge across its top. */
@@ -1445,11 +1385,6 @@
         }
         [dir="rtl"] .dash-primary-btn svg { margin-right: 0; margin-left: 8px; }
 
-        /* Charging details leads elsewhere rather than acting: tonal. */
-        .dash-charge-card .dash-primary-btn {
-            background: var(--primary-soft);
-            color: var(--primary);
-        }
 
         .dash-secondary-btn {
             min-height: 40px;
@@ -1465,8 +1400,7 @@
         @media (hover: hover) {
             .dash-icon-btn:hover,
             .dash-secondary-btn:hover,
-            .dash-command:hover,
-            .dash-charge-card .dash-primary-btn:hover {
+            .dash-command:hover {
                 box-shadow: inset 0 0 0 999px var(--state-hover);
             }
             .dash-location-card .dash-primary-btn:hover {
@@ -1591,18 +1525,13 @@
         .dash-command-grid-media .dash-command svg { margin: 0 10px 0 0; }
         [dir="rtl"] .dash-command-grid-media .dash-command svg { margin: 0 0 0 10px; }
 
-        /* Main info + charging readings (mock .metric tiles). */
+        /* Main info (mock .metric tiles). */
         .dash-metric-grid {
             display: grid;
             grid-template-columns: repeat(6, minmax(0, 1fr));
             grid-gap: 8px;
         }
 
-        /* The charging card is always a one-column bento tile, so its four
-           readings sit 2 x 2. */
-        .dash-metric-grid--4 {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
 
         /* Keep the two connectivity readings together, including when optional
            fuel or odometer readings are present. */
@@ -1814,8 +1743,7 @@
                     "main   main"
                     "soc    car"
                     "range  range"
-                    "rows   rows"
-                    "charge charge";
+                    "rows   rows";
             }
             .dash-glance-side,
             .dash-glance-car { margin-top: 16px; }
@@ -1848,10 +1776,9 @@
         }
 
         /* ── Mock layout ─────────────────────────────────────────────
-           Four columns: the hero 2x2, then charging and the AI insight,
-           quick controls under them, location and main info below.
-           Two columns from 600px (hero, controls, charging + AI,
-           location, main info), one on phones in the same order. The AI
+           Four columns: the hero 2x2, then the AI insight, quick controls,
+           location and main info. Two columns from 600px (hero, controls,
+           AI, location, main info), one on phones in the same order. The AI
            insight is placed explicitly (it is not a reorderable card);
            saved card orders still apply and dense flow fills the gaps. */
         .dash-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -1861,8 +1788,6 @@
         .dash-grid > .dash-location-card,
         .dash-grid > .dash-info-card,
         .dash-grid > #dashAiInsight[hidden] ~ .dash-info-card { grid-column: span 2; }
-        .dash-grid > .dash-charge-card { grid-column: auto; }
-        .dash-grid > #dashAiInsight[hidden] ~ .dash-charge-card { grid-column: span 2; }
 
         .dash-hero,
         .dash-card,
@@ -1891,13 +1816,12 @@
             --dash-car-roof: #121917;
             --dash-car-tyre: #060908;
             grid-template-columns: minmax(0, 1fr) 240px;
-            grid-template-rows: auto 1fr auto auto auto;
+            grid-template-rows: auto 1fr auto auto;
             grid-template-areas:
                 "main   main"
                 "soc    car"
                 "chips  car"
-                "rows   rows"
-                "charge charge";
+                "rows   rows";
             grid-column-gap: 20px;
         }
         :root[data-theme="light"] .dash-glance {
@@ -2277,13 +2201,12 @@
         .dash-glance-row[data-tone="alert"] svg { color: var(--danger); }
         .dash-glance-row strong.good { color: var(--on-surface); }
         .dash-glance-row { padding: 12px; }
-        .dash-glance-charge { margin-top: 12px; }
 
 
         /* Hero as the mock draws it: the state title, then one quiet line
            ("Vehicle off · Charging at 7.2 kW"); the speed only while moving;
-           the learned range as one caption under the bar; the charging
-           strip lives in the Energy tile. */
+           the learned range as one caption under the bar; charging power
+           stays in the drive-state detail and session details sit below SoC. */
         .dash-drive-copy {
             display: flex;
             flex-wrap: wrap;
@@ -2331,8 +2254,6 @@
             font-weight: 600;
         }
         .dash-range-meta { margin-top: 2px; }
-        .dash-glance-charge,
-        .dash-glance-charge[hidden] { display: none; }
 
         /* Main info (mock .metric): the value with its qualifier inline and
            smaller ("HomeNet-5G 192.168.1.47", "Stale Last reported: ON"). */
@@ -2350,43 +2271,12 @@
         [dir="rtl"] .dash-metric small { margin: 0 6px 0 0; }
         .dash-metric > span { margin-bottom: 6px; }
 
-        /* Energy tile (mock .mini-bar) and readings with small units. */
-        .dash-mini-bar {
-            position: relative;
-            height: 8px;
-            margin: 14px 0 0;
-            overflow: hidden;
-            border-radius: 4px;
-            background: var(--well-2);
-        }
-        .dash-mini-bar i {
-            display: block;
-            width: 0;
-            height: 100%;
-            border-radius: inherit;
-            background: var(--primary);
-            transition: width 0.6s cubic-bezier(0.2, 0, 0, 1);
-        }
-        [dir="rtl"] .dash-mini-bar i { margin-left: auto; }
-        .dash-charge-big strong .dash-fig-unit {
-            margin: 0 6px 0 2px;
-            font-size: 0.5em;
-            font-weight: 600;
-        }
         .dash-metric strong .dash-fig-unit {
             margin-left: 3px;
             font-size: var(--fs-label);
             font-weight: 500;
         }
         [dir="rtl"] .dash-metric strong .dash-fig-unit { margin-left: 0; margin-right: 3px; }
-        .dash-charge-chip {
-            min-height: 28px;
-            padding: 0 10px;
-            font-size: var(--fs-caption);
-            font-weight: 700;
-            background: var(--primary-soft);
-            color: var(--primary);
-        }
 
         /* Tile heads (mock .tile-head): optional icon chip, then titles. */
         .dash-tile-icon {
@@ -2403,71 +2293,6 @@
         .dash-tile-icon svg { width: 20px; height: 20px; }
         .dash-tile-icon + div { flex: 1 1 auto; margin-left: 12px; }
         [dir="rtl"] .dash-tile-icon + div { margin-left: 0; margin-right: 12px; }
-
-        /* Charging tile (mock .t-charge): state, the big time to full,
-           three readings, then the way to the charging page. */
-        .dash-charge-chip { margin-bottom: 12px; }
-        .dash-charge-big { min-width: 0; }
-        .dash-charge-big strong {
-            display: block;
-            color: var(--on-surface);
-            font-size: var(--fs-display);
-            font-weight: 700;
-            line-height: 1.05;
-            font-variant-numeric: tabular-nums;
-            overflow-wrap: break-word;
-        }
-        .dash-charge-big span {
-            display: block;
-            margin-top: 4px;
-            color: var(--on-surface-variant);
-            font-size: var(--fs-label);
-            line-height: 1.35;
-        }
-        .dash-charge-card .dash-metric-grid--4 {
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            margin-top: 16px;
-        }
-        .dash-charge-card .dash-metric { padding: 10px; border-radius: 12px; }
-        .dash-charge-card .dash-metric strong {
-            font-size: var(--fs-body);
-            line-height: 1.25;
-            overflow-wrap: normal;
-        }
-        /* A one-column tile under 1440px is too narrow for three readings
-           a row: two, with the session across the bottom. */
-        @media (min-width: 1024px) and (max-width: 1439px) {
-            .dash-charge-card .dash-metric-grid--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-            .dash-charge-card .dash-metric-grid--4 > .dash-metric:nth-child(3) { grid-column: 1 / -1; }
-            .dash-grid > #dashAiInsight[hidden] ~ .dash-charge-card .dash-metric-grid--4 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-            .dash-grid > #dashAiInsight[hidden] ~ .dash-charge-card .dash-metric-grid--4 > .dash-metric:nth-child(3) { grid-column: auto; }
-        }
-        .dash-charge-card .dash-action-row { padding-top: 12px; }
-        .dash-charge-card .dash-primary-btn.dash-tile-link,
-        .dash-primary-btn.dash-tile-link {
-            width: auto;
-            min-height: 44px;
-            margin-left: -4px;
-            padding: 0 4px;
-            justify-content: flex-start;
-            background: transparent;
-            color: var(--primary);
-            font-size: var(--fs-label);
-        }
-        [dir="rtl"] .dash-primary-btn.dash-tile-link { margin-left: 0; margin-right: -4px; }
-        .dash-tile-link svg,
-        [dir="rtl"] .dash-tile-link svg {
-            width: 16px;
-            height: 16px;
-            margin: 0 0 0 6px;
-            transition: transform var(--duration-fast) var(--easing-standard);
-        }
-        [dir="rtl"] .dash-tile-link svg { margin: 0 6px 0 0; transform: scaleX(-1); }
-        @media (hover: hover) {
-            .dash-charge-card .dash-primary-btn.dash-tile-link:hover { box-shadow: none; text-decoration: underline; }
-            .dash-tile-link:hover svg { transform: translateX(3px); }
-            [dir="rtl"] .dash-tile-link:hover svg { transform: scaleX(-1) translateX(3px); }
-        }
 
         /* AI insight (mock .t-brief): the kicker beside the icon chip, the
            title full width under them, so long titles keep the tile's width.
@@ -2743,9 +2568,7 @@
             .dash-grid > .dash-actions-card,
             .dash-grid > .dash-location-card,
             .dash-grid > .dash-info-card,
-            .dash-grid > #dashAiInsight[hidden] ~ .dash-info-card,
-            .dash-grid > #dashAiInsight[hidden] ~ .dash-charge-card { grid-column: 1 / -1; grid-row: auto; }
-            .dash-grid > .dash-charge-card { grid-column: auto; }
+            .dash-grid > #dashAiInsight[hidden] ~ .dash-info-card { grid-column: 1 / -1; grid-row: auto; }
             .dash-grid > #dashAiInsight { grid-column: 2; grid-row: 3; }
             .dash-glance { --dash-soc-size: 64px; grid-template-columns: minmax(0, 1fr) 220px; }
             .dash-command-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -2769,7 +2592,6 @@
         @media (max-width: 599px) {
             .dash-grid { grid-template-columns: minmax(0, 1fr); }
             .dash-grid > #dashAiInsight { grid-column: 1; grid-row: 4; }
-            .dash-grid > .dash-charge-card { grid-column: 1 / -1; }
             .dash-hero,
             .dash-card,
             .dash-ai-insight { border-radius: 22px; }
@@ -2781,8 +2603,7 @@
                     "main   main"
                     "soc    car"
                     "chips  chips"
-                    "rows   rows"
-                    "charge charge";
+                    "rows   rows";
             }
             .dash-glance-side,
             .dash-glance-car { margin-top: 16px; }
@@ -3526,7 +3347,9 @@
                     box.hidden = false;
                 },
 
-                // Charging takeover strip. `c` = status.charging or null.
+                // Charging details sit below the SoC bar. Power is already
+                // shown in the drive-state detail, so keep this strip focused
+                // on time-to-full and energy added. `c` = status.charging or null.
                 setCharging: function(c) {
                     var panel = document.getElementById('dashGlance');
                     var strip = document.getElementById('dashGlanceCharge');
@@ -3534,25 +3357,32 @@
                     var live = !!(c && c.charging);
                     panel.classList.toggle('charging', live);
                     if (!live) { strip.hidden = true; return; }
+
                     var bits = [];
-                    var stripPower = Number(c.powerKw || c.chargingPowerKW || 0);
-                    if (stripPower > 0 && c.powerSource !== 'nominalPlaceholder') {
-                        bits.push((c.isEstimated ? '~' : '') + stripPower.toFixed(1) + ' kW');
+                    var timeToFullMin = Number(c.timeToFullMin);
+                    if (isFinite(timeToFullMin) && timeToFullMin > 0) {
+                        var totalMinutes = Math.floor(timeToFullMin);
+                        var ttf = Math.floor(totalMinutes / 60) + BYD.units.hourSuffix(true)
+                            + ' ' + (totalMinutes % 60) + BYD.units.minuteSuffix(true, true);
+                        bits.push(BYD.i18n.t('dashboard.glance_time_to_full', { t: ttf })
+                            || (ttf + ' to full'));
                     }
-                    if (c.timeToFullMin && c.timeToFullMin > 0) {
-                        var ttf = Math.floor(c.timeToFullMin / 60) + BYD.units.hourSuffix(true) + ' ' + (c.timeToFullMin % 60) + BYD.units.minuteSuffix(true, true);
-                        bits.push(BYD.i18n.t('dashboard.glance_time_to_full', { t: ttf }) || (ttf + ' to full'));
-                    }
-                    if (c.sessionKwh && c.sessionKwh > 0) {
+
+                    var sessionKwh = Number(c.sessionKwh);
+                    if (isFinite(sessionKwh) && sessionKwh > 0) {
                         var sessionEnergyApproximate = c.sessionEnergyIncomplete === true
                             || c.sessionEnergyEstimated === true
                             || c.sessionEnergySource !== 'metered_counter';
-                        bits.push((sessionEnergyApproximate ? '~' : '+')
-                            + c.sessionKwh.toFixed(1) + ' kWh');
+                        var addedLabel = BYD.i18n.t('charge.metric_session') || 'Added';
+                        var energyPrefix = sessionEnergyApproximate ? '~' : '+';
+                        bits.push(addedLabel + ' ' + energyPrefix + sessionKwh.toFixed(1) + ' kWh');
                     }
-                    if (!bits.length) bits.push(BYD.i18n.t('charge.state_charging') || 'Charging');
+
                     var textEl = document.getElementById('dashGlanceChargeText');
-                    if (textEl) textEl.textContent = bits.join(' · ');
+                    if (textEl) {
+                        textEl.textContent = bits.join(' · ');
+                        textEl.hidden = bits.length === 0;
+                    }
                     strip.hidden = false;
                 },
             },
@@ -4154,64 +3984,10 @@
                     setChip('dashConnChip', tr('dashboard.chip_offline', 'Offline'), 'warn', 'wifi-off');
                 }
 
-                // ----- Charging card -----
-                // status.charging carries the dashboard fields added by the
-                // daemon's /api/status assembler (charging/plugged/full/fault +
-                // powerKw/socPercent/timeToFullMin). Absent on non-EV reads.
-                var c = status.charging;
-                this.glance.setCharging(c || null);
-                if (c) {
-                    var stateKey = c.fault ? 'charge.state_fault'
-                                 : c.charging ? 'charge.state_charging'
-                                 : c.full ? 'charge.state_full'
-                                 : c.plugged ? 'charge.state_plugged'
-                                 : 'charge.state_idle';
-                    var dotCls = c.fault ? 'dot-danger'
-                               : c.charging ? 'dot-active'
-                               : c.full ? 'dot-good'
-                               : c.plugged ? 'dot-warn'
-                               : 'dot-idle';
-                    var dot = document.getElementById('dashChargeDot');
-                    if (dot) dot.className = 'ic_status_dot ' + dotCls;
-                    var fallbackState = c.fault ? 'Charge fault' : c.charging ? 'Charging'
-                                      : c.full ? 'Full' : c.plugged ? 'Plugged in' : 'Idle';
-                    setText('dashChargeState', BYD.i18n.t(stateKey) || fallbackState);
-
-                    if (c.socPercent !== undefined && c.socPercent !== null) {
-                        setText('dashChargeSoc', c.socPercent.toFixed(1) + '%');
-                        var socBar = document.getElementById('dashChargeSocBar');
-                        if (socBar) socBar.style.width = Math.max(0, Math.min(100, c.socPercent)) + '%';
-                    } else {
-                        setText('dashChargeSoc', '--');
-                    }
-                    var dashboardPower = Number(c.powerKw || c.chargingPowerKW || 0);
-                    var dashboardPowerText = c.charging
-                            && dashboardPower > 0
-                            && c.powerSource !== 'nominalPlaceholder'
-                        ? (c.isEstimated ? '~' : '') + dashboardPower.toFixed(1) + ' kW'
-                        : '--';
-                    setText('dashChargePower', dashboardPowerText);
-                    var dashboardEnergyApproximate = c.sessionEnergyIncomplete === true
-                        || c.sessionEnergyEstimated === true
-                        || c.sessionEnergySource !== 'metered_counter';
-                    setText('dashChargeKwh', (c.sessionKwh && c.sessionKwh > 0)
-                        ? (dashboardEnergyApproximate ? '~' : '')
-                            + c.sessionKwh.toFixed(1) + ' kWh'
-                        : '--');
-                    if (c.charging && c.timeToFullMin && c.timeToFullMin > 0) {
-                        setText('dashChargeTtf', Math.floor(c.timeToFullMin / 60) + BYD.units.hourSuffix(true) + ' ' + (c.timeToFullMin % 60) + BYD.units.minuteSuffix(true, true));
-                    } else {
-                        setText('dashChargeTtf', '--');
-                    }
-                } else {
-                    var idleDot = document.getElementById('dashChargeDot');
-                    if (idleDot) idleDot.className = 'ic_status_dot dot-idle';
-                    setText('dashChargeState', BYD.i18n.t('charge.state_idle') || 'Idle');
-                    setText('dashChargeSoc', '--');
-                    setText('dashChargePower', '--');
-                    setText('dashChargeKwh', '--');
-                    setText('dashChargeTtf', '--');
-                }
+                // Charging status and session details are rendered in the
+                // vehicle glance card below the SoC bar. Charging power
+                // remains part of resolveDriveState() above.
+                this.glance.setCharging(status.charging || null);
             },
             openDirections: function() {
                 var gps = this.lastStatus && this.lastStatus.gps;
@@ -4274,7 +4050,7 @@
             }
             // Figures read as the mock sets them: the number, then a smaller unit.
             // Re-applied whenever a reading's text is replaced.
-            var unitized = document.querySelectorAll('#dashInfoGrid .dash-metric > strong, #dashChargeTtf, .dash-charge-card .dash-metric > strong');
+            var unitized = document.querySelectorAll('#dashInfoGrid .dash-metric > strong');
             var unitize = function(el) {
                 if (el.childNodes.length !== 1 || el.firstChild.nodeType !== 3) return;
                 var text = el.firstChild.nodeValue;
