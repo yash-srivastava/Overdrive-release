@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_security_byd_tools_title">Сервисное меню BYD</string>
+    <string name="settings_security_byd_tools_description">Встроенные настройки головного устройства.</string>
+    <string name="settings_security_byd_adb_title">ADB / Для разработчиков</string>
+    <string name="settings_security_byd_adb_hint">Откройте раздел «Для разработчиков» и включите отладку по USB.</string>
+    <string name="settings_security_byd_adb_unavailable">На этой прошивке настройки ADB недоступны.</string>
+    <string name="settings_security_country_code_title">Код страны</string>
+    <string name="settings_security_country_code_warning">Откроются региональные настройки BYD. Изменение кода страны может повлиять на работу региональных сервисов или потребовать перезапуска головного устройства. Продолжайте только на стоянке.</string>
+    <string name="settings_security_country_code_open">Открыть настройки</string>
+    <string name="settings_security_country_code_unavailable">На этом головном устройстве выбор кода страны недоступен.</string>
+</resources>

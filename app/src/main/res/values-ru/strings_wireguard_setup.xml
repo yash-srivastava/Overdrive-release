@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="wgsetup_title">Настройка WireGuard</string>
+    <string name="wgsetup_explainer">WireGuard подключает автомобиль к домашней сети. Трафик к адресам из AllowedIPs, например к брокеру Home Assistant, идёт через туннель. Для остальных адресов маршруты сохраняются. Используйте клиентскую конфигурацию, экспортированную с маршрутизатора, например из OPNsense, Fritz!Box или wg-easy.</string>
+    <string name="wgsetup_status_loading">Проверяем состояние…</string>
+    <string name="wgsetup_status_none">Конфигурация ещё не задана</string>
+    <string name="wgsetup_status_stopped">Конфигурация сохранена. Включите туннель в разделе «Службы».</string>
+    <string name="wgsetup_status_connected">Подключено к %1$s</string>
+    <string name="wgsetup_status_connecting">Подключаемся к %1$s…</string>
+    <string name="wgsetup_status_reloading">Применяем новую конфигурацию…</string>
+    <string name="wgsetup_status_error">Ошибка: %1$s</string>
+    <string name="wgsetup_status_unavailable">Состояние неизвестно: служба недоступна</string>
+    <string name="wgsetup_handshake_seconds">Последнее рукопожатие: %1$d с назад</string>
+    <string name="wgsetup_handshake_minutes">Последнее рукопожатие: %1$d мин назад</string>
+    <string name="wgsetup_handshake_hours">Последнее рукопожатие: %1$d ч назад</string>
+    <string name="wgsetup_handshake_none">Рукопожатий пока не было</string>
+    <string name="wgsetup_detail_address">Адрес туннеля: %1$s</string>
+    <string name="wgsetup_detail_routes">Маршруты: %1$s</string>
+    <string name="wgsetup_expose">Открыть доступ к веб-панели через WireGuard</string>
+    <string name="wgsetup_expose_warning">Любой узел с доступом к адресу автомобиля в туннеле сможет открыть страницу входа. Ограничьте доступ на сервере WireGuard.</string>
+    <string name="wgsetup_expose_url">Веб-панель: %1$s</string>
+    <string name="wgsetup_expose_failed">Не удалось изменить настройку доступа к веб-панели</string>
+    <string name="wgsetup_config_hint">Вставьте конфигурацию WireGuard ([Interface] … [Peer] …)</string>
+    <string name="wgsetup_key_note">Закрытый ключ хранится только на устройстве и больше не показывается. Новая конфигурация заменит предыдущую.</string>
+    <string name="wgsetup_paste">Вставить</string>
+    <string name="wgsetup_import">Импортировать файл</string>
+    <string name="wgsetup_phone">Настроить с телефона</string>
+    <string name="wgsetup_delete">Удалить конфигурацию</string>
+    <string name="wgsetup_clipboard_empty">Буфер обмена пуст</string>
+    <string name="wgsetup_import_failed">Не удалось прочитать файл</string>
+    <string name="wgsetup_import_too_large">Файл слишком большой</string>
+    <string name="wgsetup_import_no_qr">На изображении не найден QR-код</string>
+    <string name="wgsetup_imported">Конфигурация импортирована. Проверьте текст и нажмите «Сохранить».</string>
+    <string name="wgsetup_phone_title">Откройте на телефоне</string>
+    <string name="wgsetup_phone_steps">Отсканируйте код, войдите и загрузите или вставьте конфигурацию, экспортированную с маршрутизатора. Подключите телефон к той же сети Wi-Fi, к точке доступа автомобиля или через активный туннель.</string>
+    <string name="wgsetup_phone_lan_note">Открывайте эту страницу только через свою сеть Wi-Fi или точку доступа автомобиля.</string>
+    <string name="wgsetup_phone_no_url">Адрес недоступен. Подключите автомобиль к Wi-Fi, включите точку доступа или запустите туннель.</string>
+    <string name="wgsetup_empty">Сначала вставьте или импортируйте конфигурацию</string>
+    <string name="wgsetup_saved">Конфигурация WireGuard сохранена</string>
+    <string name="wgsetup_delete_title">Удалить конфигурацию WireGuard?</string>
+    <string name="wgsetup_delete_message">Туннель остановится, а конфигурация и закрытый ключ будут удалены.</string>
+    <string name="wgsetup_deleted">Конфигурация WireGuard удалена</string>
+    <string name="wgsetup_delete_failed">Не удалось удалить конфигурацию</string>
+</resources>

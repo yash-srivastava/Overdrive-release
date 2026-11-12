@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="daemon_name_wireguard">Туннель WireGuard</string>
+    <string name="daemon_config_no_wireguard">Конфигурация WireGuard не задана</string>
+    <string name="daemon_status_wireguard_connected">Подключено · %1$s</string>
+    <string name="daemon_status_wireguard_connecting">Подключаемся к %1$s…</string>
+    <string name="daemon_status_wireguard_error">Ошибка: %1$s</string>
+</resources>

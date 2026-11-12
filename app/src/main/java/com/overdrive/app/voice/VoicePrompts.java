@@ -18,7 +18,7 @@ import java.util.Locale;
 /**
  * Pre-generated spoken confirmations in assets/voice/prompts/{en,zh}; names come from
  * {@link #keyFor} and tools/voice/gen_voice_prompts.py. Languages with no recorded clips but a
- * translated {@code voice_prompt_<key>} string (Hebrew) speak that string through the system
+ * translated {@code voice_prompt_<key>} string (Hebrew and Russian) speak that string through the system
  * text-to-speech instead; when no voice for the language is installed, or it is not ready yet,
  * the English clip plays as before. Engine-thread only.
  */
@@ -78,7 +78,9 @@ final class VoicePrompts {
      */
     static String speechLanguage(String locale) {
         String lower = locale == null ? "" : locale.toLowerCase(Locale.ROOT);
-        return lower.startsWith("he") || lower.startsWith("iw") ? "he" : null;
+        if (lower.startsWith("he") || lower.startsWith("iw")) return "he";
+        if (lower.startsWith("ru")) return "ru";
+        return null;
     }
 
     /** Starts the text-to-speech engine early for a spoken-prompt language, so the first prompt is ready. */
