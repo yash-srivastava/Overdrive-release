@@ -341,6 +341,11 @@ public class HardwareEventRecorderGpu {
     // untouched for the RMM wedge ticker's existing consumers.
     private volatile long lastEncodedFrameElapsedMs = 0L;
 
+    // One-shot ACC ON barrier for the next cam_* file. It remains armed until
+    // a coded frame arrives after the surveillance-to-drive transition.
+    private final java.util.concurrent.atomic.AtomicLong driveFrameBarrierMs =
+            new java.util.concurrent.atomic.AtomicLong(0L);
+
     // FIX (false-GREEN: "REC/MIC green but no video file"): timestamp of the
     // last VIDEO sample actually written to the muxer (disk). Distinct from
     // lastEncodedFrameMs, which is stamped on every coded frame dequeued from
@@ -3180,6 +3185,14 @@ public class HardwareEventRecorderGpu {
                 return true;
             }
 
+            final long driveBarrier = outputPath != null
+                    && new File(outputPath).getName().startsWith("cam_")
+                    ? driveFrameBarrierMs.get() : 0L;
+            if (driveBarrier > 0L && lastEncodedFrameElapsedMs <= driveBarrier) {
+                logger.info("ACC ON drive muxer deferred: waiting for first fresh encoded frame");
+                return false;
+            }
+
             // A manual replay may already own the ring's single range cursor.
             // Do not cancel it: the event muxer still starts immediately and
             // records live frames, while beginFlushRange below simply skips
@@ -3325,8 +3338,16 @@ public class HardwareEventRecorderGpu {
                 return false;
             }
 
+            // Consume the one-shot barrier only after a valid muxer exists.
+            // A failed open must leave the barrier armed for the retry path.
+            final boolean firstPostSentryDriveClip = driveBarrier > 0L;
+            if (firstPostSentryDriveClip) {
+                driveFrameBarrierMs.compareAndSet(driveBarrier, 0L);
+                logger.info("First ACC ON drive muxer: starting live-only (no parked pre-roll)");
+            }
+
             boolean videoPreRecordCursorAcquired = false;
-            if (!manualClipExportInProgress
+            if (!firstPostSentryDriveClip && !manualClipExportInProgress
                     && savedFormat != null && preRecordBuffer != null) {
                 // SOTA: streaming flush. beginFlush() takes a seqlock-validated
                 // snapshot and pins the byte-arena read frontier. The drainer
@@ -4579,6 +4600,25 @@ public class HardwareEventRecorderGpu {
      */
     public long getLastEncodedFrameElapsedMs() {
         return lastEncodedFrameElapsedMs;
+    }
+
+    /** Keep the first drive file closed until coded video arrives after ACC ON. */
+    public void requireFreshFrameForNextDriveClip() {
+        driveFrameBarrierMs.set(android.os.SystemClock.elapsedRealtime());
+        logger.info("ACC ON drive frame barrier armed");
+    }
+
+    /**
+     * Returns true while the first post-ACC cam_* file must wait for a new
+     * encoded frame. The caller can defer the start without reporting a
+     * storage write fault or creating an empty MP4.
+     */
+    public boolean isWaitingForFreshDriveFrame(String outputPath) {
+        long barrier = driveFrameBarrierMs.get();
+        return barrier > 0L
+                && outputPath != null
+                && new File(outputPath).getName().startsWith("cam_")
+                && lastEncodedFrameElapsedMs <= barrier;
     }
 
     /**
