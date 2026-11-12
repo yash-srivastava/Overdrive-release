@@ -1,6 +1,7 @@
 package com.overdrive.app.monitor;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.json.JSONArray;
@@ -72,6 +73,20 @@ public class TopSnapshotCollectorTest {
 
         assertEquals(2, snapshot.getJSONArray("processes").length());
         assertEquals(2, snapshot.getInt("processCount"));
+    }
+
+    @Test
+    public void cachedProcessSnapshotExpiresAfter750ElapsedMilliseconds() {
+        assertTrue(TopSnapshotCollector.isCacheFresh(10_000L, 10_000L));
+        assertTrue(TopSnapshotCollector.isCacheFresh(10_000L, 10_750L));
+        assertFalse(TopSnapshotCollector.isCacheFresh(10_000L, 10_751L));
+    }
+
+    @Test
+    public void elapsedClockRegressionDoesNotMakeSnapshotLookFresh() {
+        // Defensive even if the clock source is reset unexpectedly: a negative
+        // age must never pin one old process snapshot indefinitely.
+        assertFalse(TopSnapshotCollector.isCacheFresh(10_000L, 9_500L));
     }
 
     private static long mebibytes(double value) {
