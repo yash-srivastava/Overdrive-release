@@ -803,6 +803,7 @@ public class GpuDownscaler {
             int sig = GLES30.glClientWaitSync(directFenceSyncs[directRingTail], 0, 0);
             boolean signaled = (sig == GLES30.GL_ALREADY_SIGNALED
                              || sig == GLES30.GL_CONDITION_SATISFIED);
+            boolean waitFailed = (sig == GLES30.GL_WAIT_FAILED);
             if (signaled) {
                 if (directScratchRgba == null || directScratchRgba.length != DIRECT_PBO_BYTES) {
                     directScratchRgba = new byte[DIRECT_PBO_BYTES];
@@ -811,14 +812,33 @@ public class GpuDownscaler {
                 java.nio.Buffer mapped = GLES30.glMapBufferRange(
                         GLES30.GL_PIXEL_PACK_BUFFER, 0, DIRECT_PBO_BYTES,
                         GLES30.GL_MAP_READ_BIT);
-                if (mapped instanceof ByteBuffer) {
-                    ByteBuffer bb = (ByteBuffer) mapped;
-                    bb.order(java.nio.ByteOrder.nativeOrder());
-                    bb.rewind();
-                    bb.get(directScratchRgba, 0, DIRECT_PBO_BYTES);
-                    GLES30.glUnmapBuffer(GLES30.GL_PIXEL_PACK_BUFFER);
+                boolean mappingValid = false;
+                try {
+                    if (mapped instanceof ByteBuffer) {
+                        ByteBuffer bb = (ByteBuffer) mapped;
+                        bb.order(java.nio.ByteOrder.nativeOrder());
+                        bb.rewind();
+                        if (bb.remaining() >= DIRECT_PBO_BYTES) {
+                            bb.get(directScratchRgba, 0, DIRECT_PBO_BYTES);
+                            // GL_FALSE means the mapped data store became corrupt.
+                            mappingValid = GLES30.glUnmapBuffer(
+                                    GLES30.GL_PIXEL_PACK_BUFFER);
+                        } else {
+                            GLES30.glUnmapBuffer(GLES30.GL_PIXEL_PACK_BUFFER);
+                            logger.warn("readPixelsDirect: mapped PBO is smaller than expected");
+                        }
+                    } else if (mapped != null) {
+                        // A non-ByteBuffer mapping is still mapped and must be unmapped.
+                        GLES30.glUnmapBuffer(GLES30.GL_PIXEL_PACK_BUFFER);
+                        logger.warn("readPixelsDirect: glMapBufferRange returned unsupported buffer type");
+                    } else {
+                        logger.warn("readPixelsDirect: glMapBufferRange failed");
+                    }
+                } finally {
                     GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0);
+                }
 
+                if (mappingValid) {
                     byte[] src = directScratchRgba;
                     byte[] dst = directRgbBuffer;
                     final int rowRgbaBytes = WIDTH * 4;
@@ -834,16 +854,20 @@ public class GpuDownscaler {
                     }
                     result = dst;
                 } else {
-                    GLES30.glUnmapBuffer(GLES30.GL_PIXEL_PACK_BUFFER);
-                    GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0);
-                    logger.warn("readPixelsDirect: glMapBufferRange returned non-ByteBuffer");
+                    logger.warn("readPixelsDirect: discarding invalid PBO contents");
                 }
+            } else if (waitFailed) {
+                logger.warn("readPixelsDirect: glClientWaitSync failed; discarding PBO slot");
+            }
 
+            // Retire signaled and failed fences. A timeout remains queued for
+            // the next frame, but GL_WAIT_FAILED must not wedge the ring forever.
+            if (signaled || waitFailed) {
                 GLES30.glDeleteSync(directFenceSyncs[directRingTail]);
                 directFenceSyncs[directRingTail] = 0L;
                 directRingTail = (directRingTail + 1) % DIRECT_PBO_RING_SIZE;
             }
-            // Not signaled — leave fence in place; next call will poll it.
+            // GL_TIMEOUT_EXPIRED — leave the fence in place and poll next call.
         }
 
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
