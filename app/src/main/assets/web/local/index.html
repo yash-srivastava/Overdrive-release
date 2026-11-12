@@ -1013,6 +1013,10 @@
             font-weight: 700;
             font-family: inherit;
         }
+        .dash-car-psi-unit {
+            font-size: 0.45em;
+            font-weight: 600;
+        }
         .dash-car-psi.warn  { fill: var(--warning); }
         .dash-car-psi.alert { fill: var(--danger); }
 
@@ -3375,19 +3379,26 @@
                                 // matching the Vehicle Control page and the
                                 // server's own psi field (integer PSI
                                 // collapses the ±3 kPa steps the BYD TPMS
-                                // reports, hiding real change; bar already
-                                // rendered 4 chars in these corners, so
-                                // "36.5" fits just as well). The toFixed(1)
-                                // fallback covers a stale cached core.js
-                                // that predates the pressure helpers.
+                                // reports, hiding real change). The unit is
+                                // rendered alongside the value in a smaller
+                                // suffix. The toFixed(1) fallback covers a
+                                // stale cached core.js that predates the
+                                // pressure helpers.
+                                var UU = (window.BYD && BYD.units
+                                        && BYD.units.pressureVal && BYD.units.pressureLabel)
+                                    ? BYD.units : null;
                                 var pv = '--';
                                 if (corner.available && typeof corner.psi === 'number') {
-                                    var UU = (window.BYD && BYD.units && BYD.units.pressureVal)
-                                        ? BYD.units : null;
                                     pv = UU ? UU.pressureVal(corner.kPa)
                                             : corner.psi.toFixed(1);
                                 }
                                 psiEl.textContent = pv;
+                                var pressureUnit = UU ? UU.pressureLabel() : 'PSI';
+                                var unitSpan = document.createElementNS(
+                                    'http://www.w3.org/2000/svg', 'tspan');
+                                unitSpan.setAttribute('class', 'dash-car-psi-unit');
+                                unitSpan.textContent = ' ' + pressureUnit;
+                                psiEl.appendChild(unitSpan);
                                 psiEl.setAttribute('class', 'dash-car-psi'
                                     + (state === 'warn' || state === 'alert' ? ' ' + state : ''));
                             }
