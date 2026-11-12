@@ -9,6 +9,9 @@ import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -37,6 +40,16 @@ public class WebSocketStreamServer extends WebSocketServer
     public byte[] getCachedSpsPps() { return cachedSpsPps; }
     
     private final Set<WebSocket> clients = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    // Share one daemon scheduler instead of creating a Timer thread for every
+    // early keyframe request. Retries are coalesced per connected client below.
+    private static final ScheduledExecutorService KEYFRAME_RETRY_EXECUTOR =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread thread = new Thread(r, "WS-KeyframeRetry");
+                thread.setDaemon(true);
+                return thread;
+            });
+    private final Set<WebSocket> pendingKeyframeRetries =
+            Collections.newSetFromMap(new ConcurrentHashMap<>());
     private Timer idleTimer;
     private volatile long lastClientDisconnectElapsedMs = 0;
     private volatile boolean idleShutdownTriggered = false;
@@ -127,6 +140,7 @@ public class WebSocketStreamServer extends WebSocketServer
     @Override
     public void onClose(WebSocket conn, int code, String reason, boolean remote) {
         clients.remove(conn);
+        pendingKeyframeRetries.remove(conn);
         logger.info("WS Client disconnected (remaining: " + clients.size() + ")");
         if (clients.isEmpty()) {
             lastClientDisconnectElapsedMs =
@@ -182,27 +196,24 @@ public class WebSocketStreamServer extends WebSocketServer
                 // never block the WS reader thread; conn.isOpen() guards a client that
                 // disconnected during the deferral window.
                 final WebSocket deferredConn = conn;
-                Timer t = new Timer("WS-KeyframeRetry", true);
-                t.schedule(new TimerTask() {
-                    @Override
-                    public void run() {
-                        byte[] late = cachedSpsPps;
-                        if (late != null && late.length > 0 && deferredConn.isOpen()) {
-                            try { deferredConn.send(late); } catch (Exception e) {
-                                logger.warn("keyframe: deferred SPS/PPS resend failed: " + e.getMessage());
+                // Repeated requests from one client share a single pending retry.
+                if (pendingKeyframeRetries.add(deferredConn)) {
+                    KEYFRAME_RETRY_EXECUTOR.schedule(() -> {
+                        try {
+                            byte[] late = cachedSpsPps;
+                            if (late != null && late.length > 0 && deferredConn.isOpen()) {
+                                try { deferredConn.send(late); } catch (Exception e) {
+                                    logger.warn("keyframe: deferred SPS/PPS resend failed: " + e.getMessage());
+                                }
+                            } else if (late == null) {
+                                // The drainer's format callback remains the fallback broadcast.
+                                logger.warn("keyframe: encoder format still unpublished after deferral — relying on drainer onSpsPps broadcast");
                             }
-                        } else if (late == null) {
-                            // Encoder STILL hasn't published format after the deferral —
-                            // log so a wedged-encoder lane is visible (W-level: app-side
-                            // logcat only surfaces W/E). The onOpen one-shot already ran,
-                            // and the drainer's first INFO_OUTPUT_FORMAT_CHANGED will
-                            // sendToAll() this client anyway, so this is the diagnostic,
-                            // not a second retry loop (which would risk an unbounded
-                            // timer storm against a genuinely dead encoder).
-                            logger.warn("keyframe: encoder format still unpublished after deferral — relying on drainer onSpsPps broadcast");
+                        } finally {
+                            pendingKeyframeRetries.remove(deferredConn);
                         }
-                    }
-                }, KEYFRAME_RESEND_DEFER_MS);
+                    }, KEYFRAME_RESEND_DEFER_MS, TimeUnit.MILLISECONDS);
+                }
             }
             Runnable hook = keyframeRequestHook;
             if (hook != null) {
@@ -220,6 +231,7 @@ public class WebSocketStreamServer extends WebSocketServer
     public void onError(WebSocket conn, Exception ex) {
         if (conn != null) {
             clients.remove(conn);
+            pendingKeyframeRetries.remove(conn);
             logger.error("WS Error: " + ex.getMessage());
             if (clients.isEmpty()) {
                 lastClientDisconnectElapsedMs =
@@ -400,6 +412,7 @@ public class WebSocketStreamServer extends WebSocketServer
                 try { conn.close(); } catch (Exception ignored) {}
             }
             clients.clear();
+            pendingKeyframeRetries.clear();
             cachedSpsPps = null;
             reusableFrameBuffer = null;
             frameCount = 0;
