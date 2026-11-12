@@ -197,13 +197,37 @@
                                         <span class="deterrent-label" data-i18n="liveview.deterrent_horn">Horn</span>
                                     </button>
                                     <button type="button" class="deterrent-btn" id="vehiclePowerOnBtn" style="display:none;"
-                                            onclick="BYD.stream.fireLiveAction('powerOn')"><span class="deterrent-label" data-i18n="vehicle.power_on">Power on</span></button>
+                                            onclick="BYD.stream.fireLiveAction('powerOn')">
+                                        <!-- Lucide power -->
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M12 2v10"/><path d="M18.4 6.6a8 8 0 1 1-12.8 0"/>
+                                        </svg>
+                                        <span class="deterrent-label" data-i18n="vehicle.power_on">Power on</span>
+                                    </button>
                                     <button type="button" class="deterrent-btn" id="vehiclePowerOffBtn" style="display:none;"
-                                            onclick="BYD.stream.fireLiveAction('powerOff')"><span class="deterrent-label" data-i18n="vehicle.power_off">Power off</span></button>
+                                            onclick="BYD.stream.fireLiveAction('powerOff')">
+                                        <!-- Lucide power-off -->
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M18.4 6.6a8 8 0 1 1-12.8 0"/><path d="M12 2v10"/><path d="m2 2 20 20"/>
+                                        </svg>
+                                        <span class="deterrent-label" data-i18n="vehicle.power_off">Power off</span>
+                                    </button>
                                     <button type="button" class="deterrent-btn" id="vehicleTrunkOpenBtn"
-                                            onclick="BYD.stream.fireLiveAction('trunkOpen')"><span class="deterrent-label" data-i18n="dashboard.cmd_trunk_open">Open trunk</span></button>
+                                            onclick="BYD.stream.fireLiveAction('trunkOpen')">
+                                        <!-- Open trunk: rear of a car with the hatch raised -->
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M4 13v4h16v-4l-2-5H6z"/><path d="M7 8l-2-4h9l3 4"/><path d="M4 13h16"/><path d="M7 17v2m10-2v2"/>
+                                        </svg>
+                                        <span class="deterrent-label" data-i18n="dashboard.cmd_trunk_open">Open trunk</span>
+                                    </button>
                                     <button type="button" class="deterrent-btn" id="vehicleTrunkCloseBtn"
-                                            onclick="BYD.stream.fireLiveAction('trunkClose')"><span class="deterrent-label" data-i18n="dashboard.cmd_trunk_close">Close trunk</span></button>
+                                            onclick="BYD.stream.fireLiveAction('trunkClose')">
+                                        <!-- Closed trunk: rear of a car with the hatch shut -->
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M4 13v4h16v-4l-2-5H6z"/><path d="M7 8l1-3h8l1 3"/><path d="M4 13h16"/><path d="M7 17v2m10-2v2"/>
+                                        </svg>
+                                        <span class="deterrent-label" data-i18n="dashboard.cmd_trunk_close">Close trunk</span>
+                                    </button>
                                 </div>
                             </div>
                             </div>
