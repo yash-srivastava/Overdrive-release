@@ -27,8 +27,13 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -49,14 +54,31 @@ public class HttpServer {
 
     private static final String WEB_ROOT = com.overdrive.app.util.ScratchRoot.path("web");
     private final int port;
-    private ServerSocket serverSocket;
+    // stop() runs on a different thread from start()/accept(); volatile is
+    // required so it always closes the currently published listener socket.
+    private volatile ServerSocket serverSocket;
     private volatile boolean running = true;
 
     /** Consecutive bind failures, reset on a successful bind. */
     private int bindFailures;
 
-    // Thread Pool to prevent server clogging (max 32 concurrent connections)
-    private final ExecutorService threadPool = Executors.newFixedThreadPool(32);
+    // Bound both active handlers and accepted-but-not-yet-serviced sockets.
+    // Executors.newFixedThreadPool(32) limits workers but uses an unbounded
+    // LinkedBlockingQueue, allowing slow clients to accumulate sockets/Fds.
+    private static final int HTTP_WORKER_THREADS = 32;
+    private static final int HTTP_PENDING_CONNECTIONS = 64;
+    private final ExecutorService threadPool = new ThreadPoolExecutor(
+            HTTP_WORKER_THREADS,
+            HTTP_WORKER_THREADS,
+            0L,
+            TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(HTTP_PENDING_CONNECTIONS),
+            Executors.defaultThreadFactory(),
+            new ThreadPoolExecutor.AbortPolicy());
+    // Track queued as well as running sockets so stop() can close every accepted
+    // connection, including tasks removed from the executor queue by shutdownNow.
+    private final Object clientLock = new Object();
+    private final Set<Socket> clientSockets = new HashSet<>();
 
     /** Pending-connection backlog for the listening socket (see run loop). */
     static final int LISTEN_BACKLOG = 128;
@@ -287,20 +309,60 @@ public class HttpServer {
                 // browser demultiplexed into N loopback connections) easily
                 // exceeds 10 pending connects and the kernel drops the SYNs.
                 // The kernel caps this at somaxconn.
-                serverSocket = new ServerSocket(port, LISTEN_BACKLOG, InetAddress.getByName("0.0.0.0"));
-                serverSocket.setReuseAddress(true);
+                ServerSocket boundSocket = new ServerSocket();
+                // SO_REUSEADDR must be configured before bind(); setting it on
+                // an already-bound ServerSocket does not affect this listener.
+                boundSocket.setReuseAddress(true);
+                boundSocket.bind(new java.net.InetSocketAddress(
+                        InetAddress.getByName("0.0.0.0"), port), LISTEN_BACKLOG);
+                // Publish the newly-bound listener under the same lock used by
+                // stop(). If shutdown won while bind() was in progress, close
+                // this local socket instead of publishing it after stop() has
+                // already checked the field.
+                synchronized (clientLock) {
+                    if (!running) {
+                        try { boundSocket.close(); } catch (Exception ignored) {}
+                        break;
+                    }
+                    serverSocket = boundSocket;
+                }
                 bindFailures = 0;
                 CameraDaemon.log("HTTP server listening on 0.0.0.0:" + port);
 
-                while (running && CameraDaemon.isRunning() && !serverSocket.isClosed()) {
+                while (running && CameraDaemon.isRunning() && !boundSocket.isClosed()) {
                     try {
-                        Socket client = serverSocket.accept();
+                        Socket client = boundSocket.accept();
                         // (Removed per-accept "HTTP client:" log — it fired for
                         // EVERY request including the blind-spot overlay's 250ms
                         // /api/stream/turn poll, flooding the daemon log. The
                         // per-request line below already records real requests and
                         // now skips the high-frequency polling endpoints.)
-                        threadPool.execute(() -> handleClient(client));
+                        boolean accepted = false;
+                        synchronized (clientLock) {
+                            if (running) {
+                                clientSockets.add(client);
+                                try {
+                                    threadPool.execute(() -> {
+                                        try {
+                                            handleClient(client);
+                                        } finally {
+                                            synchronized (clientLock) {
+                                                clientSockets.remove(client);
+                                            }
+                                        }
+                                    });
+                                    accepted = true;
+                                } catch (RejectedExecutionException rejected) {
+                                    clientSockets.remove(client);
+                                }
+                            }
+                        }
+                        if (!accepted) {
+                            try { client.close(); } catch (Exception ignored) {}
+                            if (running) {
+                                CameraDaemon.log("WARN: HTTP client capacity reached; rejected connection");
+                            }
+                        }
                     } catch (java.net.SocketException e) {
                         if (running) {
                             CameraDaemon.log("WARN: HTTP socket error: " + e.getMessage());
@@ -334,13 +396,28 @@ public class HttpServer {
     }
 
     public void stop() {
-        running = false;
+        // Serialize the stop transition with accept-and-submit. Once running is
+        // false no newly accepted socket can escape the cleanup snapshot below.
+        synchronized (clientLock) {
+            running = false;
+            // Close the listener as part of the stop transition so accept()
+            // wakes immediately. The bind/publish path uses this same lock.
+            try {
+                ServerSocket listener = serverSocket;
+                if (listener != null) listener.close();
+            } catch (Exception ignored) {}
+        }
+        // Give upgraded WebSocket handlers their existing close path before
+        // force-closing the remaining HTTP sockets.
         RemoteCommunicationWebSocket.stopActive("Communication server stopped");
         CabinAudioWebSocket.stopActive("Communication server stopped");
         GenAiVoiceWebSocket.stopActive("GenAI server stopped");
-        try {
-            if (serverSocket != null) serverSocket.close();
-        } catch (Exception e) {}
+        synchronized (clientLock) {
+            for (Socket client : clientSockets) {
+                try { client.close(); } catch (Exception ignored) {}
+            }
+            clientSockets.clear();
+        }
         threadPool.shutdownNow();
     }
 

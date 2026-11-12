@@ -119,7 +119,11 @@ public class RemoteDevViewAssetTest {
         assertTrue(server.contains("RemoteDevViewWebSocketStream"));
         assertTrue(server.contains(".sessionFromProtocols(websocketProtocolHeader)"));
         assertTrue(server.contains("redactQueryToken(requestLine)"));
-        assertTrue(bridge.contains("Executors.newFixedThreadPool(CLIENT_THREADS)"));
+        assertTrue(bridge.contains("ArrayBlockingQueue(CLIENT_QUEUE_CAPACITY)"));
+        assertTrue(bridge.contains("ThreadPoolExecutor.AbortPolicy()"));
+        assertTrue(bridge.contains("activeClients"));
+        assertTrue(bridge.contains("REQUEST_DEADLINE_MS"));
+        assertFalse(bridge.contains("Executors.newFixedThreadPool(CLIENT_THREADS)"));
 
         String capability = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         assertEquals(capability, RemoteDevViewWebSocketStream.sessionFromProtocols(

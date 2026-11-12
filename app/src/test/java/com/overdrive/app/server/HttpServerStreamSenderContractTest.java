@@ -24,8 +24,22 @@ public class HttpServerStreamSenderContractTest {
     public void listenBacklogIs128() throws Exception {
         assertEquals(128, HttpServer.LISTEN_BACKLOG);
         String source = readRepositoryFile(SERVER);
-        assertTrue(source.contains("new ServerSocket(port, LISTEN_BACKLOG, InetAddress.getByName(\"0.0.0.0\"))"));
+        assertTrue(source.contains("boundSocket.setReuseAddress(true)"));
+        assertTrue(source.contains("boundSocket.bind(new java.net.InetSocketAddress("));
+        assertTrue(source.contains("InetAddress.getByName(\"0.0.0.0\"), port), LISTEN_BACKLOG)"));
+        assertFalse(source.contains("new ServerSocket(port, LISTEN_BACKLOG,"));
         assertFalse(source.contains("new ServerSocket(port, 10,"));
+    }
+
+    @Test
+    public void acceptedHttpConnectionsAndShutdownAreResourceBounded() throws Exception {
+        String source = readRepositoryFile(SERVER);
+        assertTrue(source.contains("new ArrayBlockingQueue<>(HTTP_PENDING_CONNECTIONS)"));
+        assertTrue(source.contains("new ThreadPoolExecutor.AbortPolicy()"));
+        assertTrue(source.contains("private volatile ServerSocket serverSocket"));
+        assertTrue(source.contains("clientSockets.add(client)"));
+        assertTrue(source.contains("clientSockets.clear()"));
+        assertFalse(source.contains("private final ExecutorService threadPool = Executors.newFixedThreadPool(32);"));
     }
 
     @Test

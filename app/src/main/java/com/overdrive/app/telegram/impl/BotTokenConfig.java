@@ -33,14 +33,23 @@ public class BotTokenConfig implements IBotTokenConfig {
 
     private static final String TELEGRAM_API_BASE = "https://api.telegram.org/bot";
 
+    // BotTokenConfig is frequently constructed for cheap preference/config
+    // reads (including the Integrations status poll). Keep one default client
+    // so those instances do not each allocate a dispatcher and connection pool.
+    // The holder also avoids constructing an unused default client when callers
+    // always supply their own proxy-aware client.
+    private static final class DefaultHttpClientHolder {
+        private static final OkHttpClient INSTANCE = new OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(10, TimeUnit.SECONDS)
+                .build();
+    }
+
     private final OkHttpClient httpClient;
 
     @SuppressWarnings("unused")
     public BotTokenConfig(Context context) {
-        this.httpClient = new OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(10, TimeUnit.SECONDS)
-                .build();
+        this.httpClient = DefaultHttpClientHolder.INSTANCE;
     }
 
     /** Constructor with custom OkHttpClient (for proxy support). */

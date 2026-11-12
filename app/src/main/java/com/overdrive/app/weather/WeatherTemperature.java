@@ -35,6 +35,21 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class WeatherTemperature {
     private static final DaemonLogger logger = DaemonLogger.getInstance("WeatherTemperature");
 
+    // Reuse OkHttp's dispatcher and connection pool across the temperature and
+    // assistant-forecast endpoints. Constructing a fresh client for every
+    // refresh defeats keep-alive reuse and creates separate dispatcher pools.
+    private static final OkHttpClient WEATHER_CLIENT = new OkHttpClient.Builder()
+            .proxySelector(ProxyHelper.chainProxySelector())
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
+            .build();
+    // fetchNow is used by the telemetry/ABRP path and intentionally retains
+    // its tighter three-second network budget while sharing the base pool.
+    private static final OkHttpClient WEATHER_FAST_CLIENT = WEATHER_CLIENT.newBuilder()
+            .connectTimeout(3, TimeUnit.SECONDS)
+            .readTimeout(3, TimeUnit.SECONDS)
+            .build();
+
     /** Serve the cached value for this long before a refresh is attempted. */
     private static final long CACHE_MS = 10 * 60 * 1000; // 10 min
     /** Discard the cache entirely past this age (a parked car's local weather
@@ -122,12 +137,7 @@ public final class WeatherTemperature {
             // Chain selector (proxy → direct) rather than a frozen proxy: a
             // tailnet-only Tailscale listener would otherwise block the fetch
             // while probing healthy, and weather's 3s budget can't afford it.
-            OkHttpClient client = new OkHttpClient.Builder()
-                    .proxySelector(ProxyHelper.chainProxySelector())
-                    .connectTimeout(3, TimeUnit.SECONDS)
-                    .readTimeout(3, TimeUnit.SECONDS)
-                    .build();
-            try (Response response = client.newCall(request).execute()) {
+            try (Response response = WEATHER_FAST_CLIENT.newCall(request).execute()) {
                 if (response.isSuccessful() && response.body() != null) {
                     String body = response.body().string();
                     JSONObject root = new JSONObject(body);
@@ -227,12 +237,7 @@ public final class WeatherTemperature {
                     .url(url)
                     .header("User-Agent", "OverDrive/1.0")
                     .build();
-            OkHttpClient client = new OkHttpClient.Builder()
-                    .proxySelector(ProxyHelper.chainProxySelector())
-                    .connectTimeout(5, TimeUnit.SECONDS)
-                    .readTimeout(5, TimeUnit.SECONDS)
-                    .build();
-            try (Response response = client.newCall(request).execute()) {
+            try (Response response = WEATHER_CLIENT.newCall(request).execute()) {
                 if (!response.isSuccessful() || response.body() == null) {
                     return new JSONObject().put("available", false).put("reason", "fetch_failed");
                 }
