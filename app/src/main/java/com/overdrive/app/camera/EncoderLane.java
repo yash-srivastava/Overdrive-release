@@ -167,7 +167,14 @@ public final class EncoderLane {
             logger.error("initRecorder: lane thread unavailable");
             return;
         }
-        h.post(() -> {
+        boolean posted = h.post(() -> {
+            // shutdown() can race after the caller's initial check but before
+            // this message reaches the lane. If shutdown has already queued
+            // EGL cleanup, do not initialize a new context behind that cleanup.
+            if (shutdownRequested.get()) {
+                logger.warn("initRecorder task skipped — lane is shutting down");
+                return;
+            }
             try {
                 if (!ensureLaneContextLocked()) {
                     logger.error("initRecorder: lane EGL context unavailable");
@@ -185,6 +192,9 @@ public final class EncoderLane {
                 logger.error("Failed to initialize recorder on EncoderLane", e);
             }
         });
+        if (!posted) {
+            logger.error("initRecorder: lane rejected initialization task");
+        }
     }
 
     /** Hands the newest published frame to the lane. Acquisition thread. */
