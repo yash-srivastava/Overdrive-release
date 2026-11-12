@@ -31,6 +31,7 @@ import com.overdrive.app.ui.util.QrCodeGenerator
 import com.overdrive.app.util.DaemonHttpClient
 import org.json.JSONObject
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 /**
  * Fragment for managing background daemons.
@@ -41,6 +42,16 @@ class DaemonsFragment : Fragment() {
     private val wifiSettingsWorker = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "WifiAutoEnableSettings").apply { isDaemon = true }
     }
+    // QR encoding allocates and fills a 400x400 bitmap. Keep that CPU work off
+    // the UI thread and separate from configuration I/O so neither queue blocks
+    // the other.
+    private val tailscaleQrWorker = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "TailscaleQrEncoder").apply { isDaemon = true }
+    }
+    // Incremented on a new request, login completion, dialog dismissal and
+    // view teardown so late URL/bitmap results cannot repaint stale UI.
+    private var tailscaleQrGeneration = 0
+    private var tailscaleSettingsDialog: AlertDialog? = null
 
     private val daemonsViewModel: DaemonsViewModel by activityViewModels()
     private lateinit var recyclerDaemons: RecyclerView
@@ -102,12 +113,16 @@ class DaemonsFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        tailscaleQrGeneration++
+        tailscaleSettingsDialog?.dismiss()
+        tailscaleSettingsDialog = null
         wireGuardDialog?.dismiss()
         wireGuardDialog = null
         super.onDestroyView()
     }
 
     override fun onDestroy() {
+        tailscaleQrWorker.shutdownNow()
         wifiSettingsWorker.shutdown()
         super.onDestroy()
     }
@@ -345,6 +360,7 @@ class DaemonsFragment : Fragment() {
         var loginGenerated = false
 
         activity?.runOnUiThread {
+            if (!isAdded || view == null) return@runOnUiThread
             val dialogView = LayoutInflater.from(context).inflate(R.layout.dialog_tailscale_settings, null)
             val loginGenerateButton = dialogView.findViewById<TextView>(R.id.generateLoginUrlBtn)
             val qrCodeContainer = dialogView.findViewById<LinearLayout>(R.id.qrCodeContainer)
@@ -402,17 +418,62 @@ class DaemonsFragment : Fragment() {
             loginGenerateButton.setOnClickListener {
                 if (!loginGenerated) {
                     loginGenerated = true
+                    val generation = ++tailscaleQrGeneration
                     qrCodeContainer.visibility = View.VISIBLE
+                    qrCodeImage.setImageDrawable(null)
                     daemonsViewModel.tailscaleController.generateLoginUrl { url ->
                         activity?.runOnUiThread {
-                            if (url != null) {
-                                val qrBitmap = QrCodeGenerator.generate(url, 400)
-                                qrCodeImage.setImageBitmap(qrBitmap)
-                                qrCodeText.text = url
-                                qrCodeText.setTextColor(ContextCompat.getColor(context, R.color.brand_primary))
-                            } else {
+                            if (!isAdded || view == null ||
+                                generation != tailscaleQrGeneration ||
+                                tailscaleSettingsDialog?.isShowing != true
+                            ) {
+                                return@runOnUiThread
+                            }
+                            val currentContext = context ?: return@runOnUiThread
+                            if (url == null) {
                                 qrCodeText.text = getString(R.string.tailscale_failed_login_url)
-                                qrCodeText.setTextColor(ContextCompat.getColor(context, R.color.status_danger))
+                                qrCodeText.setTextColor(
+                                    ContextCompat.getColor(currentContext, R.color.status_danger)
+                                )
+                                loginGenerated = false
+                                return@runOnUiThread
+                            }
+
+                            // Publish the URL immediately, but encode its QR bitmap
+                            // on a worker so ZXing and bitmap allocation cannot stall
+                            // the Android main thread.
+                            qrCodeText.text = url
+                            qrCodeText.setTextColor(
+                                ContextCompat.getColor(currentContext, R.color.brand_primary)
+                            )
+                            try {
+                                tailscaleQrWorker.execute {
+                                    val qrBitmap = QrCodeGenerator.generate(url, 400)
+                                    val posted = handler.post {
+                                        if (!isAdded || view == null ||
+                                            generation != tailscaleQrGeneration ||
+                                            tailscaleSettingsDialog?.isShowing != true
+                                        ) {
+                                            qrBitmap?.recycle()
+                                            return@post
+                                        }
+                                        if (qrBitmap != null) {
+                                            qrCodeImage.setImageBitmap(qrBitmap)
+                                        } else {
+                                            qrCodeText.text = getString(R.string.tailscale_failed_login_url)
+                                            qrCodeText.setTextColor(
+                                                ContextCompat.getColor(currentContext, R.color.status_danger)
+                                            )
+                                            loginGenerated = false
+                                        }
+                                    }
+                                    if (!posted) qrBitmap?.recycle()
+                                }
+                            } catch (_: RejectedExecutionException) {
+                                qrCodeText.text = getString(R.string.tailscale_failed_login_url)
+                                qrCodeText.setTextColor(
+                                    ContextCompat.getColor(currentContext, R.color.status_danger)
+                                )
                                 loginGenerated = false
                             }
                         }
@@ -423,6 +484,8 @@ class DaemonsFragment : Fragment() {
             daemonsViewModel.tailscaleController.tunnelUrl.observe(viewLifecycleOwner) { url ->
                 if (loginGenerated && !url.isNullOrEmpty()) {
                     activity?.runOnUiThread {
+                        tailscaleQrGeneration++
+                        qrCodeImage.setImageDrawable(null)
                         qrCodeContainer.visibility = View.GONE
                         loginGenerated = false
                         loginGenerateButton.text = getString(R.string.tailscale_logged_in_relogin)
@@ -486,6 +549,14 @@ class DaemonsFragment : Fragment() {
                 }
                 .create()
 
+            tailscaleSettingsDialog = dialog
+            dialog.setOnDismissListener {
+                tailscaleQrGeneration++
+                qrCodeImage.setImageDrawable(null)
+                if (tailscaleSettingsDialog === dialog) {
+                    tailscaleSettingsDialog = null
+                }
+            }
             dialog.show()
         }
     }
