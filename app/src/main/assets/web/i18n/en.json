@@ -3065,7 +3065,18 @@
     "soc_will_appear": "SOC history will appear once data is collected",
     "soc_current_label": "Current Battery Level",
     "soc_history_will_build": "History will build over time",
-    "page_header_short": "Performance"
+    "page_header_short": "Performance",
+    "card_system_cpu": "System CPU",
+    "card_system_ram": "System RAM",
+    "card_overdrive_app": "OverDrive app",
+    "cpu_per_core_prefix": "Per-core (top)",
+    "system_ram_basis": "Used = total − available; reclaimable cache is excluded.",
+    "app_memory_basis": "PSS includes a proportional share of shared memory. Native and Java heap are separate app-local measurements, so these figures are not expected to add up.",
+    "card_app_pss": "OverDrive PSS",
+    "process_scope_hint": "These rows are per-process, not device totals. CPU is per-core (100% = one fully busy core; multi-core processes can exceed 100%). RAM % is each process's share of total RAM; Resident is its resident memory.",
+    "col_cpu_per_core": "CPU / core",
+    "col_ram_percent": "RAM %",
+    "system_cpu_basis": "Whole device · all cores combined (0–100%)."
   },
   "update": {
     "check_for_updates": "Check for Updates",
