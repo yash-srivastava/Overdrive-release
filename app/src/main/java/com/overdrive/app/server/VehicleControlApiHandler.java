@@ -4199,7 +4199,11 @@ public class VehicleControlApiHandler {
                     new VehicleCommandRouter.AcChargeCurrentLimitCommand(state.intValue()));
             JSONObject routed = routedResponse(result, "ac-charge-current-limit");
             int readBack = collector.getAcChargingCurrentLimitState();
-            boolean confirmed = readBack == state.intValue();
+            boolean readBackAvailable = readBack >= BydDataCollector.AC_CHARGE_CURRENT_6A
+                    && readBack <= BydDataCollector.AC_CHARGE_CURRENT_MAX;
+            boolean commandSucceeded = result.outcome == VehicleCommandRouter.Outcome.SUCCESS;
+            boolean confirmed = readBack == state.intValue()
+                    || (commandSucceeded && !readBackAvailable);
             // The final HAL state is the automation/manual command contract. This also handles a
             // delayed app-process retry: it may apply after the daemon-side route timed out, or a
             // newer command may supersede this one before the response is serialized.
@@ -4207,22 +4211,24 @@ public class VehicleControlApiHandler {
             routed.put("commandSuccess", confirmed);
             routed.put("outcome", confirmed ? "success" : "failed");
             if (confirmed) {
-                routed.put("path", "sdk");
-                routed.put("message", Messages.get("vehicle_control.local_sent"));
+                if (readBack == state.intValue()) {
+                    routed.put("path", "sdk");
+                }
+                if (routed.optString("message", "").isEmpty()) {
+                    routed.put("message", Messages.get("vehicle_control.local_sent"));
+                }
                 routed.remove("error");
             } else {
                 String error = Messages.get("vehicle_control.local_failed");
                 routed.put("message", error);
                 routed.put("error", error);
             }
+            int effectiveState = readBackAvailable ? readBack : state.intValue();
             routed.put("supported", true);
-            routed.put("available", readBack >= BydDataCollector.AC_CHARGE_CURRENT_6A
-                    && readBack <= BydDataCollector.AC_CHARGE_CURRENT_MAX);
-            routed.put("state", readBack >= BydDataCollector.AC_CHARGE_CURRENT_6A
-                    && readBack <= BydDataCollector.AC_CHARGE_CURRENT_MAX
-                    ? readBack : JSONObject.NULL);
-            String label = BydDataCollector.acChargingCurrentLimitLabel(readBack);
-            routed.put("label", label != null ? label : JSONObject.NULL);
+            routed.put("available", readBackAvailable || confirmed);
+            routed.put("state", (readBackAvailable || confirmed) ? effectiveState : JSONObject.NULL);
+            String label = BydDataCollector.acChargingCurrentLimitLabel(effectiveState);
+            routed.put("label", (readBackAvailable || confirmed) && label != null ? label : JSONObject.NULL);
             HttpResponse.sendJson(out, routed.toString());
         } catch (Exception e) {
             logger.warn("AC charge current limit command failed: " + e.getMessage());

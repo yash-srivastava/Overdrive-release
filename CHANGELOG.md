@@ -4,6 +4,11 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
 
 ## [In corso / Unreleased]
 
+- **Fix False `local_failed` on AC Charge Current Limit Readback (`VehicleControlApiHandler.java`)**:
+  - In `handleAcChargeCurrentLimit`, the API previously asserted strict equality between the desired state and `collector.getAcChargingCurrentLimitState()`. When running inside daemon or headless contexts (e.g., `CameraDaemon`, UID 2000), direct VHAL readback or binder cache can be `UNAVAILABLE` (`-2147483648`) even when `VehicleCommandRouter` has successfully routed the command to the vehicle actuator.
+  - The handler now treats `result.outcome == SUCCESS` as authoritative when readback is `UNAVAILABLE` or inactive, preventing false "The car rejected the command" errors and returning populated `state`, `available: true`, and label while still reporting legitimate rejections when an explicit, differing HAL state is observed.
+
+
 - **Fix Critical System Server Binder Deadlock & Watchdog Crash During Update (`AppUpdater.java`, `AccSentryDaemon.java`, `docs/INCIDENT_REPORT_SYSTEM_SERVER_BINDER_DEADLOCK.md`)**:
   - **In-App Update Pre-Install Daemon Protection (`AppUpdater.java`)**: Removed the premature removal of `acc_sentry_daemon.disabled` / `camera_daemon.disabled` prior to `pm install` (latent since `1f3ee725` / `263e7df0` `v57.0`). Previously, sweeping sentinels before package installation allowed shell watchdogs to immediately resurrect daemons while the APK was being replaced. Sentinels now stay strictly intact throughout `pm install` and are safely cleaned up by `UpdateLifecycle.hardResetDaemons()` post-update.
   - **Broadcast Liveness Gate & Timeout Backoff (`AccSentryDaemon.java`)**: Added a check in `sendParkedLinkBroadcast()` (introduced in `263e7df0` `v57.0`) to skip `am broadcast -W` when an update is in progress (`UPDATE_IN_PROGRESS_FILE` or `acc_sentry_daemon.disabled` present). Implemented a 30-second backoff when broadcasts fail or time out, preventing rapid Binder thread pool exhaustion (32/32 threads hung on `IntentReceiver.waitForFinish()`) detonated in `braveheart v60.0–v60.3` by Adreno 640 GL stalls (PR #571/#599/#600).
