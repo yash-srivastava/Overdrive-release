@@ -679,7 +679,14 @@
     "tariff_fallback_default": "Frais en dehors de chaque utilisation tarifaire «{label}».",
     "tariff_fallback_global": "Frais en dehors de chaque utilisation tarifaire {rate}/kWh.",
     "tariff_label_placeholder": "Domicile",
-    "per_kwh_unit": "/kWh"
+    "per_kwh_unit": "/kWh",
+    "filter_location": "Location",
+    "filter_all_locations": "All locations",
+    "filter_location_hint": "Add location tariffs in Settings to filter by place.",
+    "copy_summary": "Copy summary",
+    "summary_copied": "Summary copied",
+    "summary_copy_failed": "Could not copy",
+    "no_sessions_location": "No sessions at this location in the selected period"
   },
   "trip": {
     "tab_trips": "Trajets",

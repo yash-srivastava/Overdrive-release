@@ -1218,7 +1218,14 @@
     "tariff_fallback_global": "טעינות מחוץ לכל תעריף מוגדר מחושבות לפי {rate}/קוט\"ש.",
     "tariff_auto_hint": "נשמר. טעינות בטווח של {radius} מ' מכאן ישתמשו בתעריף זה באופן אוטומטי.",
     "tariff_label_placeholder": "בית",
-    "per_kwh_unit": "/קוט\"ש"
+    "per_kwh_unit": "/קוט\"ש",
+    "filter_location": "מיקום",
+    "filter_all_locations": "כל המקומות",
+    "filter_location_hint": "הוסף תעריפי מיקום בהגדרות כדי לסנן לפי מקום.",
+    "copy_summary": "העתק סיכום",
+    "summary_copied": "הסיכום הועתק",
+    "summary_copy_failed": "לא ניתן להעתיק",
+    "no_sessions_location": "אין טעינות במיקום זה בתקופה שנבחרה"
   },
   "trip": {
     "tab_trips": "נסיעות",

@@ -761,7 +761,14 @@
       "one": "{count} Прошлый взнос переоценен",
       "other": "{count} Прошлые сборы переоценены"
     },
-    "tariff_auto_hint": "Спасён. Обвинения внутри {radius} m здесь будет использовать этот тариф автоматически."
+    "tariff_auto_hint": "Спасён. Обвинения внутри {radius} m здесь будет использовать этот тариф автоматически.",
+    "filter_location": "Location",
+    "filter_all_locations": "All locations",
+    "filter_location_hint": "Add location tariffs in Settings to filter by place.",
+    "copy_summary": "Copy summary",
+    "summary_copied": "Summary copied",
+    "summary_copy_failed": "Could not copy",
+    "no_sessions_location": "No sessions at this location in the selected period"
   },
   "trip": {
     "tab_trips": "Поездки",

@@ -681,7 +681,14 @@
     "tariff_fallback_default": "すべての関税が「{label}」を使用する外の料金。",
     "tariff_fallback_global": "すべての関税以外の料金は {rate}/kWhを使用します。",
     "tariff_label_placeholder": "ホーム",
-    "per_kwh_unit": "/kWhh"
+    "per_kwh_unit": "/kWhh",
+    "filter_location": "Location",
+    "filter_all_locations": "All locations",
+    "filter_location_hint": "Add location tariffs in Settings to filter by place.",
+    "copy_summary": "Copy summary",
+    "summary_copied": "Summary copied",
+    "summary_copy_failed": "Could not copy",
+    "no_sessions_location": "No sessions at this location in the selected period"
   },
   "trip": {
     "tab_trips": "走行履歴",

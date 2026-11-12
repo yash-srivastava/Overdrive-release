@@ -2826,7 +2826,14 @@
     "chart_soh_title": "แนวโน้มสุขภาพแบตเตอรี่",
     "type_unknown": "ชาร์จ",
     "detail_odometer": "เลขไมล์",
-    "odometer_short": "ODO"
+    "odometer_short": "ODO",
+    "filter_location": "Location",
+    "filter_all_locations": "All locations",
+    "filter_location_hint": "Add location tariffs in Settings to filter by place.",
+    "copy_summary": "Copy summary",
+    "summary_copied": "Summary copied",
+    "summary_copy_failed": "Could not copy",
+    "no_sessions_location": "No sessions at this location in the selected period"
   },
   "backup": {
     "restoring": "กำลังกู้คืน…",

@@ -2681,7 +2681,14 @@
     "tariff_fallback_global": "الرسوم خارج كل تعريفات الاستخدام {rate}/kWh.",
     "tariff_auto_hint": "تم الحفظ. الرسوم داخل {radius} m هنا ستستخدم هذه التعريفة تلقائياً.",
     "tariff_label_placeholder": "المنزل",
-    "per_kwh_unit": "/kwساعة"
+    "per_kwh_unit": "/kwساعة",
+    "filter_location": "Location",
+    "filter_all_locations": "All locations",
+    "filter_location_hint": "Add location tariffs in Settings to filter by place.",
+    "copy_summary": "Copy summary",
+    "summary_copied": "Summary copied",
+    "summary_copy_failed": "Could not copy",
+    "no_sessions_location": "No sessions at this location in the selected period"
   },
   "backup": {
     "section_title": "النسخ الاحتياطي والاستعادة",

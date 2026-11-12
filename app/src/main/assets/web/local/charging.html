@@ -123,6 +123,25 @@
         .charge-period-seg::-webkit-scrollbar { display: none; }
         .charge-period-seg > * + * { margin-left: 2px; }
         [dir="rtl"] .charge-period-seg > * + * { margin-left: 0; margin-right: 2px; }
+        .charge-location-filter-row {
+            display: -webkit-flex; display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            margin: 0 -8px 4px 0;
+        }
+        .charge-location-filter-row > * { margin: 0 8px 8px 0; }
+        [dir="rtl"] .charge-location-filter-row { margin: 0 0 4px -8px; }
+        [dir="rtl"] .charge-location-filter-row > * { margin: 0 0 8px 8px; }
+        .charge-location-chip svg { color: var(--primary); }
+        .charge-location-hint {
+            margin: 0 0 8px;
+            color: var(--on-surface-variant);
+            font-size: var(--fs-label);
+            line-height: 1.35;
+        }
+        .ch-summary-actions { margin: 0 0 12px; }
+        .ch-copy-summary-btn { min-height: 44px; background: var(--well); color: var(--on-surface); }
+        .ch-copy-summary-btn.active { background: var(--secondary-container); color: var(--on-secondary-container); }
         #chargeCustomTab { min-height: 44px; padding: 0 16px 0 12px; background: var(--well); color: var(--on-surface); }
         #chargeCustomTab svg { width: 18px; height: 18px; flex: 0 0 auto; color: var(--primary); }
         #chargeCustomTab svg + span { margin-left: 8px; }
@@ -1408,6 +1427,15 @@
                                 <span data-i18n="charge.filter_custom">Custom</span>
                             </button>
                         </div>
+                        <p class="charge-location-hint" id="chargeLocationFilterHint" style="display:none;" data-i18n="charge.filter_location_hint">Add location tariffs in Settings to filter by place.</p>
+                        <div class="charge-location-filter-row" id="chargeLocationFilterRow" style="display:none;">
+                            <label class="session-sort app-chip charge-location-chip" for="sessionLocationFilter">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6-5.5-6-10a6 6 0 0 1 12 0c0 4.5-6 10-6 10z"/><circle cx="12" cy="11" r="2"/></svg>
+                                <select id="sessionLocationFilter" aria-label="Location" data-i18n-attr="aria-label:charge.filter_location" onchange="CHARGING.setLocationFilter(this.value)">
+                                    <option value="" data-i18n="charge.filter_all_locations">All locations</option>
+                                </select>
+                            </label>
+                        </div>
                         <!-- Custom date range (hidden until "Custom" is tapped).
                              Each field opens the shared calendar popup — matches
                              the events-page date picker look & feel. -->
@@ -1429,6 +1457,9 @@
 
                     <!-- Period summary (Sessions tab) -->
                     <div data-tab="sessions" id="chargeSummary">
+                        <div class="ch-summary-actions" id="chargeSummaryActions" style="display:none;">
+                            <button type="button" class="filter-tab ch-copy-summary-btn" id="copyLocationSummaryBtn" onclick="CHARGING.copyLocationSummary()" data-i18n="charge.copy_summary">Copy summary</button>
+                        </div>
                         <div class="ch-stat-grid">
                             <div class="ch-stat ch-stat--sessions app-surface-card"><div class="ch-stat-head"><span class="ch-stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 12a4 4 0 0 1 4-4h3a4 4 0 0 1 0 8h-1"/><path d="M16 12a4 4 0 0 1-4 4H9a4 4 0 0 1 0-8h1"/></svg></span><div class="ch-stat-copy"><span data-i18n="charge.summary_sessions">Sessions</span><strong id="summarySessions">--</strong></div></div><small data-i18n="charge.summary_sessions_desc">Total charging sessions</small></div>
                             <div class="ch-stat ch-stat--energy app-surface-card"><div class="ch-stat-head"><span class="ch-stat-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.4 2 4.8 13.2h6.1L9.8 22l9.4-12.5h-6.1L13.4 2z"/></svg></span><div class="ch-stat-copy"><span data-i18n="charge.summary_energy">Energy</span><strong id="summaryEnergy">--</strong></div></div><small data-i18n="charge.summary_energy_desc">Total energy delivered</small></div>
@@ -1765,7 +1796,7 @@
 
     <script src="../shared/core.js?v=24"></script>
     <script src="../shared/update-flow.js?v=3"></script>
-    <script src="../shared/charging.js?v=46"></script>
+    <script src="../shared/charging.js?v=47"></script>
     <script>
         function toggleSidebar() {
             var sb = document.getElementById('sidebar');
