@@ -24137,21 +24137,30 @@ public class BydDataCollector {
             } catch (Exception e) {
                 logger.debug("setDriveConfig lookup failed: " + e.getMessage());
             }
+            if (m == null) {
+                try {
+                    // DiLink 5 (Qualcomm SA8155P / DiLink 100) SettingAdapterManager / BYDAutoSettingDevice OEM spelling: setDrvingMode(int)
+                    m = settingDevice.getClass().getMethod("setDrvingMode", int.class);
+                } catch (NoSuchMethodException ignored) {
+                } catch (Exception e) {
+                    logger.debug("setDrvingMode lookup failed: " + e.getMessage());
+                }
+            }
             if (m != null) {
                 try {
                     if (VehicleActuatorBridge.isDiLink5RequestExpired()) return false;
                     Object r = m.invoke(settingDevice, apiMode);
-                    logger.info("setDriveConfig(" + apiMode + ") return=" + r);
+                    logger.info("setDriveMode(" + m.getName() + ", " + apiMode + ") return=" + r);
                     if (awaitDriveMode(configMode)) {
                         logger.info("setDriveConfigMode(" + configMode
-                                + "): setDriveConfig(" + apiMode + ") confirmed");
+                                + "): " + m.getName() + "(" + apiMode + ") confirmed");
                         return true;
                     }
                     logger.warn("setDriveConfigMode(" + configMode
-                            + "): setDriveConfig(" + apiMode
+                            + "): " + m.getName() + "(" + apiMode
                             + ") returned but no drive-mode axis confirmed it");
                 } catch (Exception e) {
-                    logger.debug("setDriveConfig(apiMode=" + apiMode + ") failed: " + e.getMessage());
+                    logger.debug("setDriveMode(" + (m != null ? m.getName() : "null") + ", apiMode=" + apiMode + ") failed: " + e.getMessage());
                 }
             }
         }

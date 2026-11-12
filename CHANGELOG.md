@@ -4,6 +4,9 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
 
 ## [In corso / Unreleased]
 
+- **Fix DiLink 5 Drive Mode Actuation (`BydDataCollector.java`, `BydModeCommand.java`, `BydDriveModeEncodingTest.java`)**:
+  - **Native `setDrvingMode` OEM Spelling & Setting Device Fallback**: On BYD DiLink 5 (Qualcomm SA8155P / DiLink 100), the SettingAdapterManager and BYDAutoSettingDevice native method for drive mode is named `setDrvingMode(int)` (OEM typo without 'e'). Added reflective fallback to `setDrvingMode` when `setDriveConfig` is absent, and wired support into `BydModeCommand` shell execution. This resolves drive mode automations (e.g., AutoSport mode on accelerator threshold) failing on DiLink 5 vehicles.
+
 - **Fix Critical System Server Binder Deadlock & Watchdog Crash During Update (`AppUpdater.java`, `AccSentryDaemon.java`, `docs/INCIDENT_REPORT_SYSTEM_SERVER_BINDER_DEADLOCK.md`)**:
   - **In-App Update Pre-Install Daemon Protection (`AppUpdater.java`)**: Removed the premature removal of `acc_sentry_daemon.disabled` / `camera_daemon.disabled` prior to `pm install` (latent since `1f3ee725` / `263e7df0` `v57.0`). Previously, sweeping sentinels before package installation allowed shell watchdogs to immediately resurrect daemons while the APK was being replaced. Sentinels now stay strictly intact throughout `pm install` and are safely cleaned up by `UpdateLifecycle.hardResetDaemons()` post-update.
   - **Broadcast Liveness Gate & Timeout Backoff (`AccSentryDaemon.java`)**: Added a check in `sendParkedLinkBroadcast()` (introduced in `263e7df0` `v57.0`) to skip `am broadcast -W` when an update is in progress (`UPDATE_IN_PROGRESS_FILE` or `acc_sentry_daemon.disabled` present). Implemented a 30-second backoff when broadcasts fail or time out, preventing rapid Binder thread pool exhaustion (32/32 threads hung on `IntentReceiver.waitForFinish()`) detonated in `braveheart v60.0–v60.3` by Adreno 640 GL stalls (PR #571/#599/#600).
