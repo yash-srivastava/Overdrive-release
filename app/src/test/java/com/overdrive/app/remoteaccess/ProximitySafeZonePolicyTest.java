@@ -163,6 +163,46 @@ public class ProximitySafeZonePolicyTest {
         assertFalse(result.permits(both(OUTSIDE).lease("lock")));
     }
 
+    @Test public void bluetoothSuppressionFollowsTheExistingUnlockSafeZoneDecision() throws Exception {
+        ProximitySafeZonePolicy.Result inside = ProximitySafeZonePolicy.evaluate(
+                true, false, true, Collections.singletonList("home"),
+                Collections.singletonList(HOME), INSIDE, null);
+        assertEquals("INSIDE", inside.state);
+        assertTrue(inside.shouldDisableBluetooth());
+        assertTrue(inside.allowed("lock"));
+        assertFalse(inside.allowed("unlock"));
+        assertTrue(inside.toJson().getJSONObject("bluetooth").getBoolean("disable"));
+
+        ProximitySafeZonePolicy.Result outside = ProximitySafeZonePolicy.evaluate(
+                true, false, true, Collections.singletonList("home"),
+                Collections.singletonList(HOME), OUTSIDE, null);
+        assertEquals("OUTSIDE", outside.state);
+        assertFalse(outside.shouldDisableBluetooth());
+
+        ProximitySafeZonePolicy.Result uncertain = ProximitySafeZonePolicy.evaluate(
+                true, false, true, Collections.singletonList("home"),
+                Collections.singletonList(HOME), null, null);
+        assertEquals("UNKNOWN", uncertain.state);
+        assertFalse(uncertain.shouldDisableBluetooth());
+
+        ProximitySafeZonePolicy.Result lockOnly = ProximitySafeZonePolicy.evaluate(
+                true, true, false, Collections.singletonList("home"),
+                Collections.singletonList(HOME), INSIDE, null);
+        assertFalse(lockOnly.shouldDisableBluetooth());
+    }
+
+    @Test public void bluetoothSuppressionRequiresMasterAndASelectedValidZone() {
+        ProximitySafeZonePolicy.Result disabled = ProximitySafeZonePolicy.evaluate(
+                false, false, true, Collections.singletonList("home"),
+                Collections.singletonList(HOME), INSIDE, null);
+        assertFalse(disabled.shouldDisableBluetooth());
+        ProximitySafeZonePolicy.Result missing = ProximitySafeZonePolicy.evaluate(
+                true, false, true, Collections.singletonList("missing"),
+                Collections.singletonList(HOME), INSIDE, null);
+        assertEquals("safe_zone_missing", missing.reason);
+        assertFalse(missing.shouldDisableBluetooth());
+    }
+
     @Test public void cachedUnstampedOrFutureAgeCannotAuthorizeAnAction() {
         ProximitySafeZonePolicy.Result missing = both(null);
         assertEquals("gps_unavailable", missing.reason);

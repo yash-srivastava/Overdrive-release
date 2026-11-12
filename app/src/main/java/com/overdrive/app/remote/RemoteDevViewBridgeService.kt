@@ -196,6 +196,7 @@ class RemoteDevViewBridgeService : Service() {
                                         request.optBoolean("vehicleOff", false),
                                         request.optBoolean("vehicleOn", false),
                                         request.optBoolean("forceDisable", false),
+                                        request.optBoolean("safeZoneDisable", false),
                                     ),
                             )
                         } else {

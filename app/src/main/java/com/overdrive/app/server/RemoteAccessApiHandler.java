@@ -69,6 +69,12 @@ public final class RemoteAccessApiHandler {
     // Envelope time of the latest accepted phone observation and the vehicle power read with it.
     private static long lastObservationElapsed = -1;
     private static int lastObservedPower = BydVehicleData.UNAVAILABLE;
+    // Set only after this daemon confirms a phone-proximity walk-away lock while parked.
+    // A daemon restart or unknown/on power observation deliberately clears the latch.
+    private static boolean parkedBluetoothLockConfirmed;
+    private static long parkedBluetoothLockConfirmedAtElapsedMs = -1;
+    private static boolean parkedBluetoothSafeZoneDisableDirective;
+    private static long parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
     // B4: the last bodywork "open" edge seen by this daemon; releases the post-unlock relock grace early.
     private static volatile long lastDoorOpenedElapsed = -1;
     // Written under ACTION (the SDK dispatch) or by the confirm job (a cloud leg); the two never run
@@ -532,13 +538,20 @@ public final class RemoteAccessApiHandler {
             runtime = reportedRuntime == null ? new JSONObject() : new JSONObject(reportedRuntime.toString());
             lastObservationElapsed = observed;
             lastObservedPower = power;
+            if (power != 0) {
+                parkedBluetoothLockConfirmed = false;
+                parkedBluetoothLockConfirmedAtElapsedMs = -1;
+                parkedBluetoothSafeZoneDisableDirective = false;
+                parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
+            }
             notePhoneObservation(phone, sample, observed, proof, healthyNativeProof, evaluated);
             logPhoneDiagnostic(phone, sample, evaluated, eligible, power, now);
             changed();
         }
         // Release the collector before readback. Confirmation must not delay
         // sampling beyond its freshness window. Reuse this existing HTTP worker.
-        HttpResponse.sendJson(out, new JSONObject().put("success", true).toString());
+        HttpResponse.sendJson(out, new JSONObject().put("success", true)
+                .put("safeZoneBluetoothDisable", cachedParkedBluetoothSafeZoneDisable(power)).toString());
         if (!actionSatisfied && (evaluated.arrivalCandidate || evaluated.lockCandidate
                 || evaluated.event != ProximityEvaluator.Event.NONE)) {
             try {
@@ -877,13 +890,30 @@ public final class RemoteAccessApiHandler {
                 }
             }
             @Override void satisfied() throws Exception {
+                if ("lock".equals(action)) {
+                    try { ensureDoorOpenObserver(BydDataCollector.getInstance()); }
+                    catch (Throwable ignored) {}
+                }
                 synchronized (STATE) {
                     refreshSettings();
                     PhoneState current = PHONES.get(reading.address);
-                    if (capturedEpisodeCurrent(current) && current.satisfiedEpisodeId != reading.episodeId) {
-                        current.satisfiedEpisodeId = reading.episodeId;
-                        current.signal.put("actionSatisfied", true);
-                        changed();
+                    if (capturedEpisodeCurrent(current)) {
+                        if ("lock".equals(action) && lastObservedPower == 0) {
+                            parkedBluetoothLockConfirmed = true;
+                            parkedBluetoothLockConfirmedAtElapsedMs = SystemClock.elapsedRealtime();
+                            parkedBluetoothSafeZoneDisableDirective = false;
+                            parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
+                        } else {
+                            parkedBluetoothLockConfirmed = false;
+                            parkedBluetoothLockConfirmedAtElapsedMs = -1;
+                            parkedBluetoothSafeZoneDisableDirective = false;
+                            parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
+                        }
+                        if (current.satisfiedEpisodeId != reading.episodeId) {
+                            current.satisfiedEpisodeId = reading.episodeId;
+                            current.signal.put("actionSatisfied", true);
+                            changed();
+                        }
                     }
                 }
             }
@@ -1177,7 +1207,7 @@ public final class RemoteAccessApiHandler {
                 if (confirmWithVehicle)
                     recordAction(action, "accepted", "Local command accepted; awaiting driver-door readback" + railDetail);
                 else recordAction(action, "sent", DiLink5GateActuationPolicy.CONFIRM_OFF_SENT_TEXT);
-                if ("unlock".equals(action)) noteProximityUnlockDispatched(collector);
+                if ("unlock".equals(action)) ensureDoorOpenObserver(collector);
                 if (finalEvidence != null) {
                     // Age belongs in the daemon log only (D1): recordAction dedups by exact message.
                     com.overdrive.app.daemon.CameraDaemon.log("Proximity: DI5 gate evidence at dispatch "
@@ -1470,7 +1500,7 @@ public final class RemoteAccessApiHandler {
         if (result.outcome == VehicleCommandRouter.Outcome.SUCCESS) {
             recordAction(action, "accepted", "Cloud command accepted; awaiting driver-door readback"
                     + DiLink5GateActuationPolicy.cloudFallbackDetail(path, actuationRail));
-            if ("unlock".equals(action)) noteProximityUnlockDispatched(collector);
+            if ("unlock".equals(action)) ensureDoorOpenObserver(collector);
         }
         // A carsvc window still follows this leg (the Di5 immediate rule's pinned window, or the second
         // window): refresh the dump burst so that window sees back-to-back readings whatever the leg took.
@@ -1658,6 +1688,160 @@ public final class RemoteAccessApiHandler {
         return scalar instanceof Boolean ? scalar.toString() : "unknown";
     }
 
+    /**
+     * Only the camera daemon can see the loaded safe-zone geometry. The override is
+     * withheld until a phone-proximity lock has been confirmed for this parked cycle;
+     * uncertain power, GPS or geometry restores ordinary keep-alive instead.
+     */
+    /** Refresh the daemon-owned directive on its maintenance lane (not on the phone sample path). */
+    private static boolean shouldDisableParkedBluetooth(int power) {
+        boolean requested = computeParkedBluetoothSafeZoneDisable(power);
+        synchronized (STATE) {
+            parkedBluetoothSafeZoneDisableDirective = requested;
+            parkedBluetoothSafeZoneDirectiveAtElapsedMs = SystemClock.elapsedRealtime();
+        }
+        return requested;
+    }
+
+    /** A short-lived cached decision keeps the phone sample response free of vehicle-state I/O. */
+    private static boolean cachedParkedBluetoothSafeZoneDisable(int power) {
+        if (power != 0) return false;
+        final JSONObject settingsSnapshot;
+        final long directiveAt;
+        final long lockConfirmedAt;
+        synchronized (STATE) {
+            long age = SystemClock.elapsedRealtime() - parkedBluetoothSafeZoneDirectiveAtElapsedMs;
+            if (!parkedBluetoothSafeZoneDisableDirective
+                    || parkedBluetoothSafeZoneDirectiveAtElapsedMs < 0
+                    || age < 0 || age > 15_000L
+                    || !config.optBoolean("enabled")
+                    || !config.optBoolean("keepBluetoothOn")
+                    || !config.optBoolean("restrictUnlockToOutsideSafeZones")
+                    || UnifiedConfigManager.isVehicleOnOnlyMode()
+                    || !parkedBluetoothLockConfirmed
+                    || parkedBluetoothLockConfirmedAtElapsedMs <= 0
+                    || lastObservedPower != 0
+                    || lastDoorOpenedElapsed >= parkedBluetoothLockConfirmedAtElapsedMs
+                    || (!DiLink5Platform.isSelected() && !doorOpenObserverRegistered)) return false;
+            try {
+                settingsSnapshot = new JSONObject(effectiveConfig.toString());
+            } catch (Throwable unavailable) {
+                return false;
+            }
+            directiveAt = parkedBluetoothSafeZoneDirectiveAtElapsedMs;
+            lockConfirmedAt = parkedBluetoothLockConfirmedAtElapsedMs;
+        }
+
+        // Re-evaluate the in-memory daemon GPS/zone snapshot on every phone sample,
+        // without doing vehicle-service reads on the collector's response path.
+        ProximitySafeZonePolicy.Result safeZones = safeZoneSnapshot(settingsSnapshot);
+        if (!safeZones.shouldDisableBluetooth()) {
+            synchronized (STATE) {
+                if (parkedBluetoothSafeZoneDirectiveAtElapsedMs == directiveAt) {
+                    parkedBluetoothSafeZoneDisableDirective = false;
+                    parkedBluetoothSafeZoneDirectiveAtElapsedMs = SystemClock.elapsedRealtime();
+                }
+            }
+            return false;
+        }
+
+        synchronized (STATE) {
+            return parkedBluetoothSafeZoneDisableDirective
+                    && parkedBluetoothSafeZoneDirectiveAtElapsedMs == directiveAt
+                    && config.optBoolean("enabled")
+                    && config.optBoolean("keepBluetoothOn")
+                    && config.optBoolean("restrictUnlockToOutsideSafeZones")
+                    && !UnifiedConfigManager.isVehicleOnOnlyMode()
+                    && parkedBluetoothLockConfirmed
+                    && parkedBluetoothLockConfirmedAtElapsedMs == lockConfirmedAt
+                    && lastObservedPower == 0
+                    && lastDoorOpenedElapsed < lockConfirmedAt
+                    && config.optLong("revision") == settingsSnapshot.optLong("revision");
+        }
+    }
+
+    private static boolean computeParkedBluetoothSafeZoneDisable(int power) {
+        if (power != 0) {
+            synchronized (STATE) {
+                parkedBluetoothLockConfirmed = false;
+                parkedBluetoothLockConfirmedAtElapsedMs = -1;
+                parkedBluetoothSafeZoneDisableDirective = false;
+                parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
+            }
+            return false;
+        }
+
+        final JSONObject settingsSnapshot;
+        final long lockConfirmedAt;
+        synchronized (STATE) {
+            try {
+                refreshSettings();
+                if (!config.optBoolean("enabled")
+                        || !config.optBoolean("keepBluetoothOn")
+                        || !config.optBoolean("restrictUnlockToOutsideSafeZones")
+                        || UnifiedConfigManager.isVehicleOnOnlyMode()
+                        || !parkedBluetoothLockConfirmed
+                        || lastObservedPower != 0) return false;
+                settingsSnapshot = new JSONObject(effectiveConfig.toString());
+                lockConfirmedAt = parkedBluetoothLockConfirmedAtElapsedMs;
+                if (lockConfirmedAt < 0) return false;
+            } catch (Throwable unavailable) {
+                return false;
+            }
+        }
+
+        ProximitySafeZonePolicy.Result safeZones = safeZoneSnapshot(settingsSnapshot);
+        if (!safeZones.shouldDisableBluetooth()) return false;
+        if (!DiLink5Platform.isSelected() && !doorOpenObserverRegistered) return false;
+
+        // A manual unlock or a newly opened door/lid starts a new proximity cycle.
+        // Do not keep the radio suppressed once the vehicle is no longer securely parked.
+        if (!parkedVehicleStillLocked()) {
+            synchronized (STATE) {
+                parkedBluetoothLockConfirmed = false;
+                parkedBluetoothLockConfirmedAtElapsedMs = -1;
+                parkedBluetoothSafeZoneDisableDirective = false;
+                parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
+            }
+            return false;
+        }
+
+        synchronized (STATE) {
+            try {
+                refreshSettings();
+                if (!parkedBluetoothLockConfirmed || lastObservedPower != 0
+                        || parkedBluetoothLockConfirmedAtElapsedMs != lockConfirmedAt
+                        || config.optLong("revision") != settingsSnapshot.optLong("revision")) return false;
+                if (lastDoorOpenedElapsed >= lockConfirmedAt) {
+                    parkedBluetoothLockConfirmed = false;
+                    parkedBluetoothLockConfirmedAtElapsedMs = -1;
+                    parkedBluetoothSafeZoneDisableDirective = false;
+                    parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
+                    return false;
+                }
+                return safeZones.shouldDisableBluetooth();
+            } catch (Throwable unavailable) {
+                return false;
+            }
+        }
+    }
+
+    /** Read current vehicle state outside STATE; unknown/unavailable state fails open. */
+    private static boolean parkedVehicleStillLocked() {
+        try {
+            BydDataCollector collector = BydDataCollector.getInstance();
+            int lockState = DiLink5Platform.isSelected()
+                    ? collector.readDiLink5GateDoorLockEvidence().state
+                    : collector.readDoorLockState();
+            if (lockState != BydDataCollector.DOOR_STATE_LOCK) return false;
+            int[] doors = collector.readAllDoorOpenStates();
+            return doors != null && doors.length >= 6
+                    && DiLink5GateActuationPolicy.doorBlockReason(doors) == null;
+        } catch (Throwable unavailable) {
+            return false;
+        }
+    }
+
     /** Existing daemon/watchdog lanes share the app's one radio owner. */
     public static boolean reconcileBluetoothKeepAlive() {
         return reconcileBluetoothKeepAlive(false);
@@ -1666,10 +1850,12 @@ public final class RemoteAccessApiHandler {
     public static boolean reconcileBluetoothKeepAlive(boolean forceDisable) {
         try {
             int power = readVehiclePowerNow();
+            boolean safeZoneDisable = shouldDisableParkedBluetooth(power);
             RemoteDevViewBridgeClient.Response response = new RemoteDevViewBridgeClient().send(
                     new JSONObject().put("command", "remoteAccess").put("operation", "bluetoothKeepAlive")
                             .put("vehicleOff", power == 0).put("vehicleOn", power > 0)
-                            .put("forceDisable", forceDisable));
+                            .put("forceDisable", forceDisable)
+                            .put("safeZoneDisable", safeZoneDisable));
             JSONObject result = response == null ? null : response.metadata;
             if (result == null || !result.optBoolean("success")) return false;
             JSONObject radio = result.optJSONObject("runtime");
@@ -1722,6 +1908,10 @@ public final class RemoteAccessApiHandler {
 
     private static void reset(JSONObject next) throws Exception {
         pendingActuation = null;
+        parkedBluetoothLockConfirmed = false;
+        parkedBluetoothLockConfirmedAtElapsedMs = -1;
+        parkedBluetoothSafeZoneDisableDirective = false;
+        parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1;
         JSONObject nextEffective = RemoteAccessSettings.effective(next);
         String nextModeGeneration = DiLink5Platform.currentActiveModeGeneration();
         // A radio-only change (the shared parked Bluetooth switch) keeps BOTH fob evaluators under
@@ -1901,6 +2091,8 @@ public final class RemoteAccessApiHandler {
                     .put("reason", !config.optBoolean("enabled") ? "disabled"
                             : latestObservation < 0 ? "waiting_for_collector" : "collector_stale");
         }
+        ProximitySafeZonePolicy.Result safeZones = safeZoneSnapshot(effectiveConfig);
+        boolean safeZoneBluetoothDisable = cachedParkedBluetoothSafeZoneDisable(lastObservedPower);
         return new JSONObject().put("success", true).put("sequence", sequence).put("sessionId", SESSION_ID)
                 .put("config", new JSONObject(effectiveConfig.toString()))
                 .put("savedConfig", new JSONObject(config.toString())).put("signal", value).put("signals", signals)
@@ -1909,7 +2101,13 @@ public final class RemoteAccessApiHandler {
                         .put("enabled", config.optBoolean("keyFobEnabled"))
                         .put("presence", keyFobPresence.current(now).toJson()))
                 .put("bluetooth", BluetoothRadioStatusReader.cached())
-                .put("safeZones", safeZoneSnapshot(effectiveConfig).toJson())
+                .put("safeZones", safeZones.toJson())
+                .put("parkedBluetooth", new JSONObject()
+                        .put("safeZoneFeatureEnabled", effectiveConfig.optBoolean("restrictUnlockToOutsideSafeZones"))
+                        .put("walkAwayLockConfirmed", parkedBluetoothLockConfirmed
+                                && parkedBluetoothLockConfirmedAtElapsedMs > 0
+                                && lastDoorOpenedElapsed < parkedBluetoothLockConfirmedAtElapsedMs)
+                        .put("safeZoneDisableRequested", safeZoneBluetoothDisable))
                 .put("devices", pairedDevices == null ? new JSONArray() : pairedDevices)
                 .put("events", events).put("lastAction", lastAction)
                 .put("allPhonesAway", allPhonesAway(now))
@@ -2252,14 +2450,14 @@ public final class RemoteAccessApiHandler {
         return null;
     }
 
-    /** B4: make sure door edges are observed from the first proximity unlock on; idempotent, never throws. */
-    private static void noteProximityUnlockDispatched(BydDataCollector collector) {
+    /** Observe door edges for relock grace and to restore Bluetooth after a new door-open cycle. */
+    private static void ensureDoorOpenObserver(BydDataCollector collector) {
         if (DiLink5Platform.isSelected() || doorOpenObserverRegistered) return;
         try {
             collector.addDoorStateListener(DOOR_OPEN_OBSERVER);
             doorOpenObserverRegistered = true;
         } catch (Throwable ignored) {
-            // Without door edges the grace simply lasts the full 15 s.
+            // Live door-state reads still fail open when this observer is unavailable.
         }
     }
 

@@ -14,6 +14,8 @@ import com.overdrive.app.util.DaemonHttpClient;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.OutputStream;
+import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
@@ -41,6 +43,9 @@ public final class BluetoothAccessMonitor {
     private final AtomicInteger activeWorkers = new AtomicInteger();
     private final BluetoothPhoneReconnectController reconnect;
     private volatile boolean running = true;
+    private volatile boolean safeZoneBluetoothDisable;
+    private volatile long safeZoneDecisionAtElapsedMs = -1;
+    private static final long SAFE_ZONE_DIRECTIVE_MAX_AGE_MS = 15_000L;
 
     private BluetoothAccessMonitor(Context context, JSONObject config) {
         this.config = config;
@@ -242,6 +247,37 @@ public final class BluetoothAccessMonitor {
         } catch (Exception | LinkageError unavailable) { return false; }
     }
 
+    /** The daemon is authoritative; stale or missing directives never keep Bluetooth disabled. */
+    private boolean safeZoneBluetoothDisableNow() {
+        long observed = safeZoneDecisionAtElapsedMs;
+        long now = SystemClock.elapsedRealtime();
+        return safeZoneBluetoothDisable && observed >= 0 && now >= observed
+                && now - observed <= SAFE_ZONE_DIRECTIVE_MAX_AGE_MS;
+    }
+
+    private void updateSafeZoneBluetoothDirective(HttpURLConnection connection) {
+        InputStream input = null;
+        try {
+            int status = connection.getResponseCode();
+            input = status >= 200 && status < 400
+                    ? connection.getInputStream() : connection.getErrorStream();
+            if (input == null) return;
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            byte[] buffer = new byte[1024];
+            int count;
+            while ((count = input.read(buffer)) != -1) bytes.write(buffer, 0, count);
+            JSONObject response = new JSONObject(new String(bytes.toByteArray(), StandardCharsets.UTF_8));
+            if (response.optBoolean("success")) {
+                safeZoneBluetoothDisable = response.optBoolean("safeZoneBluetoothDisable", false);
+                safeZoneDecisionAtElapsedMs = SystemClock.elapsedRealtime();
+            }
+        } catch (Exception unavailable) {
+            // A stale directive expires after 15 seconds and returns to normal keep-alive.
+        } finally {
+            if (input != null) try { input.close(); } catch (Exception ignored) {}
+        }
+    }
+
     private final class PhoneWorker {
         private final String address;
         private final Thread thread;
@@ -276,12 +312,6 @@ public final class BluetoothAccessMonitor {
                         BluetoothConnectionStateReader.Snapshot.unknown("connection_state_unavailable");
                 BluetoothAdapter observedAdapter = null;
                 try {
-                    JSONObject radio = SharedBluetoothKeepAliveController.runtime(context);
-                    if (radio.optBoolean("enabled") || radio.optBoolean("radioOwned")
-                            || radio.optBoolean("cleanupPending")) {
-                        int power = VehiclePowerReader.readNow(context);
-                        SharedBluetoothKeepAliveController.reconcile(context, power == 0, power > 0, false);
-                    }
                     observedAdapter = BluetoothAdapter.getDefaultAdapter();
                     connectionProof = BluetoothConnectionStateReader.read(
                             context, observedAdapter, address,
@@ -344,6 +374,21 @@ public final class BluetoothAccessMonitor {
                 if (!running || Thread.currentThread().isInterrupted()) break;
                 reportDiagnostic(reason);
                 publish(raw, connected, reason, observedAtElapsedMs, connectionProof);
+                // Reconcile only after the relay response refreshes the daemon-owned
+                // safe-zone directive, so an old cached decision cannot override a
+                // newer outside/unknown result on this same sampling cycle.
+                try {
+                    JSONObject radio = SharedBluetoothKeepAliveController.runtime(context);
+                    if (radio.optBoolean("enabled") || radio.optBoolean("radioOwned")
+                            || radio.optBoolean("cleanupPending")) {
+                        int power = VehiclePowerReader.readNow(context);
+                        SharedBluetoothKeepAliveController.reconcile(
+                                context, power == 0, power > 0, false,
+                                safeZoneBluetoothDisableNow());
+                    }
+                } catch (Throwable unavailable) {
+                    // The daemon watchdog and the next collector cycle retry reconciliation.
+                }
                 // Include native checks and reporting in both sample budgets.
                 // Connected phones need fresh samples for approach confirmation;
                 // disconnected recovery retains its shared three-second spacing.
@@ -409,7 +454,7 @@ public final class BluetoothAccessMonitor {
             connection.setRequestProperty("Content-Type", "application/json");
             connection.setFixedLengthStreamingMode(bytes.length);
             try (OutputStream out = connection.getOutputStream()) { out.write(bytes); }
-            connection.getResponseCode();
+            updateSafeZoneBluetoothDirective(connection);
         } catch (Exception ignored) {
             // Daemon loss is unknown, never a departure. Only enabled ticks retry.
         } finally {

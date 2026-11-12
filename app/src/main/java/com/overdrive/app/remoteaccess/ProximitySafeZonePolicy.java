@@ -105,6 +105,11 @@ public final class ProximitySafeZonePolicy {
             return ("lock".equals(action) ? lockRestricted : unlockRestricted) ? reason : "not_restricted";
         }
 
+        /** True only for a confirmed inside-zone result; unknown location never disables Bluetooth. */
+        public boolean shouldDisableBluetooth() {
+            return enabled && unlockRestricted && "INSIDE".equals(state);
+        }
+
         public Lease lease(String action) {
             return allowed(action) ? new Lease(action, geometryScope) : null;
         }
@@ -136,7 +141,10 @@ public final class ProximitySafeZonePolicy {
                     .put("lock", new JSONObject().put("restricted", lockRestricted)
                             .put("allowed", allowed("lock")).put("reason", actionReason("lock")))
                     .put("unlock", new JSONObject().put("restricted", unlockRestricted)
-                            .put("allowed", allowed("unlock")).put("reason", actionReason("unlock")));
+                            .put("allowed", allowed("unlock")).put("reason", actionReason("unlock")))
+                    .put("bluetooth", new JSONObject().put("restricted", unlockRestricted)
+                            .put("disable", shouldDisableBluetooth())
+                            .put("reason", unlockRestricted ? reason : "not_restricted"));
         }
     }
 
@@ -202,8 +210,10 @@ public final class ProximitySafeZonePolicy {
                         fix, usingParked, ids, selected, scope);
             if (distance - uncertainty <= zone.radiusMeters) boundary = true;
         }
-        return new Result(true, restrictLock, restrictUnlock, boundary ? "UNKNOWN" : "OUTSIDE",
-                boundary ? "safe_zone_boundary" : "outside_safe_zones", fix, usingParked, ids, selected, scope);
+        return new Result(true, restrictLock, restrictUnlock,
+                boundary ? "UNKNOWN" : "OUTSIDE",
+                boundary ? "safe_zone_boundary" : "outside_safe_zones",
+                fix, usingParked, ids, selected, scope);
     }
 
     private static Result result(boolean enabled, boolean restrictLock, boolean restrictUnlock,

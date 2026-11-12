@@ -19,6 +19,7 @@ import org.json.JSONObject;
 public final class SharedBluetoothKeepAliveController {
     private static final String PREFS = "shared_bluetooth_runtime";
     private static final String OWNED = "radioOwned";
+    private static final String SAFE_ZONE_DISABLED = "safeZoneDisabled";
     private static final String LEGACY_ADOPTED = "remoteAccessLeaseAdopted";
     private static volatile String lastError = "";
 
@@ -43,45 +44,69 @@ public final class SharedBluetoothKeepAliveController {
      */
     public static synchronized JSONObject reconcile(
             Context context, boolean vehicleOff, boolean vehicleOn, boolean forceDisable) {
+        return reconcile(context, vehicleOff, vehicleOn, forceDisable, false);
+    }
+
+    /**
+     * The final argument is a short-lived directive computed by the camera daemon
+     * from its authoritative safe-zone geometry and confirmed walk-away-lock state.
+     */
+    public static synchronized JSONObject reconcile(
+            Context context, boolean vehicleOff, boolean vehicleOn, boolean forceDisable,
+            boolean safeZoneDisable) {
         try {
             SharedPreferences lease = lease(context);
             Consent consent = freshConsent();
             BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
             int state = adapter == null ? -1 : adapter.getState();
             boolean owned = lease.getBoolean(OWNED, false);
+            boolean safeZoneOwned = lease.getBoolean(SAFE_ZONE_DISABLED, false);
             ParkedBluetoothKeepAlivePolicy.Action action = ParkedBluetoothKeepAlivePolicy.decide(
                     consent.enabled, consent.onOnly, vehicleOff, vehicleOn, owned,
-                    forceDisable, radioState(state));
+                    forceDisable, safeZoneDisable, safeZoneOwned, radioState(state));
             lastError = "";
             if (action == ParkedBluetoothKeepAlivePolicy.Action.RELEASE_OWNERSHIP) {
-                if (!writeOwned(lease, false)) lastError = "lease_write_failed";
+                if (!writeOwned(lease, false) || !writeSafeZoneDisabled(lease, false))
+                    lastError = "lease_write_failed";
             } else if (action == ParkedBluetoothKeepAlivePolicy.Action.ENABLE) {
                 // Persist first so process death cannot leave a feature-created radio unowned.
                 if (!writeOwned(lease, true)) {
                     lastError = "lease_write_failed";
                 } else {
                     // Cross-process OFF and on-only changes must win over a queued tick.
+                    // A safe-zone-owned radio is nevertheless restored on vehicle-on so
+                    // the normal vehicle Bluetooth stack can take over.
                     Consent latest = freshConsent();
-                    if (!latest.enabled || latest.onOnly) {
+                    boolean restoreForDriving = safeZoneOwned && vehicleOn && !vehicleOff;
+                    if ((!latest.enabled || latest.onOnly) && !restoreForDriving) {
                         if (adapter == null || adapter.getState() == BluetoothAdapter.STATE_OFF) {
                             writeOwned(lease, false);
+                            writeSafeZoneDisabled(lease, false);
                         }
                     } else if (adapter == null || !adapter.enable()) {
-                        if (adapter != null && adapter.getState() == BluetoothAdapter.STATE_OFF) {
+                        if (adapter != null && adapter.getState() == BluetoothAdapter.STATE_OFF
+                                && !safeZoneOwned) {
                             writeOwned(lease, false);
                         }
                         lastError = "enable_rejected";
                     }
                 }
             } else if (action == ParkedBluetoothKeepAlivePolicy.Action.DISABLE) {
-                // Explicit OFF also owns an uncompleted cleanup of an initially-on adapter.
+                // Persist ownership before the asynchronous framework transition.
                 if (!writeOwned(lease, true)) {
                     lastError = "lease_write_failed";
-                } else if (adapter == null || !adapter.disable()) {
-                    if (adapter != null && adapter.getState() == BluetoothAdapter.STATE_OFF) {
-                        writeOwned(lease, false);
-                    } else {
-                        lastError = "disable_rejected";
+                } else if (safeZoneDisable && consent.enabled && !consent.onOnly
+                        && !writeSafeZoneDisabled(lease, true)) {
+                    lastError = "safe_zone_lease_write_failed";
+                } else {
+                    if (!safeZoneDisable) writeSafeZoneDisabled(lease, false);
+                    if (adapter == null || !adapter.disable()) {
+                        if (adapter != null && adapter.getState() == BluetoothAdapter.STATE_OFF
+                                && !safeZoneDisable) {
+                            writeOwned(lease, false);
+                        } else if (adapter == null || adapter.getState() != BluetoothAdapter.STATE_OFF) {
+                            lastError = "disable_rejected";
+                        }
                     }
                 }
             }
@@ -116,6 +141,10 @@ public final class SharedBluetoothKeepAliveController {
             Consent consent = freshConsent();
             if (consent.enabled != enabled) {
                 lastError = "superseded_intent";
+                return false;
+            }
+            if (!writeSafeZoneDisabled(lease, false)) {
+                lastError = "safe_zone_lease_write_failed";
                 return false;
             }
             BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
@@ -170,11 +199,13 @@ public final class SharedBluetoothKeepAliveController {
             BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
             int state = adapter == null ? -1 : adapter.getState();
             boolean owned = lease.getBoolean(OWNED, false);
-            boolean pending = owned && (!consent.enabled || consent.onOnly)
+            boolean safeZoneDisabled = lease.getBoolean(SAFE_ZONE_DISABLED, false);
+            boolean pending = owned && (safeZoneDisabled || !consent.enabled || consent.onOnly)
                     && state != BluetoothAdapter.STATE_OFF;
             result.put("enabled", consent.enabled)
                     .put("requestedEnabled", consent.enabled && !consent.onOnly)
                     .put("radioOwned", owned)
+                    .put("safeZoneDisabled", safeZoneDisabled)
                     .put("cleanupPending", pending)
                     .put("state", state)
                     .put("bluetoothEnabled", state == BluetoothAdapter.STATE_ON)
@@ -209,6 +240,11 @@ public final class SharedBluetoothKeepAliveController {
     private static boolean writeOwned(SharedPreferences lease, boolean owned) {
         return lease.getBoolean(OWNED, false) == owned
                 || lease.edit().putBoolean(OWNED, owned).commit();
+    }
+
+    private static boolean writeSafeZoneDisabled(SharedPreferences lease, boolean disabled) {
+        return lease.getBoolean(SAFE_ZONE_DISABLED, false) == disabled
+                || lease.edit().putBoolean(SAFE_ZONE_DISABLED, disabled).commit();
     }
 
     private static Consent freshConsent() {
