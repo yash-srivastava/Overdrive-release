@@ -135,6 +135,9 @@ public final class BydCloudDeterrent {
             // The router owns capability discovery, remote-command
             // serialization, terminal confirmation, and timeout cancellation.
             CommandResult result = VehicleCommandRouter.getInstance().execute(command);
+            if (result != null && result.outcome == VehicleCommandRouter.Outcome.SUCCESS) {
+                com.overdrive.app.notifications.DeterrentNotificationStatus.markCloudFired();
+            }
             lastCommandTimeMs.set(System.currentTimeMillis());
             logger.info("Deterrent " + action + " result=" + result.outcome
                     + " path=" + result.pathString());

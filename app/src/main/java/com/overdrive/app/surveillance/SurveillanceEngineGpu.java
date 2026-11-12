@@ -28,6 +28,7 @@ public class SurveillanceEngineGpu {
     private long lastMotionTime = 0;
     // volatile: read cross-thread by hasActiveMotion() (RMM control thread) to
     // drive the parked-idle fps ramp. Written only on the motion thread.
+    private volatile String finalDeterrentSummary = "";
     private volatile long firstMotionTime = 0;  // When sustained motion started (for duration check)
 
     // Parked-idle throttle keyframe pulse: last time we forced an IDR while idle.
@@ -8547,7 +8548,7 @@ public class SurveillanceEngineGpu {
                     if (enc != null) durationSec = enc.getLastFinalizedDurationSec();
                 } catch (Throwable ignored) {}
                 String label = threat != null ? Actor.groupLabel(threat.classGroup) : null;
-                TelegramNotifier.notifyVideoRecorded(videoPath, label, durationSec);
+                TelegramNotifier.notifyVideoRecorded(videoPath, label, durationSec, finalDeterrentSummary);
             } else {
                 logger.debug("Surveillance video upload skipped — clip path unresolved/missing");
             }
@@ -8564,7 +8565,7 @@ public class SurveillanceEngineGpu {
                 String label = threat != null ? Actor.groupLabel(threat.classGroup) : null;
                 TelegramNotifier.notifyVideoRecorded(
                         oemFinalizedClip.getPath(), label,
-                        oemFinalizedClip.getDurationSeconds());
+                        oemFinalizedClip.getDurationSeconds(), finalDeterrentSummary);
             }
         } catch (Throwable t) {
             logger.debug("Telegram OEM surveillance video send failed: " + t.getMessage());
@@ -9454,6 +9455,24 @@ public class SurveillanceEngineGpu {
             data.put("vehicleCount", vehicles);
             data.put("bikeCount", bikes);
             data.put("animalCount", animals);
+            // Include only deterrents that reached their successful execution
+            // point. Web Push and the final Telegram video caption share this verdict.
+            org.json.JSONObject deterrents =
+                    com.overdrive.app.notifications.DeterrentNotificationStatus.consume();
+            java.util.List<String> firedDeterrents = new java.util.ArrayList<>();
+            if (deterrents.has("screenDeterrentFired")) {
+                data.put("screenDeterrentFired", true);
+                firedDeterrents.add("Screen deterrent");
+            }
+            if (deterrents.has("cloudDeterrentFired")) {
+                data.put("cloudDeterrentFired", true);
+                firedDeterrents.add("Cloud deterrent");
+            }
+            finalDeterrentSummary = firedDeterrents.isEmpty() ? ""
+                    : "Deterrent fired: " + android.text.TextUtils.join(" + ", firedDeterrents);
+            if (!finalDeterrentSummary.isEmpty()) {
+                body = body + " · " + finalDeterrentSummary;
+            }
             if (closest != null && closest != Actor.Proximity.UNKNOWN) {
                 data.put("closestProximity", closest.name());
             }

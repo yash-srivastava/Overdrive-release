@@ -808,6 +808,7 @@ public final class ScreenDeterrent {
                 terminateCurrentSession();
                 return;
             }
+            com.overdrive.app.notifications.DeterrentNotificationStatus.markScreenFired();
 
             if (movie != null && movie.duration() > 0) {
                 renderGifLoop(surface, movie, dispW, dispH, stop);
