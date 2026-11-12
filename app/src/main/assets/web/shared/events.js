@@ -687,6 +687,10 @@ BYD.events = {
 
     /** Idempotent stop — safe to call multiple times. */
     stopInflightPolling() {
+        // Invalidate any request already in flight; its response must not
+        // mutate a newly started polling session.
+        this._inflightPollGeneration = (this._inflightPollGeneration || 0) + 1;
+        this._inflightPollRequestPending = false;
         if (this.inflightPollHandle) {
             clearInterval(this.inflightPollHandle);
             this.inflightPollHandle = null;
@@ -1363,15 +1367,33 @@ BYD.events = {
 
     startInflightPolling() {
         this.stopInflightPolling();
+        // setInterval does not wait for an async callback. If the local
+        // recording-status request takes longer than the polling interval,
+        // overlapping requests can accumulate on a slow head unit.
+        this._inflightPollRequestPending = false;
+        const pollGeneration = (this._inflightPollGeneration || 0) + 1;
+        this._inflightPollGeneration = pollGeneration;
         this.inflightPollHandle = setInterval(async () => {
+            if (pollGeneration !== this._inflightPollGeneration) return;
             if (!this.inflightFilename) {
                 this.stopInflightPolling();
                 return;
             }
+            if (this._inflightPollRequestPending) return;
+
+            this._inflightPollRequestPending = true;
             try {
+                const filename = this.inflightFilename;
                 const res = await fetch('/api/recordings/inflight/' +
-                    encodeURIComponent(this.inflightFilename));
+                    encodeURIComponent(filename));
+                if (!res.ok) throw new Error('Inflight status HTTP ' + res.status);
                 const data = await res.json();
+                // Ignore a late response if the tracked recording changed while
+                // this request was in flight.
+                if (filename !== this.inflightFilename) return;
+                if (!data || typeof data.inflight !== 'boolean') {
+                    throw new Error('Invalid inflight status response');
+                }
                 if (!data.inflight) {
                     // Rename finished. Clear the placeholder, reload the list
                     // so the freshly-renamed file appears in its proper slot,
@@ -1396,6 +1418,10 @@ BYD.events = {
                 }
             } catch (e) {
                 // Network blip — keep polling, don't bail.
+            } finally {
+                if (pollGeneration === this._inflightPollGeneration) {
+                    this._inflightPollRequestPending = false;
+                }
             }
         }, 2000);
     },
