@@ -86,6 +86,8 @@ BYD.events = {
     // the dashcam zoom rects). Mirrors ZoomableVideoView.Layout on native.
     _layout: 'standard',
     _quadrantWired: false,
+    _playerLifecycleWired: false,
+    _externalRecordingKey: null,
     _QUADRANT_LS_KEY: 'byd.events.quadrant',
     _QUADRANT_VALID: ['all', 'front', 'right', 'rear', 'left'],
 
@@ -135,6 +137,48 @@ BYD.events = {
         } catch (e) {
             return false;
         }
+    },
+
+    /**
+     * Mount the shared player lifecycle on any page that includes video-player.js.
+     * Events and Parking use the same modal, controls, quadrant handling and cleanup.
+     */
+    initPlayer() {
+        if (this._playerLifecycleWired) return;
+        const modal = document.getElementById('videoModal');
+        const player = document.getElementById('videoPlayer');
+        if (!modal || !player) return;
+
+        this.wireQuadrantBar();
+        document.addEventListener('keydown', (e) => {
+            if (!modal.classList.contains('active')) return;
+            if (e.key === 'Escape') {
+                this.closeVideo();
+                return;
+            }
+            const tag = (e.target && e.target.tagName) || '';
+            const isFormTarget = /^(input|textarea|select)$/i.test(tag) ||
+                (e.target && e.target.isContentEditable);
+            if (isFormTarget || e.altKey || e.ctrlKey || e.metaKey) return;
+            if (e.key === '0') this.setQuadrant('all');
+            else if (e.key === '1') this.setQuadrant('front');
+            else if (e.key === '2') this.setQuadrant('right');
+            else if (e.key === '3') this.setQuadrant('rear');
+            else if (e.key === '4') this.setQuadrant('left');
+        });
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) this.closeVideo();
+        });
+
+        const calendar = document.getElementById('calendarPopup');
+        const updateOverflow = () => {
+            const calendarOpen = calendar && calendar.classList.contains('active');
+            document.body.style.overflow = modal.classList.contains('active') || calendarOpen ? 'hidden' : '';
+        };
+        const observer = new MutationObserver(updateOverflow);
+        observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
+        if (calendar) observer.observe(calendar, { attributes: true, attributeFilter: ['class'] });
+        this._playerLifecycleWired = true;
     },
 
     /**
@@ -562,6 +606,7 @@ BYD.events = {
         await this.loadDatesWithRecordings();
         await this.loadStorageStats();
         await this.loadRecordings();
+        this.initPlayer();
 
         // Deep-link from a notification.
         //   - If the recording is finalized (in this.recordings): open the player.
@@ -582,37 +627,10 @@ BYD.events = {
             }
         }
         
-        // Wire the quadrant zoom selector once. The buttons are static in
-        // events.html; we install delegated click handlers + restore the
-        // last-chosen quadrant from localStorage. Subsequent playVideo
-        // calls just re-apply the persisted choice without re-binding.
-        this.wireQuadrantBar();
         this.wirePlaceSearch();
 
         document.addEventListener('keydown', (e) => {
-            // Quadrant hotkeys while the player modal is open. Mirrors the
-            // numeric pad layout of the AVM cameras: 0 = all, then 1-4 walk
-            // Front, Right, Rear, Left. Skip when the focus is on a form
-            // input — typing "1" in a search box must not zoom the player.
-            const tag = (e.target && e.target.tagName) || '';
-            const isFormTarget = /^(input|textarea|select)$/i.test(tag) ||
-                (e.target && e.target.isContentEditable);
-            const modalOpen = document.getElementById('videoModal').classList.contains('active');
-            if (modalOpen && !isFormTarget && !e.altKey && !e.ctrlKey && !e.metaKey) {
-                if (e.key === '0') { this.setQuadrant('all'); return; }
-                if (e.key === '1') { this.setQuadrant('front'); return; }
-                if (e.key === '2') { this.setQuadrant('right'); return; }
-                if (e.key === '3') { this.setQuadrant('rear'); return; }
-                if (e.key === '4') { this.setQuadrant('left'); return; }
-            }
-            if (e.key === 'Escape') {
-                this.closeVideo();
-                this.closeCalendar();
-            }
-        });
-        
-        document.getElementById('videoModal').addEventListener('click', (e) => {
-            if (e.target.id === 'videoModal') this.closeVideo();
+            if (e.key === 'Escape') this.closeCalendar();
         });
         
         document.getElementById('calendarPopup').addEventListener('click', (e) => {
@@ -620,15 +638,12 @@ BYD.events = {
         });
         
         const calendarPopup = document.getElementById('calendarPopup');
-        const videoModal = document.getElementById('videoModal');
-        
         const observer = new MutationObserver(() => {
-            const isOpen = calendarPopup.classList.contains('active') || videoModal.classList.contains('active');
-            document.body.style.overflow = isOpen ? 'hidden' : '';
+            const videoModal = document.getElementById('videoModal');
+            const videoOpen = videoModal && videoModal.classList.contains('active');
+            document.body.style.overflow = calendarPopup.classList.contains('active') || videoOpen ? 'hidden' : '';
         });
-        
-        observer.observe(calendarPopup, { attributes: true });
-        observer.observe(videoModal, { attributes: true });
+        observer.observe(calendarPopup, { attributes: true, attributeFilter: ['class'] });
 
         // Stop inflight polling when the page is unloaded or hidden — without
         // this, setInterval keeps firing in the background after the user
@@ -1891,11 +1906,46 @@ BYD.events = {
     playVideo(recordingKey) {
         const rec = this.findRecording(recordingKey);
         if (!rec) return;
-        
+        this.openRecording(rec);
+    },
+
+    /** Open a daemon-provided recording from another page using this exact player. */
+    playExternalRecording(recording) {
+        if (!recording || typeof recording.filename !== 'string' ||
+                !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,250}\.mp4$/i.test(recording.filename)) return false;
+        const id = String(recording.id || '');
+        if (id && !/^[a-f0-9]{32}$/i.test(id)) return false;
+        const videoUrl = id ? '/video/id/' + id : '/video/' + recording.filename;
+        const eventUrl = id ? '/api/events/id/' + id : '/api/events/' + recording.filename;
+        if (recording.videoUrl && recording.videoUrl !== videoUrl) return false;
+        if (recording.eventUrl && recording.eventUrl !== eventUrl) return false;
+
+        this.initPlayer();
+        if (!this._playerLifecycleWired) return false;
+        if (this._externalRecordingKey) {
+            const previousKey = this._externalRecordingKey;
+            this.recordings = this.recordings.filter(r => this.recordingKey(r) !== previousKey);
+        }
+        const rec = Object.assign({}, recording, {
+            videoUrl: videoUrl,
+            eventUrl: eventUrl,
+            dateFormatted: recording.dateFormatted || '',
+            timeFormatted: recording.timeFormatted || '',
+            sizeFormatted: recording.sizeFormatted || '',
+            watched: recording.watched !== false
+        });
+        const key = this.recordingKey(rec);
+        this.recordings.push(rec);
+        this._externalRecordingKey = key;
+        this.openRecording(rec);
+        return true;
+    },
+
+    openRecording(rec) {
         document.getElementById('videoTitle').textContent = rec.filename;
-        document.getElementById('videoDate').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> ' + rec.dateFormatted;
-        document.getElementById('videoTime').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> ' + rec.timeFormatted;
-        document.getElementById('videoSize').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> ' + rec.sizeFormatted;
+        document.getElementById('videoDate').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> ' + (rec.dateFormatted || '');
+        document.getElementById('videoTime').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> ' + (rec.timeFormatted || '');
+        document.getElementById('videoSize').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> ' + (rec.sizeFormatted || '');
         
         const downloadBtn = document.getElementById('downloadBtn');
         downloadBtn.href = rec.videoUrl;
@@ -1984,6 +2034,11 @@ BYD.events = {
         this._lastMutedState = null;
         // SOTA: Clean up timeline
         this.destroyTimeline();
+        if (this._externalRecordingKey) {
+            const externalKey = this._externalRecordingKey;
+            this.recordings = this.recordings.filter(r => this.recordingKey(r) !== externalKey);
+            this._externalRecordingKey = null;
+        }
     },
     
     downloadVideo(recordingKey) {
@@ -2288,7 +2343,7 @@ BYD.events = {
             }
         } catch (e) {
             // Best-effort marker overlay; no events file is fine.
-            console.debug('No timeline data for', filename);
+            console.debug('No timeline data for', recording.filename);
         }
     },
 
