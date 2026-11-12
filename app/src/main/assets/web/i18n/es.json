@@ -1132,7 +1132,14 @@
     "tariff_fallback_global": "Las cargas que no entran en ninguna tarifa usan {rate}/kWh.",
     "tariff_auto_hint": "Guardada. Las cargas a menos de {radius} m de aquí usarán esta tarifa automáticamente.",
     "tariff_label_placeholder": "Casa",
-    "per_kwh_unit": "/kWh"
+    "per_kwh_unit": "/kWh",
+    "filter_location": "Location",
+    "filter_all_locations": "All locations",
+    "filter_location_hint": "Add location tariffs in Settings to filter by place.",
+    "copy_summary": "Copy summary",
+    "summary_copied": "Summary copied",
+    "summary_copy_failed": "Could not copy",
+    "no_sessions_location": "No sessions at this location in the selected period"
   },
   "trip": {
     "tab_trips": "Viajes",

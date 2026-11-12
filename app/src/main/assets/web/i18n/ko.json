@@ -2739,7 +2739,14 @@
     "chart_soh_title": "배터리 건강 추이",
     "type_unknown": "충전",
     "detail_odometer": "주행거리계",
-    "odometer_short": "ODO"
+    "odometer_short": "ODO",
+    "filter_location": "Location",
+    "filter_all_locations": "All locations",
+    "filter_location_hint": "Add location tariffs in Settings to filter by place.",
+    "copy_summary": "Copy summary",
+    "summary_copied": "Summary copied",
+    "summary_copy_failed": "Could not copy",
+    "no_sessions_location": "No sessions at this location in the selected period"
   },
   "backup": {
     "restoring": "복원 중…",
