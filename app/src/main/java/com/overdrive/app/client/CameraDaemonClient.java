@@ -43,7 +43,7 @@ public class CameraDaemonClient {
     /**
      * Connect to CameraDaemon via TCP socket on localhost.
      */
-    public boolean connect() {
+    public synchronized boolean connect() {
         try {
             socket = new Socket();
             socket.connect(new InetSocketAddress(HOST, PORT), CONNECT_TIMEOUT_MS);
@@ -58,6 +58,14 @@ public class CameraDaemonClient {
         } catch (Exception e) {
             Log.e(TAG, "Failed to connect to " + HOST + ":" + PORT + ": " + e.getMessage());
             connected = false;
+            // Release partially initialized resources if setup failed after
+            // creating the socket or either stream.
+            try { if (reader != null) reader.close(); } catch (Exception ignored) {}
+            try { if (writer != null) writer.close(); } catch (Exception ignored) {}
+            try { if (socket != null) socket.close(); } catch (Exception ignored) {}
+            reader = null;
+            writer = null;
+            socket = null;
             return false;
         }
     }
@@ -91,18 +99,23 @@ public class CameraDaemonClient {
      * Send command and get response (blocking).
      */
     public JSONObject sendCommand(JSONObject command) throws Exception {
-        if (!isConnected()) {
-            // Try to reconnect
-            if (!connect()) {
-                throw new Exception("Not connected to CameraDaemon");
-            }
-        }
-        
         synchronized (this) {
+            // Serialize connection recovery and the complete request/response
+            // exchange so concurrent callers cannot replace shared streams.
+            if (!isConnected()) {
+                if (!connect()) {
+                    throw new Exception("Not connected to CameraDaemon");
+                }
+            }
+
             try {
                 writer.println(command.toString());
                 writer.flush();
-                
+                if (writer.checkError()) {
+                    connected = false;
+                    throw new java.io.IOException("Failed to write command to CameraDaemon");
+                }
+
                 String response = reader.readLine();
                 if (response == null) {
                     connected = false;
@@ -115,7 +128,7 @@ public class CameraDaemonClient {
             }
         }
     }
-    
+
     /**
      * Send command string and get response (blocking).
      */
