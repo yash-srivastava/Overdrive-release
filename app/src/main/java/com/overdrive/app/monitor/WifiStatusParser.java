@@ -91,8 +91,9 @@ public final class WifiStatusParser {
     }
 
     /**
-     * Strips one pair of surrounding quotes and maps every hidden/placeholder form to null:
-     * empty, {@code <unknown ssid>}, {@code <none>}, or anything containing "unknown".
+     * Strip a pair of surrounding quotes and reject exact framework redaction markers.
+     * An SSID is user-controlled: a real name such as "Unknown-Guest" must not be
+     * rejected just because it contains the word "unknown".
      */
     static String normalizeSsid(String raw) {
         if (raw == null) {
@@ -102,8 +103,12 @@ public final class WifiStatusParser {
         if (s.length() >= 2 && s.startsWith("\"") && s.endsWith("\"")) {
             s = s.substring(1, s.length() - 1);
         }
-        if (s.isEmpty() || s.equals("<none>")
-                || s.toLowerCase(Locale.ROOT).contains("unknown")) {
+        String lower = s.toLowerCase(Locale.ROOT);
+        if (s.isEmpty() || "<none>".equals(lower)
+                || "<unknown ssid>".equals(lower)
+                || "<unknown>".equals(lower)
+                || "unknown ssid".equals(lower)
+                || "unknown".equals(lower)) {
             return null;
         }
         return s;
