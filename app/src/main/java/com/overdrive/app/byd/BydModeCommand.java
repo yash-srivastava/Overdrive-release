@@ -178,7 +178,9 @@ public final class BydModeCommand {
             if (awaitDriveMode(energy, setting, configMode)) return true;
         }
 
-        if (setting != null && invokeIfPresent(setting, "setDriveConfig", configMode)
+        if (setting != null
+                && (invokeIfPresent(setting, "setDriveConfig", configMode)
+                        || invokeIfPresent(setting, "setDrvingMode", configMode))
                 && awaitDriveMode(energy, setting, configMode)) {
             return true;
         }

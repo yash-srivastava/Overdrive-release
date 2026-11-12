@@ -203,6 +203,22 @@ public class BydDriveModeEncodingTest {
         }
     }
 
+    @Test
+    public void dilink5DrvingModeSetterIsRecognized() throws Exception {
+        DiLink5DrvingModeDevice device = new DiLink5DrvingModeDevice();
+        java.lang.reflect.Method m = device.getClass().getMethod("setDrvingMode", int.class);
+        assertEquals(0, m.invoke(device, 2));
+        assertEquals(2, device.lastMode);
+    }
+
+    public static final class DiLink5DrvingModeDevice {
+        public int lastMode = -1;
+        public int setDrvingMode(int mode) {
+            this.lastMode = mode;
+            return 0;
+        }
+    }
+
     public static final class TargetModeDevice {
         private final int mode;
 
