@@ -2,6 +2,7 @@ package com.overdrive.app.server;
 
 import com.overdrive.app.logging.DaemonLogger;
 import com.overdrive.app.storage.StorageManager;
+import com.overdrive.app.storage.H2SocketLockRetry;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -329,8 +330,8 @@ public final class RecordingsIndex {
             return false;
         }
 
-        // Same retry-on-stale-lock pattern as TripDatabase. SIGKILL of the
-        // previous daemon can leave a stale .lock.db that blocks reopen.
+        // A previous daemon may still be releasing its socket lock. H2 detects
+        // orphaned lock owners itself; the lock file must not be deleted here.
         int maxRetries = 3;
         int retryDelayMs = 1000;
         boolean wiped = false;
@@ -354,10 +355,10 @@ public final class RecordingsIndex {
                 return true;
             } catch (Exception e) {
                 String msg = e.getMessage();
-                boolean lockErr = msg != null
-                        && (msg.contains("Locked by another process")
-                                || msg.contains("lock.db")
-                                || msg.contains("already in use"));
+                boolean lockErr = H2SocketLockRetry.isLockConflict(e);
+                // Release any partially opened H2 handle before contention
+                // retries or derived-index corruption recovery.
+                closeQuietly();
                 // Corruption: a hard power-cut / SIGKILL mid-write can leave the
                 // MVStore file half-flushed. H2 surfaces this as "File corrupted"
                 // / IO_EXCEPTION (SQLState-adjacent code 90030). This is NOT
@@ -380,8 +381,8 @@ public final class RecordingsIndex {
                 // (e.g. a duplicate recording_id when H2's ADD COLUMN copy re-adds the PK).
                 boolean unmigratable = storeOpened && !wiped;
                 if (lockErr && attempt < maxRetries) {
-                    logger.warn("Index DB locked (attempt " + attempt + "/" + maxRetries + "), cleaning stale locks");
-                    cleanupStaleLocks();
+                    logger.warn("Index DB locked (attempt " + attempt + "/" + maxRetries
+                            + "); waiting for H2 socket-lock owner to release it");
                     try { Thread.sleep((long) retryDelayMs * attempt); }
                     catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
@@ -391,10 +392,8 @@ public final class RecordingsIndex {
                     logger.error("Index DB " + (corruptErr ? "corrupted" : "schema migration failed")
                             + " (attempt " + attempt + "/" + maxRetries
                             + "), wiping store to rebuild from filesystem: " + msg, e);
-                    // A partially-opened connection can hold an OS handle on the
-                    // file — close it before deleting so the unlink actually frees
-                    // the inode and the reopen sees a clean directory.
-                    closeQuietly();
+                    // The partially-opened JDBC handle was closed above.
+                    // Only the derived index artifacts may be rebuilt here.
                     wipeCorruptStore();
                     wiped = true;
                     // No sleep needed — this isn't a transient contention error.
@@ -729,9 +728,9 @@ public final class RecordingsIndex {
      * every row by walking the recording dirs — so wiping it loses no
      * authoritative data, only the pre-parsed metadata cache.
      *
-     * <p>MVStore uses {@code <path>.mv.db}; older PageStore builds and the
-     * trace/lock siblings are removed too so no half-written companion file
-     * confuses the reopen.
+     * <p>MVStore uses {@code <path>.mv.db}; older PageStore artifacts are
+     * also removed. The H2 lock sibling is deliberately untouched: only
+     * H2 can establish whether its socket owner is still active.
      */
     private void wipeCorruptStore() {
         String[] suffixes = {
@@ -739,7 +738,6 @@ public final class RecordingsIndex {
             ".mv.db.tmp",    // in-progress compaction temp
             ".h2.db",        // legacy PageStore
             ".trace.db",
-            ".lock.db",
             ".newFile",      // MVStore atomic-write scratch
             ".tempFile"
         };
@@ -752,22 +750,6 @@ public final class RecordingsIndex {
             } catch (Exception e) {
                 logger.debug("wipeCorruptStore(" + sfx + ") failed: " + e.getMessage());
             }
-        }
-    }
-
-    private void cleanupStaleLocks() {
-        try {
-            File lock = new File(DB_PATH + ".lock.db");
-            if (lock.exists()) {
-                long age = System.currentTimeMillis() - lock.lastModified();
-                if (age > 5 * 60 * 1000L && lock.delete()) {
-                    logger.info("Deleted stale lock file (age " + (age / 1000) + "s)");
-                }
-            }
-            File trace = new File(DB_PATH + ".trace.db");
-            if (trace.exists()) trace.delete();
-        } catch (Exception e) {
-            logger.debug("Lock cleanup failed: " + e.getMessage());
         }
     }
 

@@ -1,6 +1,7 @@
 package com.overdrive.app.monitor;
 
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.storage.H2SocketLockRetry;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -506,12 +507,19 @@ public class SocHistoryDatabase {
                     
                 } catch (Exception e) {
                     String msg = e.getMessage();
-                    boolean isLockError = msg != null && (msg.contains("Locked by another process") || 
-                        msg.contains("lock.db") || msg.contains("already in use"));
-                    
+                    boolean isLockError = H2SocketLockRetry.isLockConflict(e);
+                    // A JDBC open can succeed before table setup or journal replay fails.
+                    // Release that connection before another attempt; never make our own
+                    // live socket lock look like contention from a different daemon.
+                    if (connection != null) {
+                        try { connection.close(); } catch (Exception ignored) { }
+                        connection = null;
+                    }
+                    isInitialized = false;
+
                     if (isLockError && attempt < maxRetries) {
-                        logger.warn("Database locked (attempt " + attempt + "/" + maxRetries + "), cleaning up stale locks...");
-                        cleanupStaleLocks();
+                        logger.warn("Database locked (attempt " + attempt + "/" + maxRetries
+                                + "); waiting for H2 socket-lock owner to release it");
                         try {
                             Thread.sleep(retryDelayMs * attempt);  // Exponential backoff
                         } catch (InterruptedException ie) {
@@ -521,42 +529,12 @@ public class SocHistoryDatabase {
                     } else {
                         logger.error("Failed to initialize SOC database: " + e.getClass().getName() + " - " + msg, e);
                         if (isLockError || !storeSalvage.shouldReplace(e)) break;
-                        if (connection != null) {
-                            try { connection.close(); } catch (Exception ignored) { }
-                            connection = null;
-                        }
                         if (!storeSalvage.replace()) break;
                         // The replacement store gets an attempt of its own.
                         attempt--;
                     }
                 }
             }
-        }
-    }
-    
-    /**
-     * Clean up stale lock files that may have been left by crashed processes.
-     */
-    private void cleanupStaleLocks() {
-        try {
-            java.io.File lockFile = new java.io.File(DB_PATH + ".lock.db");
-            if (lockFile.exists()) {
-                // Check if the lock file is stale (older than 5 minutes with no active process)
-                long ageMs = System.currentTimeMillis() - lockFile.lastModified();
-                if (ageMs > 5 * 60 * 1000) {  // 5 minutes
-                    if (lockFile.delete()) {
-                        logger.info("Deleted stale lock file (age: " + (ageMs / 1000) + "s)");
-                    }
-                }
-            }
-            
-            // Also try to clean up trace files
-            java.io.File traceFile = new java.io.File(DB_PATH + ".trace.db");
-            if (traceFile.exists()) {
-                traceFile.delete();
-            }
-        } catch (Exception e) {
-            logger.debug("Lock cleanup failed: " + e.getMessage());
         }
     }
     

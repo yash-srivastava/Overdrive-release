@@ -1,6 +1,7 @@
 package com.overdrive.app.roadsense.store
 
 import com.overdrive.app.logging.DaemonLogger
+import com.overdrive.app.storage.H2SocketLockRetry
 import com.overdrive.app.roadsense.detect.ALTITUDE_UNKNOWN
 import com.overdrive.app.roadsense.detect.HazardType
 import com.overdrive.app.roadsense.detect.RoadSenseHazard
@@ -8,7 +9,6 @@ import com.overdrive.app.roadsense.detect.Severity
 import com.overdrive.app.roadsense.detect.StoredHazard
 import com.overdrive.app.roadsense.detect.altitudeKnown
 import com.overdrive.app.roadsense.detect.altitudeMatches
-import java.io.File
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.PreparedStatement
@@ -205,9 +205,9 @@ class RoadSenseStore private constructor() {
     // ──────────────────────────── Lifecycle ─────────────────────────────────
 
     /**
-     * Open the connection, create the table + indices if absent, recover from a
-     * stale lock left by a crashed daemon. Idempotent. Mirrors
-     * SocHistoryDatabase.init() including the 3-attempt lock-recovery retry.
+     * Open the connection and schema, allowing a bounded retry while another
+     * daemon releases H2's socket lock. H2 itself reclaims orphaned lock files.
+     * Idempotent; does not delete another process's lock file.
      */
     fun init() {
         if (initialized) return
@@ -235,14 +235,13 @@ class RoadSenseStore private constructor() {
                     return
                 } catch (e: Exception) {
                     val msg = e.message
-                    val isLockError = msg != null && (
-                        msg.contains("Locked by another process") ||
-                            msg.contains("lock.db") ||
-                            msg.contains("already in use")
-                        )
+                    val isLockError = H2SocketLockRetry.isLockConflict(e)
+                    // Schema setup can throw after getConnection acquired the lock.
+                    // Close that partial connection before attempting another open.
+                    try { connection?.close() } catch (_: Exception) { }
+                    connection = null
                     if (isLockError && attempt < maxRetries) {
-                        logger.warn("Store locked (attempt $attempt/$maxRetries), cleaning stale locks...")
-                        cleanupStaleLocks()
+                        logger.warn("Store locked (attempt $attempt/$maxRetries); waiting for H2 socket-lock owner")
                         try {
                             Thread.sleep(retryDelayMs * attempt) // backoff
                         } catch (ie: InterruptedException) {
@@ -326,27 +325,6 @@ class RoadSenseStore private constructor() {
             initialized = false
         }
         logger.info("RoadSense store stopped")
-    }
-
-    /**
-     * Delete stale lock + trace files left by a crashed daemon, so the retry in
-     * [init] can re-open. Same heuristic as SocHistoryDatabase: only remove a
-     * lock file older than 5 minutes (a live holder touches it far more often).
-     */
-    private fun cleanupStaleLocks() {
-        try {
-            val lockFile = File("$DB_PATH.lock.db")
-            if (lockFile.exists()) {
-                val ageMs = System.currentTimeMillis() - lockFile.lastModified()
-                if (ageMs > 5 * 60 * 1000) {
-                    if (lockFile.delete()) logger.info("Deleted stale lock file (age ${ageMs / 1000}s)")
-                }
-            }
-            val traceFile = File("$DB_PATH.trace.db")
-            if (traceFile.exists()) traceFile.delete()
-        } catch (e: Exception) {
-            logger.debug("Lock cleanup failed: " + e.message)
-        }
     }
 
     /**

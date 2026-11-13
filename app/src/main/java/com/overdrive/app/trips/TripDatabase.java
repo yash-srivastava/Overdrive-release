@@ -1,6 +1,7 @@
 package com.overdrive.app.trips;
 
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.storage.H2SocketLockRetry;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -94,12 +95,11 @@ public class TripDatabase {
                     connection = null;
                 }
                 String msg = e.getMessage();
-                boolean isLockError = msg != null && (msg.contains("Locked by another process") ||
-                        msg.contains("lock.db") || msg.contains("already in use"));
+                boolean isLockError = H2SocketLockRetry.isLockConflict(e);
 
                 if (isLockError && attempt < maxRetries) {
-                    logger.warn("Database locked (attempt " + attempt + "/" + maxRetries + "), cleaning up stale locks...");
-                    cleanupStaleLocks();
+                    logger.warn("Database locked (attempt " + attempt + "/" + maxRetries
+                            + "); waiting for H2 socket-lock owner to release it");
                     try {
                         Thread.sleep(retryDelayMs * attempt); // Exponential backoff
                     } catch (InterruptedException ie) {
@@ -235,26 +235,6 @@ public class TripDatabase {
             logger.error("Connection check failed", e);
             forceReconnect();
             return probe();
-        }
-    }
-
-    private void cleanupStaleLocks() {
-        try {
-            java.io.File lockFile = new java.io.File(DB_PATH + ".lock.db");
-            if (lockFile.exists()) {
-                long ageMs = System.currentTimeMillis() - lockFile.lastModified();
-                if (ageMs > 5 * 60 * 1000) {
-                    if (lockFile.delete()) {
-                        logger.info("Deleted stale lock file (age: " + (ageMs / 1000) + "s)");
-                    }
-                }
-            }
-            java.io.File traceFile = new java.io.File(DB_PATH + ".trace.db");
-            if (traceFile.exists()) {
-                traceFile.delete();
-            }
-        } catch (Exception e) {
-            logger.debug("Lock cleanup failed: " + e.getMessage());
         }
     }
 

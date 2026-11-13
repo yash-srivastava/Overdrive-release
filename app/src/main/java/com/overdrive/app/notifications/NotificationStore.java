@@ -1,6 +1,7 @@
 package com.overdrive.app.notifications;
 
 import com.overdrive.app.logging.DaemonLogger;
+import com.overdrive.app.storage.H2SocketLockRetry;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -114,11 +115,9 @@ public final class NotificationStore {
         synchronized (lock) {
             if (isInitialized) return;
 
-            // Retry loop with stale-lock cleanup + backoff. The head unit is
-            // frequently hard-killed (ACC-off yank, OOM, restart storms), which
-            // can orphan overdrive_notif_h2.lock.db; a single getConnection
-            // would then leave the log dark for the whole session. Mirrors
-            // SocHistoryDatabase.init().
+            // A prior daemon may still be releasing its H2 socket lock.
+            // Retry briefly, leaving orphan detection to H2's lock protocol.
+            // Never infer ownership from .lock.db modification time.
             int maxRetries = 3;
             int retryDelayMs = 500;
             for (int attempt = 1; attempt <= maxRetries; attempt++) {
@@ -134,12 +133,16 @@ public final class NotificationStore {
                     break;
                 } catch (Exception e) {
                     String msg = e.getMessage();
-                    boolean isLockError = msg != null && (msg.contains("Locked by another process")
-                            || msg.contains("lock.db") || msg.contains("already in use"));
+                    boolean isLockError = H2SocketLockRetry.isLockConflict(e);
+                    // SET CACHE_SIZE or createTable may fail after JDBC acquired the
+                    // socket lock. Close the partial handle before retrying.
+                    if (connection != null) {
+                        try { connection.close(); } catch (Exception ignored) { }
+                        connection = null;
+                    }
                     if (isLockError && attempt < maxRetries) {
                         logger.warn("NotificationStore locked (attempt " + attempt + "/" + maxRetries
-                                + "), cleaning stale locks...");
-                        cleanupStaleLocks();
+                                + "); waiting for H2 socket-lock owner to release it");
                         try {
                             Thread.sleep((long) retryDelayMs * attempt);
                         } catch (InterruptedException ie) {
@@ -187,25 +190,6 @@ public final class NotificationStore {
             // stop() shut the executor down between creation and scheduling —
             // benign shutdown race; the store is being torn down anyway.
             logger.debug("NotificationStore prune scheduler rejected (shutting down)");
-        }
-    }
-
-    /** Clean up a stale lock/trace file left by a crashed prior daemon. */
-    private void cleanupStaleLocks() {
-        try {
-            java.io.File lockFile = new java.io.File(DB_PATH + ".lock.db");
-            if (lockFile.exists()) {
-                long ageMs = System.currentTimeMillis() - lockFile.lastModified();
-                if (ageMs > 5 * 60 * 1000) {
-                    if (lockFile.delete()) {
-                        logger.info("Deleted stale NotificationStore lock (age " + (ageMs / 1000) + "s)");
-                    }
-                }
-            }
-            java.io.File traceFile = new java.io.File(DB_PATH + ".trace.db");
-            if (traceFile.exists()) traceFile.delete();
-        } catch (Exception e) {
-            logger.debug("NotificationStore lock cleanup failed: " + e.getMessage());
         }
     }
 
