@@ -32,7 +32,6 @@ import java.lang.reflect.Field;
  */
 public final class BluetoothAccessMonitor {
     private static final String TAG = "BluetoothAccessMonitor";
-    private static final long CONNECTED_INTERVAL_MS = 1000;
     private static BluetoothAccessMonitor instance;
     private final JSONObject config;
     private final Context context;
@@ -244,6 +243,8 @@ public final class BluetoothAccessMonitor {
 
     private final class PhoneWorker {
         private final String address;
+        private final int awayThreshold;
+        private final BluetoothProximitySamplingPolicy sampling = new BluetoothProximitySamplingPolicy();
         private final Thread thread;
         private volatile BluetoothRssiReader reader;
         private volatile HttpURLConnection relay;
@@ -253,6 +254,9 @@ public final class BluetoothAccessMonitor {
 
         PhoneWorker(String address) {
             this.address = address;
+            JSONObject phone = RemoteAccessSettings.phone(config, address);
+            this.awayThreshold = phone == null ? config.optInt("awayThreshold", -24)
+                    : phone.optInt("awayThreshold", config.optInt("awayThreshold", -24));
             thread = new Thread(this::collect, "OverDrive-Proximity-" + workers.size());
             thread.setDaemon(true);
         }
@@ -272,15 +276,17 @@ public final class BluetoothAccessMonitor {
                 Integer raw = null;
                 boolean connected = false;
                 String reason = "disconnected";
+                JSONObject radio = new JSONObject();
                 BluetoothConnectionStateReader.Snapshot connectionProof =
                         BluetoothConnectionStateReader.Snapshot.unknown("connection_state_unavailable");
                 BluetoothAdapter observedAdapter = null;
                 try {
-                    JSONObject radio = SharedBluetoothKeepAliveController.runtime(context);
+                    radio = SharedBluetoothKeepAliveController.runtime(context);
                     if (radio.optBoolean("enabled") || radio.optBoolean("radioOwned")
                             || radio.optBoolean("cleanupPending")) {
                         int power = VehiclePowerReader.readNow(context);
-                        SharedBluetoothKeepAliveController.reconcile(context, power == 0, power > 0, false);
+                        radio = SharedBluetoothKeepAliveController.reconcile(
+                                context, power == 0, power > 0, false);
                     }
                     observedAdapter = BluetoothAdapter.getDefaultAdapter();
                     connectionProof = BluetoothConnectionStateReader.read(
@@ -289,9 +295,11 @@ public final class BluetoothAccessMonitor {
                     connected = connectionProof.connected();
                     if (!connectionProof.connectionReadKnown) {
                         releaseReader();
+                        sampling.reset();
                         reason = connectionProof.reason;
                     } else if (!connected) {
                         releaseReader();
+                        sampling.reset();
                     } else {
                         BluetoothRssiReader current = reader;
                         if (current == null) {
@@ -310,6 +318,7 @@ public final class BluetoothAccessMonitor {
                     break;
                 } catch (Throwable unavailable) {
                     releaseReader();
+                    sampling.reset();
                     reason = unavailable instanceof UnsupportedOperationException
                             ? "unsupported_platform" : "rssi_unavailable";
                 }
@@ -330,6 +339,7 @@ public final class BluetoothAccessMonitor {
                         connected = false;
                         reason = connectionProof.reason;
                         releaseReader();
+                        sampling.reset();
                     }
                 } catch (Exception | LinkageError unavailable) {
                     connectionProof = BluetoothConnectionStateReader.Snapshot.unknown(
@@ -338,16 +348,20 @@ public final class BluetoothAccessMonitor {
                     connected = false;
                     reason = connectionProof.reason;
                     releaseReader();
+                    sampling.reset();
                 }
                 try { reconnect.tick(address, connected); }
                 catch (Throwable unavailable) { reconnect.stopAfterUnexpectedFailure(unavailable); }
                 if (!running || Thread.currentThread().isInterrupted()) break;
                 reportDiagnostic(reason);
-                publish(raw, connected, reason, observedAtElapsedMs, connectionProof);
-                // Include native checks and reporting in both sample budgets.
-                // Connected phones need fresh samples for approach confirmation;
-                // disconnected recovery retains its shared three-second spacing.
-                long intervalMs = connected ? CONNECTED_INTERVAL_MS
+                publish(raw, connected, reason, observedAtElapsedMs, connectionProof, radio);
+                // Keep 1 Hz while the phone is near or in the transition band so
+                // arrival confirmation remains snappy. Once two consecutive RSSI
+                // readings are comfortably beyond the Away threshold, sample
+                // every three seconds instead. A missing RSSI also uses the
+                // slower retry cadence.
+                // Disconnected recovery retains its existing shared three-second spacing.
+                long intervalMs = connected ? sampling.nextIntervalMs(raw, awayThreshold)
                         : BluetoothPhoneReconnectController.RETRY_INTERVAL_MS;
                 long sleepMs = Math.max(100, intervalMs
                         - (SystemClock.elapsedRealtime() - cycleStartedMs));
@@ -379,10 +393,9 @@ public final class BluetoothAccessMonitor {
     }
 
     private void publish(Integer raw, boolean connected, String reason, long observedAtElapsedMs,
-            BluetoothConnectionStateReader.Snapshot connectionProof) {
+            BluetoothConnectionStateReader.Snapshot connectionProof, JSONObject radio) {
         HttpURLConnection connection = null;
         try {
-            JSONObject radio = SharedBluetoothKeepAliveController.runtime(context);
             JSONObject observation = new JSONObject().put("command", "remoteAccessObservation")
                     .put("instanceId", instanceId).put("observationSequence", ++observationSequence)
                     .put("revision", config.optLong("revision")).put("deviceAddress", address)

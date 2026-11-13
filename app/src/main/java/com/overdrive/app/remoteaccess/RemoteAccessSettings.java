@@ -137,8 +137,9 @@ public final class RemoteAccessSettings {
                     .put(KEY_FOB_LOCK_SAMPLES_KEY, KEY_FOB_LOCK_SAMPLES_DEFAULT)
                     .put(LOCK_WAITS_FOR_KEY_ABSENCE_KEY, LOCK_WAITS_FOR_KEY_ABSENCE_DEFAULT)
                     .put("nearThreshold", -12).put("awayThreshold", -24)
-                    // 18 Oct snappy defaults: a 1 Hz collector delivers the two confirming readings
-                    // (ProximityEvaluator.MIN_CONFIRMING_SAMPLES) inside these windows.
+                    // 18 Oct snappy defaults: the collector keeps 1 Hz near/in the transition band
+                    // so arrival confirmation gets two readings inside these windows. Clearly-away
+                    // phones may use a 3 s cadence, which still fits the departure window and lease.
                     .put("windowMs", 6000).put("dwellMs", 2000).put("staleMs", 5000)
                     .put("nearWindowMs", 2000).put("nearDwellMs", 1000)
                     .put("cooldownMs", 10000).put("keepBluetoothOn", false)
