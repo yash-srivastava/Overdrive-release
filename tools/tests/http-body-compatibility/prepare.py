@@ -67,7 +67,7 @@ public class HttpServer {
  void handleWebSocketUpgrade(Socket socket,String key,boolean decoder,boolean tunnel) { throw new AssertionError("No WebSocket in this test"); }
 '''
     write("com/overdrive/app/server/HttpServer.java", header + "\n".join(methods) + "\n}\n")
-    for name in ("AuthMiddleware", "HttpResponse", "GenAiRequestSecurity"):
+    for name in ("AuthMiddleware", "HttpResponse", "GenAiRequestSecurity", "HttpRequestHead"):
         content = (source / (name + ".java")).read_text()
         write("com/overdrive/app/server/" + name + ".java", content)
         records.append({"file": name + ".java", "whole_file": True,

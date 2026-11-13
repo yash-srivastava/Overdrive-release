@@ -13,6 +13,7 @@ import com.overdrive.app.surveillance.HardwareEventRecorderGpu;
 
 import org.json.JSONObject;
 
+import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
@@ -532,15 +533,17 @@ public class HttpServer {
     }
 
     private void handleClient(Socket client) {
+        OutputStream out = null;
         try {
             client.setSoTimeout(15000);
-            // Force UTF-8 so the body byte-count loop below is deterministic.
-            // The platform default on Android is UTF-8 anyway, but pinning it
-            // here removes the implicit dependency on the JVM property.
-            BufferedReader reader = new BufferedReader(new InputStreamReader(client.getInputStream(), "UTF-8"));
-            OutputStream out = new BufferedOutputStream(client.getOutputStream());
+            // Read network-controlled request lines/headers as bounded bytes,
+            // without letting BufferedReader.readLine() allocate indefinitely.
+            // Reuse this same stream for the body: no header-byte read-ahead is lost.
+            BufferedInputStream input = new BufferedInputStream(client.getInputStream(), 8192);
+            HttpRequestHead head = new HttpRequestHead(input);
+            out = new BufferedOutputStream(client.getOutputStream());
 
-            String requestLine = reader.readLine();
+            String requestLine = head.readRequestLine();
             if (requestLine == null) {
                 client.close();
                 return;
@@ -565,7 +568,7 @@ public class HttpServer {
                     return;
                 }
                 hasProxyProtocol = true;
-                requestLine = reader.readLine();
+                requestLine = head.readRequestLine();
                 if (requestLine == null) {
                     client.close();
                     return;
@@ -593,7 +596,7 @@ public class HttpServer {
 
             // Parse headers
             String line;
-            int contentLength = 0;
+            HttpRequestHead.Framing framing = new HttpRequestHead.Framing();
             String websocketKey = null;
             String upgradeHeader = null;
             String websocketProtocolHeader = null;
@@ -617,11 +620,10 @@ public class HttpServer {
             // X-Forwarded-Host. Captured here so isPwaOrigin can match it.
             String forwardedHostHeader = null;
 
-            while ((line = reader.readLine()) != null && !line.isEmpty()) {
-                String lower = line.toLowerCase();
-                if (lower.startsWith("content-length:")) {
-                    contentLength = Integer.parseInt(line.substring(15).trim());
-                } else if (lower.startsWith("sec-websocket-key:")) {
+            while (!(line = head.readHeaderLine()).isEmpty()) {
+                framing.accept(line);
+                String lower = line.toLowerCase(java.util.Locale.ROOT);
+                if (lower.startsWith("sec-websocket-key:")) {
                     websocketKey = line.substring(18).trim();
                 } else if (lower.startsWith("upgrade:")) {
                     upgradeHeader = line.substring(8).trim();
@@ -679,58 +681,17 @@ public class HttpServer {
                 }
             }
             
-            // Read POST body if present
-            // SOTA: Loop read for large payloads (e.g., base64 image uploads)
-            // BufferedReader.read() may return fewer chars than requested in a single call
-            // Default hard cap 16 MB — the largest legitimate generic payload is a
-            // base64-encoded 8 MB asset (~10.7 MB). Above this we 413 instead of
-            // letting an attacker allocate arbitrary heap on the daemon process.
-            //
-            // EXCEPTIONS:
-            // - Backup imports allow 32 MB for trip-history bundles.
-            // - The audio-library upload accepts short video clips (48 MB max,
-            // see AudioApiHandler.MAX_AUDIO_BYTES) as a base64 JSON body (~64 MB) — raise
-            // the cap to 72 MB for JUST that one endpoint so a legitimate clip isn't
-            // pre-rejected here, while every other endpoint keeps the tight 16 MB cap.
-            // The body is still buffered then decoded (peak ~200 MB transient for a
-            // 48 MB clip), which is safe on this head unit; a materially larger limit
-            // would require a stream-to-disk upload rewrite rather than this bump.
+            int contentLength = framing.contentLength();
+            // Validate the requested allocation before consuming any body bytes.
+            // The decoder reads at most Content-Length raw bytes and handles
+            // multi-byte UTF-8 across chunk boundaries without re-encoding each
+            // character chunk to guess how many wire bytes were consumed.
             final int maxBodyBytes = maxBodyBytesForRequestLine(requestLine);
-            String body = null;
             if (contentLength > maxBodyBytes) {
                 HttpResponse.sendError(out, 413, "Payload too large");
-                client.close();
                 return;
             }
-            if (contentLength > 0) {
-                // Content-Length is in BYTES per RFC 7230. BufferedReader is a
-                // character stream — UTF-8 multi-byte chars (e.g. "₹" = U+20B9
-                // = 3 bytes but 1 char) decode 1:1 into Java chars, so reading
-                // `contentLength` chars on a body containing non-ASCII would
-                // block forever waiting for chars that will never come (the
-                // browser already sent the full byte count, but it represents
-                // fewer chars). Loop until the UTF-8 byte count of what we've
-                // accumulated equals the declared Content-Length.
-                //
-                // Headers are guaranteed ASCII (HTTP/1.1 spec) so the
-                // BufferedReader.readLine() loop above is unaffected.
-                int CHUNK = Math.min(contentLength, 4096);
-                char[] bodyChars = new char[CHUNK];
-                // Reserve only the bounded read chunk. Content-Length is untrusted;
-                // let the accumulator grow as body characters actually arrive.
-                StringBuilder sb = new StringBuilder(CHUNK);
-                int bytesAccumulated = 0;
-                while (bytesAccumulated < contentLength) {
-                    int read = reader.read(bodyChars, 0, CHUNK);
-                    if (read == -1) break;  // EOF
-                    sb.append(bodyChars, 0, read);
-                    // Encode just the chars read this iteration to count their
-                    // UTF-8 byte length. Cheaper than re-encoding the whole
-                    // accumulator each tick.
-                    bytesAccumulated += new String(bodyChars, 0, read).getBytes("UTF-8").length;
-                }
-                body = sb.toString();
-            }
+            String body = HttpRequestHead.readUtf8Body(input, contentLength);
 
             String[] parts = requestLine.split(" ");
             if (parts.length < 2) {
@@ -1116,6 +1077,13 @@ public class HttpServer {
                 HttpResponse.sendHtml(out, "<html><head><meta http-equiv='refresh' content='0;url=/'></head></html>");
             } else {
                 HttpResponse.sendError(out, 404, "Not Found");
+            }
+        } catch (HttpRequestHead.HeadException e) {
+            // Fail before authentication/routing: do not echo attacker-supplied
+            // header values or request targets in this response.
+            if (out != null) {
+                try { HttpResponse.sendError(out, e.status, e.getMessage()); }
+                catch (Exception ignored) { /* peer may have disconnected */ }
             }
         } catch (Exception e) {
             CameraDaemon.log("HTTP error: " + e.getMessage());
