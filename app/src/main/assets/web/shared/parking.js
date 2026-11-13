@@ -17,7 +17,7 @@
     var PAGE = 24;
     var state = {
         status: null, days: 30, offset: 0, total: 0, loading: false,
-        sessions: [], blobs: [], listRequest: 0
+        sessions: [], blobs: [], listRequest: 0, detail: null
     };
 
     // ---------------------------------------------------------------- i18n / utils
@@ -49,7 +49,7 @@
         'parking.side_front': 'Front', 'parking.side_right': 'Right', 'parking.side_rear': 'Rear', 'parking.side_left': 'Left',
         'parking.status_present_on_arrival': 'Already there', 'parking.status_arrived': 'Arrived', 'parking.status_departed': 'Left',
         'parking.status_still_there': 'Still there', 'parking.status_left_unknown': 'Left (time unknown)', 'parking.status_passed': 'Passed close',
-        'parking.arrived_at': 'Arrived {t}', 'parking.left_at': 'Left {t}', 'parking.last_seen': 'Last seen {t}', 'parking.clip': 'clip',
+        'parking.arrived_at': 'Arrived {t}', 'parking.left_at': 'Left {t}', 'parking.last_seen': 'Last seen {t}', 'parking.clip': 'clip', 'parking.clip_unavailable': 'This recording is unavailable.',
         'parking.events': 'Sentry events', 'parking.no_events': 'No sentry events during this session.', 'parking.open_events': 'Recordings',
         'parking.delete': 'Delete session', 'parking.delete_confirm': 'Delete this session, its stills and frames?', 'parking.deleted': 'Session deleted',
         'parking.delete_failed': 'Could not delete (open session?)', 'parking.enabled_toast': 'Parking Intelligence turned on',
@@ -381,6 +381,7 @@
         var detail = $('pkDetailView');
         detail.classList.remove('active');
         detail.innerHTML = '';
+        state.detail = null;
         revokeAll();
         fetch('/api/parking/status', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (st) {
             state.status = st;
@@ -405,7 +406,7 @@
         try { window.scrollTo(0, 0); } catch (e) { /* ignore */ }
         fetch('/api/parking/sessions/' + encodeURIComponent(id), { cache: 'no-store' })
             .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
-            .then(function (d) { renderDetail(d); })
+            .then(function (d) { state.detail = d; renderDetail(d); })
             .catch(function () { view.innerHTML = detailHeader(null) + '<div class="empty-state"><div class="empty-title">' + esc(t('parking.no_sessions_title')) + '</div></div>'; hydrateImages(view); });
         if (!state.status) {
             fetch('/api/parking/status', { cache: 'no-store' }).then(function (r) { return r.json(); })
@@ -516,7 +517,42 @@
         }
     }
     function clipLink(name) {
-        return name ? ' · <a href="events.html?file=' + encodeURIComponent(name) + '">' + esc(t('parking.clip')) + '</a>' : '';
+        if (!validClipFilename(name)) return '';
+        return ' · <a href="#" data-parking-clip="' + esc(name) + '">' + esc(t('parking.clip')) + '</a>';
+    }
+
+    function validClipFilename(name) {
+        return typeof name === 'string' && name.length <= 255 &&
+            /^[A-Za-z0-9][A-Za-z0-9_.-]{0,250}\.mp4$/i.test(name);
+    }
+
+    function playClip(filename) {
+        if (!validClipFilename(filename)) {
+            toast(t('parking.clip_unavailable'), 'error');
+            return;
+        }
+        var recordings = state.detail && state.detail.events ? state.detail.events : [];
+        var recording = null;
+        for (var i = 0; i < recordings.length; i++) {
+            if (recordings[i] && recordings[i].filename === filename) {
+                recording = recordings[i];
+                break;
+            }
+        }
+        // Neighbour clips can be older/un-stamped recordings absent from the
+        // session's Sentry query. The legacy filename route still streams them.
+        if (!recording) {
+            recording = {
+                filename: filename,
+                videoUrl: '/video/' + filename,
+                eventUrl: '/api/events/' + filename,
+                dateFormatted: '', timeFormatted: '', sizeFormatted: '', watched: true
+            };
+        }
+        if (!window.BYD || !BYD.events || typeof BYD.events.playExternalRecording !== 'function' ||
+                !BYD.events.playExternalRecording(recording)) {
+            toast(t('parking.clip_unavailable'), 'error');
+        }
     }
     function neighbourRow(n, sessionId) {
         var status = (n.status || '').toLowerCase();
@@ -570,7 +606,7 @@
                 if (r.bikeCount) counts.push(countGlyph('bike', t('parking.bike'), r.bikeCount));
                 if (r.animalCount) counts.push(countGlyph('paw', t('parking.animal'), r.animalCount));
                 var cams = r.cameras ? String(r.cameras).split(',').map(function (c) { return t('parking.side_' + c); }).join(' · ') : '';
-                return '<a class="pk-event" href="events.html?file=' + encodeURIComponent(r.filename || '') + '">' +
+                return '<a class="pk-event" href="#" data-parking-clip="' + esc(r.filename || '') + '">' +
                     '<div class="pk-ev-thumb"' + (thumb ? ' data-img="' + esc(thumb) + '"' : '') + '></div>' +
                     '<div class="pk-ev-main"><div class="pk-ev-title">' + esc(fmtTime(r.timestamp)) + sev + '</div>' +
                     '<div class="pk-ev-sub">' + counts.join('') + (cams ? (counts.length ? '· ' : '') + esc(cams) : '') + '</div></div></a>';
@@ -604,12 +640,33 @@
     // ---------------------------------------------------------------- routing
 
     function route() {
+        var modal = $('videoModal');
+        if (modal && modal.classList.contains('active') && window.BYD && BYD.events) {
+            BYD.events.closeVideo();
+        }
         var m = /^#\/session\/([A-Za-z0-9_\-]+)/.exec(location.hash || '');
         if (m) showDetail(m[1]); else showList();
     }
 
     window.Parking = {
         init: function () {
+            if (window.BYD && BYD.events && typeof BYD.events.initPlayer === 'function') {
+                BYD.events.initPlayer();
+            }
+            var detailView = $('pkDetailView');
+            if (detailView && !detailView._parkingClipHandler) {
+                detailView.addEventListener('click', function (e) {
+                    var target = e.target;
+                    while (target && target !== detailView && !(target.getAttribute && target.getAttribute('data-parking-clip'))) {
+                        target = target.parentNode;
+                    }
+                    if (!target || target === detailView) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    playClip(target.getAttribute('data-parking-clip'));
+                });
+                detailView._parkingClipHandler = true;
+            }
             window.addEventListener('hashchange', route);
             // Switching bottom tabs while in the detail drill-in returns to the list.
             document.addEventListener('ot-tabs:active-changed', function () {
@@ -643,6 +700,7 @@
                     .catch(function () { /* server sleeps while parked (onOnly) — keep the last render */ });
             }, 45000);
         },
+        playClip: playClip,
         quickFilter: function (days, btn) {
             state.days = days;
             var tabs = document.querySelectorAll('.filter-tab');

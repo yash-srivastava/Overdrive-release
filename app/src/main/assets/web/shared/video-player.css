@@ -1,0 +1,886 @@
+/* Shared Events video player styles. Keep this player surface identical on events.html and parking.html. */
+        /* Player (mock .player): a centred panel on wide screens, a bottom sheet on phones. */
+        .video-modal {
+            position: fixed;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            left: 0;
+            /* One dark scrim in both themes, as in the mock. */
+            background: rgba(0, 0, 0, 0.75);
+            /* Above the body-level theme FAB (z-index 9000 in theme.js).
+               Keeps the floating theme picker from sitting on top of the
+               player on PWA / external mobile browsers. The Android
+               WebView path doesn't render the FAB at all (theme.js
+               opt-out), so this is purely a PWA / desktop concern. */
+            z-index: 10000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        /* Belt-and-suspenders: while the video modal is open, also fully
+           hide the body-level theme FAB. The z-index bump above already
+           handles stacking, but on iOS Safari the native fullscreen API
+           creates a top-layer subtree that excludes body-level fixed
+           elements unless they're descendants — meaning the FAB would
+           re-appear inside the fullscreen world. Hiding via a class on
+           <html> is the universal off-switch. */
+        html.video-modal-open #bydThemePicker {
+            display: none !important;
+        }
+
+        .video-modal.active {
+            display: flex;
+        }
+
+        .video-container {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            max-width: 960px;
+            max-height: 100%;
+            /* Scrolls rather than squeezing the video when the panel cannot fit. */
+            overflow-x: hidden;
+            overflow-y: auto;
+            /* Shows as bands beside a video narrower than the panel. */
+            background: #000;
+            border-radius: var(--radius-2xl);
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+            animation: popIn 0.2s ease;
+        }
+        @media (min-width: 1600px) {
+            .video-container { max-width: 1200px; }
+        }
+
+        /* ====================================================================
+           Fullscreen state.
+           Applied via the Fullscreen API on .video-container; the
+           :fullscreen pseudo-class catches the browser-driven case and
+           .is-fullscreen is the manual fallback for WebViews without
+           the API. Layout rules are identical for both paths.
+
+           Key constraints:
+             - Container must escape the modal's 16/20px padding, so we
+               position:fixed inset:0 (the API path does this for free,
+               but the fallback needs it explicitly).
+             - The video frame keeps its source aspect-ratio (set inline
+               by events.js on loadedmetadata) so quadrant-corner zoom
+               still has no internal letterbox to surface. We size it to
+               the LARGEST box that fits the available viewport while
+               preserving that aspect — width:100% + height:auto + a
+               max-height tied to the column's remaining slot lets the
+               browser pick this box automatically.
+             - .video-details is hidden in fullscreen (its info is
+               redundant with the title in the header) to maximize the
+               area available for the video itself.
+           ==================================================================== */
+        .video-container:fullscreen,
+        .video-container:-webkit-full-screen,
+        .video-container.is-fullscreen {
+            position: fixed;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            height: calc(var(--vh, 1vh) * 100);
+            max-width: 100vw;
+            max-height: 100vh;
+            max-height: calc(var(--vh, 1vh) * 100);
+            overflow: hidden;
+            border-radius: 0;
+            background: #000;
+            box-shadow: none;
+            z-index: 2000;
+            /* Push the video player block to fill the remaining space
+               between header and transport row, and center its contents
+               horizontally so an aspect-mismatched wrapper sits centered
+               in the viewport instead of pinned left. */
+            justify-content: flex-start;
+            align-items: stretch;
+        }
+
+        /* The video frame: fill width AND grow vertically to consume
+           whatever the header + transport leave behind, while honoring
+           the source aspect-ratio set inline by events.js. The browser
+           reconciles aspect-ratio + max-height by shrinking the wrapper
+           on whichever axis hits its bound first — exactly the
+           "fit-largest-box" behavior we want.
+
+           min-height:0 is the standard flex-column escape so the wrapper
+           can actually be smaller than its content's intrinsic min size. */
+        .video-container:fullscreen .video-player,
+        .video-container:-webkit-full-screen .video-player,
+        .video-container.is-fullscreen .video-player {
+            flex: 1 1 auto;
+            min-height: 0;
+            width: auto;
+            max-width: 100%;
+            max-height: 100%;
+            margin: auto;
+            align-self: center;
+        }
+
+        /* Header + transport in fullscreen: keep them, but hide the
+           details meta block (date/time/size + Download). The header
+           shows the title and the close button is reachable; the
+           transport is the primary scrub surface. */
+        .video-container:fullscreen .video-details,
+        .video-container:-webkit-full-screen .video-details,
+        .video-container.is-fullscreen .video-details {
+            display: none;
+        }
+
+        /* In fullscreen the header floats over the video as a transparent
+           gradient strip — gives back the vertical space the bordered
+           header would have eaten while keeping the title + close button
+           legible against bright frames. The status-bar / notch insets
+           are honored explicitly (env(safe-area-inset-top)) so the close
+           button never lands underneath the system UI on mobile. */
+        /* Fullscreen header: a FULL-width transparent strip whose only
+           job is to be the swipe-drag-to-close hit zone (binding lives
+           on .video-header in events.js). Title + close are positioned
+           absolutely OUTSIDE the flex layout so the quadrant pill on
+           the right never has to share width budget with them — that
+           was compressing the close button on narrow phones.
+
+           Layout in fullscreen:
+              [X-FAB | title …]          …          [quadrant pill]
+              ←——————————————————————————————————————————————→
+                          (drag-to-close strip)
+        */
+        .video-container:fullscreen .video-header,
+        .video-container:-webkit-full-screen .video-header,
+        .video-container.is-fullscreen .video-header {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 10;
+            background: transparent;
+            border-bottom: none;
+            /* Match the visual safe-area inset so the strip is tall
+               enough to comfortably grab on phones with notches. The
+               actual interactive children re-anchor below. */
+            height: calc(env(safe-area-inset-top, 0px) + 64px);
+            padding: 0;
+            display: block;
+        }
+        /* Close button → top-left FAB. Lifts out of the flex flow so it
+           keeps its 44 × 44 footprint regardless of what's around it. */
+        .video-container:fullscreen .video-close,
+        .video-container:-webkit-full-screen .video-close,
+        .video-container.is-fullscreen .video-close {
+            position: absolute;
+            top: calc(env(safe-area-inset-top, 0px) + 14px);
+            left: calc(env(safe-area-inset-left, 0px) + 12px);
+            width: 44px;
+            height: 44px;
+            border-radius: 22px;
+            background: rgba(0, 0, 0, 0.55);
+            color: #fff;
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            flex-shrink: 0;
+            margin: 0;
+            z-index: 21;
+        }
+        /* Title sits to the right of the close FAB and ellipsizes if
+           it'd run into the quadrant pill on the opposite side. Right
+           offset accounts for: safe-area-right + bar width + gutter. */
+        .video-container:fullscreen .video-title,
+        .video-container:-webkit-full-screen .video-title,
+        .video-container.is-fullscreen .video-title {
+            position: absolute;
+            top: calc(env(safe-area-inset-top, 0px) + 22px);
+            left: calc(env(safe-area-inset-left, 0px) + 68px);
+            right: calc(env(safe-area-inset-right, 0px) + 280px);
+            color: #fff;
+            text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            pointer-events: none;
+        }
+        /* Visual gradient strip — separate pseudo so it spans the whole
+           top edge for legibility but never intercepts pointer events
+           aimed at the quadrant bar. */
+        .video-container:fullscreen::after,
+        .video-container:-webkit-full-screen::after,
+        .video-container.is-fullscreen::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: calc(env(safe-area-inset-top, 0px) + 56px);
+            background: linear-gradient(to bottom, rgba(0,0,0,0.6), rgba(0,0,0,0));
+            z-index: 9;
+            pointer-events: none;
+        }
+
+        /* (Close button + title styling for fullscreen lives in the
+           absolutely-positioned rules above — those rules are more
+           specific layout-wise so they handle look + position together,
+           which is why this older "just chrome" block is gone.) */
+
+        /* Transport row in fullscreen also clears its safe-area inset so
+           the time text + scrubber sit above any home-indicator gesture
+           bar. Slight transparency lets the video peek through. */
+        .video-container:fullscreen .video-transport,
+        .video-container:-webkit-full-screen .video-transport,
+        .video-container.is-fullscreen .video-transport {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 10;
+            background: linear-gradient(to top, rgba(0,0,0,0.75), rgba(0,0,0,0));
+            padding-bottom: env(safe-area-inset-bottom, 0px);
+        }
+        .video-container:fullscreen .video-controls,
+        .video-container:-webkit-full-screen .video-controls,
+        .video-container.is-fullscreen .video-controls,
+        .video-container:fullscreen .timeline-legend,
+        .video-container:-webkit-full-screen .timeline-legend,
+        .video-container.is-fullscreen .timeline-legend {
+            border-top: none;
+            color: #fff;
+        }
+        .video-container:fullscreen .video-ctrl-btn,
+        .video-container:-webkit-full-screen .video-ctrl-btn,
+        .video-container.is-fullscreen .video-ctrl-btn,
+        .video-container:fullscreen .video-time,
+        .video-container:-webkit-full-screen .video-time,
+        .video-container.is-fullscreen .video-time,
+        .video-container:fullscreen .legend-item,
+        .video-container:-webkit-full-screen .legend-item,
+        .video-container.is-fullscreen .legend-item {
+            color: #fff;
+        }
+        .video-container:fullscreen .timeline-track,
+        .video-container:-webkit-full-screen .timeline-track,
+        .video-container.is-fullscreen .timeline-track {
+            background: rgba(255, 255, 255, 0.28);
+        }
+        /* The sheet grab handle is for the panel only; fullscreen has its own. */
+        .video-container:fullscreen .video-header::before,
+        .video-container:-webkit-full-screen .video-header::before,
+        .video-container.is-fullscreen .video-header::before {
+            display: none;
+        }
+
+        /* Swipe-down-to-dismiss visual: the container is translated by
+           events.js while the gesture is active. Backdrop fades with the
+           drag to reinforce "dropping the surface". */
+        .video-modal.dragging .video-container {
+            transition: none !important;
+        }
+        .video-modal {
+            transition: background 240ms cubic-bezier(0.05, 0.7, 0.1, 1);
+        }
+        .video-container {
+            transition: transform 320ms cubic-bezier(0.2, 0.9, 0.3, 1);
+        }
+        /* Pull-handle affordance — only visible in fullscreen (in-modal
+           the X button + drag-anywhere already telegraph dismissal). */
+        .video-container:fullscreen::before,
+        .video-container:-webkit-full-screen::before,
+        .video-container.is-fullscreen::before {
+            content: "";
+            position: absolute;
+            top: calc(env(safe-area-inset-top, 0px) + 6px);
+            left: 50%;
+            transform: translateX(-50%);
+            width: 38px;
+            height: 4px;
+            border-radius: 2px;
+            background: rgba(255, 255, 255, 0.5);
+            z-index: 11;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 200ms ease;
+        }
+        .video-container:fullscreen.show-handle::before,
+        .video-container:-webkit-full-screen.show-handle::before,
+        .video-container.is-fullscreen.show-handle::before {
+            opacity: 1;
+        }
+
+        /* Header: title and close. Also the swipe-down-to-close zone (events.js), so touch drags belong to it. */
+        .video-header {
+            position: relative;
+            display: flex;
+            flex: 0 0 auto;
+            align-items: center;
+            min-width: 0;
+            padding: 12px 12px 12px 20px;
+            background: var(--tile);
+            touch-action: none;
+        }
+        [dir="rtl"] .video-header { padding: 12px 20px 12px 12px; }
+
+        .video-title {
+            flex: 1 1 auto;
+            min-width: 0;
+            overflow: hidden;
+            font-size: var(--fs-title);
+            font-weight: 600;
+            line-height: 1.3;
+            color: var(--on-surface);
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+
+        .video-close {
+            flex: 0 0 auto;
+            width: 44px;
+            height: 44px;
+            margin-left: 12px;
+            border-radius: 50%;
+            background: var(--well);
+            color: var(--on-surface-variant);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color var(--duration-fast) var(--easing-standard), color var(--duration-fast) var(--easing-standard);
+            border: none;
+            cursor: pointer;
+        }
+        [dir="rtl"] .video-close { margin-left: 0; margin-right: 12px; }
+
+        @media (hover: hover) {
+            .video-close:hover {
+                background: var(--well-2);
+                color: var(--on-surface);
+            }
+        }
+
+        /* Phones: a bottom sheet (mock player on phones) with a grab handle on the header, which is also the swipe-down zone. */
+        @media (max-width: 768px) {
+            .video-modal {
+                align-items: flex-end;
+                padding: 24px 0 0;
+            }
+
+            .video-container {
+                max-width: 100%;
+                border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
+                box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.4);
+                animation: slideUp 0.3s ease;
+            }
+
+            .video-modal .video-header { padding-top: 22px; }
+            .video-header::before {
+                content: "";
+                position: absolute;
+                top: 8px;
+                left: 50%;
+                width: 36px;
+                height: 4px;
+                margin-left: -18px;
+                border-radius: 2px;
+                background: var(--outline-variant);
+                pointer-events: none;
+            }
+        }
+
+
+        .video-player {
+            flex: 0 0 auto;
+            width: 100%;
+            margin: 0 auto;
+            /* Chrome 58 has no aspect-ratio support. This percentage-height
+               fallback is disabled below on modern engines. */
+            height: 0;
+            padding-bottom: 56.25%;
+            /* Initial aspect — replaced at runtime by events.js once
+               loadedmetadata fires (videoPlayerWrap.style.aspectRatio is
+               set to the actual mosaic dims, typically 4/3 for Seal at
+               2560×1920 or 16/9 for Tang at 2560×1440). Matching the
+               wrapper aspect to the source is what eliminates the
+               letterbox bands at the corners — without it, a 4:3 mosaic
+               in a 16:9 frame pillarboxes, and zooming 2x into a corner
+               surfaces half-a-pillarbox of black space. */
+            aspect-ratio: 16/9;
+            background: black;
+            /* Quadrant zoom is implemented as a CSS transform on the
+               <video> element (scale + transform-origin). overflow:hidden
+               crops the off-screen quadrants instead of overflowing the
+               modal layout.
+
+               IMPORTANT: ALL transport chrome (scrubber, time text,
+               play/pause, mute) lives OUTSIDE this element — see
+               .video-transport below. The native <video controls> overlay
+               cannot be used here: it's painted as part of the video
+               element, so a transform: scale(2) on <video> drags the
+               native control bar with it and pushes the timestamp +
+               native scrubber off-screen on every quadrant zoom. We render
+               our own chrome and leave <video> with only the surface. */
+            position: relative;
+            overflow: hidden;
+        }
+
+        @supports (aspect-ratio: 1 / 1) {
+            /* Fit the frame to the screen height: as wide as the panel allows,
+               but no wider than the height left over by the player chrome times
+               the clip's aspect (--video-ar, set by events.js on loadedmetadata),
+               so the source aspect never gets stretched. Black shows beside it. */
+            .video-player {
+                height: auto;
+                padding-bottom: 0;
+                max-width: calc((100vh - 304px) * 1.7778);
+                max-width: calc((var(--vh, 1vh) * 100 - 304px) * var(--video-ar, 1.7778));
+            }
+            @media (max-width: 768px) {
+                .video-player {
+                    max-width: calc((100vh - 336px) * 1.7778);
+                    max-width: calc((var(--vh, 1vh) * 100 - 336px) * var(--video-ar, 1.7778));
+                }
+            }
+            /* Short screens (phone landscape): keep the header and transport in view; the details scroll. */
+            @media (max-height: 560px) {
+                .video-player {
+                    max-width: calc((100vh - 222px) * 1.7778);
+                    max-width: calc((var(--vh, 1vh) * 100 - 222px) * var(--video-ar, 1.7778));
+                }
+            }
+            /* Square calendar days (the date picker); Chrome 58 keeps min-height: 40px. */
+            .calendar-day { aspect-ratio: 1; }
+        }
+
+        .video-container:fullscreen .video-player,
+        .video-container:-webkit-full-screen .video-player,
+        .video-container.is-fullscreen .video-player {
+            height: auto;
+            padding-bottom: 0 !important;
+        }
+
+        .video-player video {
+            position: absolute;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+            /* `fill` (not `cover`/`contain`) is intentional: the wrapper
+               aspect-ratio is set at runtime to match the mosaic exactly,
+               so a stretched fit IS pixel-correct — and it guarantees no
+               letterbox bands inside the wrapper. With `cover` the browser
+               can still letterbox by a hair if the wrapper aspect drifts
+               (sub-pixel rounding), and with `contain` the bands always
+               appear when the wrapper aspect doesn't match the source.
+               Setting wrapper aspect == source aspect + object-fit:fill
+               makes "fill the frame" deterministic. */
+            object-fit: fill;
+            /* Animate scale/translate when switching quadrants. Material 3
+               emphasized decelerate curve — same vocabulary as the native
+               player so the surfaces feel identical. */
+            transition: transform 240ms cubic-bezier(0.05, 0.7, 0.1, 1);
+            will-change: transform;
+            transform-origin: 50% 50%;
+            /* `manipulation` keeps the browser's pinch-to-zoom + double-tap-
+               to-zoom gestures from stealing the gesture stream — without
+               it, fast double-taps on a touch-only head unit map to "zoom
+               the page" and never reach our dblclick handler. Also skips
+               the legacy 300 ms tap-delay heuristic. */
+            touch-action: manipulation;
+            /* Click anywhere on the surface = toggle play/pause (since we
+               removed the native controls bar). cursor:pointer signals
+               affordance on desktop; touch devices ignore it harmlessly. */
+            cursor: pointer;
+        }
+
+        .video-player.zoom-front video { transform-origin: 0% 0%; transform: scale(2); }
+        .video-player.zoom-right video { transform-origin: 100% 0%; transform: scale(2); }
+        .video-player.zoom-rear  video { transform-origin: 0% 100%; transform: scale(2); }
+        .video-player.zoom-left  video { transform-origin: 100% 100%; transform: scale(2); }
+
+        /* Dashcam composition: front fills the top 70% band (full width);
+           left/rear/right tile the bottom 30% band in thirds. Three classes
+           → more specific than the standard .zoom-* rules above, so these win
+           when the wrap also carries the `dashcam` class (set per clip in
+           events.js from the sidecar `layout`). Mirrors the native
+           ZoomableVideoView.regionFor() rects. zoom-all stays identity. */
+        .video-player.dashcam.zoom-front video { transform-origin: 50% 0%;    transform: scaleY(1.42857); }
+        .video-player.dashcam.zoom-left  video { transform-origin: 0% 100%;   transform: scale(3, 3.33333); }
+        .video-player.dashcam.zoom-rear  video { transform-origin: 50% 100%;  transform: scale(3, 3.33333); }
+        .video-player.dashcam.zoom-right video { transform-origin: 100% 100%; transform: scale(3, 3.33333); }
+
+        /* Quadrant pill — floats over the video, top-right corner. Mirrors
+           the native player's selector chrome so the surfaces feel uniform.
+           Auto-hides with the rest of the controls when the user is just
+           watching (managed in events.js). */
+        .quadrant-bar {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            display: flex;
+            padding: 4px;
+            border-radius: 999px;
+            background: rgba(0, 0, 0, 0.65);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            /* Above the modal's video-header (z-index: auto inside the
+               flex column). Important for the fullscreen path too where
+               the header gradient pseudo sits at z:9 — bar must reliably
+               receive taps even when visually overlapping. */
+            z-index: 15;
+            /* Match the video transform's 240ms emphasized-decelerate so
+               chrome and surface settle on the same beat. */
+            transition: opacity 240ms cubic-bezier(0.05, 0.7, 0.1, 1),
+                        transform 240ms cubic-bezier(0.05, 0.7, 0.1, 1);
+        }
+        /* Auto-hide state — fades out + lifts slightly out of frame after
+           the player sits idle. Pointer events disabled so a stale tap
+           target doesn't intercept while the bar is invisible. Tapping
+           the video brings it back (events.js). */
+        .quadrant-bar.hidden {
+            opacity: 0;
+            transform: translateY(-6px);
+            pointer-events: none;
+        }
+
+        /* Fullscreen mobile fix: re-anchor the bar to the .video-container
+           so it sits at the screen's top-right (not the centered video
+           rect's top-right, which on aspect-mismatched viewports drifts
+           inward). Clear safe-area-top so the buttons never sit under
+           the notch / status bar. z-index 20 puts it above the header
+           gradient pseudo (z:9) and the header element itself (z:10). */
+        .video-container:fullscreen .quadrant-bar,
+        .video-container:-webkit-full-screen .quadrant-bar,
+        .video-container.is-fullscreen .quadrant-bar {
+            position: fixed;
+            top: calc(env(safe-area-inset-top, 0px) + 14px);
+            right: calc(env(safe-area-inset-right, 0px) + 12px);
+            z-index: 20;
+        }
+        .quadrant-bar button {
+            /* Touch-target sized to comfortably hit on the head unit. The
+               visual circle is 32 px (matches the icon's optical weight)
+               but the button itself is 44 px — Apple/MD3 minimum — so a
+               glove tap doesn't miss. Padding absorbs the extra area. */
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0.55;
+            transition: opacity 150ms ease, background 150ms ease;
+            padding: 0;
+            touch-action: manipulation;
+            /* Prevent iOS/Chrome touch grey-flash; we have our own
+               .active state styling that does the job legibly. */
+            -webkit-tap-highlight-color: transparent;
+        }
+        .quadrant-bar button + button { margin-left: 4px; }
+        [dir="rtl"] .quadrant-bar button + button { margin-left: 0; margin-right: 4px; }
+        .quadrant-bar button:hover { background: rgba(255, 255, 255, 0.1); }
+        .quadrant-bar button.active { opacity: 1; background: rgba(255, 255, 255, 0.18); }
+        .quadrant-bar svg { width: 18px; height: 18px; }
+        /* The 2x2 grid icon — cells are inline rects so we can use opacity
+           on the inactive cells for a glance-readable map. */
+        .quadrant-bar .qcell { fill: rgba(255, 255, 255, 0.45); }
+        .quadrant-bar .qcell.lit { fill: #FFFFFF; }
+        /* Two icon variants per button: q2x2 (standard mosaic map) and qdash
+           (dashcam map — full-width front band over three lower thirds). Show
+           the dashcam variant only when the open clip is a dashcam clip
+           (videoPlayerWrap gets .dashcam), so the glyph matches the layout-aware
+           zoom regions and each button maps to the right camera. */
+        .quadrant-bar .qdash { display: none; }
+        .video-player.dashcam .quadrant-bar .q2x2 { display: none; }
+        .video-player.dashcam .quadrant-bar .qdash { display: inline; }
+
+        /* Details (mock .player-info): date, time and size, then Download; wraps on narrow screens. */
+        .video-details {
+            display: flex;
+            flex: 0 0 auto;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 20px 14px;
+            padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+            background: var(--tile);
+        }
+
+        .video-meta {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            min-width: 0;
+            margin-right: 12px;
+            font-size: var(--fs-label);
+            font-variant-numeric: tabular-nums;
+            color: var(--on-surface-variant);
+        }
+        [dir="rtl"] .video-meta { margin-right: 0; margin-left: 12px; }
+
+        .video-meta span {
+            display: flex;
+            align-items: center;
+            margin: 4px 16px 4px 0;
+            white-space: nowrap;
+        }
+        [dir="rtl"] .video-meta span { margin: 4px 0 4px 16px; }
+        .video-meta svg { flex-shrink: 0; margin-right: 6px; }
+        [dir="rtl"] .video-meta svg { margin-right: 0; margin-left: 6px; }
+
+        /* Download: the mock's tonal button. */
+        .download-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 44px;
+            margin: 4px 0;
+            padding: 0 20px;
+            border-radius: var(--radius-full);
+            background: var(--well-2);
+            color: var(--on-surface);
+            font-size: var(--fs-label);
+            font-weight: 600;
+            white-space: nowrap;
+            transition: background-color var(--duration-fast) var(--easing-standard), transform var(--duration-fast) var(--easing-standard);
+            -webkit-tap-highlight-color: transparent;
+        }
+        .download-btn svg { flex-shrink: 0; margin-right: 8px; }
+        [dir="rtl"] .download-btn svg { margin-right: 0; margin-left: 8px; }
+        @media (hover: hover) {
+            .download-btn:hover { background-image: linear-gradient(var(--state-hover), var(--state-hover)); }
+        }
+
+        .download-btn:active {
+            transform: scale(0.97);
+        }
+
+        /* Loading Spinner */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+        }
+
+        /* Index-warming banner (built by events.js _showWarmingBanner). Reuses
+           .loading + .spinner but left-aligned and compact. */
+        .warming-banner { padding: 16px 12px; justify-content: flex-start; }
+        .warming-banner .spinner { width: 18px; height: 18px; border-width: 2px; flex: none; margin-right: 12px; }
+        .warming-banner-text { font-size: 13px; color: var(--text-secondary); }
+
+        .spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid var(--bg-elevated);
+            border-top-color: var(--brand-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* ====================================================================
+           Video transport — sits OUTSIDE the zooming .video-player surface so
+           none of these controls move when a quadrant transform fires. This
+           replaces the native <video controls> overlay (which can't be used
+           here because it scales with the video element).
+           ==================================================================== */
+        .video-transport {
+            flex: 0 0 auto;
+            display: flex;
+            flex-direction: column;
+            padding: 4px 12px 0;
+            background: var(--tile);
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* SOTA: Event Timeline Scrubber.
+           22 px tall touch target on the head unit; the visible track is the
+           inner 6 px stripe. This matches Material 3's "thin track, generous
+           tap area" pattern and YouTube's mobile player. */
+        .timeline-scrubber {
+            position: relative;
+            width: 100%;
+            height: 22px;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: none;
+        }
+
+        /* Inner visible stripe — centered vertically. Click/drag still
+           registers on the full 22 px parent, so users don't have to thread
+           a needle to seek. */
+        .timeline-track {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            height: 6px;
+            background: var(--well-2);
+            border-radius: 3px;
+            overflow: visible;
+        }
+
+        /* Watched-progress fill (always behind the markers so a contiguous
+           motion stripe still reads as motion, not "watched"). */
+        .timeline-progress {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            width: 0;
+            background: var(--primary);
+            border-radius: 3px;
+            pointer-events: none;
+            transition: width 0.08s linear;
+        }
+
+        .timeline-marker {
+            position: absolute;
+            /* Markers extend slightly above/below the track stripe so
+               event bands read as proper "highlights" on top of the
+               progress fill rather than a hairline within it. */
+            top: -3px;
+            bottom: -3px;
+            min-width: 2px;
+            border-radius: 2px;
+            pointer-events: none;
+        }
+
+        .timeline-marker.type-motion {
+            background: rgba(148, 163, 184, 0.6);
+        }
+
+        .timeline-marker.type-person {
+            background: rgba(239, 68, 68, 0.85);
+        }
+
+        .timeline-marker.type-car {
+            background: rgba(59, 130, 246, 0.85);
+        }
+
+        .timeline-marker.type-bike {
+            background: rgba(251, 146, 60, 0.85);
+        }
+
+        .timeline-marker.type-animal {
+            background: rgba(168, 85, 247, 0.85);
+        }
+
+        .timeline-playhead {
+            position: absolute;
+            top: 50%;
+            left: 0;
+            width: 14px;
+            height: 14px;
+            margin-left: -7px;
+            margin-top: -7px;
+            border-radius: 50%;
+            background: var(--primary);
+            pointer-events: none;
+            z-index: 3;
+            box-shadow: 0 0 0 4px var(--primary-soft), 0 1px 4px rgba(0, 0, 0, 0.3);
+            /* No transition during scrub — feels laggy. Re-enabled while
+               playing via .smooth so timeupdate's 4 Hz cadence interpolates
+               into a smooth crawl instead of stepping. */
+        }
+        .timeline-playhead.smooth { transition: left 0.25s linear; }
+        .timeline-scrubber.dragging .timeline-playhead { transform: scale(1.18); }
+
+        .timeline-legend {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            padding: 4px 0 0;
+        }
+
+        /* Transport row — play/pause + time + mute. Lives below the scrubber
+           and is never affected by the quadrant zoom. */
+        .video-controls {
+            display: flex;
+            align-items: center;
+            margin: 0 -6px;
+            padding: 2px 0 6px;
+        }
+        .video-controls > * + * { margin-left: 4px; }
+        [dir="rtl"] .video-controls > * + * { margin-left: 0; margin-right: 4px; }
+
+        .video-ctrl-btn {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            border: none;
+            background: transparent;
+            color: var(--on-surface);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+            transition: background 150ms ease;
+        }
+        @media (hover: hover) {
+            .video-ctrl-btn:hover { background: var(--state-hover); }
+        }
+        .video-ctrl-btn:active { background: var(--well); }
+        .video-ctrl-btn svg { width: 22px; height: 22px; }
+
+        .video-time {
+            font-size: var(--fs-label);
+            font-weight: 500;
+            color: var(--on-surface-variant);
+            white-space: nowrap;
+            padding: 0 4px;
+            font-variant-numeric: tabular-nums;
+        }
+        .video-time .sep { margin: 0 2px; opacity: 0.7; }
+        .video-time .dur { opacity: 0.7; }
+
+        /* Spacer pushes the mute button to the right edge of the row. */
+        .video-controls .spacer { flex: 1; }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            font-size: 11px;
+            color: var(--on-surface-variant);
+        }
+        .legend-item + .legend-item { margin-left: 12px; }
+        [dir="rtl"] .legend-item + .legend-item { margin-left: 0; margin-right: 12px; }
+
+        .legend-dot {
+            flex-shrink: 0;
+            width: 8px;
+            height: 8px;
+            margin-right: 4px;
+            border-radius: 2px;
+        }
+        [dir="rtl"] .legend-dot { margin-right: 0; margin-left: 4px; }
+
+        .legend-motion { background: rgba(148, 163, 184, 0.6); }
+        .legend-person { background: rgba(239, 68, 68, 0.85); }
+        .legend-car { background: rgba(59, 130, 246, 0.85); }
+        .legend-bike { background: rgba(251, 146, 60, 0.85); }
+        .legend-animal { background: rgba(168, 85, 247, 0.85); }
+
+
+/* Player entrance animation (formerly page-local to events.html). */
+@keyframes popIn {
+    from { transform: scale(0.95); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
