@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="dashboard_modern_updating">Обновляем данные автомобиля</string>
+    <string name="dashboard_modern_vehicle_unavailable">Данные автомобиля недоступны</string>
+    <string name="dashboard_modern_vehicle_connected">Автомобиль подключён</string>
+    <string name="dashboard_modern_battery">Аккумулятор</string>
+    <string name="dashboard_modern_range">Расчётный запас хода</string>
+    <string name="dashboard_modern_personalized_range">Запас хода с учётом ваших поездок</string>
+    <string name="dashboard_modern_vehicle_range">По данным автомобиля</string>
+    <string name="dashboard_modern_breakdown_ev">На электротяге %1$d %2$s</string>
+    <string name="dashboard_modern_breakdown_fuel">На топливе %1$d %2$s</string>
+    <string name="dashboard_modern_breakdown_fuel_pct">На топливе %1$d %2$s (%3$.0f%%)</string>
+    <string name="dashboard_modern_charging">Зарядка</string>
+    <string name="dashboard_modern_plugged_in">Кабель подключён</string>
+    <string name="dashboard_modern_charge_complete">Зарядка завершена</string>
+    <string name="dashboard_modern_charge_fault">Проверьте зарядку</string>
+    <string name="dashboard_modern_charge_power">%1$.1f кВт</string>
+    <string name="dashboard_modern_charge_power_estimated">~%1$.1f кВт</string>
+    <string name="dashboard_modern_charge_power_label">Мощность</string>
+    <string name="dashboard_modern_charge_eta_label">Осталось</string>
+    <string name="dashboard_modern_charge_session_label">Заряжено за сеанс</string>
+    <string name="dashboard_modern_charge_session">%1$.1f кВт·ч</string>
+    <string name="dashboard_modern_minutes">%1$d мин</string>
+    <string name="dashboard_modern_hours_minutes">%1$d ч %2$d мин</string>
+    <string name="dashboard_modern_storage_summary">Занято %1$s · Свободно %2$s</string>
+    <string name="dashboard_modern_storage_unavailable">Хранилище недоступно</string>
+    <string name="dashboard_modern_clips_today">Записей за сегодня: %1$d</string>
+    <string name="dashboard_modern_recordings_unavailable">Записи недоступны</string>
+    <string name="dashboard_modern_recent_activity">Последние события</string>
+    <string name="dashboard_modern_activity_loading">Загружаем последние события</string>
+    <string name="dashboard_modern_no_activity">Недавних событий нет</string>
+    <string name="dashboard_modern_activity_unavailable">Не удалось загрузить последние события</string>
+    <string name="dashboard_ai_insight_kicker">Сводка ИИ</string>
+    <string name="dashboard_ai_insight_default_title">Обзор автомобиля</string>
+    <string name="dashboard_ai_insight_open">Показать полную сводку ИИ</string>
+    <string name="dashboard_ai_insight_collapse">Свернуть сводку ИИ</string>
+    <string name="dashboard_modern_quick_actions">Быстрые действия</string>
+    <string name="dashboard_modern_remote_details">Сведения о подключении</string>
+    <string name="dashboard_modern_expand_remote">Показать сведения об удалённом доступе</string>
+    <string name="dashboard_modern_collapse_remote">Скрыть сведения об удалённом доступе</string>
+</resources>

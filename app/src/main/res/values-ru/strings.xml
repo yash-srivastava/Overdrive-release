@@ -66,9 +66,9 @@
     <string name="cd_step_completed">Шаг завершен</string>
     <string name="cd_permission_granted">Разрешение выдано</string>
     <!-- overlay_status -->
-    <string name="overlay_rec_inactive_label">REC</string>
-    <string name="overlay_trip_inactive_label">TRIP</string>
-    <string name="overlay_mic_inactive_label">MIC</string>
+    <string name="overlay_rec_inactive_label">ЗАП</string>
+    <string name="overlay_trip_inactive_label">ПОЕЗДКА</string>
+    <string name="overlay_mic_inactive_label">МИК</string>
     <!-- Quick-action chips revealed by tapping the REC pill: switch
          recording mode without opening the app. Short labels read fine
          cross-locale (matches existing REC/MIC/TRIP precedent), so
@@ -153,7 +153,7 @@
     <string name="camera_role_label">Назначение ракурсов</string>
     <string name="camera_candidate_previous">Предыдущие</string>
     <string name="camera_candidate_next">Далее</string>
-    <string name="camera_preview_unavailable">Пока не доступно предварительное просмотр. Попробуйте другого кандидата или обновьте, открыв диалог после запуска демона.</string>
+    <string name="camera_preview_unavailable">Предпросмотр пока недоступен. Попробуйте другой вариант или откройте это окно снова после перезапуска службы камер.</string>
     <string name="camera_mapping_save">Сохранить сопоставление</string>
     <string name="camera_mapping_clear">Очистить назначение</string>
     <string name="camera_mapping_saved">Сопоставление камер сохранено.</string>
@@ -162,7 +162,7 @@
     <string name="camera_mapping_summary_probing">Панорамный поток: автоматическое обнаружение / исследование наследия</string>
     <string name="camera_mapping_current_format">Текущее сопоставление: %1$s</string>
     <string name="camera_mapping_current_none">Текущее сопоставление: авто / по умолчанию</string>
-    <string name="camera_mapping_hint">OverDrive поддерживает традиционное поведение запуска по умолчанию, но теперь позволяет правильно калибровывать сливную панорамную ленту. Предусмотреть каждый сырый слитый слайд, отобразить логические 360-роли на слайд, который на самом деле показывает передний / правый / задний / левый на вашем автомобиле, и демон будет повторно использовать этот макет для записи, потоковой передачи и ИИ после перезапуска.</string>
+    <string name="camera_mapping_hint">По умолчанию OverDrive запускает камеры в прежнем режиме. Чтобы настроить круговой обзор, просмотрите каждый исходный фрагмент панорамы и укажите, какой ракурс он показывает: передний, правый, задний или левый. После перезапуска служба камер будет использовать эту схему для записи, трансляции и распознавания объектов.</string>
     <!-- fragment_dashboard -->
     <string name="dashboard_scan_to_connect">Сканировать для подключения</string>
     <string name="dashboard_qr_waiting">Ждём туннеля...</string>
@@ -199,17 +199,17 @@
     <string name="onboarding_done_short">Понятно</string>
     <!-- Step 0: authorize the daemon (system ADB popup) -->
     <string name="onboarding_authorize_title">Активируйте Overdrive</string>
-    <string name="onboarding_authorize_body">Overdrive runs your cameras through a small on-device helper. Android will ask once to allow USB debugging — tap <b>Allow</b> and check <b>Always allow from this device</b> so it stays on after every restart.</string>
+    <string name="onboarding_authorize_body">OverDrive использует фоновую службу для работы с камерами. Когда Android запросит разрешение на отладку по USB, отметьте «Всегда разрешать с этого компьютера» и нажмите «Разрешить». Разрешение сохранится после перезапуска.</string>
     <string name="onboarding_authorize_button">Разрешить доступ</string>
     <string name="onboarding_authorize_waiting_title">Ожидание разрешения…</string>
     <string name="onboarding_authorize_waiting_body">Принять всплывающее окно Android. Если вы его не увидите, может быть предоставлено — это будет продолжено самостоятельно.</string>
     <string name="onboarding_authorize_retry_title">Все еще не подключен</string>
     <string name="onboarding_authorize_retry_body">Помощник еще не запущен. Возможно, разрешение Android было отклонено. Попробуйте еще раз и не забудьте проверить <b>всегда разрешить</b>.</string>
     <string name="onboarding_authorize_retry_button">Попробовать еще раз</string>
-    <string name="onboarding_mode_title">Когда должно выполняться переключение?</string>
-    <string name="onboarding_mode_body">Выберите, как перегрузка ведет себя после отключения автомобиля.\n\n<b>On &amp; Off</b> держит наблюдение во время парковки — слежение и фоновый мониторинг активны, Таким образом, автомобиль тянет немного электроэнергии.\n\n<b>Только</b> полностью выключает перегрузку после выхода. Dashcam, поездки и зарядка всё ещё работают во время вождения, и при включении автомобиля все начинается автоматически. Вы можете изменить это в любое время в настройках.</string>
-    <string name="onboarding_mode_on_off_button">При &amp; выкл</string>
-    <string name="onboarding_mode_on_only_button">Только на</string>
+    <string name="onboarding_mode_title">Когда работает OverDrive?</string>
+    <string name="onboarding_mode_body">Выберите, что будет делать OverDrive после выключения автомобиля.\n\n<b>В движении и на стоянке</b> — охрана и фоновое наблюдение продолжают работать на стоянке и расходуют немного энергии.\n\n<b>Только при включённом автомобиле</b> — после выхода OverDrive полностью выключается. Видеорегистратор, журнал поездок и отслеживание зарядки снова заработают автоматически при включении автомобиля. Режим можно в любой момент изменить в настройках.</string>
+    <string name="onboarding_mode_on_off_button">В движении и на стоянке</string>
+    <string name="onboarding_mode_on_only_button">Только при включённом автомобиле</string>
     <!-- Camera mapping chapter -->
     <string name="onboarding_camera_step_label">Камера · шаг %1$d из %2$d</string>
     <string name="onboarding_camera_intro_title">Настройка камер</string>
@@ -248,10 +248,10 @@
     <string name="onboarding_dash_chips_body">Фишки вверх по топ-шоу, службам и вашей удаленной ссылке. Они сами обновляются — они не кнопки.</string>
     <string name="onboarding_dash_chips_body_land">Ваш живой статус — запись, сервисы и удаленная ссылка — здесь отображается самостоятельно.</string>
     <!-- Completion -->
-    <string name="onboarding_done_title">Cockpit готов</string>
-    <string name="onboarding_done_body">Камеры сопоставлены и настроены батареи. Нажмите \"Живой\", чтобы посмотреть ваши каналы — или откройте более широкие настройки в любое время.</string>
+    <string name="onboarding_done_title">Настройка завершена</string>
+    <string name="onboarding_done_body">Камеры и аккумулятор настроены. Откройте «Камеры», чтобы проверить изображение. Дополнительные параметры доступны в настройках.</string>
     <string name="onboarding_done_primary">Готово</string>
-    <string name="onboarding_done_secondary">Узнать настройки</string>
+    <string name="onboarding_done_secondary">Дополнительные настройки</string>
     <!-- Expert track (chaptered walkthrough of deeper config; footguns warned, never fired) -->
     <string name="onboarding_help_cd">Тур с гидом</string>
     <string name="onboarding_reset_toast">Сброс посадки — повтор руководства</string>
@@ -264,28 +264,28 @@
     <string name="onboarding_expert_vehicle_body">Нажмите на плитку транспортного средства, чтобы установить размер и модель батареи — она обеспечивает точный диапазон и оценку здоровья.</string>
     <string name="onboarding_expert_recordings_title">Ваши записи</string>
     <string name="onboarding_expert_recordings_body">Переключение между Dashcam (продолжение+клипы приближения) и Наблюдение (события припаркованного чувства) с этим переключателем — каждая из них хранит свою собственную библиотеку. Нажмите на клип, чтобы сыграть.</string>
-    <string name="onboarding_expert_live_title">Живые камеры</string>
-    <string name="onboarding_expert_live_body">Откройте \"Живой\" отсюда, чтобы посмотреть все камеры в режиме реального времени. Удобно для просмотра перед дисплеем или во время парковки рядом с ним.</string>
+    <string name="onboarding_expert_live_title">Просмотр камер</string>
+    <string name="onboarding_expert_live_body">Откройте «Камеры», чтобы увидеть все ракурсы в реальном времени. Например, перед поездкой можно проверить, что видно вокруг автомобиля.</string>
     <string name="onboarding_expert_trips_title">История поездок</string>
-    <string name="onboarding_expert_trips_body">Поездки регистрируют каждый автомобиль — маршрут, расстояние, длительность и энергопотребление, так что вы можете проверить, где был автомобиль.</string>
+    <string name="onboarding_expert_trips_body">В журнале поездок сохраняются маршрут, расстояние, время в пути и расход энергии по каждой поездке.</string>
     <string name="onboarding_expert_roadsense_title">RoadSense</string>
     <string name="onboarding_expert_roadsense_body">RoadSense использует датчики движения автомобиля и GPS для обнаружения дорожных опасностей — бумпы, капсулы, взломщики скорости — и предупреждает вас перед известными. Обнаружение закладок, карты опасности, предупреждающие фишки и слепые споты. Включите переключатель, чтобы использовать любой из них.</string>
     <string name="onboarding_expert_blindspot_title">Слепой спот</string>
     <string name="onboarding_expert_blindspot_body">Включите слепые споты на вкладке здесь и, когда вы сигнализируете о повороте, вид боковой камеры появляется на экране автоматически — слева от левого сигнала, справа — и вскоре скрывается. Он запускается только при включенном сигнале.</string>
-    <string name="onboarding_expert_maps_title">Navigation</string>
-    <string name="onboarding_expert_maps_body">Откройте Карту для полной походной навигации — ищите место назначения, ищите маршрут и живую инструкцию, плюс близлежащие точки интереса и любые дорожные опасности RoadSense вошел в путь. Вы также можете автоматически создать его в кластере инструментов, когда начнете ездить — это переключает жизнь на вкладке RoadSense.</string>
+    <string name="onboarding_expert_maps_title">Навигация</string>
+    <string name="onboarding_expert_maps_body">На карте можно найти пункт назначения, построить маршрут и получать подсказки по ходу поездки. На ней также видны ближайшие места и опасные участки, отмеченные RoadSense. Чтобы автоматически выводить маршрут на приборную панель в начале поездки, включите эту опцию на вкладке «Карта» в RoadSense.</string>
     <string name="onboarding_expert_integrations_title">Интеграции</string>
     <string name="onboarding_expert_integrations_body">Подключите оповещения Telegram, лучший планировщик, MQTT или BYD Cloud. Каждая карта открывает настройки внутри приложения. Таблетка вверх становится зеленым, когда все связано.</string>
     <string name="onboarding_expert_bydcloud_title">Облако BYD разблокирует пульт дистанционного управления</string>
     <string name="onboarding_expert_bydcloud_body">Привязывая ваш BYD аккаунт, вы получаете возможность удаленного блокирования, мигания и рога с вашего телефона. Рассматривайте связанный аккаунт и код доступа как чувствительный.</string>
     <string name="onboarding_expert_surveillance_title">Наблюдение &amp; запись</string>
     <string name="onboarding_expert_surveillance_body">Точное обнаружение, качество и хранение здесь. Они открыты как внутри-приложенные страницы конфигурации, обслуживаемые в вашем автомобиле — пустой экран означает, что помощник все еще запускается.</string>
-    <string name="onboarding_expert_camprobe_title">Проб камеры — осторожный</string>
-    <string name="onboarding_expert_camprobe_body">Это переопределяет каналы физической камеры и перезапускает камеры. Измените его, если лента выглядит неправильно — вы настроили это раньше в руководстве.</string>
+    <string name="onboarding_expert_camprobe_title">Настройка ракурсов камер</string>
+    <string name="onboarding_expert_camprobe_body">Здесь можно назначить каждой камере её ракурс. После сохранения камеры перезапустятся. Меняйте настройки, только если изображение выводится в неправильном порядке.</string>
     <string name="onboarding_expert_traffic_title">Traffic Monitor — требуется для дистанционного доступа</string>
     <string name="onboarding_expert_traffic_body">Встроенный Traffic Monitor от BYD блокирует использование встроенной SIM-карты автомобиля другими приложениями. Если вы хотите подключаться к автомобилю дистанционно через SIM-карту BYD, Traffic Monitor необходимо отключить здесь. Для применения изменения головной блок перезагрузится.</string>
-    <string name="onboarding_expert_daemons_title">Услуги — обработка с осторожностью</string>
-    <string name="onboarding_expert_daemons_body">Эти переключатели запускают и останавливают фоновые службы. Выключение камеры, монитора или ACC Sentry останавливает запись и не отключает ее до тех пор, пока вы их не включите, даже после перезагрузки.</string>
+    <string name="onboarding_expert_daemons_title">Управление фоновыми службами</string>
+    <string name="onboarding_expert_daemons_body">Здесь можно запускать и останавливать фоновые службы. Если выключить камеры, наблюдение или охрану ACC, запись остановится. После перезапуска эти службы останутся выключенными, пока вы не включите их вручную.</string>
     <string name="onboarding_expert_security_title">Заблокировать PIN-кодом</string>
     <string name="onboarding_expert_security_body">Установите PIN-код для доступа к приложению для общих автомобилей. Наблюдение и регистрация продолжаются пока приложение заблокировано. Забыли PIN-код можно удалить только с компьютера по USB.</string>
     <string name="onboarding_expert_reset_title">Сброс данных — навсегда</string>
@@ -342,10 +342,10 @@
     <string name="reset_cat_recordings_desc">Все MP4 в папке записей</string>
     <string name="reset_cat_sentry_events">События наблюдения</string>
     <string name="reset_cat_sentry_events_desc">Клипы событий наблюдения и связанные файлы JSON</string>
-    <string name="reset_cat_proximity">Записи приближения</string>
-    <string name="reset_cat_proximity_desc">MP4 событий с радиолокационным задействованием</string>
-    <string name="reset_cat_trip_files">Поездка телеметрические файлы</string>
-    <string name="reset_cat_trip_files_desc">Телеметрия за поездку JSON на диске</string>
+    <string name="reset_cat_proximity">Записи сближения</string>
+    <string name="reset_cat_proximity_desc">Видеозаписи событий, обнаруженных радаром</string>
+    <string name="reset_cat_trip_files">Файлы телеметрии поездок</string>
+    <string name="reset_cat_trip_files_desc">Файлы JSON с телеметрией каждой поездки</string>
     <!-- fragment_abrp_settings -->
     <!-- fragment_recording_library -->
     <string name="recording_lib_chip_any">Любая</string>
@@ -370,12 +370,12 @@
     <string name="recording_lib_filter_section_storage">Хранилище</string>
     <!-- Storage filter chip labels (full words; the tile badge uses the short
          SD/USB/INT forms above). -->
-    <string name="recording_lib_storage_filter_internal">Внутренний</string>
+    <string name="recording_lib_storage_filter_internal">Внутренняя память</string>
     <string name="recording_lib_storage_filter_sd">SD-карта</string>
     <string name="recording_lib_storage_filter_usb">USB</string>
     <string name="recording_lib_place_search_hint">Поиск мест…</string>
     <string name="recording_lib_chip_type_normal">Норм.</string>
-    <string name="recording_lib_chip_type_proximity">Близость</string>
+    <string name="recording_lib_chip_type_proximity">Сближение</string>
     <string name="recording_lib_date_today">Сегодня</string>
     <string name="recording_lib_date_yesterday">Вчера .</string>
     <string name="recording_lib_clip_count">Клипки %1$d</string>
@@ -403,9 +403,9 @@
          start. Includes a progress counter when the daemon reports done/total,
          otherwise a static body. The library re-polls every 1.5s and
          transitions out automatically once results land. -->
-    <string name="recording_lib_building_index_title">Индекс библиотеки</string>
-    <string name="recording_lib_building_index_body">Одно мгновение, пока демон сканирует ваши записи.</string>
-    <string name="recording_lib_building_index_progress">Индексированный %1$d из %2$d клипов…</string>
+    <string name="recording_lib_building_index_title">Поиск записей</string>
+    <string name="recording_lib_building_index_body">Служба камер ищет сохранённые записи. Подождите немного.</string>
+    <string name="recording_lib_building_index_progress">Обработано записей: %1$d из %2$d…</string>
     <!-- Tile type badge labels — short, glanceable, mirrors the on-disk
          filename prefix (cam_/event_/dvr_/proximity_) so power users can
          map a tile back to its file group at a glance. -->
@@ -415,9 +415,9 @@
     <string name="recording_lib_type_oem">OEM</string>
     <!-- Per-clip storage tag — where the clip actually landed. Surfaces the
          silent SD→internal fallback (SD bridged behind the USB power rail). -->
-    <string name="recording_lib_storage_sd">УР</string>
+    <string name="recording_lib_storage_sd">SD</string>
     <string name="recording_lib_storage_usb">USB</string>
-    <string name="recording_lib_storage_internal">СОБСТВЕННЫЙ</string>
+    <string name="recording_lib_storage_internal">ВНУТР.</string>
     <!-- Toast shown when a multi-select share is dispatched. -->
     <string name="toast_share_recordings">Совместное использование %1$d записей</string>
     <!-- fragment_sentry_config -->
@@ -426,11 +426,11 @@
     <string name="player_time_zero">0: 00</string>
     <string name="player_time_separator"> / </string>
     <!-- fragment_daemons -->
-    <string name="daemons_hero_title">Службы с фоном</string>
+    <string name="daemons_hero_title">Фоновые службы</string>
     <!-- Subtitle on the Daemons hero header before the first state arrives. -->
-    <string name="daemons_count_pending">Услуги по загрузке...</string>
+    <string name="daemons_count_pending">Загружаем список служб…</string>
     <!-- Subtitle on the Daemons hero header. %1$d running, %2$d total. -->
-    <string name="daemons_count_fmt">%1$d из %2$d работающий</string>
+    <string name="daemons_count_fmt">Работает: %1$d из %2$d</string>
     <!-- dialog_time_window -->
     <!-- dialog_update_progress -->
     <string name="update_preparing">Подготавливаю обновление...</string>
@@ -546,11 +546,11 @@
     <string name="toast_failed_with_message">Не удалось: %1$s</string>
     <string name="toast_camera_id_set">Набор камеры %1$d  следующий цикл ACC</string>
     <string name="toast_clearing_camera_config">Очищает конфигурацию камеры...</string>
-    <string name="toast_restarting_camera_daemon">Возобновляем работу демона камеры...</string>
+    <string name="toast_restarting_camera_daemon">Перезапускаем службу камер…</string>
     <string name="toast_camera_daemon_restarting">Димон камеры запускается с полным зондом</string>
-    <string name="toast_camera_restart_failed">Конфигурация очищена, но перезагрузка демона не удалась. Пожалуйста, перезагрузите ее вручную.</string>
-    <string name="toast_camera_settings_saved_restarting">Настройки камеры сохранились  перезагрузка демона камеры...</string>
-    <string name="toast_camera_settings_restart_failed">Настройки камеры были сохранены, но восстановление демона не удалось.</string>
+    <string name="toast_camera_restart_failed">Настройки сброшены, но службу камер не удалось перезапустить. Перезапустите её вручную.</string>
+    <string name="toast_camera_settings_saved_restarting">Настройки камер сохранены. Перезапускаем службу камер…</string>
+    <string name="toast_camera_settings_restart_failed">Настройки камер сохранены, но службу камер не удалось перезапустить.</string>
     <string name="toast_failed_with_message_x">Не удалось: %1$s</string>
     <string name="toast_soh_reset_success">Перезагрузка оценки SOH  будет пересчитываться из следующих данных</string>
     <string name="toast_soh_reset_failed_no_daemon">Перезагрузка не удалась  демона не отвечает и файл не может быть написан</string>
@@ -572,7 +572,7 @@
     <string name="dialog_reset_soh_title">Возобновить оценку SOH?</string>
     <string name="dialog_reset_soh_message">Это очистит все данные SOH и заставит переоценку с нуля.\n\nИспользуйте это, если:\n• батарея была заменена\n• чтение SOH кажется неверным\n• Вы хотите перекалибрировать\n\nСистема будет пересеять из следующего доступного источника данных (OEM, калибровка заряда или мгновенное чтение).</string>
     <string name="dialog_reset_following_title">Перезагрузить следующее?</string>
-    <string name="dialog_reset_following_message">This cannot be undone.\n\n%1$s</string>
+    <string name="dialog_reset_following_message">Это действие нельзя отменить.\n\n%1$s</string>
     <string name="dialog_reset_complete_title">Перезагрузка завершена</string>
     <string name="dialog_traffic_cannot_check_title">Не могу проверить статус</string>
     <string name="dialog_traffic_cannot_check_message">Подключение ADB еще не готово.\n\nПриложение нуждается в доступе ADB для управления системными пакетами. Пожалуйста, убедитесь:\n\n• USB Debugging включена в параметрах разработчика\n• Просьба о разрешении ADB была принята\n\nСтатус будет обновляться автоматически после подключения.</string>
@@ -593,8 +593,8 @@
     <string name="reset_label_byd_cloud">BYD Квалификации облака</string>
     <string name="reset_label_recordings">Записи</string>
     <string name="reset_label_sentry_events">События наблюдения</string>
-    <string name="reset_label_proximity">Записи приближения</string>
-    <string name="reset_label_trip_files">Поездка телеметрические файлы</string>
+    <string name="reset_label_proximity">Записи сближения</string>
+    <string name="reset_label_trip_files">Файлы телеметрии поездок</string>
     <!-- ROI dialog -->
     <!-- Sentry config -->
     <!-- Format helpers -->
@@ -611,19 +611,19 @@
     <string name="dashboard_starting_cloudflared">Запуск туннеля Cloudflared…</string>
     <string name="dashboard_starting_tailscale">Запуск туннеля Tailscale...</string>
     <string name="dashboard_waiting_url">Ждём туннеля URL...</string>
-    <string name="dashboard_daemons_running">%1$d/%2$d Бег</string>
+    <string name="dashboard_daemons_running">Работает: %1$d из %2$d</string>
     <string name="tunnel_label_cloudflared">Cloudflared</string>
     <string name="tunnel_label_zrok">Zrok</string>
     <string name="tunnel_label_tailscale">Tailscale</string>
     <!-- Daemon names — shown on the Daemons list and dashboard. -->
-    <string name="daemon_name_camera">Камера Daemon</string>
-    <string name="daemon_name_surveillance">Daemon наблюдения</string>
-    <string name="daemon_name_acc_surveillance">ACC Наблюдение</string>
-    <string name="daemon_name_singbox">Sing-box Прокси</string>
+    <string name="daemon_name_camera">Камеры</string>
+    <string name="daemon_name_surveillance">Наблюдение</string>
+    <string name="daemon_name_acc_surveillance">Охрана ACC</string>
+    <string name="daemon_name_singbox">Прокси sing-box</string>
     <string name="daemon_name_cloudflared">Тоннель Cloudflared</string>
     <string name="daemon_name_zrok">Тоннель Zrok</string>
     <string name="daemon_name_tailscale">Тоннель Tailscale</string>
-    <string name="daemon_name_telegram">Telegram Бот</string>
+    <string name="daemon_name_telegram">Бот Telegram</string>
     <string name="clip_label_access_code">Код доступа</string>
     <string name="clip_label_url">URL</string>
     <!-- ABRP -->
@@ -708,7 +708,7 @@
     <string name="setup_traffic_body">BYD Traffic Monitor блокирует доступ сторонних приложений к интернету. Отключение Traffic Monitor позволяет OverDrive и любым другим установленным вами приложениям по-настоящему пользоваться сетью. После этого требуется жёсткая перезагрузка.</string>
     <string name="setup_traffic_button">Откройте Traffic Monitor</string>
     <string name="setup_camera_fix_title">Камера подает черный или неточный?</string>
-    <string name="setup_camera_fix_body">Зонд камеры, нажмите идентификатор камеры на 0, нажмите Save, а затем перезагрузите демона камеры. Если ленты все еще неправильны, повторяйте с идентификатором камеры 1. Оставьте раздел отображения нетронутым.</string>
+    <string name="setup_camera_fix_body">Откройте проверку камер. Установите идентификатор камеры 0, нажмите «Сохранить» и перезапустите службу камер. Если изображение по-прежнему неправильное, повторите с идентификатором 1. Схему ракурсов менять не нужно.</string>
     <!-- Recording storage path -->
     <!-- MainActivity status -->
     <string name="camera_current_manual">Текущая: Камера %1$d (учебное пособие)</string>
@@ -745,7 +745,7 @@
     <!-- ============================================================== -->
     <!-- Top-level destinations (navigation rail labels) -->
     <string name="rail_dashboard">Дисбордная панель</string>
-    <string name="rail_live">Жизнь</string>
+    <string name="rail_live">Камеры</string>
     <string name="rail_recordings">Записи</string>
     <string name="rail_vehicle">Автомобиль</string>
     <string name="rail_projection">Проекция</string>
@@ -761,7 +761,7 @@
     <string name="settings_section_appearance">Внешний вид</string>
     <string name="settings_section_recording">Запись</string>
     <string name="settings_section_surveillance">Наблюдение</string>
-    <string name="settings_section_daemons">Демоны</string>
+    <string name="settings_section_daemons">Службы</string>
     <string name="settings_section_privacy">Конфиденциальность и данные</string>
     <string name="settings_section_overlay">Переложение состояния</string>
     <string name="settings_section_security">Безопасность</string>
@@ -775,11 +775,11 @@
     <string name="settings_section_about">О приложении</string>
     <!-- Settings sub-rail (landscape) — overline + a11y -->
     <string name="settings_subrail_overline">Устройства</string>
-    <string name="cd_settings_subrail">Настройки подпоезда</string>
+    <string name="cd_settings_subrail">Разделы настроек</string>
     <!-- Settings → Vehicle data placeholder pane -->
     <!-- Settings → Privacy pane copy -->
     <string name="settings_privacy_title">Конфиденциальность и данные</string>
-    <string name="settings_privacy_body">Ресет очищает индекс записей, кешированные учетные данные, состояние демона и предпочтения на устройстве.</string>
+    <string name="settings_privacy_body">Сброс удаляет индекс записей, сохранённые данные входа, состояние фоновых служб и настройки на устройстве.</string>
     <!-- Settings → About pane copy -->
     <string name="settings_about_title">О OverDrive</string>
     <string name="settings_about_version_label">Версия</string>
@@ -804,12 +804,12 @@
     <string name="settings_backup_restoring">Восстановление…</string>
     <string name="settings_backup_restored">Настройки восстановлены</string>
     <string name="settings_backup_restore_failed">Не удалось восстановить</string>
-    <string name="settings_backup_daemon_down">Служба камеры должна быть запущена для резервного копирования или восстановления. Запустите её из демонов, а затем повторите попытку.</string>
+    <string name="settings_backup_daemon_down">Для резервного копирования и восстановления запустите службу камер в разделе «Службы» и повторите попытку.</string>
     <string name="settings_backup_restore_confirm_title">Восстановить настройки?</string>
     <string name="settings_backup_restore_confirm_msg">Это заменяет ваши текущие настройки Overdrive на службы резервного копирования и перезагрузки. Он работает только на том же блоке резервного копирования, на котором была сделана резервная копия.</string>
     <string name="settings_backup_restore_confirm_btn">Восстановить</string>
-    <string name="settings_backup_restart_hint">Настройки восстановлены. Перезапустите демон камеры (Daemons → Camera → Перезапустить), чтобы убедиться, что все восстановленные настройки будут применены.</string>
-    <string name="settings_backup_trips_prompt">Включите историю вашей поездки (расстояние, энергия, стоимость, результаты, начальные и конечные места)? Детали телеметрии по поездкам не включены. Файл будет содержать историю вашего местоположения — сохранить его приватным.</string>
+    <string name="settings_backup_restart_hint">Настройки восстановлены. Чтобы применить их, откройте «Службы → Камеры» и нажмите «Перезапустить».</string>
+    <string name="settings_backup_trips_prompt">Включить историю поездок (расстояние, расход энергии, стоимость, оценки, места отправления и прибытия)? Подробная телеметрия в копию не входит. В файле будет история ваших перемещений. Храните его в защищённом месте.</string>
     <string name="settings_backup_settings_only">Только настройки</string>
     <string name="settings_backup_with_trips">Включить поездки</string>
     <!-- Support-development section: tiered options, low-cost first.
@@ -851,7 +851,7 @@
     <!-- Hero subtitle: "%1$d today · %2$d total · %3$s" where %3$s is a pre-formatted size like "42 GB". -->
     <string name="recordings_summary_format">%1$d сегодня · %2$d общее · %3$s</string>
     <!-- Per-segment label with running count, e.g. "Dashcam · 118". -->
-    <string name="recordings_segment_dashcam_count">Dashcam · %d</string>
+    <string name="recordings_segment_dashcam_count">Видеорегистратор · %d</string>
     <string name="recordings_segment_surveillance_count">Наблюдение · %d</string>
     <!-- Layout-time placeholder for the counts subtitle before the scan completes. -->
     <string name="recordings_summary_pending">—</string>
@@ -936,10 +936,10 @@
     <string name="dashboard_chip_recording_active">Запись</string>
     <string name="dashboard_chip_recording_idle">Простой</string>
     <string name="dashboard_vehicle_tap_to_set">Нажмите на настройку</string>
-    <string name="dashboard_vehicle_summary">%1$.1f kWh · %2$s</string>
+    <string name="dashboard_vehicle_summary">%1$.1f кВт·ч · %2$s</string>
     <string name="vehicle_dialog_title">Установка емкости батареи</string>
     <string name="vehicle_dialog_capacity_label">Пропускная способность (kWh)</string>
-    <string name="vehicle_dialog_capacity_suffix">kWh</string>
+    <string name="vehicle_dialog_capacity_suffix">кВт·ч</string>
     <string name="vehicle_dialog_capacity_helper">от 5 до 120 kWh. Оставьте, чтобы использовать модель по умолчанию.</string>
     <string name="vehicle_dialog_model_label">Модель</string>
     <string name="vehicle_dialog_save">Сохранить</string>
@@ -955,7 +955,7 @@
     <string name="dashboard_tunnel_online">Онлайн</string>
     <string name="dashboard_tunnel_connecting">Подключение...</string>
     <!-- Quick actions (now rendered as same-size tiles, not chips) -->
-    <string name="dashboard_action_live">Вид в прямом эфире</string>
+    <string name="dashboard_action_live">Камеры</string>
     <string name="dashboard_action_live_subtitle">Открытый вид камеры</string>
     <string name="dashboard_action_recordings">Записи</string>
     <string name="dashboard_action_settings">Настройки</string>
@@ -1119,7 +1119,7 @@
     <!-- Number formatters used inside other insights. Translators may localize
          the unit suffix (e.g. "키와트" / "квт·ч") but should leave the float
          placeholder shape so the bold-ifier still finds the digits. -->
-    <string name="dashboard_insight_kwh_format">%1$.1f kWh</string>
+    <string name="dashboard_insight_kwh_format">%1$.1f кВт·ч</string>
     <string name="dashboard_insight_percent_format">%1$.1f%%</string>
     <string name="dashboard_insight_hours_minutes">%1$d hr %2$d мин</string>
     <!-- Today's clips. -->
@@ -1387,7 +1387,7 @@
     <string name="projection_fullscreen_enter">Во весь экран</string>
     <string name="projection_fullscreen_exit">Выйти из полноэкранного режима</string>
     <string name="cd_replay_status">Статус мгновенного повтора</string>
-    <string name="recording_lib_type_replay">ПОВТОРИТЬ</string>
+    <string name="recording_lib_type_replay">ПОВТОР</string>
     <string name="settings_overlay_replay_title">Индикатор мгновенного повтора</string>
     <string name="settings_overlay_replay_subtitle">Показать значок CLIP: зеленый во время повтора, синий для 5 после сохранения, красный при сбое. Появляется только тогда, когда существует привязка или автоматизация повтора.</string>
     <string name="recordings_segment_replays">Повторы</string>
@@ -1686,4 +1686,272 @@
     <string name="voice_overlay_blocked_moving">Недоступно во время движения</string>
     <string name="voice_overlay_refused">Это нельзя сделать голосом</string>
     <string name="voice_overlay_failed">Не удалось выполнить</string>
+    <string name="action_create_evidence_pack">Создать архив материалов события</string>
+    <string name="action_share_evidence_pack">Поделиться архивом материалов события</string>
+    <string name="overlay_recording_mode_failed">Не удалось изменить режим записи</string>
+    <string name="overlay_recording_mode_failed_fmt">Не удалось изменить режим записи: %1$s</string>
+    <string name="tailscale_enable_https">Доступ к веб-интерфейсу по HTTPS</string>
+    <string name="tailscale_https_explainer">Веб-панель будет доступна только в вашей сети Tailscale по защищённому адресу https://…ts.net. Сначала включите MagicDNS и сертификаты HTTPS в консоли Tailscale.</string>
+    <string name="toast_tailscale_https_enabled">HTTPS в сети Tailscale включён</string>
+    <string name="toast_tailscale_https_disabled">HTTPS в сети Tailscale отключён</string>
+    <string name="toast_tailscale_https_save_failed">Не удалось изменить настройку HTTPS. Запустите Tailscale и войдите в аккаунт, включите MagicDNS и сертификаты HTTPS. Убедитесь, что на порту 443 нет другого правила Serve.</string>
+    <string name="camera_mode_current_dilink5">Текущий режим: DiLink 5</string>
+    <string name="camera_mode_current_camera2">Текущий режим: Camera2 360</string>
+    <string name="camera_dilink5_mapping_title">Порядок камер DiLink 5</string>
+    <string name="camera_dilink5_mapping_subtitle">Идентификаторы камер перечислены в порядке: передняя, правая, задняя, левая. Оставьте «Авто», если на исходных изображениях порядок правильный.</string>
+    <string name="camera_dilink5_mapping_current_auto">Сейчас: авто, по модели автомобиля</string>
+    <string name="camera_dilink5_mapping_current_format">Сейчас: %1$s</string>
+    <string name="camera_dilink5_mapping_auto">Авто (по модели автомобиля)</string>
+    <string name="camera_dilink5_mapping_standard">Стандартный порядок: 0, 1, 2, 3</string>
+    <string name="camera_dilink5_mapping_opposite">Поменять местами переднюю и заднюю, правую и левую: 2, 3, 0, 1</string>
+    <string name="camera_dilink5_mapping_hint">Перед сохранением проверьте изображение со всех четырёх камер. После сохранения служба камер перезапустится.</string>
+    <string name="camera_dilink5_mapping_unchanged">Этот порядок камер уже выбран.</string>
+    <string name="camera2_order_title">Порядок камер кругового обзора</string>
+    <string name="camera2_order_subtitle">Порядок четырёх ракурсов в режиме кругового обзора. Меняйте «Авто», только если передний, задний, левый и правый ракурсы перепутаны.</string>
+    <string name="camera2_order_current_auto">Сейчас: авто, по настройкам камеры</string>
+    <string name="camera2_order_current_format">Сейчас: %1$s</string>
+    <string name="camera2_order_auto">Авто (по настройкам камеры)</string>
+    <string name="camera2_order_standard">Стандартный: передняя, правая, левая, задняя</string>
+    <string name="camera2_order_opposite">Обратный: задняя, левая, правая, передняя</string>
+    <string name="camera2_order_hint">Настройка применяется к записям, просмотру камер, обнаружению объектов и оповещениям. После сохранения служба камер перезапустится.</string>
+    <string name="camera_decoupled_lane_label">Независимая запись видео (для камеры заднего вида)</string>
+    <string name="camera_decoupled_lane_subtitle">Кадры копируются перед кодированием, чтобы сбой записи не прерывал изображение штатной камеры заднего вида. Работает только в старом режиме камер. Требуется около 60 МБ видеопамяти и один дополнительный проход обработки каждого кадра. Применяется при следующем запуске камер после переключения ACC или перезапуска службы.</string>
+    <string name="recording_lib_chip_parking_session">Эта стоянка</string>
+    <string name="recording_lib_chip_parking_session_at">Стоянка · %1$s</string>
+    <string name="recording_safekeep_saved">СОХРАНЕНО</string>
+    <string name="recording_safekeep_queued">В ОЧЕРЕДИ</string>
+    <string name="recording_safekeep_waiting">ОЖИДАНИЕ</string>
+    <string name="recording_safekeep_failed">ОШИБКА</string>
+    <string name="recording_safekeep_uploading">ВЫГРУЗКА %1$d%%</string>
+    <string name="recording_safekeep_locked">ПОД ЗАЩИТОЙ</string>
+    <string name="action_safekeep_upload_now">Выгрузить сейчас</string>
+    <string name="action_safekeep_lock">Защитить от удаления</string>
+    <string name="action_safekeep_unlock">Снять защиту</string>
+    <string name="action_safekeep_open_cloud">Открыть в облаке</string>
+    <string name="toast_safekeep_upload_queued">Запись будет выгружена при первой возможности</string>
+    <string name="toast_safekeep_no_storage">Подключите хранилище</string>
+    <string name="toast_safekeep_locked">Запись защищена от удаления и будет выгружена в первую очередь</string>
+    <string name="toast_safekeep_unlocked">Защита от удаления снята</string>
+    <string name="toast_safekeep_lock_full">Место для защищённых записей закончилось. Снимите защиту с одной из записей или увеличьте лимит в SafeKeep.</string>
+    <string name="toast_safekeep_action_failed">Не удалось выполнить действие в SafeKeep: %1$s</string>
+    <string name="toast_safekeep_open_failed">Нет приложения для открытия этой ссылки</string>
+    <string name="daemon_status_running">Работает</string>
+    <string name="daemon_status_proxy_on">%1$s • Прокси включён</string>
+    <string name="daemon_status_running_uptime">Работает • Время работы: %1$s</string>
+    <string name="daemon_status_stopped">Остановлено</string>
+    <string name="daemon_status_starting">Запуск…</string>
+    <string name="daemon_status_stopping">Остановка…</string>
+    <string name="daemon_status_error">Ошибка</string>
+    <string name="daemon_status_needs_config">Требуется настройка</string>
+    <string name="daemon_config_no_token">Токен не задан. Нажмите, чтобы настроить.</string>
+    <string name="daemon_config_paid_token">Для платной версии нужен токен. Нажмите, чтобы настроить.</string>
+    <string name="daemon_config_not_logged_in">Вход не выполнен. Нажмите, чтобы настроить.</string>
+    <string name="daemon_status_stop_failed">Не удалось остановить: %1$s</string>
+    <string name="daemon_status_connect_failed">Не удалось подключиться</string>
+    <string name="daemon_status_retry_in">%1$s • Повтор через %2$d мин</string>
+    <string name="cloudflared_no_output">cloudflared не вернул данных</string>
+    <string name="cloudflared_start_cancelled">Запуск Cloudflared отменён</string>
+    <string name="daemon_status_prepare_failed">Не удалось подготовить запуск службы: %1$s</string>
+    <string name="cloudflared_error_paid_token">Для платной версии нужен токен</string>
+    <string name="zrok_error_no_token">❌ Токен Zrok не задан. Нажмите, чтобы настроить.</string>
+    <string name="singbox_status_running">Прокси sing-box работает на порту 8119</string>
+    <string name="cloudflared_error_launch_timeout">Истекло время ожидания запуска Cloudflared</string>
+    <string name="cloudflared_error_launch_failed">Не удалось запустить Cloudflared: %1$s</string>
+    <string name="cloudflared_error_binary_missing">Файл libcloudflared.so не найден. Добавьте его в jniLibs/arm64-v8a/</string>
+    <string name="cloudflared_error_install_failed">Не удалось установить cloudflared</string>
+    <string name="cloudflared_error_install_failed_detail">Не удалось установить cloudflared: %1$s</string>
+    <string name="cloudflared_error_spawn_failed">Ошибка запуска: %1$s</string>
+    <string name="cloudflared_error_no_url">Не удалось получить URL. Последние строки журнала:\n%1$s</string>
+    <string name="cloudflared_error_url_timeout">Истекло время ожидания адреса туннеля</string>
+    <string name="cloudflared_error_proxy">Ошибка прокси. Проверьте, работает ли sing-box на порту 8119.\n%1$s</string>
+    <string name="cloudflared_error_connection">Ошибка подключения Cloudflared: %1$s</string>
+    <string name="daemon_uptime_fmt">Время работы: %1$s</string>
+    <string name="toast_cloudflared_encrypt_failed">Не удалось зашифровать токен Cloudflared.</string>
+    <string name="toast_cloudflared_save_failed">Не удалось сохранить настройки Cloudflared. Проверьте, запущена ли служба камер.</string>
+    <string name="projection_temporarily_unavailable">Проекция временно недоступна. Откройте приложение заново.</string>
+    <string name="dialog_create_evidence_pack_title">Создать архив материалов события?</string>
+    <string name="dialog_create_evidence_pack_message">OverDrive отправит настроенному ИИ-сервису только отфильтрованные метаданные события. Видео останется на устройстве и будет включено в скачиваемый архив.</string>
+    <string name="toast_evidence_pack_creating">Создаём архив материалов события…</string>
+    <string name="toast_evidence_pack_ready">Архив материалов события готов</string>
+    <string name="toast_evidence_pack_unavailable">Эта запись ещё не добавлена в индекс</string>
+    <string name="toast_evidence_pack_failed">Не удалось создать архив материалов события: %1$s</string>
+    <string name="error_unknown">Неизвестная ошибка</string>
+    <string name="nav_page_remote_access">Доступ по приближению</string>
+    <string name="settings_overlay_chip_opacity">Видимость плавающего индикатора</string>
+    <string name="settings_overlay_chip_opacity_subtitle">Чем выше значение, тем заметнее индикатор. Диапазон от 10 до 100 %.</string>
+    <string name="settings_overlay_icon_opacity">Прозрачность значка</string>
+    <string name="settings_overlay_icon_size">Размер значка</string>
+    <string name="diagnostics_section_daemon_storage">Хранилище служб</string>
+    <string name="vehicle_setup_title">Настройка автомобиля</string>
+    <string name="vehicle_setup_checking">Проверяем…</string>
+    <string name="vehicle_setup_detected">Обнаружено: %1$s</string>
+    <string name="vehicle_setup_configured">В настройках: %1$s</string>
+    <string name="vehicle_setup_platform_dilink100">Головное устройство DiLink 100</string>
+    <string name="vehicle_setup_platform_dilink5">Головное устройство DiLink 5</string>
+    <string name="vehicle_setup_platform_legacy">Головное устройство DiLink 3/4</string>
+    <string name="vehicle_setup_platform_unknown">не распознано</string>
+    <string name="vehicle_setup_unconfirmed">%1$s (требует подтверждения)</string>
+    <string name="vehicle_setup_shared_firmware">%1$s · Shark 6 или другая модель</string>
+    <string name="vehicle_setup_running">%1$s (сейчас используется %2$s)</string>
+    <string name="vehicle_setup_no_model">модель не выбрана</string>
+    <string name="vehicle_setup_storage_standard">стандартное хранилище</string>
+    <string name="vehicle_setup_storage_alternate">альтернативное хранилище</string>
+    <string name="vehicle_setup_storage_mismatch">папки не совпадают</string>
+    <string name="vehicle_setup_storage_split">Служба камер и приложение используют разные папки</string>
+    <string name="vehicle_setup_match">Подходит для этого головного устройства</string>
+    <string name="vehicle_setup_differs">Рекомендуется для этого головного устройства: %1$s</string>
+    <string name="vehicle_setup_service_offline">Служба камер не запущена</string>
+    <string name="vehicle_setup_pending_hint">Настройка не завершена. Откройте эту карточку и нажмите «Настроить автомобиль».</string>
+    <string name="vehicle_setup_shark_storage_hint">Только для Shark 6. Если служба камер не запускается, включите «Альтернативное хранилище служб» в разделе «Хранилище служб».</string>
+    <string name="vehicle_setup_details_title">Параметры автомобиля</string>
+    <string name="vehicle_setup_copy">Скопировать</string>
+    <string name="vehicle_setup_copied">Скопировано</string>
+    <string name="vehicle_setup_mode_default">По умолчанию</string>
+    <string name="vehicle_setup_run">Настроить автомобиль</string>
+    <string name="vehicle_setup_pick_title">Выберите свой автомобиль</string>
+    <string name="vehicle_setup_pick_checking">Проверяем головное устройство…</string>
+    <string name="vehicle_setup_pick_subtitle">OverDrive подберёт параметры хранилища, системы камер и аккумулятора.</string>
+    <string name="vehicle_setup_detected_badge">Определено автоматически</string>
+    <string name="vehicle_setup_not_listed">Моего автомобиля нет в списке</string>
+    <string name="vehicle_setup_not_listed_badge">Настройки по умолчанию</string>
+    <string name="vehicle_setup_row_not_listed">Будут применены настройки по умолчанию без выбора модели.</string>
+    <string name="vehicle_setup_row_not_listed_kept">Будут применены настройки по умолчанию. Сохранённая модель (%1$s) останется выбранной.</string>
+    <string name="vehicle_setup_next">Далее</string>
+    <string name="vehicle_setup_back">Назад</string>
+    <string name="vehicle_setup_apply">Применить</string>
+    <string name="vehicle_setup_retry">Повторить</string>
+    <string name="vehicle_setup_done">Готово</string>
+    <string name="vehicle_setup_change">Изменить</string>
+    <string name="vehicle_setup_review_title">Проверьте настройки</string>
+    <string name="vehicle_setup_review_subtitle">Чтобы сохранить изменения, нажмите «Применить».</string>
+    <string name="vehicle_setup_row_unchanged">Уже настроено</string>
+    <string name="vehicle_setup_row_kwh">Ёмкость аккумулятора: %1$s кВт·ч</string>
+    <string name="vehicle_setup_row_camera">Система камер: %1$s</string>
+    <string name="vehicle_setup_row_camera_detected">Определено по головному устройству</string>
+    <string name="vehicle_setup_row_camera_model">Рекомендуется для этой модели</string>
+    <string name="vehicle_setup_row_camera_chosen">Выбрано вручную</string>
+    <string name="vehicle_setup_row_camera_restart">Служба камер перезапустится (около минуты)</string>
+    <string name="vehicle_setup_row_order">Порядок камер Shark</string>
+    <string name="vehicle_setup_row_order_auto">Автоматически (8·9·5·4)</string>
+    <string name="vehicle_setup_row_order_kept">Сохранённый порядок: %1$s</string>
+    <string name="vehicle_setup_row_camera_unsupported">На этом головном устройстве режим DiLink 5 недоступен</string>
+    <string name="vehicle_setup_row_storage_check">Сначала проверим стандартную папку. Если головное устройство блокирует её (Shark 6), включится альтернативное хранилище и приложение перезапустится один раз. Старые настройки останутся в стандартной папке.</string>
+    <string name="vehicle_setup_row_storage_repair">Сначала проверим стандартную папку. Если головное устройство блокирует её (Shark 6), приложение переключится на папку службы камер и перезапустится один раз.</string>
+    <string name="vehicle_setup_row_storage_split">Приложение и служба камер используют разные папки. Исправьте это в разделе «Диагностика → Хранилище служб».</string>
+    <string name="vehicle_setup_resume_title">Завершить настройку автомобиля?</string>
+    <string name="vehicle_setup_discard">Отменить настройку</string>
+    <string name="vehicle_setup_continue">Продолжить</string>
+    <string name="vehicle_setup_step_storage_check">Проверка хранилища служб</string>
+    <string name="vehicle_setup_storage_not_needed">Для этого головного устройства не требуется</string>
+    <string name="vehicle_setup_storage_repair_skipped">Стандартная папка доступна. Чтобы согласовать папки, откройте «Диагностика → Хранилище служб».</string>
+    <string name="vehicle_setup_fail_restart_unverifiable">Не удалось проверить перезапуск службы камер: нет подключения по ADB. Ваши настройки сохранены.</string>
+    <string name="vehicle_setup_storage_switched">Включено альтернативное хранилище</string>
+    <string name="vehicle_setup_storage_busy">уже выполняется переключение хранилища</string>
+    <string name="vehicle_setup_row_camera_current">Текущая настройка</string>
+    <string name="vehicle_setup_row_camera_default">По умолчанию для автомобилей вне списка</string>
+    <string name="vehicle_setup_fail_storage_check">Не удалось проверить хранилище служб по ADB.</string>
+    <string name="vehicle_setup_camera_choice_title">Система камер</string>
+    <string name="vehicle_setup_apply_title">Настраиваем автомобиль</string>
+    <string name="vehicle_setup_apply_subtitle">Оставайтесь на парковке. Настройка может занять несколько минут.</string>
+    <string name="vehicle_setup_step_storage">Переключение на альтернативное хранилище служб</string>
+    <string name="vehicle_setup_step_service">Ожидание запуска службы камер</string>
+    <string name="vehicle_setup_step_model">Выбор модели автомобиля: %1$s</string>
+    <string name="vehicle_setup_step_camera">Переключение системы камер на %1$s</string>
+    <string name="vehicle_setup_step_verify">Проверка службы камер</string>
+    <string name="vehicle_setup_start_service">Запустить службу камер</string>
+    <string name="vehicle_setup_fail_storage">Не удалось переключить хранилище: %1$s</string>
+    <string name="vehicle_setup_fail_storage_kept">после перезапуска приложение по-прежнему использует стандартную папку</string>
+    <string name="vehicle_setup_fail_service">Служба камер не запустилась.</string>
+    <string name="vehicle_setup_fail_model">Не удалось сохранить модель автомобиля.</string>
+    <string name="vehicle_setup_fail_model_reason">Не удалось сохранить модель автомобиля: %1$s</string>
+    <string name="vehicle_setup_fail_camera_save">Не удалось сохранить настройки системы камер.</string>
+    <string name="vehicle_setup_fail_camera_switch">Служба камер не запустилась с новыми настройками.</string>
+    <string name="vehicle_setup_fail_restart">Служба камер не перезапустилась. Ваши настройки сохранены.</string>
+    <string name="vehicle_setup_done_title">Настройка завершена</string>
+    <string name="vehicle_setup_done_subtitle">Откройте «Камеры», чтобы проверить изображение.</string>
+    <string name="scratch_root_dialog_title">Хранилище служб</string>
+    <string name="scratch_root_dialog_intro">Приложение и фоновые службы OverDrive хранят общие настройки, файлы блокировок и журналы в папке ADB. На некоторых головных устройствах (BYD Shark 6 и других с DiLink 5.0) прошивка запрещает ADB создавать файлы в этой папке, поэтому службы не запускаются.</string>
+    <string name="scratch_root_current_folder">Текущая папка: %1$s</string>
+    <string name="scratch_root_switch_label">Альтернативное хранилище служб</string>
+    <string name="scratch_root_switch_summary">Включите, если фоновые службы не запускаются. В другой папке приложение запустится с настройками по умолчанию. Чтобы вернуться к прежним настройкам, выключите этот параметр. При переключении все службы остановятся и OverDrive перезапустится.</string>
+    <string name="scratch_root_paths">Стандартная папка: %1$s\nАльтернативная папка: %2$s</string>
+    <string name="scratch_root_confirm_title">Перезапустить OverDrive?</string>
+    <string name="scratch_root_confirm_enable">Все службы остановятся, а OverDrive перезапустится с альтернативным хранилищем. После этого заново выберите режим камер и другие настройки.</string>
+    <string name="scratch_root_confirm_disable">Все службы остановятся, а OverDrive перезапустится со стандартным хранилищем.</string>
+    <string name="scratch_root_working">Переключаем хранилище служб…</string>
+    <string name="scratch_root_failed">Не удалось переключить хранилище служб: %1$s</string>
+    <string name="scratch_root_failed_adb">Нет подключения по ADB. Включите отладку по USB или Wi-Fi и повторите попытку.</string>
+    <string name="scratch_root_restart">Перезапустить сейчас</string>
+    <string name="integrations_safekeep_desc">Сохраняйте резервные копии событий охраны, записей видеорегистратора и поездок в Google Drive, OneDrive, на NAS или в хранилище S3.</string>
+    <string name="unit_minute">мин</string>
+    <string name="unit_minute_compact">м</string>
+    <string name="unit_hour_compact">ч</string>
+    <string name="unit_second_compact">с</string>
+    <string name="rail_widgets">Виджеты</string>
+    <string name="widget_builder_open_elsewhere">Откройте редактор виджетов на телефоне или компьютере</string>
+    <string name="projection_resize_not_applied">Приборная панель не поддерживает этот размер окна.</string>
+    <string name="projection_dilink5_mode_required">В разделе «Диагностика» выберите режим DiLink 5 и перезапустите службу камер.</string>
+    <string name="projection_transport_title">Протокол проекции</string>
+    <string name="projection_transport_desc">Штатный протокол вывода на приборную панель. В режиме «Авто» он определяется по прошивке. Меняйте этот параметр, только если проекция не работает.</string>
+    <string name="projection_transport_auto">Авто</string>
+    <string name="projection_transport_legacy">Старый протокол</string>
+    <string name="projection_transport_active">Используется: %1$s (%2$s)</string>
+    <string name="projection_transport_restart_required">Сохранено. Перезапустите службу камер, чтобы применить настройку.</string>
+    <string name="projection_transport_save_failed">Не удалось сохранить протокол проекции.</string>
+    <string name="projection_oem_cluster_takeover">Штатный интерфейс перехватывает вывод на приборную панель. Отключите на ней экран ассистентов вождения (SR) или проекцию навигации в настройках автомобиля и повторите попытку.</string>
+    <string name="roi_tap_to_add_points">Касайтесь экрана, чтобы добавить точки (%1$d–%2$d)</string>
+    <string name="voice_enroll_start">Произнесите «OverDrive» четыре раза с паузами (%1$d из %2$d)</string>
+    <string name="voice_enroll_next">Записано. Повторите (%1$d из %2$d)</string>
+    <string name="voice_enroll_say">Произнесите «OverDrive» (%1$d из %2$d)</string>
+    <string name="voice_enroll_learning">Запоминаем ваш голос…</string>
+    <string name="voice_enroll_done">Готово. OverDrive запомнил ваш голос</string>
+    <string name="voice_enroll_failed">Не удалось запомнить голос. Повторите попытку, когда в салоне будет тихо</string>
+    <plurals name="recording_headline_person">
+        <item quantity="one">Обнаружено: %1$d человек</item>
+        <item quantity="few">Обнаружено: %1$d человека</item>
+        <item quantity="many">Обнаружено: %1$d человек</item>
+        <item quantity="other">Обнаружено: %1$d человека</item>
+    </plurals>
+    <plurals name="recording_actor_person">
+        <item quantity="one">%1$d человек</item>
+        <item quantity="few">%1$d человека</item>
+        <item quantity="many">%1$d человек</item>
+        <item quantity="other">%1$d человека</item>
+    </plurals>
+    <plurals name="recording_headline_vehicle">
+        <item quantity="one">Обнаружено: %1$d автомобиль</item>
+        <item quantity="few">Обнаружено: %1$d автомобиля</item>
+        <item quantity="many">Обнаружено: %1$d автомобилей</item>
+        <item quantity="other">Обнаружено: %1$d автомобиля</item>
+    </plurals>
+    <plurals name="recording_actor_vehicle">
+        <item quantity="one">%1$d автомобиль</item>
+        <item quantity="few">%1$d автомобиля</item>
+        <item quantity="many">%1$d автомобилей</item>
+        <item quantity="other">%1$d автомобиля</item>
+    </plurals>
+    <plurals name="recording_headline_bike">
+        <item quantity="one">Обнаружено: %1$d велосипед</item>
+        <item quantity="few">Обнаружено: %1$d велосипеда</item>
+        <item quantity="many">Обнаружено: %1$d велосипедов</item>
+        <item quantity="other">Обнаружено: %1$d велосипеда</item>
+    </plurals>
+    <plurals name="recording_actor_bike">
+        <item quantity="one">%1$d велосипед</item>
+        <item quantity="few">%1$d велосипеда</item>
+        <item quantity="many">%1$d велосипедов</item>
+        <item quantity="other">%1$d велосипеда</item>
+    </plurals>
+    <plurals name="recording_headline_animal">
+        <item quantity="one">Обнаружено: %1$d животное</item>
+        <item quantity="few">Обнаружено: %1$d животных</item>
+        <item quantity="many">Обнаружено: %1$d животных</item>
+        <item quantity="other">Обнаружено: %1$d животного</item>
+    </plurals>
+    <plurals name="recording_actor_animal">
+        <item quantity="one">%1$d животное</item>
+        <item quantity="few">%1$d животных</item>
+        <item quantity="many">%1$d животных</item>
+        <item quantity="other">%1$d животного</item>
+    </plurals>
 </resources>
