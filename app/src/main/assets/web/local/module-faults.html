@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title data-i18n="moduleFaults.page_title">Module Faults - OverDrive</title>
+    <link rel="icon" type="image/webp" href="../shared/app-icon-dark.webp">
+    <script src="../shared/theme.js?v=11"></script>
+    <script src="../shared/app-shell.js?v=19"></script>
+    <link rel="stylesheet" href="../shared/styles.css?v=38">
+    <link rel="stylesheet" href="../shared/revamp.css?v=2">
+    <style>
+        .mf-intro { color:var(--text-secondary); font-size:13px; line-height:1.55; margin:0 0 16px; }
+        .mf-scope { border:1px solid var(--status-warning); background:var(--status-warning-container,var(--bg-elevated)); border-radius:var(--radius-md); padding:14px 16px; margin-bottom:18px; }
+        .mf-scope strong { display:block; color:var(--text-primary); font-size:14px; margin-bottom:5px; }
+        .mf-scope p { margin:0; color:var(--text-secondary); font-size:12px; line-height:1.55; }
+        .mf-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:16px; }
+        .mf-toolbar .mf-updated { color:var(--text-muted); font-size:12px; margin-left:auto; }
+        .mf-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(125px,1fr)); gap:10px; margin-bottom:18px; }
+        .mf-summary-item { background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:var(--radius-md); padding:12px 14px; }
+        .mf-summary-value { font:700 24px/1.1 'JetBrains Mono',monospace; color:var(--text-primary); }
+        .mf-summary-label { color:var(--text-muted); font-size:11px; margin-top:5px; }
+        .mf-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); gap:14px; }
+        .mf-card { background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:var(--radius-md); padding:16px; min-width:0; }
+        .mf-card.warning { border-color:var(--status-warning); }
+        .mf-card.clear { border-color:var(--status-success); }
+        .mf-card.partial { border-color:var(--status-warning); }
+        .mf-card.not_scanned,.mf-card.unavailable { opacity:.88; }
+        .mf-card-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+        .mf-card h2 { margin:0; font-size:16px; font-weight:650; color:var(--text-primary); }
+        .mf-status { flex:0 0 auto; border-radius:999px; padding:4px 9px; font-size:10px; font-weight:700; letter-spacing:.02em; background:var(--bg-elevated); color:var(--text-secondary); }
+        .mf-status.warning { color:var(--status-warning); }
+        .mf-status.clear { color:var(--status-success); }
+        .mf-status.partial { color:var(--status-warning); }
+        .mf-summary-text { color:var(--text-secondary); font-size:13px; line-height:1.5; margin:10px 0 0; }
+        .mf-source { color:var(--text-muted); font-size:11px; margin-top:10px; }
+        .mf-reading-list { border-top:1px solid var(--border-subtle); margin-top:13px; padding-top:4px; }
+        .mf-reading { padding:10px 0; border-bottom:1px solid var(--border-subtle); }
+        .mf-reading:last-child { border-bottom:0; padding-bottom:0; }
+        .mf-reading-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+        .mf-reading strong { color:var(--text-primary); font-size:12px; }
+        .mf-reading p { color:var(--text-secondary); font-size:12px; line-height:1.45; margin:5px 0 0; }
+        .mf-reading small { color:var(--text-muted); display:block; font-size:11px; margin-top:4px; }
+        .mf-footnote { color:var(--text-muted); font-size:12px; line-height:1.55; margin:18px 2px 4px; }
+        .mf-error { display:none; background:var(--status-danger-container,var(--bg-elevated)); border:1px solid var(--status-danger); border-radius:var(--radius-md); color:var(--text-primary); padding:12px 14px; margin-bottom:14px; font-size:13px; }
+        .mf-empty { color:var(--text-muted); font-size:13px; padding:22px 12px; text-align:center; }
+        @media(max-width:520px) { .mf-toolbar .mf-updated { width:100%; margin-left:0; } .mf-grid { grid-template-columns:1fr; } }
+    </style>
+</head>
+<body class="r-settings">
+    <div class="app-layout">
+        <div id="app-shell-mount"></div>
+        <main class="main-content">
+            <div class="mobile-header">
+                <button class="menu-toggle" onclick="toggleSidebar()" aria-label="Open menu">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
+                </button>
+                <span style="font-weight:600;" data-i18n="moduleFaults.page_title">Module Faults</span>
+                <div style="width:40px;"></div>
+            </div>
+            <header class="page-header">
+                <h1 class="page-title" data-i18n="moduleFaults.page_title">Module Faults</h1>
+            </header>
+            <div class="page-body">
+                <p class="mf-intro" data-i18n="moduleFaults.page_subtitle">Read-only overview of vehicle warnings currently exposed by BYD telemetry.</p>
+                <section class="mf-scope" aria-live="polite">
+                    <strong data-i18n="moduleFaults.scope_title">Partial diagnostic coverage</strong>
+                    <p data-i18n="moduleFaults.scope_body">This first version reads existing TPMS, 12V battery and charging-state indicators. It does not read stored ECU diagnostic trouble codes (DTCs), and it does not send CAN/UDS commands, clear faults, reset modules or change vehicle settings.</p>
+                </section>
+                <div id="mfError" class="mf-error" role="alert"></div>
+                <div class="mf-toolbar">
+                    <button class="btn btn-primary" id="mfRefresh" type="button" onclick="ModuleFaultsPage.refresh()" data-i18n="moduleFaults.refresh">Refresh readings</button>
+                    <button class="btn" id="mfCopy" type="button" onclick="ModuleFaultsPage.copyReport()" disabled data-i18n="moduleFaults.copy_report">Copy report</button>
+                    <span class="mf-updated"><span data-i18n="moduleFaults.last_updated">Last updated</span>: <span id="mfUpdated">—</span></span>
+                </div>
+                <div class="mf-summary" id="mfSummary" aria-live="polite">
+                    <div class="mf-summary-item"><div class="mf-summary-value">—</div><div class="mf-summary-label">Warnings</div></div>
+                </div>
+                <div class="mf-grid" id="mfModules" aria-live="polite">
+                    <div class="mf-empty" data-i18n="moduleFaults.loading">Reading available vehicle telemetry…</div>
+                </div>
+                <p class="mf-footnote" data-i18n="moduleFaults.dtc_note">A BYD-capable workshop diagnostic tool is still required for full ECU DTC coverage, including brakes, airbags, steering, ADAS and traction-battery modules.</p>
+            </div>
+        </main>
+    </div>
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    <div id="toastContainer" class="toast-container"></div>
+    <script src="../shared/auth.js"></script>
+    <script src="../shared/core.js?v=24"></script>
+    <script src="../shared/module-faults.js?v=1"></script>
+    <script>
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+            document.getElementById('sidebarOverlay').classList.toggle('show');
+        }
+        BYD.i18n.init().then(function () {
+            BYD.core.init();
+            ModuleFaultsPage.init();
+        });
+    </script>
+</body>
+</html>

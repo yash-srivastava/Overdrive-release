@@ -1302,6 +1302,8 @@
     <string name="diagnostics_section_traffic">Traffic monitor</string>
     <string name="diagnostics_section_camera_probe">Camera probe</string>
     <string name="diagnostics_section_battery">Battery health</string>
+    <string name="diagnostics_section_module_faults">Module faults</string>
+    <string name="diagnostics_module_faults_summary">View available vehicle-reported warnings (partial coverage)</string>
     <string name="diagnostics_section_daemon_storage">Daemon storage</string>
 
     <!-- Diagnostics "Vehicle setup" card: read-only detected vs configured summary -->

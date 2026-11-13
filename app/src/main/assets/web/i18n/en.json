@@ -43,6 +43,7 @@
     "surveillance": "Surveillance",
     "recordings": "Recordings",
     "performance": "Performance",
+    "module_faults": "Module Faults",
     "abrp": "ABRP",
     "mqtt": "MQTT",
     "trips": "Trips",
@@ -6742,5 +6743,30 @@
     "time_minutes": "{n} min ago",
     "time_hours": "{n} h ago",
     "time_days": "{n} days ago"
+  },
+  "moduleFaults": {
+    "page_title": "Module Faults",
+    "page_subtitle": "Read-only overview of vehicle warnings currently exposed by BYD telemetry.",
+    "scope_title": "Partial diagnostic coverage",
+    "scope_body": "This first version reads existing TPMS, 12V battery and charging-state indicators. It does not read stored ECU diagnostic trouble codes (DTCs), and it does not send CAN/UDS commands, clear faults, reset modules or change vehicle settings.",
+    "refresh": "Refresh readings",
+    "copy_report": "Copy report",
+    "loading": "Reading available vehicle telemetry…",
+    "load_error": "Could not load vehicle diagnostic indicators.",
+    "last_updated": "Last updated",
+    "status_warning": "Warning reported",
+    "status_clear": "No warning reported",
+    "status_partial": "Partial data",
+    "status_unavailable": "Unavailable",
+    "status_not_scanned": "Not scanned",
+    "warning_modules": "Warnings",
+    "clear_modules": "No warning reported",
+    "partial_modules": "Partial",
+    "unavailable_modules": "Unavailable",
+    "not_scanned_modules": "Not scanned",
+    "empty": "No readings are available yet. Make sure the vehicle is awake and try refreshing.",
+    "dtc_note": "A BYD-capable workshop diagnostic tool is still required for full ECU DTC coverage, including brakes, airbags, steering, ADAS and traction-battery modules.",
+    "copied": "Diagnostic report copied to clipboard.",
+    "copy_failed": "Could not copy the report."
   }
 }

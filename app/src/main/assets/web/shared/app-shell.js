@@ -82,10 +82,11 @@
         { href: 'byd-cloud.html',                         i18n: 'nav.byd_cloud',      label: 'BYD Cloud',      svg: '<path d="M17.5 19a4.5 4.5 0 1 0-2.83-7.97A6 6 0 0 0 4 12.45a3 3 0 0 0 .5 5.95"/><path d="M17.5 19h-12"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
         { href: 'safekeep.html',                          i18n: 'nav.safekeep',       label: 'SafeKeep',       svg: '<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 14 11.5 16.5 16 12"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
 
-        // ===== Diagnostics ===== — Performance is the only diagnostics-ish
-        // page that exists on web; the native diagnostics fragment is native.
+        // ===== Diagnostics ===== — shared read-only vehicle warnings plus
+        // head-unit performance diagnostics.
         { divider: true, label: 'Diagnostics', i18n: 'nav.diagnostics_group', svg: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>' },
         { href: 'performance.html',                       i18n: 'nav.performance',    label: 'Performance',    svg: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>' },
+        { href: 'module-faults.html',                     i18n: 'nav.module_faults',  label: 'Module Faults',  svg: '<path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83m8.48 8.48 2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48 2.83-2.83"/><circle cx="12" cy="12" r="4"/>' },
         { href: 'network.html',                           i18n: 'nav.network',        label: 'Network',        svg: '<path d="M12 20h.01"/><path d="M8.5 16.4a5 5 0 0 1 7 0"/><path d="M5 13a9 9 0 0 1 14 0"/><path d="M1.8 9.6a14 14 0 0 1 20.4 0"/>', svgExtra: 'stroke-linecap="round"' },
         { href: 'remote-dev-view.html',                   i18n: 'nav.remote_dev_view', label: 'Remote Dev View',  svg: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="m9 8 2 2-2 2M13 12h2"/>' },
 

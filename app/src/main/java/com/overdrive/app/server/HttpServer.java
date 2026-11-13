@@ -939,6 +939,10 @@ public class HttpServer {
                 if (!serveStaticFile(out, "local/performance.html")) {
                     HttpResponse.sendError(out, 404, "performance.html not found");
                 }
+            } else if (path.equals("/module-faults.html") || path.equals("/module-faults")) {
+                if (!serveStaticFile(out, "local/module-faults.html")) {
+                    HttpResponse.sendError(out, 404, "module-faults.html not found");
+                }
             } else if (path.equals("/remote-dev-view.html") || path.equals("/remote-dev-view")) {
                 if (!serveStaticFile(out, "local/remote-dev-view.html")) {
                     HttpResponse.sendError(out, 404, "remote-dev-view.html not found");
@@ -1552,6 +1556,12 @@ public class HttpServer {
         // Dedicated remote voice/message control surface.
         if (path.startsWith("/api/communicate/")) {
             return RemoteCommunicationApiHandler.handle(method, path, body, out);
+        }
+
+        // Read-only module-fault overview. This consumes existing BYD telemetry only;
+        // it does not issue ECU diagnostic requests or mutate vehicle state.
+        if (path.equals("/api/diagnostics/module-faults")) {
+            return ModuleFaultsApiHandler.handle(method, path, out);
         }
 
         // Vehicle Control API + the parked/cooldown-guarded IVI reboot action.
