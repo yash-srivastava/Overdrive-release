@@ -105,6 +105,15 @@ public final class ProximitySafeZonePolicy {
             return ("lock".equals(action) ? lockRestricted : unlockRestricted) ? reason : "not_restricted";
         }
 
+        /**
+         * Parked Bluetooth suppression reuses the existing Unlock-only restriction.
+         * Only a confident INSIDE result authorizes suppression; boundary and unknown
+         * positions deliberately keep the radio available.
+         */
+        public boolean shouldDisableBluetooth() {
+            return enabled && unlockRestricted && "INSIDE".equals(state);
+        }
+
         public Lease lease(String action) {
             return allowed(action) ? new Lease(action, geometryScope) : null;
         }
@@ -136,7 +145,8 @@ public final class ProximitySafeZonePolicy {
                     .put("lock", new JSONObject().put("restricted", lockRestricted)
                             .put("allowed", allowed("lock")).put("reason", actionReason("lock")))
                     .put("unlock", new JSONObject().put("restricted", unlockRestricted)
-                            .put("allowed", allowed("unlock")).put("reason", actionReason("unlock")));
+                            .put("allowed", allowed("unlock")).put("reason", actionReason("unlock")))
+                    .put("bluetoothDisableEligible", shouldDisableBluetooth());
         }
     }
 

@@ -259,12 +259,12 @@
                         </div>
                         <div class="ra-safe-zones" aria-labelledby="raSafeZoneTitle">
                             <div class="ra-safe-zone-heading">
-                                <div><strong id="raSafeZoneTitle" data-i18n="remote_access.safe_zones_title">Safe zone restrictions</strong><p data-i18n="remote_access.safe_zones_copy">Pause selected automatic actions inside your chosen safe locations. Uncertain location also pauses restricted actions.</p></div>
+                                <div><strong id="raSafeZoneTitle" data-i18n="remote_access.safe_zones_title">Safe zone restrictions</strong><p data-i18n="remote_access.safe_zones_copy">Pause selected automatic actions inside your chosen safe locations. Uncertain location pauses restricted actions and keeps parked Bluetooth available.</p></div>
                                 <a href="safe-locations.html" data-i18n="remote_access.safe_zones_manage">Manage locations ↗</a>
                             </div>
                             <div class="ra-actions-grid ra-safe-zone-actions">
                                 <label class="ra-rule">
-                                    <span class="ra-rule-copy"><strong data-i18n="remote_access.safe_zones_unlock">Unlock only outside safe zones</strong><span data-i18n="remote_access.safe_zones_unlock_desc">Apply to all enabled phone and keyfob unlock rules.</span></span>
+                                    <span class="ra-rule-copy"><strong data-i18n="remote_access.safe_zones_unlock">Unlock only outside safe zones</strong><span data-i18n="remote_access.safe_zones_unlock_desc">Apply to all enabled phone and keyfob unlock rules. When phone Lock on departure and parked Bluetooth keep-alive are enabled, OverDrive can turn off the radio it enabled itself inside selected safe zones after a confirmed walk-away lock. Bluetooth you enabled independently stays on. The radio is restored if the vehicle is unlocked, a door opens, the vehicle starts, or the location is no longer confirmed.</span></span>
                                     <span class="ra-switch"><input type="checkbox" id="raRestrictUnlockSafeZones" aria-label="Allow automatic unlock only outside selected safe zones" data-i18n-attr="aria-label:remote_access.safe_zones_unlock_aria" disabled><span class="ra-switch-track"><span class="ra-switch-thumb"></span></span></span>
                                 </label>
                                 <label class="ra-rule">

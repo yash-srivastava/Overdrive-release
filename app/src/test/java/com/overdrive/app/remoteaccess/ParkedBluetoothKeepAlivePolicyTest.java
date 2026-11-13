@@ -52,6 +52,32 @@ public class ParkedBluetoothKeepAlivePolicyTest {
         assertEquals(DISABLE, decide(false, false, true, false, true, false, TURNING_ON));
     }
 
+    @Test public void safeZoneDirectiveDisablesOnlyARadioAlreadyOwnedByOverDrive() {
+        assertEquals(DISABLE, decide(true, false, true, false, true, false,
+                true, false, ON));
+        // An adapter that the owner enabled independently must remain on.
+        assertEquals(NONE, decide(true, false, true, false, false, false,
+                true, false, ON));
+        assertEquals(NONE, decide(true, false, true, false, false, false,
+                true, false, OFF));
+    }
+
+    @Test public void safeZoneOwnedRadioIsRestoredWhenTheDaemonWithdrawsItsDirective() {
+        assertEquals(ENABLE, decide(true, false, true, false, true, false,
+                false, true, OFF));
+        assertEquals(RELEASE_OWNERSHIP, decide(true, false, true, false, true, false,
+                false, true, ON));
+        assertEquals(ENABLE, decide(false, false, false, true, true, false,
+                false, true, OFF));
+    }
+
+    @Test public void unknownPowerDoesNotActOnASafeZoneDirective() {
+        assertEquals(NONE, decide(true, false, false, false, true, false,
+                true, false, ON));
+        assertEquals(NONE, decide(true, false, true, false, true, false,
+                true, false, UNKNOWN));
+    }
+
     @Test public void confirmedOffCanClearRevokedLeaseWithoutPowerRead() {
         assertEquals(RELEASE_OWNERSHIP,
                 decide(false, false, false, false, true, false, OFF));
@@ -63,5 +89,13 @@ public class ParkedBluetoothKeepAlivePolicyTest {
             ParkedBluetoothKeepAlivePolicy.RadioState state) {
         return ParkedBluetoothKeepAlivePolicy.decide(configured, onOnly, vehicleOff, vehicleOn,
                 owned, forceDisable, state);
+    }
+
+    private static ParkedBluetoothKeepAlivePolicy.Action decide(
+            boolean configured, boolean onOnly, boolean vehicleOff, boolean vehicleOn,
+            boolean owned, boolean forceDisable, boolean safeZoneDisable, boolean safeZoneOwned,
+            ParkedBluetoothKeepAlivePolicy.RadioState state) {
+        return ParkedBluetoothKeepAlivePolicy.decide(configured, onOnly, vehicleOff, vehicleOn,
+                owned, forceDisable, safeZoneDisable, safeZoneOwned, state);
     }
 }

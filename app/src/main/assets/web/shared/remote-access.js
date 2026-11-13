@@ -386,11 +386,18 @@ var RemoteAccess = (function () {
             config.keyFobEnabled === true && config.keyFobLockEnabled === true;
         var restrictLock = config.restrictLockToOutsideSafeZones === true && lockConfigured;
         var restrictUnlock = config.restrictUnlockToOutsideSafeZones === true && config.unlockEnabled === true;
-        var active = restrictLock || restrictUnlock;
+        var restrictBluetooth = config.lockEnabled === true
+            && config.restrictUnlockToOutsideSafeZones === true && config.keepBluetoothOn === true;
+        var active = restrictLock || restrictUnlock || restrictBluetooth;
         var geofence = state.status && state.status.safeZones || {};
+        var parkedBluetooth = state.status && state.status.parkedBluetooth || {};
+        var bluetoothRuntime = state.status && state.status.runtime && state.status.runtime.bluetoothRuntime || {};
         var title, detail, kind = 'disabled';
-        var actions = restrictLock && restrictUnlock ? tr('safe_zones_actions_both', 'Automatic lock and unlock') :
-            restrictLock ? tr('safe_zones_action_lock', 'Automatic lock') : tr('safe_zones_action_unlock', 'Automatic unlock');
+        var labels = [];
+        if (restrictLock) labels.push(tr('safe_zones_action_lock', 'Automatic lock'));
+        if (restrictUnlock) labels.push(tr('safe_zones_action_unlock', 'Automatic unlock'));
+        if (restrictBluetooth) labels.push(tr('safe_zones_action_bluetooth', 'Parked Bluetooth after confirmed lock'));
+        var actions = labels.join(' · ');
         if (!state.enabled) {
             title = tr('safe_zones_master_off', 'Proximity disabled');
             detail = tr('safe_zones_master_off_detail', 'Saved restrictions apply when proximity is enabled.');
@@ -411,13 +418,35 @@ var RemoteAccess = (function () {
                 (!restrictUnlock || geofence.unlock && geofence.unlock.restricted === true && geofence.unlock.allowed === true);
             if (fresh && geofence.state === 'INSIDE') {
                 kind = 'inside'; title = tr('safe_zones_inside', 'Inside selected safe zone');
-                detail = actions + ' ' + tr('safe_zones_paused_suffix', 'paused by your saved restrictions.');
+                if (restrictBluetooth) {
+                    if (parkedBluetooth.safeZoneDisableRequested === true
+                            && bluetoothRuntime.safeZoneDisabled === true && bluetoothRuntime.state === 10) {
+                        detail = tr('safe_zones_bluetooth_disabled_detail', "The walk-away lock is confirmed and OverDrive's parked Bluetooth keep-alive radio is off. The radio is restored if the vehicle is unlocked, a door opens, the vehicle starts, or this location is no longer confirmed.");
+                    } else if (parkedBluetooth.safeZoneDisableRequested === true
+                            && bluetoothRuntime.bluetoothEnabled === true && bluetoothRuntime.radioOwned !== true) {
+                        detail = tr('safe_zones_bluetooth_owner_detail', "The walk-away lock is confirmed, but Bluetooth was enabled outside OverDrive's radio lease, so it remains on.");
+                    } else if (parkedBluetooth.safeZoneDisableRequested !== true
+                            && bluetoothRuntime.safeZoneDisabled === true) {
+                        detail = tr('safe_zones_bluetooth_restore_detail', 'The safe-zone override has cleared; Bluetooth restoration is pending.');
+                    } else if (parkedBluetooth.walkAwayLockConfirmed !== true) {
+                        detail = tr('safe_zones_bluetooth_waiting_lock_detail', 'Bluetooth remains available until OverDrive confirms the phone walk-away lock.');
+                    } else {
+                        detail = tr('safe_zones_bluetooth_waiting_detail', 'The lock is confirmed, but OverDrive is waiting for current vehicle and radio state to allow the safe-zone override.');
+                    }
+                    if (restrictLock || restrictUnlock) detail = actions + '. ' + detail;
+                } else {
+                    detail = actions + ' ' + tr('safe_zones_paused_suffix', 'paused by your saved restrictions.');
+                }
             } else if (fresh && geofence.state === 'OUTSIDE' && outsideAllowed) {
                 kind = 'outside'; title = tr('safe_zones_outside', 'Outside selected safe zones');
-                detail = tr('safe_zones_outside_detail', 'Restricted actions can follow saved signal rules. All other safety checks still apply.');
+                detail = restrictBluetooth
+                    ? actions + '. ' + tr('safe_zones_bluetooth_outside_detail', 'Parked Bluetooth keep-alive remains available outside selected safe zones.')
+                    : tr('safe_zones_outside_detail', 'Restricted actions can follow saved signal rules. All other safety checks still apply.');
             } else {
                 kind = 'unknown'; title = tr('safe_zones_unknown', 'Location not confirmed');
-                detail = actions + ' ' + tr('safe_zones_unknown_suffix', 'paused until a fresh, accurate location confirms the car is outside selected zones.');
+                detail = restrictBluetooth
+                    ? actions + '. ' + tr('safe_zones_bluetooth_unknown_detail', 'Location is uncertain, so OverDrive keeps Bluetooth available.')
+                    : actions + ' ' + tr('safe_zones_unknown_suffix', 'paused until a fresh, accurate location confirms the car is outside selected zones.');
                 if (Array.isArray(geofence.selectedZones) && geofence.selectedZones.some(function (zone) { return zone.missing; }))
                     detail = tr('safe_zones_missing_detail', 'Saved selection retained. Restricted actions stay paused until you remove it or restore the location.');
             }

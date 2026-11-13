@@ -66,6 +66,21 @@ public class ProximitySafeZonePolicyTest {
         assertTrue(outside.allowed("unlock"));
     }
 
+    @Test public void parkedBluetoothRequiresAnUnlockRestrictionAndConfidentInsideFix() {
+        assertTrue(both(INSIDE).shouldDisableBluetooth());
+        assertTrue(ProximitySafeZonePolicy.evaluate(true, false, true,
+                Collections.singletonList("home"), Collections.singletonList(HOME), INSIDE)
+                .shouldDisableBluetooth());
+        assertFalse(both(OUTSIDE).shouldDisableBluetooth());
+        assertFalse(both(null).shouldDisableBluetooth());
+        assertFalse(ProximitySafeZonePolicy.evaluate(true, true, false,
+                Collections.singletonList("home"), Collections.singletonList(HOME), INSIDE)
+                .shouldDisableBluetooth());
+        assertFalse(ProximitySafeZonePolicy.evaluate(false, false, true,
+                Collections.singletonList("home"), Collections.singletonList(HOME), INSIDE)
+                .shouldDisableBluetooth());
+    }
+
     @Test public void boundaryAndAccuracyOverlapRemainUnknown() {
         // One degree latitude is about 111 km: this is approximately 100 m.
         ProximitySafeZonePolicy.Result onBoundary = both(

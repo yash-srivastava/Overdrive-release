@@ -1053,6 +1053,53 @@ public class BluetoothPhoneReconnectControllerTest {
         assertEquals(3_000, f.controller.snapshot(PHONE).retryInMs);
     }
 
+    @Test public void radioRestoreClearsLongBackoffForShortReturnVisits() {
+        Fixture f = new Fixture();
+        f.platform.connected.add(OTHER);
+        f.controller.tick(OTHER, true);
+        f.ready();
+        attempt(f, PHONE, 0, 1);
+        f.clock.now = 15_000;
+        f.controller.tick(PHONE, false); // First timed-out attempt; second accepted.
+        f.clock.now = 30_000;
+        f.controller.tick(PHONE, false); // Second timeout starts the 15-second backoff.
+        assertEquals("retry_backoff", f.controller.snapshot(PHONE).reason);
+        assertEquals(15_000, f.controller.snapshot(PHONE).retryInMs);
+
+        // A safe-zone radio shutdown is withdrawn when a door opens. Do not make a
+        // returning phone wait out an old absence backoff before it can reconnect.
+        f.controller.radioRestored();
+        assertEquals(0, f.controller.snapshot(PHONE).retryInMs);
+        assertEquals("waiting", f.controller.snapshot(PHONE).state);
+        assertEquals("radio_restored", f.controller.snapshot(PHONE).reason);
+        f.controller.tick(PHONE, false);
+        assertEquals("profile_loading", f.controller.snapshot(PHONE).reason);
+        f.platform.ready(f.profile);
+        f.controller.tick(PHONE, false);
+        assertEquals(3, f.profile.connects);
+        assertEquals("attempt_accepted", f.controller.snapshot(PHONE).reason);
+    }
+
+    @Test public void radioRestoreGraceKeepsRetryingWhileThePhoneReconnects() {
+        Fixture f = new Fixture();
+        f.platform.connected.add(OTHER);
+        f.controller.tick(OTHER, true);
+        f.controller.radioRestored();
+        f.ready();
+        assertEquals(BluetoothPhoneReconnectController.RADIO_RESTORE_GRACE_MS, 45_000L);
+        attempt(f, PHONE, 0, 1);
+        f.clock.now = 15_000;
+        f.controller.tick(PHONE, false);
+        assertEquals(1, f.profile.connects);
+        assertEquals(3_000, f.controller.snapshot(PHONE).retryInMs);
+        attempt(f, PHONE, 18_000, 2);
+        f.clock.now = 33_000;
+        f.controller.tick(PHONE, false);
+        assertEquals(2, f.profile.connects);
+        assertEquals(3_000, f.controller.snapshot(PHONE).retryInMs);
+        attempt(f, PHONE, 36_000, 3);
+    }
+
     @Test public void rebondingAfterAnUnpairedSpellClearsTheBackoff() {
         Fixture f = new Fixture();
         f.platform.connected.add(OTHER);
