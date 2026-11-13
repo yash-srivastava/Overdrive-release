@@ -15,7 +15,6 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.util.List;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -94,11 +93,10 @@ public final class GeocodingResolver {
      *
      * <p>Replaces the prior Future-based de-dup. The Future approach
      * required a SECOND `executor.execute(() -> fRef.get())` task per
-     * caller for callback delivery; under {@link ThreadPoolExecutor.DiscardOldestPolicy}
-     * the callback dispatcher could be silently discarded by the queue,
-     * leaving the sidecar without its place tag even though the cache
-     * received the put. Threading the callbacks through the resolve task
-     * itself eliminates the queue-discard hazard.
+     * caller for callback delivery. The callback is now delivered by the
+     * lookup task itself. When a queued lookup is evicted, the discard-aware
+     * rejection policy clears its inflight registry entry so later calls can
+     * register a new leader instead of waiting on a task that never runs.
      *
      * <p>Value type: {@link java.util.concurrent.CopyOnWriteArrayList}
      * — concurrent appenders, lock-free reader at task tail.
@@ -113,19 +111,20 @@ public final class GeocodingResolver {
             t.setPriority(Thread.MIN_PRIORITY);
             return t;
         };
-        // Bounded queue + DiscardOldest policy: a 1000-recording burst all
+        // Bounded queue + discard-aware oldest eviction: a 1000-recording burst all
         // missing cache (locale switch, fresh install, road trip) cannot
         // grow the queue forever. The 1 req/s rate limiter + 6 h cooldown
         // mean the queue could otherwise drain very slowly under network
         // failure. DiscardOldest keeps the most recent (most likely to
-        // matter to the user) and silently drops stale geocode requests.
+        // matter to the user) and drops stale geocode requests. The dropped
+        // task must remove its inflight entry or later callers can get stuck.
         this.executor = new ThreadPoolExecutor(
                 /* corePoolSize  = */ 2,
                 /* maxPoolSize   = */ 2,
                 /* keepAliveTime = */ 0L, TimeUnit.MILLISECONDS,
                 /* workQueue     = */ new LinkedBlockingQueue<>(1024),
                 tf,
-                new ThreadPoolExecutor.DiscardOldestPolicy());
+                new GeocodeDiscardPolicy());
     }
 
     public static GeocodingResolver getInstance() {
@@ -237,43 +236,51 @@ public final class GeocodingResolver {
         if (!becameLeader[0]) return;  // Piggybacking — leader will fire the callback.
 
         final String flowFinal = flow;
-        Callable<PlaceResult> task = () -> {
-            PlaceResult result = null;
-            try {
-                result = doResolve(lat, lng, locale, flowFinal, null);
-            } catch (Throwable t) {
-                logger.warn("doResolve threw: " + t.getMessage());
-            } finally {
-                // Snapshot-and-remove under the bin monitor so any
-                // registration racing this drain is forced to either
-                // land in our snapshot (if it won the bin monitor first)
-                // or become a new leader (if we won first). The
-                // PlaceResult sneaks out via a lambda capture into a
-                // single-element holder; compute itself returns null so
-                // the entry is removed.
-                final PlaceResult finalResult = result;
-                final java.util.List<ResolveCallback>[] drained =
-                        new java.util.List[]{ null };
-                inflight.compute(key, (k, existing) -> {
-                    drained[0] = existing;
-                    return null;  // remove the entry
-                });
-                if (drained[0] != null && finalResult != null) {
-                    for (ResolveCallback cb : drained[0]) {
-                        safeInvokeCallback(cb, finalResult);
+        // Use execute(), not submit(): submit() wraps the task in a FutureTask,
+        // concealing its onDropped() hook from the queue's rejection handler.
+        GeocodeDiscardPolicy.Droppable task = new GeocodeDiscardPolicy.Droppable() {
+            @Override public void onDropped() {
+                // This task was removed before it ran. A later request for the
+                // same key must be allowed to become a new lookup leader.
+                inflight.remove(key);
+            }
+
+            @Override public void run() {
+                PlaceResult result = null;
+                try {
+                    result = doResolve(lat, lng, locale, flowFinal, null);
+                } catch (Throwable t) {
+                    logger.warn("doResolve threw: " + t.getMessage());
+                } finally {
+                    // Snapshot-and-remove under the bin monitor so any
+                    // registration racing this drain is forced to either
+                    // land in our snapshot (if it won the bin monitor first)
+                    // or become a new leader (if we won first). The
+                    // PlaceResult sneaks out via a lambda capture into a
+                    // single-element holder; compute itself returns null so
+                    // the entry is removed.
+                    final PlaceResult finalResult = result;
+                    final java.util.List<ResolveCallback>[] drained =
+                            new java.util.List[]{ null };
+                    inflight.compute(key, (k, existing) -> {
+                        drained[0] = existing;
+                        return null;  // remove the entry
+                    });
+                    if (drained[0] != null && finalResult != null) {
+                        for (ResolveCallback cb : drained[0]) {
+                            safeInvokeCallback(cb, finalResult);
+                        }
                     }
                 }
             }
-            return result;
         };
         try {
-            executor.submit(task);
+            executor.execute(task);
         } catch (Throwable t) {
-            // DiscardOldest never throws; this branch only fires if the
-            // executor has been shut down. Drain the registered callbacks
-            // so they don't leak; absent a result we just discard them.
-            inflight.remove(key);
-            logger.warn("submit failed: " + t.getMessage());
+            // A task may fail to enqueue for reasons other than saturation.
+            // Clear the registry even when execute() throws unexpectedly.
+            task.onDropped();
+            logger.warn("enqueue failed: " + t.getMessage());
         }
     }
 
