@@ -14,8 +14,6 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
-import java.text.SimpleDateFormat;
-import java.util.Locale;
 import java.util.TimeZone;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -104,20 +102,11 @@ public class DataUsageMonitor {
     // The shell daemons + native tunnels all run under this UID.
     private static final int SHELL_UID = 2000;
 
-    // SimpleDateFormat is NOT thread-safe and this key is formatted from BOTH the
-    // sampler thread (addToDay, every 2 min) and the HTTP thread (getUsage, per
-    // page poll). A shared instance would race → garbled date strings or an
-    // internal-calendar throw. ThreadLocal gives each thread its own formatter.
-    // Local day boundaries (the user's "per day"). TZ may be briefly wrong on a
-    // cold-boot head unit until GPS/NTP corrects the RTC — acceptable for a data
-    // graph; the bucket just lands on the then-current local day. Write (addToDay)
-    // and read (getUsage) both use this same format, so their day-keys always agree.
-    private static final ThreadLocal<SimpleDateFormat> DAY_FMT =
-            ThreadLocal.withInitial(() -> new SimpleDateFormat("yyyy-MM-dd", Locale.US));
-
-    /** Format a timestamp as the local yyyy-MM-dd day key (thread-safe). */
+    // Format sampled counter deltas using the local calendar day. Resolve the
+    // current timezone at each call: the head unit can correct its timezone
+    // after boot without restarting the daemon.
     private static String dayKey(long ms) {
-        return DAY_FMT.get().format(new java.util.Date(ms));
+        return DataUsageDayKeys.format(ms, TimeZone.getDefault());
     }
 
     private static DataUsageMonitor instance;
@@ -643,7 +632,9 @@ public class DataUsageMonitor {
             }
             if (days <= 0) days = 30;
             long now = System.currentTimeMillis();
-            String from = dayKey(now - (days - 1L) * 86400000L);
+            // Calendar days are not always 24 hours long across DST changes.
+            // Use the same local-day convention as writes, not fixed milliseconds.
+            String from = DataUsageDayKeys.firstDay(now, days, TimeZone.getDefault());
 
             JSONArray arr = new JSONArray();
             long tW = 0, tM = 0, tO = 0, tA = 0, tS = 0;
