@@ -6320,9 +6320,9 @@ public class StorageManager {
             logWarn("setRecordingsStorageType: could not push recorder dir: " + t.getMessage());
         }
 
-        if (type == StorageType.SD_CARD) {
-            autoEnableCdrCleanup();
-        }
+        // Selecting an SD card must never silently opt in to deletion of
+        // OEM recordings. /api/storage/external recommends cleanup and the
+        // driver can enable it explicitly after reviewing the target path.
 
         // FIX (audit R8, MEDIUM): re-arm RecordingsIndex against the new
         // volume's recordings dir + reconcile so events.html / native
@@ -6397,9 +6397,9 @@ public class StorageManager {
             logWarn("setSurveillanceStorageType: could not re-arm volume watchdog: " + t.getMessage());
         }
 
-        if (type == StorageType.SD_CARD) {
-            autoEnableCdrCleanup();
-        }
+        // Selecting an SD card must never silently opt in to deletion of
+        // OEM recordings. /api/storage/external recommends cleanup and the
+        // driver can enable it explicitly after reviewing the target path.
 
         // FIX (audit R8, MEDIUM): symmetric with setRecordingsStorageType.
         // Recordings live alongside surveillance events on the same volume
@@ -6420,7 +6420,7 @@ public class StorageManager {
 
     /**
      * Set trips storage type (INTERNAL or SD_CARD).
-     * Does NOT call autoEnableCdrCleanup() — trip files are small and don't compete with BYD dashcam space.
+     * Trip storage selection never changes OEM dashcam-cleanup consent.
      * @param type The storage type to use
      * @return true if successfully changed, false if SD card not available
      */
@@ -6498,34 +6498,6 @@ public class StorageManager {
             return true;
         }
         return true;  // INTERNAL
-    }
-    
-    /**
-     * SOTA: Auto-enable CDR (BYD dashcam) cleanup when Overdrive uses SD card.
-     * This ensures Overdrive always has space by cleaning up old dashcam files.
-     */
-    private void autoEnableCdrCleanup() {
-        try {
-            ExternalStorageCleaner cleaner = ExternalStorageCleaner.getInstance();
-            if (!cleaner.isEnabled() && cleaner.isSdCardAvailable()) {
-                // Calculate recommended reserved space based on our limits
-                long totalNeeded = 0;
-                if (recordingsStorageType == StorageType.SD_CARD) {
-                    totalNeeded += recordingsLimitMb;
-                }
-                if (surveillanceStorageType == StorageType.SD_CARD) {
-                    totalNeeded += surveillanceLimitMb;
-                }
-                // Add 20% buffer
-                long reservedMb = Math.max(2048, (long)(totalNeeded * 1.2));
-                
-                cleaner.setReservedSpaceMb(reservedMb);
-                cleaner.setEnabled(true);
-                logInfo("Auto-enabled CDR cleanup with " + reservedMb + "MB reserved for Overdrive");
-            }
-        } catch (Exception e) {
-            logWarn("Could not auto-enable CDR cleanup: " + e.getMessage());
-        }
     }
     
     // ==================== Volume Info ====================

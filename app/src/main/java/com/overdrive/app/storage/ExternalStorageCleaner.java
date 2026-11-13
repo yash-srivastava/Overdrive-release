@@ -6,11 +6,9 @@ import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileFilter;
 import java.io.FileReader;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.Executors;
@@ -103,26 +101,11 @@ public class ExternalStorageCleaner {
 
     // ==================== Constants ====================
     
-    // Known BYD CDR (dashcam) recording directories
-    private static final String[] CDR_SUBDIRS = {
-        "Recorder/Normal",    // BYD built-in dashcam - normal recordings
-        "Recorder",           // BYD built-in dashcam - root
-        "Recorder/Video",
-        "DCIM",
-        "DCIM/Camera",
-        "DCIM/100MEDIA",
-        "DVR",
-        "CDR",
-        "行车记录仪",
-        "Video",
-        "Video/DVR",
-        "Movies",
-        "Movies/DVR",
-        "Record",
-        "CarRecord",
-        "DashCam",
-        "Camera"
-    };
+    // Only dedicated recorder paths may be selected for destructive cleanup.
+    // Generic media folders (DCIM, Camera, Movies, Video, Record) and the
+    // previous "largest folder of videos" heuristic are not safe evidence
+    // of OEM ownership: they can hold the driver's personal recordings.
+    private static final String[] CDR_SUBDIRS = CdrCleanupSafety.RECORDER_SUBDIRS;
     
     // Video file extensions to clean
     // Names are normalized once; these extensions are already lowercase.
@@ -199,6 +182,14 @@ public class ExternalStorageCleaner {
      * SOTA: Uses sm list-volumes to find mounted SD cards.
      */
     public void discoverPaths() {
+        // Refresh/status and destructive cleanup must not race to replace the
+        // current SD / recorder paths while a deletion is in progress.
+        synchronized (cleanupLock) {
+            discoverPathsLocked();
+        }
+    }
+
+    private void discoverPathsLocked() {
         sdCardPath = null;
         cdrPath = null;
         sdCardAvailable = false;
@@ -243,7 +234,8 @@ public class ExternalStorageCleaner {
         for (String subdir : CDR_SUBDIRS) {
             String fullPath = sdCardPath + "/" + subdir;
             File cdrDir = new File(fullPath);
-            if (cdrDir.exists() && cdrDir.isDirectory() && containsVideoFiles(cdrDir)) {
+            if (CdrCleanupSafety.isTrustedRecorderRoot(new File(sdCardPath), cdrDir)
+                    && containsVideoFiles(cdrDir)) {
                 cdrPath = fullPath;
                 logInfo("Found CDR directory: " + cdrPath);
                 break;
@@ -251,61 +243,13 @@ public class ExternalStorageCleaner {
         }
         
         if (cdrPath == null) {
-            logInfo("No CDR directory found on SD card");
-            // Try to find any directory with video files
-            cdrPath = findLargestVideoDirectory(new File(sdCardPath));
-            if (cdrPath != null) {
-                logInfo("Found video directory via scan: " + cdrPath);
-            }
+            // Fail closed: the most video-heavy folder on an SD card may be
+            // personal footage, not the OEM dashcam. Never guess a deletion
+            // target. A known recorder path can be discovered on refresh.
+            logInfo("No verified OEM recorder directory found; cleanup unavailable");
         }
     }
-    
-    /**
-     * Scan SD card root to find the directory with the most video files.
-     * Fallback when known CDR paths don't exist.
-     */
-    private String findLargestVideoDirectory(File root) {
-        if (root == null || !root.exists()) return null;
-        
-        File[] dirs = root.listFiles(File::isDirectory);
-        if (dirs == null) return null;
-        
-        String bestPath = null;
-        int maxFiles = 0;
-        
-        for (File dir : dirs) {
-            // Skip Android system directories
-            String name = dir.getName();
-            if (name.equals("Android") || name.equals(".") || name.equals("..") || 
-                name.startsWith(".") || name.equals("Overdrive")) {
-                continue;
-            }
-            
-            int videoCount = countVideoFiles(dir);
-            if (videoCount > maxFiles) {
-                maxFiles = videoCount;
-                bestPath = dir.getAbsolutePath();
-            }
-        }
-        
-        // Only return if we found at least 5 video files
-        return maxFiles >= 5 ? bestPath : null;
-    }
-    
-    /**
-     * Count video files in a directory (non-recursive, just top level).
-     */
-    private int countVideoFiles(File dir) {
-        if (dir == null || !dir.exists()) return 0;
-        
-        File[] files = dir.listFiles(file -> {
-            if (!file.isFile()) return false;
-            return isVideoFile(file);
-        });
-        
-        return files != null ? files.length : 0;
-    }
-    
+
     /**
      * Get Android system property via reflection or shell.
      */
@@ -390,8 +334,12 @@ public class ExternalStorageCleaner {
                 String configuredCdrPath = extCleanup.optString("cdrPath", "");
                 if (!configuredCdrPath.isEmpty()) {
                     File cdrDir = new File(configuredCdrPath);
-                    if (cdrDir.exists() && cdrDir.isDirectory()) {
+                    if (sdCardPath != null
+                            && CdrCleanupSafety.isTrustedRecorderRoot(
+                                    new File(sdCardPath), cdrDir)) {
                         cdrPath = configuredCdrPath;
+                    } else {
+                        logWarn("Ignoring old/unverified CDR directory override");
                     }
                 }
                 
@@ -418,8 +366,8 @@ public class ExternalStorageCleaner {
      * SIGKILL between the truncate and flush could wipe the ENTIRE config.
      * updateSection does loadConfigFresh + FileLock + atomic tmp+rename + .bak
      * self-heal and refreshes the cache, so the old explicit forceReload() is
-     * now redundant. updateSection merges into the existing section, so omitting
-     * {@code cdrPath} when null preserves a previously-persisted value.
+     * now redundant. updateSection merges into the existing section. A null
+     * {@code cdrPath} now clears an unsafe previously-discovered path.
      * Stay {@code synchronized(this)} so the in-memory fields are read
      * consistently while assembling the JSON.
      */
@@ -430,9 +378,9 @@ public class ExternalStorageCleaner {
             extCleanup.put("reservedSpaceMb", reservedSpaceMb);
             extCleanup.put("protectedHours", protectedHours);
             extCleanup.put("minFilesKeep", minFilesKeep);
-            if (cdrPath != null) {
-                extCleanup.put("cdrPath", cdrPath);
-            }
+            // Clear a historical heuristic/unsafe path as well, rather than
+            // preserving it forever through the JSON section merge.
+            extCleanup.put("cdrPath", cdrPath != null ? cdrPath : JSONObject.NULL);
 
             boolean ok = com.overdrive.app.config.UnifiedConfigManager
                     .updateSection("externalCleanup", extCleanup);
@@ -660,36 +608,63 @@ public class ExternalStorageCleaner {
     }
     
     /**
-     * Get all CDR video files, including subdirectories.
+     * Scan a verified OEM recorder tree. Status reads may use a bounded shell
+     * listing fallback, but deletion/preview must have a COMPLETE Java walk;
+     * otherwise the minimum-retained-file safety rule cannot be guaranteed.
      */
-    private List<File> getCdrVideoFiles() {
-        List<File> videoFiles = new ArrayList<>();
-        if (cdrPath == null) return videoFiles;
-        
-        collectVideoFiles(new File(cdrPath), videoFiles);
-        return videoFiles;
+    private static final class VideoScan {
+        final List<File> files = new ArrayList<>();
+        boolean complete;
     }
-    
-    private void collectVideoFiles(File dir, List<File> result) {
-        if (dir == null || !dir.exists()) return;
-        
-        File[] files = dir.listFiles();
-        if (files == null) {
-            // Try shell fallback for permission issues
-            files = listFilesViaShell(dir);
+
+    private List<File> getCdrVideoFiles() {
+        return scanCdrVideoFiles(true).files;
+    }
+
+    private VideoScan scanCdrVideoFiles(boolean allowShellFallback) {
+        VideoScan scan = new VideoScan();
+        if (sdCardPath == null || cdrPath == null) return scan;
+        File volume = new File(sdCardPath);
+        File recorderRoot = new File(cdrPath);
+        if (!CdrCleanupSafety.isTrustedRecorderRoot(volume, recorderRoot)) {
+            return scan;
         }
-        
-        if (files != null) {
+        scan.complete = collectVideoFiles(recorderRoot, recorderRoot,
+                scan.files, new java.util.HashSet<String>(), allowShellFallback);
+        return scan;
+    }
+
+    private boolean collectVideoFiles(File recorderRoot, File dir, List<File> result,
+                                      java.util.Set<String> visited,
+                                      boolean allowShellFallback) {
+        try {
+            if (!CdrCleanupSafety.isSameOrWithinRoot(recorderRoot, dir)) return false;
+            // A symlink cycle must not recurse forever or count the same clip
+            // twice. Symlinks pointing outside the recorder tree fail closed.
+            if (!visited.add(dir.getCanonicalPath())) return true;
+            File[] files = dir.listFiles();
+            if (files == null && allowShellFallback) {
+                files = listFilesViaShell(dir);
+            }
+            if (files == null) return false;
             for (File file : files) {
+                if (!CdrCleanupSafety.isSameOrWithinRoot(recorderRoot, file)) {
+                    return false;
+                }
                 if (file.isDirectory()) {
-                    collectVideoFiles(file, result);
-                } else if (isVideoFile(file)) {
+                    if (!collectVideoFiles(recorderRoot, file, result, visited,
+                            allowShellFallback)) return false;
+                } else if (file.isFile() && isVideoFile(file)) {
                     result.add(file);
                 }
             }
+            return true;
+        } catch (java.io.IOException | SecurityException e) {
+            logWarn("Could not safely enumerate recorder tree: " + e.getMessage());
+            return false;
         }
     }
-    
+
     private boolean isVideoFile(File file) {
         String name = file.getName().toLowerCase();
         for (String ext : VIDEO_EXTENSIONS) {
@@ -797,15 +772,11 @@ public class ExternalStorageCleaner {
                 return new CleanupResult("Cleanup not enabled");
             }
             
-            if (sdCardPath == null || cdrPath == null) {
-                discoverPaths();
-                if (sdCardPath == null) {
-                    return new CleanupResult("No SD card found");
-                }
-                if (cdrPath == null) {
-                    return new CleanupResult("No CDR directory found");
-                }
-            }
+            // Re-discover before every destructive operation. Never trust a
+            // previously cached path after an SD-card removal or replacement.
+            discoverPaths();
+            if (sdCardPath == null) return new CleanupResult("No SD card found");
+            if (cdrPath == null) return new CleanupResult("No verified OEM recorder directory found");
             
             long freeSpace = getSdCardFreeSpace();
             long reservedBytes = reservedSpaceMb * 1024L * 1024L;
@@ -842,13 +813,9 @@ public class ExternalStorageCleaner {
                 return new CleanupResult("External storage cleanup is disabled");
             }
 
-            if (sdCardPath == null || cdrPath == null) {
-                discoverPaths();
-                if (cdrPath == null) {
-                    return new CleanupResult("No CDR directory found");
-                }
-            }
-
+            discoverPaths();
+            if (sdCardPath == null) return new CleanupResult("No SD card found");
+            if (cdrPath == null) return new CleanupResult("No verified OEM recorder directory found");
             return performCleanup(bytesToFree);
         }
     }
@@ -857,8 +824,11 @@ public class ExternalStorageCleaner {
      * Perform the actual cleanup operation.
      */
     private CleanupResult performCleanup(long bytesToFree) {
-        List<File> files = getCdrVideoFiles();
-        
+        VideoScan scan = scanCdrVideoFiles(false);
+        if (!scan.complete) {
+            return new CleanupResult("Cannot fully enumerate verified recorder directory; no files deleted");
+        }
+        List<File> files = scan.files;
         if (files.isEmpty()) {
             return new CleanupResult("No CDR files found");
         }
@@ -874,6 +844,7 @@ public class ExternalStorageCleaner {
         
         long freed = 0;
         int deleted = 0;
+        boolean aborted = false;
         List<String> deletedFiles = new ArrayList<>();
         
         for (int i = 0; i < deletableCount && freed < bytesToFree; i++) {
@@ -889,6 +860,14 @@ public class ExternalStorageCleaner {
             long fileSize = file.length();
             String fileName = file.getName();
             
+            // Recheck immediately before unlinking. A replaced directory
+            // symlink or changed mount must not redirect an rm outside CDR.
+            if (!CdrCleanupSafety.isTrustedRecorderRoot(
+                    new File(sdCardPath), new File(cdrPath))) {
+                logWarn("Recorder path changed during cleanup; stopping further deletion");
+                aborted = true;
+                break;
+            }
             if (deleteFile(file)) {
                 freed += fileSize;
                 deleted++;
@@ -909,8 +888,8 @@ public class ExternalStorageCleaner {
         // cleanup completes).
         invalidateWalkCache();
 
-        logInfo("CDR cleanup complete: freed " + formatSize(freed) +
-            " (" + deleted + " files)");
+        logInfo("CDR cleanup " + (aborted ? "stopped after path change" : "complete")
+                + ": freed " + formatSize(freed) + " (" + deleted + " files)");
 
         return new CleanupResult(freed, deleted, deletedFiles);
     }
@@ -919,6 +898,13 @@ public class ExternalStorageCleaner {
      * Delete a file, trying Java API first then shell fallback.
      */
     private boolean deleteFile(File file) {
+        // Both Java delete and shell rm follow parent symlinks. Revalidate the
+        // canonical target just before either attempt. No arbitrary SD files.
+        if (cdrPath == null || !CdrCleanupSafety.isRegularFileInRecorder(
+                new File(cdrPath), file)) {
+            logWarn("Refusing deletion outside verified recorder directory");
+            return false;
+        }
         // Try Java delete
         if (file.delete()) {
             return true;
@@ -1059,7 +1045,9 @@ public class ExternalStorageCleaner {
             if (cdrPath == null) return preview;
         }
         
-        List<File> files = getCdrVideoFiles();
+        VideoScan scan = scanCdrVideoFiles(false);
+        if (!scan.complete) return null; // API reports unsafe/incomplete preview
+        List<File> files = scan.files;
         files.sort(Comparator.comparingLong(File::lastModified));
         
         long protectionCutoff = System.currentTimeMillis() - (protectedHours * 3600L * 1000L);

@@ -130,7 +130,10 @@ public class ExternalStorageApiHandler {
         
         // CDR info
         response.put("cdrPath", cleaner.getCdrPath());
-        
+        // Null means the media folder could not be positively identified as
+        // an OEM recorder directory, never that the SD is safe to clean.
+        response.put("cdrPathVerified", cleaner.getCdrPath() != null);
+
         if (cleaner.getCdrPath() != null) {
             long cdrUsage = cleaner.getCdrUsage();
             int cdrCount = cleaner.getCdrFileCount();
@@ -307,7 +310,14 @@ public class ExternalStorageApiHandler {
         }
         
         List<ExternalStorageCleaner.FileInfo> preview = cleaner.previewCleanup(bytesToFree);
-        
+        if (preview == null) {
+            JSONObject error = new JSONObject();
+            error.put("success", false);
+            error.put("error", "Cannot safely enumerate the entire OEM recorder tree");
+            sendJson(out, 409, error);
+            return;
+        }
+
         JSONObject response = new JSONObject();
         response.put("success", true);
         response.put("targetBytes", bytesToFree);
