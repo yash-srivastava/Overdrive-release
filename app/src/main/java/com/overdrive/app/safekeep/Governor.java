@@ -13,7 +13,9 @@ public final class Governor {
     private static final long HEALTHY_HOLD_MS = 10_000;
 
     private final TokenBucket bucket = new TokenBucket(0);
-    private volatile long unhealthyAt;
+    // elapsedRealtime() cannot jump when the head unit corrects its wall clock.
+    // -1 means the recorder has not reported an unhealthy interval.
+    private volatile long unhealthyAtElapsed = -1L;
     private volatile long lastDrops = -1;
 
     public TokenBucket bucket() {
@@ -22,13 +24,15 @@ public final class Governor {
 
     /** Null when the chunk may proceed, else a reason code. Class 0 (KB-sized) is exempt from media pauses. */
     public String backpressure(SafeKeepConfig cfg, UploadSignals.Snap s, int pclass) {
-        long now = System.currentTimeMillis();
+        long nowElapsed = android.os.SystemClock.elapsedRealtime();
         boolean dropped = lastDrops >= 0 && s.drops > lastDrops;
         lastDrops = s.drops;
         if (s.writing && (s.writerLagMs > RECORDER_LAG_PAUSE_MS || s.queueDepth > QUEUE_DEPTH_PAUSE || dropped)) {
-            unhealthyAt = now;
+            unhealthyAtElapsed = nowElapsed;
         }
-        if (now - unhealthyAt < HEALTHY_HOLD_MS) return "recorder_busy";
+        if (SafeKeepTiming.withinHold(nowElapsed, unhealthyAtElapsed, HEALTHY_HOLD_MS)) {
+            return "recorder_busy";
+        }
         if (pclass >= 1) {
             if (s.eventActive) return "event_recording";
             if (cfg.limits.pauseForLiveView && s.liveView) return "live_view";

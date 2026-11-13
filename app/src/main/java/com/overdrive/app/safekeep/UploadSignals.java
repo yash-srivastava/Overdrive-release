@@ -94,7 +94,8 @@ public final class UploadSignals {
     private volatile long lastAtElapsed;
     private volatile long ssidAt;
     private volatile String ssidKey = "";
-    private volatile long thermalAt;
+    // Monotonic time: RTC/NTP/timezone changes must not freeze thermal checks.
+    private volatile long thermalAtElapsed = -1L;
     private volatile float lastTemp = Float.NaN;
     private final AtomicLong parkedUploadMs = new AtomicLong();
     private volatile long parkedSessionMark = -1;
@@ -261,9 +262,10 @@ public final class UploadSignals {
         } catch (Throwable ignored) {
         }
 
-        if (now - thermalAt > THERMAL_REFRESH_MS) {
+        long nowElapsed = android.os.SystemClock.elapsedRealtime();
+        if (SafeKeepTiming.intervalDue(nowElapsed, thermalAtElapsed, THERMAL_REFRESH_MS)) {
             lastTemp = Thermal.readCelsius();
-            thermalAt = now;
+            thermalAtElapsed = android.os.SystemClock.elapsedRealtime();
         }
         s.tempC = lastTemp;
         try {
