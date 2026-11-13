@@ -19,7 +19,7 @@ import java.io.OutputStream;
  * the feature and this endpoint reports unavailable.
  *
  * Endpoints:
- *   GET  /api/logs/available           → {available, daemons:[key,…]}
+ *   GET  /api/logs/available           → {available, daemons:[key,…], descriptions:{key:{name,component,sendWhen}}}
  *   POST /api/logs/upload?daemon=camera → {code} | {error}
  *
  * Public-mode is hard-blocked for /upload (mirrors /api/update/install): a
@@ -45,8 +45,20 @@ public class LogsApiHandler {
         try {
             r.put("available", LogUploader.isUploadConfigured());
             JSONArray arr = new JSONArray();
-            for (String k : DaemonLogPaths.keys()) arr.put(k);
+            JSONObject descriptions = new JSONObject();
+            for (String k : DaemonLogPaths.keys()) {
+                arr.put(k);
+                DaemonLogPaths.LogDescription description = DaemonLogPaths.descriptionFor(k);
+                if (description != null) {
+                    descriptions.put(k, new JSONObject()
+                            .put("name", description.name)
+                            .put("component", description.component)
+                            .put("sendWhen", description.sendWhen));
+                }
+            }
             r.put("daemons", arr);
+            // Additive API field: older clients can continue consuming daemons[].
+            r.put("descriptions", descriptions);
         } catch (Exception ignored) {}
         HttpResponse.sendJson(out, r.toString());
     }

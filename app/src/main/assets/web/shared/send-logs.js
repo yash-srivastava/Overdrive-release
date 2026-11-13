@@ -7,6 +7,7 @@
  * POSTs /api/logs/upload?daemon=<key>, which uploads the (redacted) log to the
  * Worker and returns a short code shown for the user to share.
  *
+ * Each daemon row includes the component it owns and examples of when to send it.
  * ES5-only (Chrome 58 head unit): var + string concat + fetch(). POST uses
  * fetch (the WebView eats XHR write bodies). No flex `gap`.
  */
@@ -31,11 +32,15 @@
         if (STYLE_INJECTED) return;
         STYLE_INJECTED = true;
         var css =
-            '.diag-row{display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--border-subtle);cursor:pointer;color:var(--text-primary);}' +
+            '.diag-row{display:flex;align-items:center;padding:13px 14px;border-bottom:1px solid var(--border-subtle);cursor:pointer;color:var(--text-primary);}' +
             '.diag-row:last-child{border-bottom:0;}' +
             '.diag-row:hover{background:var(--bg-hover);}' +
-            '.diag-row .diag-name{flex:1;font-size:15px;}' +
-            '.diag-row .diag-act{font-size:13px;color:var(--text-secondary);}' +
+            '.diag-row:focus-visible{outline:2px solid var(--brand-primary);outline-offset:-2px;}' +
+            '.diag-copy{flex:1;min-width:0;}' +
+            '.diag-row .diag-name{display:block;font-size:15px;font-weight:600;}' +
+            '.diag-row .diag-component{display:block;margin-top:4px;font-size:12px;line-height:1.45;color:var(--text-secondary);}' +
+            '.diag-row .diag-when{display:block;margin-top:3px;font-size:12px;line-height:1.45;color:var(--text-secondary);opacity:0.85;}' +
+            '.diag-row .diag-act{flex-shrink:0;margin-left:12px;font-size:13px;color:var(--text-secondary);white-space:nowrap;}' +
             '.diag-row.busy{opacity:0.6;pointer-events:none;}' +
             '.diag-code{font-family:ui-monospace,monospace;font-size:18px;font-weight:700;letter-spacing:1px;color:var(--brand-primary);}';
         var s = document.createElement('style');
@@ -44,13 +49,22 @@
     }
 
     function prettyName(key) {
-        // Map the stable daemon key to a readable label; fall back to the key.
+        // Fallback label for an older server that does not return descriptions.
         var names = {
             camera: 'Camera', accsentry: 'ACC Sentry', sentry: 'Sentry',
-            telegram: 'Telegram', cloudflared: 'Cloudflared', zrok: 'Zrok',
-            tailscale: 'Tailscale', wireguard: 'WireGuard', singbox: 'Sing-box'
+            telegram: 'Telegram Bot', cloudflared: 'Cloudflared Tunnel', zrok: 'Zrok Tunnel',
+            tailscale: 'Tailscale', wireguard: 'WireGuard', singbox: 'Sing-box Proxy'
         };
         return names[key] || key;
+    }
+
+    function descriptionFor(key, descriptions) {
+        var info = descriptions && descriptions[key] ? descriptions[key] : {};
+        return {
+            name: info.name || prettyName(key),
+            component: info.component || t('logs.component_unavailable', 'Component details are unavailable in this app version.'),
+            sendWhen: info.sendWhen || t('logs.send_when_unavailable', 'Send this log when the problem involves this service.')
+        };
     }
 
     function uploadDaemon(rowEl, key) {
@@ -165,24 +179,51 @@
         document.body.appendChild(bg);
     }
 
-    function render(daemons) {
+    function render(daemons, descriptions) {
         var list = $('diagDaemonList');
         var section = $('diagSection');
         if (!list || !section) return;
         list.innerHTML = '';
         for (var i = 0; i < daemons.length; i++) {
             (function (key) {
+                var info = descriptionFor(key, descriptions);
                 var row = document.createElement('div');
                 row.className = 'diag-row';
+                row.setAttribute('role', 'button');
+                row.setAttribute('tabindex', '0');
+                row.setAttribute('aria-label', info.name + '. ' + info.component + ' ' + info.sendWhen);
+
+                var copy = document.createElement('div');
+                copy.className = 'diag-copy';
+
                 var name = document.createElement('span');
                 name.className = 'diag-name';
-                name.textContent = prettyName(key);
+                name.textContent = info.name;
+
+                var component = document.createElement('span');
+                component.className = 'diag-component';
+                component.textContent = info.component;
+
+                var when = document.createElement('span');
+                when.className = 'diag-when';
+                when.textContent = t('logs.when_to_send', 'Send this log when: ') + info.sendWhen;
+
                 var act = document.createElement('span');
                 act.className = 'diag-act';
                 act.textContent = t('logs.send', 'Send');
-                row.appendChild(name);
+
+                copy.appendChild(name);
+                copy.appendChild(component);
+                copy.appendChild(when);
+                row.appendChild(copy);
                 row.appendChild(act);
                 row.addEventListener('click', function () { uploadDaemon(row, key); });
+                row.addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        uploadDaemon(row, key);
+                    }
+                });
                 list.appendChild(row);
             })(daemons[i]);
         }
@@ -193,7 +234,7 @@
         fetch('/api/logs/available').then(function (r) { return r.json(); }).then(function (res) {
             if (!res || !res.available || !res.daemons || !res.daemons.length) return; // hidden on non-braveheart
             injectStyles();
-            render(res.daemons);
+            render(res.daemons, res.descriptions || {});
         }).catch(function () { /* endpoint missing on old daemon — stay hidden */ });
     }
 
