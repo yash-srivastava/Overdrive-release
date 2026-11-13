@@ -19,7 +19,8 @@ import java.net.URI
 import java.util.concurrent.Executors
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * HTTP-CONNECT / SOCKS5 proxy for tethered clients whose OUTBOUND sockets are
@@ -53,7 +54,12 @@ object CellularRelay {
 
     private val log = LogManager.getInstance()
     private val running = AtomicBoolean(false)
-    private val tunnels = AtomicInteger(0)
+    // Admission is reserved by the accept thread, not by workers after dispatch.
+    // This bounds both the active/queued work and the cached pool's thread count.
+    private val admissions = RelayAdmissionGate(MAX_TUNNELS)
+    private val lifecycleLock = Any()
+    private val generation = AtomicLong(0L)
+    private val openSockets = ConcurrentHashMap.newKeySet<Socket>()
 
     // Relayed traffic never traverses the AP interface as forwarded packets — it
     // terminates in this process and re-egresses on a cellular socket — so the
@@ -90,58 +96,74 @@ object CellularRelay {
     @Volatile internal var authToken: String? = null   // internal for unit tests
 
     fun start(context: Context, authToken: String? = null) {
-        if (!running.compareAndSet(false, true)) return
-        this.authToken = authToken
-        val ctx = context.applicationContext
-        try {
-            val manager = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-            if (manager == null) {
-                running.set(false)
-                log.warn(TAG, "no ConnectivityManager; relay not started")
-                return
-            }
-            cm = manager
-            requestCellular(manager)
+        synchronized(lifecycleLock) {
+            if (running.get()) return
+            val epoch = generation.incrementAndGet()
+            running.set(true)
+            this.authToken = authToken
+            try {
+                val ctx = context.applicationContext
+                val manager = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                    ?: throw IllegalStateException("no ConnectivityManager")
+                cm = manager
+                // Fail closed before requesting a radio network if the AP gateway
+                // is unavailable. Any later startup failure is rolled back by stop().
+                val bindAddr = apGatewayAddress()
+                    ?: throw IllegalStateException("no AP gateway address; fail closed")
+                val ss = ServerSocket()
+                server = ss // publish before bind so even bind failures close this socket
+                ss.reuseAddress = true
+                ss.bind(InetSocketAddress(bindAddr, PORT))
+                requestCellular(manager, epoch)
 
-            // SECURITY: never bind the wildcard. The relay serves tethered AP
-            // clients only, so bind the AP gateway address; if it cannot be
-            // determined, fail closed instead of exposing the port on every
-            // interface.
-            val bindAddr = apGatewayAddress()
-            if (bindAddr == null) {
-                running.set(false)
-                log.warn(TAG, "no AP gateway address; relay NOT started (fail closed)")
-                return
+                val t = Thread({ acceptLoop(ss, epoch) }, "cell-relay-accept").apply { isDaemon = true }
+                accept = t
+                t.start()
+                log.info(TAG, "relay listening on ${bindAddr.hostAddress}:$PORT (AP bind, auth=${authToken != null})")
+            } catch (t: Throwable) {
+                log.warn(TAG, "relay start failed: ${t.message}")
+                stop() // Closes listener and unregisters a partially established network request.
             }
-            val ss = ServerSocket()
-            ss.reuseAddress = true
-            ss.bind(InetSocketAddress(bindAddr, PORT))
-            server = ss
-
-            val t = Thread({ acceptLoop(ss) }, "cell-relay-accept").apply { isDaemon = true }
-            accept = t
-            t.start()
-            log.info(TAG, "relay listening on ${bindAddr.hostAddress}:$PORT (AP bind, auth=${authToken != null})")
-        } catch (t: Throwable) {
-            log.warn(TAG, "relay start failed: ${t.message}")
-            stop()
         }
     }
 
-    /** Stop accepting and release the cellular request. Safe to call when stopped. */
+    /** Revoke the session, close both ends of every tunnel and release the cellular request. */
     fun stop() {
-        running.set(false)
-        try { server?.close() } catch (t: Throwable) { }
-        server = null
-        accept = null
-        val manager = cm
-        val cb = netCallback
-        if (manager != null && cb != null) {
-            try { manager.unregisterNetworkCallback(cb) } catch (t: Throwable) { }
+        synchronized(lifecycleLock) {
+            running.set(false)
+            generation.incrementAndGet() // invalidate old accept threads and network callbacks
+            try { server?.close() } catch (_: Throwable) { }
+            server = null
+            accept = null
+            // Closing sockets wakes blocking reads; otherwise tunnels could
+            // continue relaying for up to IO_TIMEOUT_MS after hotspot shutdown.
+            for (socket in openSockets) {
+                try { socket.close() } catch (_: Throwable) { }
+            }
+            openSockets.clear()
+            val manager = cm
+            val cb = netCallback
+            netCallback = null
+            cm = null
+            cell = null
+            authToken = null
+            if (manager != null && cb != null) {
+                try { manager.unregisterNetworkCallback(cb) } catch (_: Throwable) { }
+            }
+            log.info(TAG, "relay stopped")
         }
-        netCallback = null
-        cell = null
-        log.info(TAG, "relay stopped")
+    }
+
+    private fun isCurrent(epoch: Long): Boolean = running.get() && generation.get() == epoch
+
+    /** Registration and stop share a lock so a stopped session cannot add new sockets. */
+    private fun trackSocket(socket: Socket, epoch: Long): Boolean = synchronized(lifecycleLock) {
+        if (!isCurrent(epoch)) false else openSockets.add(socket)
+    }
+
+    private fun closeTracked(socket: Socket) {
+        openSockets.remove(socket)
+        try { socket.close() } catch (_: Throwable) { }
     }
 
 
@@ -207,19 +229,27 @@ object CellularRelay {
         relayedTx.set(0)
     }
 
-    private fun requestCellular(manager: ConnectivityManager) {
+    private fun requestCellular(manager: ConnectivityManager, epoch: Long) {
         val req = NetworkRequest.Builder()
             .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .build()
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                cell = network
-                log.info(TAG, "cellular available for relay")
+                synchronized(lifecycleLock) {
+                    if (isCurrent(epoch)) {
+                        cell = network
+                        log.info(TAG, "cellular available for relay")
+                    }
+                }
             }
             override fun onLost(network: Network) {
-                if (cell == network) cell = null
-                log.info(TAG, "cellular lost for relay")
+                synchronized(lifecycleLock) {
+                    if (isCurrent(epoch)) {
+                        if (cell == network) cell = null
+                        log.info(TAG, "cellular lost for relay")
+                    }
+                }
             }
         }
         netCallback = cb
@@ -231,7 +261,8 @@ object CellularRelay {
      * to a scan so a tunnel opened during the AP transition isn't refused just
      * because the callback hasn't landed yet.
      */
-    private fun cellular(): Network? {
+    private fun cellular(epoch: Long): Network? {
+        if (!isCurrent(epoch)) return null
         cell?.let { return it }
         val manager = cm ?: return null
         return try {
@@ -240,44 +271,67 @@ object CellularRelay {
                 nc != null &&
                     nc.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) &&
                     nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            }?.also { cell = it }
+            }?.also { discovered ->
+                synchronized(lifecycleLock) {
+                    if (isCurrent(epoch)) cell = discovered
+                }
+            }
         } catch (t: Throwable) {
             null
         }
     }
 
-    private fun acceptLoop(ss: ServerSocket) {
-        while (running.get()) {
+    private fun acceptLoop(ss: ServerSocket, epoch: Long) {
+        while (isCurrent(epoch)) {
             val client = try {
                 ss.accept()
             } catch (t: Throwable) {
-                if (running.get()) log.warn(TAG, "accept failed: ${t.message}")
+                if (isCurrent(epoch)) {
+                    log.warn(TAG, "accept failed: ${t.message}")
+                    // A broken listener must not strand the cellular network request.
+                    synchronized(lifecycleLock) { if (isCurrent(epoch)) stop() }
+                }
                 return
             }
-            if (tunnels.get() >= MAX_TUNNELS) {
+            if (!isCurrent(epoch)) {
+                try { client.close() } catch (_: Throwable) { }
+                return
+            }
+            if (!admissions.tryAcquire()) {
                 log.warn(TAG, "tunnel cap reached; dropping client")
-                try { client.close() } catch (e: Throwable) { }
+                try { client.close() } catch (_: Throwable) { }
                 continue
             }
-            pool.execute { serve(client) }
+            if (!trackSocket(client, epoch)) {
+                admissions.release()
+                try { client.close() } catch (_: Throwable) { }
+                return
+            }
+            try {
+                pool.execute { serve(client, epoch) }
+            } catch (t: java.util.concurrent.RejectedExecutionException) {
+                closeTracked(client)
+                admissions.release()
+                log.warn(TAG, "could not dispatch relay tunnel: ${t.message}")
+            }
         }
     }
 
-    private fun serve(client: Socket) {
-        tunnels.incrementAndGet()
+    private fun serve(client: Socket, epoch: Long) {
         var upstream: Socket? = null
         try {
+            if (!isCurrent(epoch)) return
             client.soTimeout = IO_TIMEOUT_MS
             client.tcpNoDelay = true
             val input = client.getInputStream()
             val first = input.read()
-            if (first < 0) return
+            if (first < 0 || !isCurrent(epoch)) return
             upstream = if (first == 0x05) {
-                socks5(client, input)
+                socks5(client, input, epoch)
             } else {
-                httpProxy(client, input, first)
+                httpProxy(client, input, first, epoch)
             }
-            if (upstream == null) return
+            if (upstream == null || !isCurrent(epoch)) return
             // Pump both directions; each side half-closes on EOF so neither peer
             // waits on its own timeout for a completed response.
             val up = upstream
@@ -289,37 +343,46 @@ object CellularRelay {
         } catch (t: Throwable) {
             log.debug(TAG, "tunnel ended: ${t.message}")
         } finally {
-            try { upstream?.close() } catch (t: Throwable) { }
-            try { client.close() } catch (t: Throwable) { }
-            tunnels.decrementAndGet()
+            upstream?.let { closeTracked(it) }
+            closeTracked(client)
+            admissions.release()
         }
     }
 
-    /** Open a cellular-bound socket, resolving the host on that network too. */
-    private fun dial(host: String, port: Int): Socket? {
-        val net = cellular()
+    /** Resolve over cellular and track an in-progress connect for immediate shutdown. */
+    private fun dial(host: String, port: Int, epoch: Long): Socket? {
+        val net = cellular(epoch)
         if (net == null) {
             log.warn(TAG, "no cellular network; refusing $host:$port")
             return null
         }
+        // Resolve ON the cellular network for NAT64-synthesised addresses.
+        val addr = try { net.getAllByName(host).firstOrNull() } catch (t: Throwable) {
+            log.warn(TAG, "DNS for $host failed: ${t.message}")
+            null
+        } ?: return null
+        if (host.equals("localhost", ignoreCase = true) || !isAllowedDestination(addr)) {
+            log.warn(TAG, "refusing non-public destination $host ($addr)")
+            return null
+        }
+        val socket = Socket()
+        if (!trackSocket(socket, epoch)) {
+            try { socket.close() } catch (_: Throwable) { }
+            return null
+        }
         return try {
-            // Resolve ON the cellular network: that is what yields NAT64-synthesised
-            // addresses for IPv4-only destinations on this IPv6 carrier.
-            val addr = net.getAllByName(host).firstOrNull() ?: return null
-            // SECURITY: resolve first, then refuse private/loopback/link-local
-            // destinations — a client must not be able to reach the head unit's own
-            // services or other private networks through the relay.
-            if (host.equals("localhost", ignoreCase = true) || !isAllowedDestination(addr)) {
-                log.warn(TAG, "refusing non-public destination $host ($addr)")
-                return null
+            net.bindSocket(socket)
+            socket.tcpNoDelay = true
+            socket.connect(InetSocketAddress(addr, port), CONNECT_TIMEOUT_MS)
+            socket.soTimeout = IO_TIMEOUT_MS
+            if (!isCurrent(epoch)) {
+                closeTracked(socket)
+                null
+            } else {
+                socket
             }
-            val s = Socket()
-            net.bindSocket(s)
-            s.tcpNoDelay = true
-            s.connect(InetSocketAddress(addr, port), CONNECT_TIMEOUT_MS)
-            s.soTimeout = IO_TIMEOUT_MS
-            s
         } catch (t: Throwable) {
+            closeTracked(socket) // do not leak sockets when bind/connect fails
             log.warn(TAG, "dial $host:$port failed: ${t.message}")
             null
         }
@@ -331,7 +394,7 @@ object CellularRelay {
      * Handle CONNECT (tunnel) and absolute-URI GET/POST (plain proxy). [firstByte]
      * was already consumed by the caller's protocol sniff.
      */
-    private fun httpProxy(client: Socket, input: InputStream, firstByte: Int): Socket? {
+    private fun httpProxy(client: Socket, input: InputStream, firstByte: Int, epoch: Long): Socket? {
         val head = StringBuilder().append(firstByte.toChar())
         var consecutive = 0
         while (consecutive < 2) {
@@ -376,7 +439,7 @@ object CellularRelay {
             if (idx <= 0) return null
             val host = hp.substring(0, idx)
             val port = hp.substring(idx + 1).toIntOrNull() ?: return null
-            val up = dial(host, port) ?: run {
+            val up = dial(host, port, epoch) ?: run {
                 client.getOutputStream().write(
                     "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n".toByteArray())
                 client.getOutputStream().flush()
@@ -392,22 +455,49 @@ object CellularRelay {
         val uri = try { URI(parts[1]) } catch (t: Throwable) { null } ?: return null
         val host = uri.host ?: return null
         val port = if (uri.port > 0) uri.port else 80
-        val up = dial(host, port) ?: run {
+        // Validate and remove proxy-only secrets BEFORE opening an outbound socket.
+        val originRequest = originRequestWithoutProxyHeaders(text) ?: return null
+        val up = dial(host, port, epoch) ?: run {
             client.getOutputStream().write(
                 "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n".toByteArray())
             client.getOutputStream().flush()
             return null
         }
-        // Replay the request verbatim; the origin accepts an absolute URI.
-        up.getOutputStream().write(text.toByteArray(Charsets.ISO_8859_1))
+        up.getOutputStream().write(originRequest.toByteArray(Charsets.ISO_8859_1))
         up.getOutputStream().flush()
         return up
+    }
+
+    /**
+     * Strip proxy-only headers before forwarding a plain HTTP request to its origin.
+     * Reject malformed/folded headers instead of risking a secret reaching the origin.
+     * The CONNECT path never forwards its handshake to the destination.
+     */
+    internal fun originRequestWithoutProxyHeaders(head: String): String? {
+        if (!head.endsWith("\r\n\r\n")) return null
+        val lines = head.split("\r\n")
+        if (lines.size < 3 || lines[0].isEmpty()) return null
+        val out = StringBuilder().append(lines[0]).append("\r\n")
+        for (i in 1 until lines.size - 2) {
+            val line = lines[i]
+            if (line.isEmpty() || line[0] == ' ' || line[0] == '\t') return null
+            val colon = line.indexOf(':')
+            if (colon <= 0) return null
+            val field = line.substring(0, colon)
+            // A space/tab before the colon is not a valid field name.
+            if (field != field.trim()) return null
+            if (!field.equals("Proxy-Authorization", ignoreCase = true) &&
+                !field.equals("Proxy-Connection", ignoreCase = true)) {
+                out.append(line).append("\r\n")
+            }
+        }
+        return out.append("\r\n").toString()
     }
 
     // ==================== SOCKS5 ====================
 
     /** Minimal SOCKS5 CONNECT, no auth. The 0x05 version byte is already read. */
-    private fun socks5(client: Socket, input: InputStream): Socket? {
+    private fun socks5(client: Socket, input: InputStream, epoch: Long): Socket? {
         val out = client.getOutputStream()
         val methodCount = input.read()
         if (methodCount <= 0) return null
@@ -475,7 +565,7 @@ object CellularRelay {
         val port = ((p[0].toInt() and 0xFF) shl 8) or (p[1].toInt() and 0xFF)
 
         // 0x01 == CONNECT; this relay intentionally supports nothing else.
-        val up = if (cmd == 0x01) dial(host, port) else null
+        val up = if (cmd == 0x01) dial(host, port, epoch) else null
         if (up == null) {
             // reply=0x05 connection refused, with a zeroed BND address
             out.write(byteArrayOf(0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0))
