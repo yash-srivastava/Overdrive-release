@@ -445,6 +445,9 @@ public class PanoramicCameraGpu {
     // requested (HAL clamp; e.g. user requests 30, HAL emits ~26).
     private volatile float measuredFps = 0f;
     private long lastFrameTime = 0;
+    // Monotonic timestamp of an actual newly bound camera frame. Keep this
+    // separate from lastFrameTime, which also has watchdog/open-path writes.
+    private volatile long lastCameraFrameElapsedMs = 0L;
     private volatile long lastCameraStartTime = 0;
     // DiLink 4: track last error-restart so we can throttle tight reopen
     // loops when the HAL keeps emitting event=8. oem-parity: 60 s, not 30 s.
@@ -5469,6 +5472,11 @@ public class PanoramicCameraGpu {
             return;
         }
 
+        // A new handle must prove that it has delivered a frame of its own;
+        // never let a timestamp from the previous camera session satisfy the
+        // live-secondary fast path during a later ACC transition.
+        lastCameraFrameElapsedMs = 0L;
+
         // Cold-open invariant: every path that creates the primary AVMCamera
         // handle (initial start, ACC reopen, HAL-error restart, yield
         // reacquire, and auto-probe) routes through this one method.
@@ -7052,6 +7060,7 @@ public class PanoramicCameraGpu {
             long stageAfterAcquireNs = System.nanoTime();
             frameCounter++;
             lastFrameTime = System.currentTimeMillis();
+            lastCameraFrameElapsedMs = android.os.SystemClock.elapsedRealtime();
             firstFrameReceived = true;
             consecutiveContentionStalls = 0;  // Frames flowing — clear stall counter
             consecutiveZeroFrameRestarts = 0; // Real frame arrived — reopen succeeded; clear escalation counter
@@ -10247,6 +10256,34 @@ public class PanoramicCameraGpu {
     // Sticky stop verdict — see stop(). Never cleared; only a process restart
     // (which replaces the instance) lifts it.
     private volatile boolean stopVerdictWedged = false;
+
+    /**
+     * Returns true only when the OEM camera service reports another camera
+     * owner AND this instance is still receiving recent frames as a secondary
+     * consumer. In that state, releasing the handle again would unnecessarily
+     * interrupt a working feed and repeat the ACC-ON handover.
+     */
+    public boolean hasLiveNativeSharedCamera() {
+        if (!running || cameraObj == null || cameraCoordinator == null) {
+            return false;
+        }
+
+        long frameTimeMs = lastCameraFrameElapsedMs;
+        long frameAgeMs = android.os.SystemClock.elapsedRealtime() - frameTimeMs;
+        if (frameTimeMs <= 0L || frameAgeMs < 0L || frameAgeMs > 2000L) {
+            return false;
+        }
+
+        String nativeCameraUser = cameraCoordinator.queryCurrentCameraUser();
+        if (nativeCameraUser == null) {
+            return false;
+        }
+
+        logger.info("Live shared AVM feed confirmed (native owner="
+                + nativeCameraUser + ", frameAge=" + frameAgeMs + "ms)");
+        return true;
+    }
+
     /**
      * Releases and reopens the AVMCamera without tearing down the GL pipeline.
      *
@@ -10320,6 +10357,33 @@ public class PanoramicCameraGpu {
             // the wait — close+log above can already have spent >1s.
             lastGlThreadHeartbeat = System.currentTimeMillis();
 
+            // Start the existing legacy AVC/HAL warmup while the OEM camera
+            // ownership handoff is in progress. The cold-open boundary below
+            // calls the same shared warmup gate; it coalesces with this worker
+            // and reuses its completed result. This overlaps the required HAL
+            // settle time without removing or shortening that safety delay.
+            if (legacyOpenAttempt) {
+                Thread warmupThread = new Thread(() -> {
+                    try {
+                        boolean warmed = AvcHalWarmup.warmupBeforeColdOpen(
+                                () -> running
+                                        && restartInProgress.get()
+                                        && !CameraDaemon.isProcessRestartPending());
+                        if (!warmed) {
+                            logger.info("Concurrent AVC HAL warmup cancelled; "
+                                    + "cold-open boundary will re-check");
+                        }
+                    } catch (Throwable warmupError) {
+                        logger.warn("Concurrent AVC HAL warmup failed; "
+                                + "cold-open boundary will retry: "
+                                + warmupError.getMessage());
+                    }
+                }, "AvcHalWarmup-Handoff");
+                warmupThread.setDaemon(true);
+                warmupThread.start();
+                logger.info("Started AVC HAL warmup alongside camera handoff");
+            }
+
             // registerCameraUser is DISABLED — the event-driven branch below is
             // dead. Kept for reference; do NOT re-enable without re-validating
             // the IBYDCameraUser yield/reacquire path end-to-end.
@@ -10341,15 +10405,16 @@ public class PanoramicCameraGpu {
             // GL watchdog heartbeat — otherwise a long single sleep on this
             // (daemon) thread can race the GL thread mid-updateTexImage and
             // make timeSinceHeartbeat exceed the threshold.
-            logger.info("Polling fallback (maxWait=" + maxWaitMs + "ms)");
-            final long minWaitMs = 3000;
-            sleepWithHeartbeat(minWaitMs);
+            // Do not spend a fixed three seconds before the first ownership
+            // probe. Poll immediately; retain the full bounded wait for devices
+            // whose native camera startup is slower or whose service is absent.
+            logger.info("Polling fallback immediately (maxWait=" + maxWaitMs + "ms)");
 
             if (cameraCoordinator != null && cameraCoordinator.isRegistered()) {
                 long deadline = (legacyOpenAttempt
                         ? android.os.SystemClock.elapsedRealtime()
                         : System.currentTimeMillis())
-                        + (maxWaitMs - minWaitMs);
+                        + maxWaitMs;
                 boolean nativeAppDetected = false;
 
                 while ((legacyOpenAttempt
@@ -10368,7 +10433,7 @@ public class PanoramicCameraGpu {
                     logger.info("Native app not detected after polling — reopening");
                 }
             } else {
-                long remainingWait = maxWaitMs - minWaitMs;
+                long remainingWait = maxWaitMs;
                 logger.info("No service available — fixed delay (" + remainingWait + "ms)");
                 sleepWithHeartbeat(remainingWait);
             }

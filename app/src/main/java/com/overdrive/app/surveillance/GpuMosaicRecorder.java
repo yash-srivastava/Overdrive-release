@@ -1518,6 +1518,13 @@ public class GpuMosaicRecorder {
 
             // Use target directory
             String outputPath = new java.io.File(targetDir, filename).getAbsolutePath();
+            // Camera warmup is not a storage failure. Defer this first drive
+            // file until a post-ACC encoded frame exists; the pipeline's
+            // existing retry path will start it when the frame barrier clears.
+            if (encoder != null && encoder.isWaitingForFreshDriveFrame(outputPath)) {
+                logger.info("ACC ON camera warmup: deferring first drive muxer");
+                return;
+            }
             // DIAGNOSTIC (root-cause confirm for "REC green, no file"): log the
             // FINAL resolved target + its free space + configured-vs-active
             // storage type at each segment open. With the user-reported trigger

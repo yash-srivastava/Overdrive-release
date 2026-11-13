@@ -3769,8 +3769,8 @@ public class GpuSurveillancePipeline {
                     // records nothing because the old code (a) logged a false
                     // "Normal recording started" and (b) never retried.
                     // Defer + retry until storage settles.
-                    logger.warn("Recording did not start — storage not write-ready "
-                        + "(USB still mounting?); deferring and scheduling retry");
+                    logger.warn("Recording did not start — camera warming up or "
+                        + "storage not write-ready; deferring and scheduling retry");
                     pendingRecordingDir = outputDir;
                     pendingRecordingPrefix = prefix;
                     recordingMode = true;
@@ -4730,6 +4730,7 @@ public class GpuSurveillancePipeline {
      */
     public void onAccOn() {
         logger.info("ACC ON detected - stopping surveillance and finalizing recordings");
+        final boolean wasSurveillance = currentMode == Mode.SURVEILLANCE;
 
         try {
             // First, stop any active recording immediately (synchronous)
@@ -4812,8 +4813,15 @@ public class GpuSurveillancePipeline {
                     || com.overdrive.app.camera.dilink5.DiLink5Platform.isEnabled();
             } catch (Throwable ignored) {}
             if (camera != null && running && !persistentCamera) {
-                camera.reopenCamera();
-                logger.info("ACC ON transition complete - all recordings finalized, camera reopened");
+                if (wasSurveillance && camera.hasLiveNativeSharedCamera()) {
+                    // The native BYD app already owns primary and our secondary
+                    // feed is fresh. Reopening would discard a working stream
+                    // and repeat the handoff/warmup unnecessarily.
+                    logger.info("ACC ON: preserving live secondary AVM camera");
+                } else {
+                    camera.reopenCamera();
+                    logger.info("ACC ON transition complete - all recordings finalized, camera reopened");
+                }
             } else if (persistentCamera) {
                 logger.info("ACC ON transition complete - DiLink camera stays alive (no reopen)");
                 // A parked DI4 HAL may have paused its producer or died. Re-arm
@@ -4824,6 +4832,12 @@ public class GpuSurveillancePipeline {
                 }
             } else {
                 logger.info("ACC ON transition complete - all recordings finalized");
+            }
+
+            if (wasSurveillance && running && encoder != null) {
+                // Arm after the OEM handoff decision. The first cam_* file
+                // must use a newly encoded post-ACC frame, never parked pre-roll.
+                encoder.requireFreshFrameForNextDriveClip();
             }
         } catch (Throwable t) {
             // Any failure mid-transition leaves the pipeline in a half-mutated
