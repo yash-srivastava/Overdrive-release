@@ -867,12 +867,8 @@ BYD.performance = {
     },
 
     renderTopUnavailable(error) {
-        this._setText('topCpuBusy', '--%');
-        this._setText('topCpuDetail', '--');
         this._setText('topTasks', '--');
         this._setText('topTasksDetail', '--');
-        this._setText('topMemory', '--');
-        this._setText('topMemoryDetail', '--');
         this._setText('topSwap', '--');
         this._setText('topSwapDetail', '--');
         this._setText('topUpdated', error
@@ -891,20 +887,8 @@ BYD.performance = {
     },
 
     renderTopSnapshot(data) {
-        const cpu = data.cpu || {};
         const tasks = data.tasks || {};
-        const memory = data.memory || {};
         const swap = data.swap || {};
-        const busy = Number(cpu.deviceBusyPercent);
-        const rawBusy = Number(cpu.busyPercent);
-        const capacity = Number(cpu.capacityPercent);
-
-        this._setText('topCpuBusy', isFinite(busy) ? this._formatOne(busy) + '%' : '--%');
-        this._setText(
-            'topCpuDetail',
-            isFinite(rawBusy) && isFinite(capacity)
-                ? this._formatOne(rawBusy) + ' / ' + this._formatOne(capacity) + '% top'
-                : '--');
         this._setText(
             'topTasks',
             tasks.running != null && tasks.total != null
@@ -915,14 +899,6 @@ BYD.performance = {
             tasks.sleeping != null
                 ? tasks.sleeping + ' sleeping'
                     + (tasks.zombie ? ' · ' + tasks.zombie + ' zombie' : '')
-                : '--');
-        this._setText(
-            'topMemory',
-            memory.usedBytes != null ? this.formatBytes(memory.usedBytes) : '--');
-        this._setText(
-            'topMemoryDetail',
-            memory.totalBytes != null
-                ? this.formatBytes(memory.totalBytes) + ' total'
                 : '--');
         this._setText(
             'topSwap',
@@ -1096,7 +1072,7 @@ BYD.performance = {
             // Primary headline + bar + status — all whole-device 0-100.
             this.updateMetric('cpuValue', systemWholeDevice, '');   // system, % of device
             this.updateMetric('cpuAppValue', appWholeDevice, '');   // app, % of device
-            this.updateBar('cpuBar', appWholeDevice);
+            this.updateBar('cpuBar', systemWholeDevice);
             // Show current / max so thermal throttling is self-evident: when the
             // current freq sits well below max under load (and temp is high) the
             // SoC is throttling — which drags the whole head-unit UI on this
@@ -1108,7 +1084,7 @@ BYD.performance = {
                 this.updateMetric('cpuFreq', data.cpu.freqMhz, ' MHz');
             }
             this.updateMetric('cpuTemp', data.cpu.tempC, '°C');
-            this.setCardStatus('cpuCard', appWholeDevice);
+            this.setCardStatus('cpuCard', systemWholeDevice);
 
             // Secondary top-style line — matches `top`, with explicit context.
             this.updateMetric('cpuTopApp', data.cpu.app, '');       // per-core, matches `top`

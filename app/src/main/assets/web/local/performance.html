@@ -585,6 +585,14 @@
             font-size: 11px;
         }
 
+        .process-monitor-description {
+            max-width: 760px;
+            margin-top: 8px;
+            color: var(--text-muted);
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
         .process-refresh {
             width: 36px;
             height: 36px;
@@ -616,7 +624,7 @@
 
         .process-summary {
             display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(2, minmax(0, 1fr));
             border-bottom: 1px solid var(--border-subtle);
             background: var(--bg-elevated);
         }
@@ -768,10 +776,6 @@
 
             .process-summary-item:nth-child(2) {
                 border-right: 0;
-            }
-
-            .process-summary-item:nth-child(-n + 2) {
-                border-bottom: 1px solid var(--border-subtle);
             }
 
             .process-table {
@@ -1018,16 +1022,16 @@
                                     <rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/>
                                     <path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/>
                                 </svg>
-                                <span data-i18n="performance.card_cpu">CPU</span>
+                                <span data-i18n="performance.card_system_cpu">System CPU</span>
                             </div>
                         </div>
                         <div class="metric-value"><span id="cpuValue">--</span><span class="unit">%</span></div>
-                        <div class="metric-subtitle"><span data-i18n="performance.card_app_label">App</span>: <span id="cpuAppValue">--</span>% <span style="opacity:0.6">device</span></div>
+                        <div class="metric-subtitle" data-i18n="performance.system_cpu_basis">Whole device · all cores combined (0–100%).</div>
+                        <div class="metric-subtitle"><span data-i18n="performance.card_overdrive_app">OverDrive app</span>: <span id="cpuAppValue">--</span>% <span style="opacity:0.6">device</span></div>
                         <div class="metric-bar"><div class="metric-bar-fill" id="cpuBar" style="width: 0%"></div></div>
-                        <!-- top-style (per-core) readout for cross-checking with a live `top`.
-                             100% = one fully-busy core; ceiling = cores × 100 (e.g. 800% on 8 cores). -->
+                        <!-- Android top uses a per-core scale: 100% means one fully busy core. -->
                         <div class="metric-subtitle" style="font-family:'JetBrains Mono',monospace;font-size:11px;opacity:0.7;margin-top:4px">
-                            top · app <span id="cpuTopApp">--</span>% · sys <span id="cpuTopSys">--</span>% · <span id="cpuCores">--</span> cores (max <span id="cpuTopMax">--</span>%)
+                            <span data-i18n="performance.cpu_per_core_prefix">Per-core (top)</span> · app <span id="cpuTopApp">--</span>% · system <span id="cpuTopSys">--</span>% · <span id="cpuCores">--</span> cores (max <span id="cpuTopMax">--</span>%)
                         </div>
                         <div class="stats-row">
                             <div class="stat-item">
@@ -1049,16 +1053,17 @@
                                     <path d="M6 19v-3M10 19v-3M14 19v-3M18 19v-3M6 8v-3M10 8v-3M14 8v-3M18 8v-3"/>
                                     <rect x="2" y="8" width="20" height="8" rx="1"/>
                                 </svg>
-                                <span data-i18n="performance.card_memory">Memory</span>
+                                <span data-i18n="performance.card_system_ram">System RAM</span>
                             </div>
                         </div>
                         <div class="metric-value"><span id="memValue">--</span><span class="unit">%</span></div>
                         <div class="metric-subtitle"><span id="memUsed">--</span> / <span id="memTotal">--</span> MB</div>
+                        <div class="metric-subtitle" data-i18n="performance.system_ram_basis">Used = total − available; reclaimable cache is excluded.</div>
                         <div class="metric-bar"><div class="metric-bar-fill" id="memBar" style="width: 0%"></div></div>
-                        <div class="memory-breakdown">
+                        <div class="memory-breakdown" data-i18n-attr="title:performance.app_memory_basis">
                             <div class="breakdown-item">
                                 <div class="breakdown-value" id="appMemTotal">--</div>
-                                <div class="breakdown-label" data-i18n="performance.card_app_total">App Total</div>
+                                <div class="breakdown-label" data-i18n="performance.card_app_pss">OverDrive PSS</div>
                             </div>
                             <div class="breakdown-item">
                                 <div class="breakdown-value" id="appMemNative">--</div>
@@ -1174,6 +1179,9 @@
                                 <span aria-hidden="true"> · </span>
                                 <span id="topUpdated" data-i18n="performance.waiting">Waiting</span>
                             </div>
+                            <div class="process-monitor-description" data-i18n="performance.process_scope_hint">
+                                These rows are per-process, not device totals. CPU is per-core (100% = one fully busy core; multi-core processes can exceed 100%). RAM % is each process's share of total RAM; Resident is its resident memory.
+                            </div>
                         </div>
                         <button class="process-refresh" id="topRefreshButton"
                                 type="button" title="Refresh process snapshot"
@@ -1190,19 +1198,9 @@
 
                     <div class="process-summary">
                         <div class="process-summary-item">
-                            <div class="process-summary-label" data-i18n="performance.cpu_activity">CPU activity</div>
-                            <div class="process-summary-value" id="topCpuBusy">--%</div>
-                            <div class="process-summary-detail" id="topCpuDetail">--</div>
-                        </div>
-                        <div class="process-summary-item">
                             <div class="process-summary-label" data-i18n="performance.tasks">Tasks</div>
                             <div class="process-summary-value" id="topTasks">--</div>
                             <div class="process-summary-detail" id="topTasksDetail">--</div>
-                        </div>
-                        <div class="process-summary-item">
-                            <div class="process-summary-label" data-i18n="performance.ram">RAM</div>
-                            <div class="process-summary-value" id="topMemory">--</div>
-                            <div class="process-summary-detail" id="topMemoryDetail">--</div>
                         </div>
                         <div class="process-summary-item">
                             <div class="process-summary-label" data-i18n="performance.swap">Swap</div>
@@ -1214,8 +1212,8 @@
                     <div class="process-table" role="table" aria-label="Android processes" data-i18n-attr="aria-label:performance.live_processes">
                         <div class="process-table-header" role="row">
                             <span role="columnheader" data-i18n="performance.col_process">Process</span>
-                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_cpu">CPU</span>
-                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_memory">Memory</span>
+                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_cpu_per_core">CPU / core</span>
+                            <span role="columnheader" style="text-align:right;" data-i18n="performance.col_ram_percent">RAM %</span>
                             <span role="columnheader" style="text-align:right;" data-i18n="performance.col_resident">Resident</span>
                             <span role="columnheader" style="text-align:right;" data-i18n="performance.col_user">User</span>
                             <span role="columnheader" style="text-align:right;" data-i18n="performance.col_pid">PID</span>
