@@ -1615,6 +1615,17 @@ public class GpuSurveillancePipeline {
         if (dilink5) {
             rec.setRedMaskEnabled(false);
             rec.setApaCenterInset(0.0f);
+            // DiLink 5 hands over the raw circular fisheyes as a 2x2 on the
+            // full-frame path, where the legacy rectify never runs. Its own
+            // setting (recording.dilink5FisheyeStrength, Tang only, default off)
+            // drives the un-warp. Here (not only at init) so an encoder reinit's
+            // fresh recorder keeps it.
+            try {
+                rec.setDiLink5FisheyeStrength(com.overdrive.app.camera.dilink5
+                    .DiLink5FisheyeModel.configuredStrength());
+            } catch (Throwable t) {
+                logger.warn("DiLink 5 recorder fisheye strength: " + t.getMessage());
+            }
             return;
         }
         try {
@@ -2414,6 +2425,7 @@ public class GpuSurveillancePipeline {
                 int rectifyStrength = com.overdrive.app.config
                     .UnifiedConfigManager.getRectifyStrength();
                 recorder.setRectifyStrength((float) rectifyStrength);
+                // (DiLink 5's own un-warp is pushed by applyRecorderDilink4Layout.)
                 // Push tile aspect (tile_height / tile_width) from the
                 // active profile so the dewarp's radial math runs in true
                 // pixel space. Profile.panoHeight is the per-cam tile
@@ -2458,13 +2470,22 @@ public class GpuSurveillancePipeline {
                     .removeListener(rectifyConfigListener);
             }
             rectifyConfigListener = (section, sectionConfig) -> {
-                if (!"recording".equals(section)) return;
+                boolean recordingSection = "recording".equals(section);
+                // The DiLink 5 un-warp also depends on the selected vehicle model.
+                if (!recordingSection && !"vehicle".equals(section)) return;
                 GpuMosaicRecorder activeRecorder = recorder;
-                if (activeRecorder == null) return;
-                int strength = sectionConfig.optInt("rectifyStrength", 0);
-                if (strength < 0) strength = 0;
-                if (strength > 100) strength = 100;
-                activeRecorder.setRectifyStrength((float) strength);
+                if (recordingSection && activeRecorder != null) {
+                    int strength = sectionConfig.optInt("rectifyStrength", 0);
+                    if (strength < 0) strength = 0;
+                    if (strength > 100) strength = 100;
+                    activeRecorder.setRectifyStrength((float) strength);
+                }
+                if (!com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) return;
+                float dl5 = com.overdrive.app.camera.dilink5.DiLink5FisheyeModel
+                        .configuredStrength();
+                if (activeRecorder != null) activeRecorder.setDiLink5FisheyeStrength(dl5);
+                com.overdrive.app.streaming.GpuStreamScaler activeStream = streamScaler;
+                if (activeStream != null) activeStream.setDiLink5FisheyeStrength(dl5);
             };
             com.overdrive.app.config.UnifiedConfigManager
                 .addListener(rectifyConfigListener);
@@ -5066,6 +5087,16 @@ public class GpuSurveillancePipeline {
         // Match the recorder exactly: 0=legacy strip, 1=full-frame passive
         // APA, 3=four-corner DiLink 4 remap.
         streamScaler.setCameraLayout(streamLayout);
+
+        // DiLink 5: live view gets the same raw-fisheye un-warp as recordings.
+        if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) {
+            try {
+                streamScaler.setDiLink5FisheyeStrength(com.overdrive.app.camera.dilink5
+                    .DiLink5FisheyeModel.configuredStrength());
+            } catch (Throwable t) {
+                logger.warn("DiLink 5 stream fisheye strength: " + t.getMessage());
+            }
+        }
 
         // Hardcoded Variant A corner+flip constants on DiLink 4. Mirrors
         // GpuMosaicRecorder so live stream and recording stay aligned. On

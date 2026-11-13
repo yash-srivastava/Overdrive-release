@@ -811,6 +811,45 @@
                     </div>
                 </div>
 
+                <!-- DiLink 5 raw-fisheye un-warp (DiLink5FisheyeModel). Its own key
+                     (recording.dilink5FisheyeStrength, default 0 = off), separate from
+                     rectifyStrength. Shown only on DiLink 5 with the Tang selected as
+                     the vehicle model — the geometry was measured on a Tang 2025.
+                     Saved live (no Apply needed); the recorder, surveillance and live
+                     view all pick it up. The legacy card above is hidden on DiLink 5,
+                     where that shader branch never runs. -->
+                <div class="card" data-tab="quality" id="dl5FisheyeCard" style="display:none;">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="9"/>
+                                <path d="M3 12h18"/>
+                                <path d="M12 3c2.5 3 2.5 15 0 18"/>
+                                <path d="M12 3c-2.5 3-2.5 15 0 18"/>
+                            </svg>
+                            <span data-i18n="recording.rectify_title">Fisheye Correction</span>
+                            <span class="status-badge">DiLink 5 · Tang</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="setting-row" style="border-bottom:none;">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="recording.rectify_label">Correction Strength</div>
+                            </div>
+                            <div class="setting-control">
+                                <div class="slider-control">
+                                    <span class="slider-value" id="dl5FisheyeValue">Off</span>
+                                    <input type="range" class="slider" id="dl5FisheyeSlider" min="0" max="100" step="1" value="0" oninput="RecSettings.updateDl5FisheyeStrength(this.value)">
+                                </div>
+                                <div class="slider-range-labels rec-range-labels">
+                                    <span data-i18n="recording.rectify_min">Off</span>
+                                    <span data-i18n="recording.rectify_max">Max</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Telemetry Overlay -->
                 <div class="card" data-tab="quality">
                     <div class="card-header">

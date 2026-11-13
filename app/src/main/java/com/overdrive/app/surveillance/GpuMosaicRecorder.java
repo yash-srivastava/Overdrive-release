@@ -96,6 +96,12 @@ public class GpuMosaicRecorder {
     private int uRectifyK1Location;
     private int uRectifyK2Location;
     private int uRectifyAspectLocation;
+    // DiLink 5 raw-fisheye un-warp (see DiLink5FisheyeModel). tan(output
+    // half-FOV); 0 = off. Only sampled in the full-frame (uApaMode==1) branch
+    // and only ever pushed non-zero on DiLink 5, so DiLink 4 passive APA —
+    // which shares that branch — stays a passthrough.
+    private volatile float dl5FishTan = 0f;
+    private int uDl5FishTanLocation = -1;
     private int uRecordLayoutLocation;
     // Optional dedicated windshield camera (dashcam top band). uWindshieldTex
     // is bound to GL_TEXTURE2 in drawFrame; uWindshieldReady gates its use.
@@ -699,6 +705,7 @@ public class GpuMosaicRecorder {
             uRectifyK1Location = GLES20.glGetUniformLocation(programId, "uRectifyK1");
             uRectifyK2Location = GLES20.glGetUniformLocation(programId, "uRectifyK2");
             uRectifyAspectLocation = GLES20.glGetUniformLocation(programId, "uRectifyAspect");
+            uDl5FishTanLocation = GLES20.glGetUniformLocation(programId, "uDl5FishTan");
             uRecordLayoutLocation = GLES20.glGetUniformLocation(programId, "uRecordLayout");
             uWindshieldTexLocation = GLES20.glGetUniformLocation(programId, "uWindshieldTex");
             uWindshieldReadyLocation = GLES20.glGetUniformLocation(programId, "uWindshieldReady");
@@ -1051,6 +1058,9 @@ public class GpuMosaicRecorder {
             }
             if (uRectifyAspectLocation >= 0) {
                 GLES20.glUniform1f(uRectifyAspectLocation, rectifyAspect);
+            }
+            if (uDl5FishTanLocation >= 0) {
+                GLES20.glUniform1f(uDl5FishTanLocation, dl5FishTan);
             }
         }
 
@@ -2047,6 +2057,18 @@ public class GpuMosaicRecorder {
     public float getRectifyAspect() { return rectifyAspect; }
 
     /**
+     * DiLink 5 only: un-warp the raw circular fisheye of each 2x2 tile with the
+     * same {@code recording.rectifyStrength} slider (0 = off). Callers must
+     * push 0 (or not call) on every other platform.
+     */
+    public void setDiLink5FisheyeStrength(float strength) {
+        float tan = com.overdrive.app.camera.dilink5.DiLink5FisheyeModel.tanHalfFov(strength);
+        if (Float.compare(tan, this.dl5FishTan) == 0) return;
+        this.dl5FishTan = tan;
+        this.uniformsDirty.set(true);
+    }
+
+    /**
      * Per-output-corner producer-corner remap for the DiLink 4 passthrough
      * path. Each role (Front, Right, Rear, Left) reads from one of four
      * 0.5×0.5 producer corners: TL=(0,0), TR=(0.5,0), BL=(0,0.5),
@@ -2267,6 +2289,7 @@ public class GpuMosaicRecorder {
             // Identity-equivalent at any aspect when k1 = k2 = 0.
             "uniform float uRectifyAspect;\n" +
             "uniform float uRecordLayout;\n" +
+            com.overdrive.app.camera.dilink5.DiLink5FisheyeModel.GLSL +
             "varying vec2 vTexCoord;\n" +
             // NOTE: the previous revision of this file had a 4-tap
             // Catmull-Rom bicubic sampler here, gated on uRectifyK1 > 0.
@@ -2353,6 +2376,8 @@ public class GpuMosaicRecorder {
             "        }\n" +
             "    } else if (uApaMode > 0.5) {\n" +
             fullFrameSampling +
+            // DiLink 5 raw 2x2: un-fisheye each tile (identity when off).
+            "        samplePos = dl5UnfishMosaic(samplePos);\n" +
             "    } else if (uRecordLayout > 0.5) {\n" +
             // Dashcam composition (4-camera 360 source only). The 360 front
             // slice fills the top `split` band at full width; the 360

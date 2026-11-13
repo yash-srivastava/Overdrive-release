@@ -446,7 +446,16 @@ BYD.recording = {
                 try {
                     var mode = proxData.config.camera && proxData.config.camera.cameraMode;
                     var card = document.getElementById('rectifyCard');
-                    if (card) card.style.display = (mode === 'dilink4') ? 'none' : '';
+                    // DiLink 5 never runs the legacy-mode branch either; it gets
+                    // its own Tang-only card below instead.
+                    if (card) card.style.display = (mode === 'dilink4' || mode === 'dilink5') ? 'none' : '';
+                    var veh = proxData.config.vehicle || {};
+                    var modelId = String(veh.modelId || '').trim().toLowerCase();
+                    var isTang = modelId === 'tang' && veh.modelSource !== 'unset';
+                    var dl5Card = document.getElementById('dl5FisheyeCard');
+                    if (dl5Card) dl5Card.style.display = (mode === 'dilink5' && isTang) ? '' : 'none';
+                    var d5 = proxData.config.recording && proxData.config.recording.dilink5FisheyeStrength;
+                    this.showDl5FisheyeStrength(typeof d5 === 'number' ? d5 : 0);
                 } catch (_) {}
 
                 // Merge proximity guard with defaults to handle missing fields
@@ -1239,6 +1248,40 @@ BYD.recording = {
             self._postJson('/api/settings/unified', {
                 section: 'recording',
                 data: { rectifyStrength: v }
+            });
+        }, 200);
+    },
+
+    /** Renders the DiLink 5 fisheye slider + label for a 0..100 value. */
+    showDl5FisheyeStrength(value) {
+        var v = parseInt(value);
+        if (isNaN(v) || v < 0) v = 0;
+        if (v > 100) v = 100;
+        var slider = document.getElementById('dl5FisheyeSlider');
+        if (slider) slider.value = v;
+        var label = document.getElementById('dl5FisheyeValue');
+        if (label) {
+            var offTxt = (BYD.i18n && typeof BYD.i18n.t === 'function')
+                ? BYD.i18n.t('recording.rectify_off') : null;
+            if (!offTxt || offTxt === 'recording.rectify_off') offTxt = 'Off';
+            label.textContent = (v === 0) ? offTxt : (v + '%');
+        }
+        return v;
+    },
+
+    /**
+     * DiLink 5 (Tang) fisheye un-warp: its own key, recording.dilink5FisheyeStrength,
+     * saved live (debounced) through updateSection — no Apply needed, and it never
+     * touches rectifyStrength.
+     */
+    updateDl5FisheyeStrength(value) {
+        var v = this.showDl5FisheyeStrength(value);
+        if (this._dl5FisheyeDebounce) clearTimeout(this._dl5FisheyeDebounce);
+        var self = this;
+        this._dl5FisheyeDebounce = setTimeout(function () {
+            self._postJson('/api/settings/unified', {
+                section: 'recording',
+                data: { dilink5FisheyeStrength: v }
             });
         }, 200);
     },
