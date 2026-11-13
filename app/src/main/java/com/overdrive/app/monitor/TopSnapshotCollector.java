@@ -31,7 +31,9 @@ public final class TopSnapshotCollector {
 
     private static final Object CAPTURE_LOCK = new Object();
     private static JSONObject cachedSnapshot;
-    private static long cachedAtMs;
+    // Measured since boot, not wall clock: GPS/NTP corrections must not extend
+    // the 750 ms cache lifetime or cause repeated top processes.
+    private static long cachedAtElapsedMs;
     // Guarded by CAPTURE_LOCK; remember unsupported Toybox -m syntax.
     private static boolean limitedTopUnsupported;
 
@@ -55,12 +57,15 @@ public final class TopSnapshotCollector {
     public static JSONObject capture(int requestedRows) {
         int rows = Math.max(MIN_ROWS, Math.min(MAX_ROWS, requestedRows));
         synchronized (CAPTURE_LOCK) {
-            long now = System.currentTimeMillis();
-            if (cachedSnapshot != null && now - cachedAtMs <= CACHE_MS) {
+            long elapsedNow = android.os.SystemClock.elapsedRealtime();
+            if (cachedSnapshot != null && isCacheFresh(cachedAtElapsedMs, elapsedNow)) {
                 return copyWithLimit(cachedSnapshot, rows);
             }
 
-            long startedAt = android.os.SystemClock.elapsedRealtime();
+            // Keep the public snapshot timestamp as epoch milliseconds. Only
+            // internal cache expiry uses the monotonic clock.
+            long now = System.currentTimeMillis();
+            long startedAt = elapsedNow;
             try {
                 boolean useLimit = !limitedTopUnsupported;
                 CommandResult result = runTop(useLimit);
@@ -99,7 +104,10 @@ public final class TopSnapshotCollector {
                     parsed.put("error", "top exited with code " + result.exitCode);
                 }
                 cachedSnapshot = parsed;
-                cachedAtMs = now;
+                // Start the short reuse window when the capture completes. A
+                // slow Toybox invocation should not expire the cache before
+                // callers have had a chance to reuse the finished result.
+                cachedAtElapsedMs = android.os.SystemClock.elapsedRealtime();
                 return copyWithLimit(parsed, rows);
             } catch (Throwable t) {
                 JSONObject error = new JSONObject();
@@ -113,6 +121,12 @@ public final class TopSnapshotCollector {
                 return error;
             }
         }
+    }
+
+    /** Pure clock math, isolated for regression coverage without spawning top. */
+    static boolean isCacheFresh(long cachedAtElapsedMs, long elapsedNowMs) {
+        return elapsedNowMs >= cachedAtElapsedMs
+                && elapsedNowMs - cachedAtElapsedMs <= CACHE_MS;
     }
 
     static JSONObject parseSnapshot(
