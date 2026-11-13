@@ -195,11 +195,10 @@ public class NetworkMonitor {
                 wifiSsid = SSID_UNKNOWN_PLACEHOLDER;
                 return;
             }
-            String ssid = info.getSSID();
-            if (ssid != null && ssid.startsWith("\"") && ssid.endsWith("\"")) {
-                ssid = ssid.substring(1, ssid.length() - 1);
-            }
-            if (ssid == null || ssid.contains("unknown") || ssid.equals("<none>")) {
+            // Same exact-marker normalization as the shell and Binder paths.
+            // SSIDs are arbitrary user strings; "Unknown-Guest" is a valid name.
+            String ssid = WifiStatusParser.normalizeSsid(info.getSSID());
+            if (ssid == null) {
                 // SSID hidden by Android — try shell fallback for SSID only
                 String shellSsid = shellGetWifiSsid();
                 wifiSsid = (shellSsid != null && !shellSsid.isEmpty()) ? shellSsid : SSID_UNKNOWN_PLACEHOLDER;
@@ -367,10 +366,7 @@ public class NetworkMonitor {
             String wpa = firstLine(BoundedShell.run(
                     "wpa_cli -i wlan0 status 2>/dev/null | grep '^ssid='", SHELL_DEADLINE_MS).output);
             if (wpa.startsWith("ssid=")) {
-                String candidate = wpa.substring(5).trim();
-                if (!candidate.isEmpty()) {
-                    ssid = candidate;
-                }
+                ssid = WifiStatusParser.normalizeSsid(wpa.substring(5));
             }
         }
         lastShellSsid = ssid;

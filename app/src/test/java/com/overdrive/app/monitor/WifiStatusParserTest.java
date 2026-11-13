@@ -102,10 +102,24 @@ public class WifiStatusParserTest {
     }
 
     @Test
-    public void unknownMarkerInsideNameIsUnknown() {
-        assertNull(WifiStatusParser.normalizeSsid("\"Unknown-Guest\""));
+    public void exactUnknownMarkersAreRedactedButLegitimateNamesArePreserved() {
         assertNull(WifiStatusParser.normalizeSsid("<unknown ssid>"));
+        assertNull(WifiStatusParser.normalizeSsid("\"<UNKNOWN SSID>\""));
+        assertNull(WifiStatusParser.normalizeSsid("<none>"));
+        assertNull(WifiStatusParser.normalizeSsid("<None>"));
+        assertNull(WifiStatusParser.normalizeSsid("unknown"));
+        assertNull(WifiStatusParser.normalizeSsid("unknown ssid"));
+        assertEquals("Unknown-Guest", WifiStatusParser.normalizeSsid("\"Unknown-Guest\""));
+        assertEquals("My unknown network", WifiStatusParser.normalizeSsid("My unknown network"));
         assertEquals("Known-Guest", WifiStatusParser.normalizeSsid("\"Known-Guest\""));
         assertEquals("0a1b2c", WifiStatusParser.normalizeSsid("0a1b2c"));
+    }
+
+    @Test
+    public void connectedUnknownGuestPreservesSsidAndMeteredHint() {
+        WifiStatusParser.Parsed p = WifiStatusParser.parse(connected("\"Unknown-Guest\"", true));
+        assertTrue(p.connected);
+        assertEquals("Unknown-Guest", p.ssid);
+        assertEquals(Boolean.TRUE, p.meteredHint);
     }
 }
