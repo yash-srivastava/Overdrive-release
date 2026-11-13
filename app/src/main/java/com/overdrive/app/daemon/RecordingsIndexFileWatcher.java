@@ -8,10 +8,11 @@ import com.overdrive.app.storage.StorageManager;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Owns the {@link FileObserver} set that drives live updates into
@@ -28,18 +29,19 @@ import java.util.Set;
  *   <li>{@link #refresh()} — same as start(), but a no-op when no observer
  *       set has been built yet. The HTTP storage-type setters call this to
  *       reattach observers to the new dirs.
- *   <li>{@link #stop()} — call from the daemon shutdown path. Calls
- *       stopWatching() on every registered observer.
+ *   <li>{@link #stop()} — close the pending queue and unregister observers;
+ *       the worker exits without interrupting an in-flight H2 operation.
  * </ul>
  *
  * <p><b>Why each event matters:</b>
  * <ul>
- *   <li>{@code CREATE} / {@code MOVED_TO} on {@code .mp4} — the recorder's
+ *   <li>{@code CLOSE_WRITE} / {@code MOVED_TO} on {@code .mp4} — the recorder's
  *       finalised mp4 lands here. Upserts an index row.
  *   <li>{@code DELETE} / {@code MOVED_FROM} on {@code .mp4} — storage
  *       cleanup or external host PC delete. Drops the row.
- *   <li>{@code MODIFY} on {@code .json} — sidecar updates. SidecarGeoUpdater
- *       writes geo into the JSON after the mp4 is already on disk; the index
+ *   <li>{@code MODIFY}, {@code CLOSE_WRITE}, or {@code MOVED_TO} on
+ *       {@code .json} — sidecar updates after the MP4 has been indexed.
+ *       SidecarGeoUpdater writes geo into the JSON; the index
  *       row created at mp4-close time has no place_short yet, so we re-upsert
  *       the matching mp4 to pull the freshly-written sidecar fields.
  * </ul>
@@ -59,19 +61,20 @@ import java.util.Set;
  * </ul>
  *
  * <p><b>Concurrency:</b> all mutators (start, refresh, stop) acquire the
- * monitor on this object. Observer event callbacks run on the inotify
- * thread inside {@code FileObserver}; they do their work via
- * {@code RecordingsIndex} (which has its own internal monitor) and never
- * touch this watcher's state.
+ * monitor on this object. Observer callbacks only enqueue path changes;
+ * a bounded, coalescing single worker performs filesystem reads and index
+ * writes. This avoids blocking Android's shared FileObserver thread on
+ * FUSE metadata or H2 IO. Overflow schedules a background reconciliation.
  */
 public final class RecordingsIndexFileWatcher {
 
     private static final String TAG = "RecordingsIndexFileWatcher";
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
 
+    private static final int MAX_PENDING_PATHS = 512;
+
     private static final int EVENT_MASK =
-            FileObserver.CREATE
-            | FileObserver.MOVED_TO
+            FileObserver.MOVED_TO
             | FileObserver.DELETE
             | FileObserver.MOVED_FROM
             | FileObserver.MODIFY
@@ -90,6 +93,10 @@ public final class RecordingsIndexFileWatcher {
     /** Whether start() has ever been called — gates refresh()'s no-op. */
     private volatile boolean started = false;
 
+    /** Scoped to a start/stop lifecycle; old observers cannot enqueue after stop. */
+    private RecordingIndexEventQueue eventQueue;
+    private ExecutorService indexWorker;
+
     private RecordingsIndexFileWatcher() {}
 
     /**
@@ -98,8 +105,9 @@ public final class RecordingsIndexFileWatcher {
      * to call repeatedly when the storage-type set changes.
      */
     public synchronized void start() {
-        stopInternal();
+        stopWatchingOnly();
         try {
+            if (eventQueue == null) initWorker();
             StorageManager sm = StorageManager.getInstance();
             Set<String> seen = new HashSet<>();
             registerAll(sm.getAllRecordingsDirs(), seen);
@@ -109,29 +117,77 @@ public final class RecordingsIndexFileWatcher {
             CameraDaemon.log("RecordingsIndexFileWatcher: " + observers.size()
                     + " observer(s) registered across " + seen.size() + " unique dir(s)");
         } catch (Throwable t) {
+            stopWatchingOnly();
+            if (eventQueue == null && indexWorker != null) {
+                indexWorker.shutdown();
+                indexWorker = null;
+            }
+            started = false;
             CameraDaemon.log("RecordingsIndexFileWatcher start failed: "
                     + t.getClass().getSimpleName() + ": " + t.getMessage());
             logger.error("start failed", t);
         }
     }
 
-    /**
-     * Re-register observers against the current StorageManager dir set.
-     * Called by storage-type-change paths so observers follow the active
-     * dirs when the user switches INTERNAL ↔ SD_CARD ↔ USB. No-op if
-     * start() has not yet been called (avoids racing init).
-     */
+    /** Allocate the bounded worker once per daemon lifecycle. */
+    private void initWorker() {
+        indexWorker = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "RecordingsIndexEvents");
+            t.setDaemon(true);
+            return t;
+        });
+        eventQueue = new RecordingIndexEventQueue(indexWorker,
+                new RecordingIndexEventQueue.Listener() {
+                    @Override
+                    public void apply(String mp4Path, RecordingIndexEventQueue.Change change) {
+                        File file = new File(mp4Path);
+                        try {
+                            if (change == RecordingIndexEventQueue.Change.REMOVE
+                                    || !file.isFile()) {
+                                RecordingsIndex.getInstance().removeByPath(mp4Path);
+                            } else if (file.length() > 0) {
+                                RecordingsIndex.getInstance().upsert(file);
+                            }
+                        } catch (Throwable t) {
+                            logger.warn("Index update failed for " + file.getName()
+                                    + ": " + t.getMessage());
+                            throw new IllegalStateException("Recording index update failed", t);
+                        }
+                    }
+
+                    @Override
+                    public void reconcile() {
+                        // No synchronous root walk on this worker. Reconcile
+                        // coalesces on the index's separate background runner.
+                        if (!RecordingsIndex.getInstance().requestReconcile(
+                                "watcher-event-overflow")) {
+                            logger.warn("Could not enqueue watcher recovery reconcile");
+                        }
+                    }
+                }, MAX_PENDING_PATHS);
+    }
+
+    /** Rebind watchers, retain queued changes, and discover existing clips on new mounts. */
     public synchronized void refresh() {
         if (!started) return;
         start();
+        if (started) {
+            RecordingsIndex.getInstance().requestReconcile("watcher-storage-rebind");
+        }
     }
 
     public synchronized void stop() {
-        stopInternal();
+        // Close the old queue first. A callback from a stopped observer must
+        // never write into a later daemon run's index worker.
+        if (eventQueue != null) eventQueue.close();
+        stopWatchingOnly();
+        if (indexWorker != null) indexWorker.shutdown(); // do not interrupt JDBC
+        eventQueue = null;
+        indexWorker = null;
         started = false;
     }
 
-    private void stopInternal() {
+    private void stopWatchingOnly() {
         for (FileObserver o : observers) {
             try { o.stopWatching(); }
             catch (Throwable t) {
@@ -154,6 +210,8 @@ public final class RecordingsIndexFileWatcher {
     }
 
     private void registerOne(final File dir) {
+        final RecordingIndexEventQueue queue = eventQueue;
+        if (queue == null) return;
         if (!dir.exists() || !dir.isDirectory() || !dir.canRead()) {
             logger.debug("Skipping observer for non-readable dir: " + dir);
             return;
@@ -171,7 +229,7 @@ public final class RecordingsIndexFileWatcher {
                 fo = new FileObserver(dir, EVENT_MASK) {
                     @Override
                     public void onEvent(int event, String path) {
-                        handleEvent(dir, event, path);
+                        handleEvent(dir, event, path, queue);
                     }
                 };
             } else {
@@ -179,7 +237,7 @@ public final class RecordingsIndexFileWatcher {
                 FileObserver legacy = new FileObserver(dir.getAbsolutePath(), EVENT_MASK) {
                     @Override
                     public void onEvent(int event, String path) {
-                        handleEvent(dir, event, path);
+                        handleEvent(dir, event, path, queue);
                     }
                 };
                 fo = legacy;
@@ -196,49 +254,35 @@ public final class RecordingsIndexFileWatcher {
         }
     }
 
-    /** Dispatched on the inotify thread. Keep the work small. */
-    private static void handleEvent(File dir, int event, String path) {
-        if (path == null || path.isEmpty()) return;
-        // FileObserver event flags can include action-class bits; mask down.
+    /** FileObserver callback: no file stats, JSON parse, JDBC or blocking queue put. */
+    private static void handleEvent(File dir, int event, String path,
+                                    RecordingIndexEventQueue queue) {
+        if (path == null || path.isEmpty()
+                || path.indexOf('/') >= 0 || path.indexOf('\\') >= 0) return;
         int action = event & FileObserver.ALL_EVENTS;
-        try {
-            if (path.endsWith(".mp4")) {
-                if ((action & (FileObserver.MOVED_TO | FileObserver.CLOSE_WRITE)) != 0) {
-                    File f = new File(dir, path);
-                    // Only react to finalisation signals: CLOSE_WRITE fires
-                    // exactly once when the encoder finalises and releases
-                    // the fd; MOVED_TO covers atomic-rename publishes. CREATE
-                    // is intentionally excluded — it fires on open() with the
-                    // file usually zero-byte (or briefly non-zero from a
-                    // header write that can race back to zero), which would
-                    // upsert a sizeBytes=0 row. A crashed encoder that never
-                    // emits CLOSE_WRITE is recovered by periodic reconcile,
-                    // which applies the same f.length()>0 guard.
-                    if (f.length() > 0) {
-                        RecordingsIndex.getInstance().upsert(f);
-                    }
-                } else if ((action & (FileObserver.DELETE | FileObserver.MOVED_FROM)) != 0) {
-                    RecordingsIndex.getInstance().removeByPath(new File(dir, path).getAbsolutePath());
-                }
-            } else if (path.endsWith(".json")
-                    && (action & FileObserver.MODIFY) != 0) {
-                // Sidecar updated (geo merge etc.) — re-upsert the matching mp4
-                // so the index row picks up the new place_short / lat / lng.
-                String mp4Name = path.substring(0, path.length() - ".json".length()) + ".mp4";
-                File mp4 = new File(dir, mp4Name);
-                if (mp4.exists() && mp4.isFile() && mp4.length() > 0) {
-                    RecordingsIndex.getInstance().upsert(mp4);
-                }
+        if (path.endsWith(".mp4")) {
+            if ((action & (FileObserver.DELETE | FileObserver.MOVED_FROM)) != 0) {
+                queue.submit(new File(dir, path).getAbsolutePath(),
+                        RecordingIndexEventQueue.Change.REMOVE);
+            } else if ((action & (FileObserver.CLOSE_WRITE | FileObserver.MOVED_TO)) != 0) {
+                // CREATE alone is too early: the recorder may still be writing
+                // a zero-byte or partially-finalized mp4.
+                queue.submit(new File(dir, path).getAbsolutePath(),
+                        RecordingIndexEventQueue.Change.REFRESH);
             }
-        } catch (Throwable t) {
-            // Never let an event handler throw out of FileObserver — that
-            // can wedge the inotify reader thread on some kernels.
-            logger.warn("event handler threw: " + t.getMessage());
+        } else if (path.endsWith(".json")
+                && (action & (FileObserver.MODIFY | FileObserver.CLOSE_WRITE
+                    | FileObserver.MOVED_TO)) != 0) {
+            // MOVED_TO is required for sidecars published via atomic rename.
+            // Refresh the matching mp4 after the metadata writer closes it.
+            String mp4Name = path.substring(0, path.length() - ".json".length()) + ".mp4";
+            queue.submit(new File(dir, mp4Name).getAbsolutePath(),
+                    RecordingIndexEventQueue.Change.REFRESH);
         }
     }
 
     /** Snapshot of how many observers are live — for /api/diagnostics surfaces. */
     public synchronized int observerCount() {
-        return Collections.unmodifiableList(observers).size();
+        return observers.size();
     }
 }
