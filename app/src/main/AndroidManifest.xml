@@ -279,14 +279,29 @@
             android:configChanges="keyboardHidden"
             android:launchMode="singleTop">
             <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-            <intent-filter>
                 <action android:name="com.overdrive.app.START_LOCATION_ACTIVITY" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!--
+            A dedicated launcher alias is the only launcher entry. Service Mode
+            disables this component from the app process with PackageManager;
+            MainActivity, the app package, daemon, boot receivers and WebUI stay
+            enabled so scheduled restoration can always run.
+        -->
+        <activity-alias
+            android:name=".LauncherActivity"
+            android:targetActivity="com.overdrive.app.ui.MainActivity"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <!-- Private-display instance used only by authenticated Remote Dev View. -->
         <activity
@@ -612,10 +627,15 @@
             android:foregroundServiceType="mediaPlayback"
             android:exported="true" />
 
-        <!-- Loopback-only, HMAC-authenticated app-process bridge for Remote Dev View. -->
+        <!--
+            App-process bridge for privileged daemon operations. Only shell/system
+            may start it (DUMP permission); every socket command is independently
+            authenticated with the existing HMAC challenge.
+        -->
         <service
             android:name="com.overdrive.app.remote.RemoteDevViewBridgeService"
-            android:exported="false" />
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
 
         <!-- Browser push-to-talk receiver. The shell daemon launches this
              app-process service and streams authenticated PCM over a

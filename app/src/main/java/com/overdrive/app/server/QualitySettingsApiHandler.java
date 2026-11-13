@@ -608,6 +608,16 @@ public class QualitySettingsApiHandler {
                 HttpResponse.sendJsonError(out, "Invalid config section");
                 return;
             }
+            // Service Mode is device-local runtime state with its own authenticated
+            // API. Do not let the generic section writer mutate it or import a stale
+            // schedule through a broad settings payload.
+            if ("serviceMode".equals(section)) {
+                HttpResponse.sendJson(out, 403, new JSONObject()
+                        .put("success", false)
+                        .put("error", "Service Mode state must be changed through its dedicated API.")
+                        .toString());
+                return;
+            }
             // Collect first: removing during keys() iteration would throw.
             java.util.List<String> internalKeys = new java.util.ArrayList<>();
             java.util.Iterator<String> dataKeys = data.keys();

@@ -33,7 +33,8 @@
     "communicate_title": "Communicate - OverDrive",
     "assistant_title": "Assistant - OverDrive",
     "parking_title": "Parking - OverDrive",
-    "safekeep_title": "SafeKeep - OverDrive"
+    "safekeep_title": "SafeKeep - OverDrive",
+    "service_mode_title": "Service Mode - OverDrive"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -72,7 +73,8 @@
     "parking": "Parking",
     "safekeep": "SafeKeep",
     "remote_access": "Proximity",
-    "remote_dev_view": "Remote Dev View"
+    "remote_dev_view": "Remote Dev View",
+    "service_mode": "Service Mode"
   },
   "parking": {
     "page_title": "Parking",
@@ -6768,5 +6770,46 @@
     "dtc_note": "A BYD-capable workshop diagnostic tool is still required for full ECU DTC coverage, including brakes, airbags, steering, ADAS and traction-battery modules.",
     "copied": "Diagnostic report copied to clipboard.",
     "copy_failed": "Could not copy the report."
+  },
+  "service_mode": {
+    "page_title": "Service Mode",
+    "header_badge": "Dealer visit protection",
+    "status_inactive": "Service Mode is off",
+    "status_inactive_desc": "Your apps and OverDrive are available as usual.",
+    "status_active": "Service Mode is active",
+    "status_until": "Automatic restoration: {date}",
+    "status_restoring": "Restoring apps and features…",
+    "status_restoring_desc": "The daemon is retrying any package restoration that has not completed.",
+    "schedule_title": "Schedule the end date",
+    "schedule_desc": "Start Service Mode immediately. Everything selected below will be restored automatically at the end of the chosen date, or sooner when you press End now.",
+    "end_date": "End date",
+    "visibility_title": "Hide apps from the head unit",
+    "visibility_desc": "OverDrive stays installed and its background daemon keeps the expiry timer running. Only its launcher entry is hidden.",
+    "hide_overdrive": "Hide OverDrive from the launcher",
+    "hide_overdrive_desc": "The WebUI remains available so you can end Service Mode early.",
+    "choose_apps": "Installed apps",
+    "choose_apps_desc": "Select third-party launchable apps to hide temporarily.",
+    "refresh_apps": "Refresh",
+    "loading_apps": "Loading installed apps…",
+    "apps_failed": "Could not load installed apps.",
+    "no_apps": "No eligible user-installed launchable apps were found.",
+    "features_title": "Temporarily disable OverDrive features",
+    "features_desc": "These choices pause the selected feature without deleting its settings or saved configuration.",
+    "feature_automations": "Automations",
+    "feature_automations_desc": "Pause automatic and manual automation runs, including action groups.",
+    "feature_keymap": "Key Mapping",
+    "feature_keymap_desc": "Stop physical-key bindings from dispatching configured actions.",
+    "warning": "Only select apps you are comfortable disabling temporarily. Avoid launchers, keyboards, and apps required for vehicle controls. Apps that were already disabled before Service Mode are left disabled when it ends.",
+    "start_now": "Start now",
+    "end_now": "End now",
+    "choose_end_date": "Choose a valid end date.",
+    "end_date_future": "The end date must be today or later.",
+    "start_failed": "Could not start Service Mode.",
+    "end_failed": "Could not restore everything yet.",
+    "started": "Service Mode started.",
+    "ended": "Service Mode ended. Apps and features have been restored.",
+    "detail_overdrive": "OverDrive launcher entry is hidden",
+    "detail_app": "Hidden app: {package}",
+    "detail_feature": "Paused feature: {feature}"
   }
 }

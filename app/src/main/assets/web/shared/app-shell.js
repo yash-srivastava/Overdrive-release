@@ -100,6 +100,7 @@
         { href: 'widgets.html',                           i18n: 'nav.widgets',        label: 'Widgets',        svg: '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="18" height="8" rx="2"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
         { href: 'widget-builder.html', browserOnly: true, i18n: 'widgetBuilder.nav', label: 'Widget Builder', svg: '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><path d="M14 20.5l.6-2.9 5.2-5.2 2.3 2.3-5.2 5.2z"/><path d="M14 5h7M14 9h4"/>', svgExtra: 'stroke-linecap="round" stroke-linejoin="round"' },
         { href: 'notifications.html',                     i18n: 'nav.notifications',  label: 'Notifications',  svg: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>' },
+        { href: 'service-mode.html',                       i18n: 'nav.service_mode',   label: 'Service Mode',   svg: '<path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="6"/><path d="m9.5 12 1.7 1.7 3.4-3.4"/>' },
 
         // ===== About ===== — version, license, source, support links,
         // Check for Updates. Sits in its own group so the link isn't

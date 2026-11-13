@@ -259,6 +259,12 @@
         android:name="com.overdrive.app.ui.fragment.RoadSenseFragment"
         android:label="@string/rail_roadsense" />
 
+    <!-- Service Mode: shared authenticated WebUI page embedded in native Settings. -->
+    <fragment
+        android:id="@+id/serviceModeFragment"
+        android:name="com.overdrive.app.ui.fragment.ServiceModeFragment"
+        android:label="@string/settings_section_service_mode" />
+
     <!-- Widgets: the glass widgets overlay settings (web /widgets page). -->
     <fragment
         android:id="@+id/widgetsFragment"

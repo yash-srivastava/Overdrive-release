@@ -685,6 +685,14 @@ public class SurveillanceIpcServer implements Runnable {
                     String s = request.optString("section", "");
                     JSONObject data = request.optJSONObject("data");
                     boolean ok = false;
+                    // Service Mode runtime state is owned by ServiceModeManager.
+                    // Reject generic app-process writes even when they arrive through
+                    // the cross-UID atomic-write IPC rather than the HTTP settings API.
+                    if ("serviceMode".equals(s)) {
+                        response.put("success", false);
+                        response.put("error", "Service Mode state uses its dedicated API");
+                        break;
+                    }
                     if (!s.isEmpty() && data != null) {
                         synchronized (CONFIG_LOCK) {
                             // forceReload BEFORE merge so an app-forwarded delta
@@ -709,6 +717,11 @@ public class SurveillanceIpcServer implements Runnable {
                     String s = request.optString("section", "");
                     JSONObject values = request.optJSONObject("values");
                     boolean ok = false;
+                    if ("serviceMode".equals(s)) {
+                        response.put("success", false);
+                        response.put("error", "Service Mode state uses its dedicated API");
+                        break;
+                    }
                     if (!s.isEmpty() && values != null) {
                         java.util.Map<String, Object> map = new java.util.HashMap<>();
                         java.util.Iterator<String> it = values.keys();
