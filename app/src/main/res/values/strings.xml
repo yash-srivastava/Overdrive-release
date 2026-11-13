@@ -2095,6 +2095,21 @@
     <string name="network_autostart_title">Start when the car powers on</string>
     <string name="network_autostart_desc">Turn the hotspot on once at each power-up.</string>
 
+    <string name="network_byd_cloud_section">BYD cloud</string>
+    <string name="network_byd_cloud_title">Keep cellular data available on Wi-Fi</string>
+    <string name="network_byd_cloud_desc">With ADB, enables Android’s mobile_data_always_on setting so cellular data can remain available while Wi-Fi is connected. It does not turn mobile data on or override BYD firmware that shuts down its function APN, and may increase standby data or battery use. The previous setting is restored when switched off.</string>
+    <string name="network_byd_cloud_status_unknown">Checking Android network settings…</string>
+    <string name="network_byd_cloud_status_managed">Enabled by OverDrive: Android is configured to keep mobile data available alongside Wi-Fi. BYD cloud access still depends on the vehicle firmware and server region.</string>
+    <string name="network_byd_cloud_status_already_on">Android’s keep-mobile-data-always-on setting is already enabled. OverDrive has not changed it.</string>
+    <string name="network_byd_cloud_status_off">Off: OverDrive has not changed Android’s mobile-data setting.</string>
+    <string name="network_byd_cloud_status_data_off">The Android mobile-data master switch appears to be off. This feature does not turn it on.</string>
+    <string name="network_byd_cloud_status_error">Could not read Android network settings: %1$s. Check that wireless ADB is enabled and authorized.</string>
+    <string name="network_byd_cloud_apn3_connected">BYD function APN (apn3): connected</string>
+    <string name="network_byd_cloud_apn3_disconnected">BYD function APN (apn3): disconnected. Some firmware disconnects it whenever Wi-Fi is enabled; this setting cannot override that vendor policy.</string>
+    <string name="network_byd_cloud_apn3_unknown">BYD function APN (apn3): status is not exposed by this firmware.</string>
+    <string name="network_byd_cloud_refresh">Refresh status</string>
+    <string name="network_byd_cloud_vpn_note">If your vehicle’s BYD cloud region requires a regional source IP, connect the car to a router with a trusted VPN exit in the required region; some newer deployments require a Chinese IP. A router-level VPN works independently of OverDrive. OverDrive does not provide a VPN or change the vehicle’s cloud region. This switch is best-effort and does not guarantee that remote control, the phone app, NFC key or OTA will work over Wi-Fi.</string>
+
     <string name="network_proxy_section">Proxy</string>
     <string name="network_proxy_system_title">Route this car\'s traffic through the proxy</string>
     <string name="network_proxy_system_desc">Sets the system-wide HTTP proxy so apps on the head unit use the encrypted tunnel. Needs the proxy service running.</string>

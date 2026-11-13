@@ -18,7 +18,7 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.switchmaterial.SwitchMaterial
 import com.google.android.material.textfield.TextInputEditText
 import com.overdrive.app.R
-import com.overdrive.app.config.UnifiedConfigManager
+import com.overdrive.app.network.BydCloudWifiManager
 import com.overdrive.app.network.CellularRelay
 import com.overdrive.app.network.HotspotManager
 import org.json.JSONObject
@@ -27,9 +27,10 @@ import java.util.concurrent.Executors
 /**
  * Network & Hotspot pane.
  *
- * A pure CONSUMER of [HotspotManager]: it renders the manager's snapshot and
- * forwards user intent. There is deliberately no AP polling or restart logic
- * here — the manager owns the radio and the sampling cadence.
+ * The hotspot UI is a consumer of [HotspotManager]: it renders the manager's
+ * snapshot and forwards user intent. BYD cloud compatibility is handled by
+ * [BydCloudWifiManager], which owns the reversible Android setting and read-only
+ * APN diagnostics. The fragment keeps blocking shell work off the main thread.
  *
  * Two independent tick rates: a 1 Hz UI tick that only re-renders the uptime
  * counter (no I/O), and a slower snapshot refresh for everything else.
@@ -53,6 +54,7 @@ class NetworkFragment : Fragment() {
     private var passwordRevealed = false
 
     private var lastSnapshot: JSONObject? = null
+    private var bydCloudWifiManager: BydCloudWifiManager? = null
 
     private val uiTick = object : Runnable {
         override fun run() {
@@ -79,6 +81,7 @@ class NetworkFragment : Fragment() {
         // Fresh views need seeding again (re-entry, rotation).
         textFieldsSeeded = false
         HotspotManager.init(requireContext().applicationContext)
+        bydCloudWifiManager = BydCloudWifiManager(requireContext().applicationContext)
 
         // Restore persisted values BEFORE attaching listeners.
         io.execute {
@@ -96,6 +99,7 @@ class NetworkFragment : Fragment() {
         super.onResume()
         mainHandler.post(uiTick)
         mainHandler.post(snapshotTick)
+        refreshBydCloudSnapshot()
     }
 
     override fun onPause() {
@@ -143,6 +147,15 @@ class NetworkFragment : Fragment() {
         bindSwitch(root, R.id.swProxySystem, "proxySystemWide")
         bindSwitch(root, R.id.swProxyClients, "proxyForClients")
         optionalId("swClientTunnel")?.let { bindSwitch(root, it, "clientTunnel") }
+        root.findViewById<SwitchMaterial>(R.id.swBydCloudWifi)?.let { cloudSwitch ->
+            cloudSwitch.setOnCheckedChangeListener { _, checked ->
+                if (binding) return@setOnCheckedChangeListener
+                setBydCloudWifiEnabled(cloudSwitch, checked)
+            }
+        }
+        root.findViewById<MaterialButton>(R.id.btnBydCloudRefresh)?.setOnClickListener {
+            refreshBydCloudSnapshot()
+        }
     }
 
     /**
@@ -357,6 +370,74 @@ class NetworkFragment : Fragment() {
             getString(R.string.network_usage_nolimit_fmt, formatBytes(used))
         }
         root.findViewById<TextView>(R.id.tvUsage)?.text = label
+    }
+
+    private fun setBydCloudWifiEnabled(button: SwitchMaterial, enabled: Boolean) {
+        button.isEnabled = false
+        io.execute {
+            val manager = bydCloudWifiManager
+            val result = if (manager == null) {
+                BydCloudWifiManager.OperationResult(false, "BYD cloud network manager is unavailable.")
+            } else if (enabled) {
+                manager.enable()
+            } else {
+                manager.disable()
+            }
+            val snapshot = manager?.snapshot()
+            mainHandler.post {
+                if (!isAdded) return@post
+                binding = true
+                button.isChecked = manager?.isEnabled() == true
+                binding = false
+                button.isEnabled = true
+                if (snapshot != null) renderBydCloudSnapshot(snapshot, result.message)
+                if (!result.success) toast(result.message)
+            }
+        }
+    }
+
+    private fun refreshBydCloudSnapshot() {
+        val manager = bydCloudWifiManager ?: return
+        val button = view?.findViewById<MaterialButton>(R.id.btnBydCloudRefresh)
+        button?.isEnabled = false
+        io.execute {
+            val snapshot = manager.snapshot()
+            mainHandler.post {
+                if (!isAdded) return@post
+                val switch = view?.findViewById<SwitchMaterial>(R.id.swBydCloudWifi)
+                binding = true
+                switch?.isChecked = manager.isEnabled()
+                binding = false
+                switch?.isEnabled = true
+                button?.isEnabled = true
+                renderBydCloudSnapshot(snapshot)
+            }
+        }
+    }
+
+    private fun renderBydCloudSnapshot(
+        snapshot: BydCloudWifiManager.Snapshot,
+        operationMessage: String? = null
+    ) {
+        val root = view ?: return
+        val status = root.findViewById<TextView>(R.id.tvBydCloudStatus)
+        val apn3 = root.findViewById<TextView>(R.id.tvBydCloudApn3)
+
+        status?.text = when {
+            snapshot.error != null -> getString(R.string.network_byd_cloud_status_error, snapshot.error)
+            snapshot.mobileData == "0" -> getString(R.string.network_byd_cloud_status_data_off)
+            snapshot.managedByOverdrive -> getString(R.string.network_byd_cloud_status_managed)
+            snapshot.mobileDataAlwaysOn == "1" -> getString(R.string.network_byd_cloud_status_already_on)
+            else -> getString(R.string.network_byd_cloud_status_off)
+        }
+        if (operationMessage != null && operationMessage.isNotBlank() && snapshot.error == null) {
+            status?.append("\n\n$operationMessage")
+        }
+        apn3?.text = when (snapshot.apn3State) {
+            "connected" -> getString(R.string.network_byd_cloud_apn3_connected)
+            "disconnected" -> getString(R.string.network_byd_cloud_apn3_disconnected)
+            else -> getString(R.string.network_byd_cloud_apn3_unknown)
+        }
     }
 
     private fun renderClients(root: View, snap: JSONObject) {
