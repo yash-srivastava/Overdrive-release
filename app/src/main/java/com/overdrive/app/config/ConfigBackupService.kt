@@ -78,6 +78,7 @@ object ConfigBackupService {
     //    seq and saveConfig bumps it past the prior value on write.
     private val EXCLUDED_SECTIONS = listOf(
         "updates",
+        "serviceMode", // Device-local temporary state; never export or restore it.
         "lastModified",
         "version",
         "configSeq",

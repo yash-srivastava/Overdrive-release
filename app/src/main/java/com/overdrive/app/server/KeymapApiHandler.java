@@ -471,6 +471,13 @@ public final class KeymapApiHandler {
             return true;
         }
         if (cleanPath.equals("/api/keymap/fire") && method.equals("POST")) {
+            if (ServiceModeManager.isFeatureDisabled("keymap")) {
+                HttpResponse.sendJson(out, 403, new JSONObject()
+                        .put("success", false)
+                        .put("error", "Key Mapping execution is paused by Service Mode.")
+                        .toString());
+                return true;
+            }
             handleFire(out, body);
             return true;
         }

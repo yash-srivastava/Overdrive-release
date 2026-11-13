@@ -86,6 +86,7 @@ Enable your preferred tunnel (Zrok, Cloudflared or Tailscale).
 - **ADB Shell Runner** — Built-in terminal for running commands, checking processes, and viewing logs
 - **Telegram Notifications** — Instant alerts for motion detection, recording events, and low battery
 - **Recording Library** — Calendar view for browsing and managing recordings
+- **Service Mode** — Temporarily hide selected third-party apps and the OverDrive launcher entry for a dealer visit, with automatic restoration and optional Automations / Key Mapping pauses. See [Service Mode](docs/SERVICE_MODE.md).
 
 ## Remote Access
 

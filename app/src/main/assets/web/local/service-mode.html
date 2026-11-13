@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Service Mode - OverDrive</title>
+    <meta name="theme-color" content="#00876C">
+    <script src="../shared/theme.js?v=11"></script>
+    <script src="../shared/app-shell.js?v=20"></script>
+    <link rel="stylesheet" href="../shared/styles.css?v=38">
+    <link rel="stylesheet" href="../shared/revamp.css?v=2">
+    <style>
+        .sm-page { max-width: 1040px; margin: 0 auto; padding: 24px; }
+        .sm-hero { margin-bottom: 22px; }
+        .sm-hero h1 { margin: 0 0 8px; font-size: clamp(25px, 3vw, 34px); }
+        .sm-hero p { color: var(--on-surface-variant); max-width: 760px; margin: 0; line-height: 1.55; }
+        .sm-card { background: var(--surface-container, var(--surface)); border: 1px solid var(--outline-variant); border-radius: 18px; padding: 20px; margin: 16px 0; }
+        .sm-card h2 { margin: 0 0 6px; font-size: 18px; }
+        .sm-help { color: var(--on-surface-variant); font-size: 13px; line-height: 1.5; margin: 0 0 14px; }
+        .sm-status { display: flex; gap: 12px; align-items: flex-start; }
+        .sm-dot { width: 11px; height: 11px; border-radius: 50%; background: #8a8f98; margin-top: 6px; flex: 0 0 auto; }
+        .sm-dot.active { background: #1a9b72; box-shadow: 0 0 0 4px rgba(26,155,114,.13); }
+        .sm-dot.restoring { background: #d28a27; }
+        .sm-status-title { font-weight: 700; font-size: 17px; }
+        .sm-status-meta { color: var(--on-surface-variant); font-size: 13px; margin-top: 4px; line-height: 1.5; }
+        .sm-details { margin: 12px 0 0 23px; padding: 0; color: var(--on-surface-variant); font-size: 13px; line-height: 1.7; }
+        .sm-error { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--surface-container-high); color: var(--error, #b3261e); font-size: 13px; white-space: pre-wrap; }
+        .sm-field { display: flex; flex-direction: column; gap: 7px; margin: 14px 0; }
+        .sm-field label, .sm-option-title { font-weight: 650; font-size: 14px; }
+        .sm-field input[type=date] { width: min(100%, 320px); min-height: 44px; border: 1px solid var(--outline); border-radius: 10px; background: var(--surface); color: var(--on-surface); padding: 8px 12px; font: inherit; }
+        .sm-option { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-top: 1px solid var(--outline-variant); }
+        .sm-option:first-of-type { border-top: 0; }
+        .sm-option input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--primary, #00876c); flex: 0 0 auto; }
+        .sm-option-copy { min-width: 0; }
+        .sm-option-title { display: block; }
+        .sm-option-desc { display: block; margin-top: 3px; color: var(--on-surface-variant); font-size: 12px; line-height: 1.45; }
+        .sm-app-tools { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin: 10px 0; }
+        .sm-app-list { max-height: 330px; overflow: auto; border: 1px solid var(--outline-variant); border-radius: 12px; padding: 4px 12px; }
+        .sm-app-row { display: flex; gap: 12px; align-items: center; padding: 10px 2px; border-bottom: 1px solid var(--outline-variant); }
+        .sm-app-row:last-child { border-bottom: 0; }
+        .sm-app-row input { width: 18px; height: 18px; accent-color: var(--primary, #00876c); }
+        .sm-app-copy { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+        .sm-app-label { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+        .sm-app-package { font-size: 11px; color: var(--on-surface-variant); overflow-wrap: anywhere; }
+        .sm-empty { padding: 16px 4px; color: var(--on-surface-variant); font-size: 13px; }
+        .sm-warning { border-left: 3px solid #d28a27; padding: 10px 12px; margin: 14px 0; background: var(--surface-container-high); color: var(--on-surface-variant); font-size: 12px; line-height: 1.55; }
+        .sm-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+        .sm-button { border: 0; border-radius: 999px; padding: 12px 20px; min-height: 44px; font: inherit; font-weight: 700; cursor: pointer; background: var(--primary, #00876c); color: white; }
+        .sm-button.secondary { background: var(--surface-container-high); color: var(--on-surface); border: 1px solid var(--outline-variant); }
+        .sm-button:disabled { opacity: .55; cursor: wait; }
+        .sm-message { min-height: 20px; margin-top: 12px; font-size: 13px; color: var(--on-surface-variant); }
+        @media (max-width: 680px) { .sm-page { padding: 16px; } .sm-card { padding: 16px; } }
+    </style>
+    <script src="../shared/service-mode.js?v=1" defer></script>
+</head>
+<body class="r-settings">
+    <div class="app-layout">
+        <div id="app-shell-mount"></div>
+        <main class="main-content">
+            <div class="mobile-header">
+                <button class="menu-toggle" type="button" onclick="toggleSidebar()" aria-label="Open menu">☰</button>
+                <span style="font-weight:600">Service Mode</span>
+                <span style="width:40px"></span>
+            </div>
+            <div class="sm-page">
+                <header class="sm-hero">
+                    <h1>Service Mode</h1>
+                    <p>Temporarily hide selected third-party apps and the OverDrive launcher entry during a dealer visit. The daemon remains running and restores the saved states automatically at the end of the selected date.</p>
+                </header>
+
+                <section class="sm-card" aria-live="polite">
+                    <div class="sm-status">
+                        <span id="smStatusDot" class="sm-dot" aria-hidden="true"></span>
+                        <div>
+                            <div id="smStatusTitle" class="sm-status-title">Checking Service Mode…</div>
+                            <div id="smStatusMeta" class="sm-status-meta">Reading the current device state.</div>
+                        </div>
+                    </div>
+                    <ul id="smActiveDetails" class="sm-details" hidden></ul>
+                    <div id="smRestoreError" class="sm-error" hidden></div>
+                    <div id="smEndActions" class="sm-actions" hidden>
+                        <button id="smEndButton" class="sm-button secondary" type="button">End now and restore</button>
+                    </div>
+                </section>
+
+                <section id="smSetup">
+                    <section class="sm-card">
+                        <h2>Schedule automatic restoration</h2>
+                        <p class="sm-help">Service Mode starts immediately. The selected apps and features are restored at 23:59:59 on the chosen date in the head unit's local time zone, or sooner when you end it manually.</p>
+                        <div class="sm-field">
+                            <label for="smEndDate">End date</label>
+                            <input id="smEndDate" type="date" required>
+                        </div>
+                    </section>
+
+                    <section class="sm-card">
+                        <h2>Launcher visibility</h2>
+                        <p class="sm-help">OverDrive stays installed. Only its dedicated launcher alias is hidden, leaving the daemon, boot receivers and local WebUI available for restoration.</p>
+                        <label class="sm-option">
+                            <input id="smHideOverdrive" type="checkbox" checked>
+                            <span class="sm-option-copy">
+                                <span class="sm-option-title">Hide OverDrive from the launcher</span>
+                                <span class="sm-option-desc">The page and daemon remain available so you can end Service Mode early.</span>
+                            </span>
+                        </label>
+                    </section>
+
+                    <section class="sm-card">
+                        <h2>Third-party apps</h2>
+                        <p class="sm-help">Choose installed user apps to hide temporarily. Android and BYD system apps, home launchers, enabled keyboards and OverDrive are excluded.</p>
+                        <div class="sm-app-tools">
+                            <span class="sm-help" style="margin:0">Only eligible launchable apps are listed.</span>
+                            <button id="smRefreshApps" class="sm-button secondary" type="button">Refresh</button>
+                        </div>
+                        <div id="smApps" class="sm-app-list" aria-live="polite">
+                            <div class="sm-empty">Loading installed apps…</div>
+                        </div>
+                    </section>
+
+                    <section class="sm-card">
+                        <h2>Pause OverDrive features</h2>
+                        <p class="sm-help">These runtime gates do not delete or modify your saved rules, bindings or configuration.</p>
+                        <label class="sm-option">
+                            <input id="smPauseAutomations" type="checkbox">
+                            <span class="sm-option-copy">
+                                <span class="sm-option-title">Automations</span>
+                                <span class="sm-option-desc">Pause automatic and manual automation runs, including direct action-group runs.</span>
+                            </span>
+                        </label>
+                        <label class="sm-option">
+                            <input id="smPauseKeymap" type="checkbox">
+                            <span class="sm-option-copy">
+                                <span class="sm-option-title">Key Mapping</span>
+                                <span class="sm-option-desc">Stop physical-key bindings from dispatching configured actions.</span>
+                            </span>
+                        </label>
+                    </section>
+
+                    <div class="sm-warning">
+                        Only select apps you are comfortable disabling temporarily. Do not select apps required for vehicle controls or diagnostics. Apps that were already disabled before Service Mode are not enabled when Service Mode ends. If a package is reclassified as a system app while the mode is active, it will not be disabled again during reconciliation.
+                    </div>
+                    <div class="sm-actions">
+                        <button id="smStartButton" class="sm-button" type="button">Start Service Mode</button>
+                    </div>
+                </section>
+                <div id="smMessage" class="sm-message" role="status" aria-live="polite"></div>
+            </div>
+        </main>
+    </div>
+</body>
+</html>

@@ -18,6 +18,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -840,6 +842,130 @@ public final class AppLauncher {
         JSONArray out = new JSONArray();
         for (JSONObject app : unique) out.put(app);
         return out;
+    }
+
+
+    /**
+     * List only third-party launchable applications that are safe candidates for
+     * temporary Service Mode hiding. PackageManager is authoritative here: if it
+     * is unavailable, return an empty list rather than falling back to a shell
+     * package list that cannot distinguish Android/BYD system packages.
+     */
+    public static JSONArray listUserLaunchableApps() {
+        JSONArray result = new JSONArray();
+        Context context = CameraDaemon.getAppContext();
+        if (context == null) return result;
+
+        PackageManager pm = context.getPackageManager();
+        Intent launcherIntent = new Intent(Intent.ACTION_MAIN);
+        launcherIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+        List<ResolveInfo> resolved;
+        try {
+            resolved = pm.queryIntentActivities(launcherIntent, 0);
+        } catch (Throwable error) {
+            logger.warn("listUserLaunchableApps: PackageManager query failed: " + error.getMessage());
+            return result;
+        }
+
+        Map<String, JSONObject> byPackage = new LinkedHashMap<>();
+        for (ResolveInfo info : resolved) {
+            if (info == null || info.activityInfo == null) continue;
+            String pkg = info.activityInfo.packageName;
+            if (pkg == null || byPackage.containsKey(pkg) || !isUserLaunchableApp(pkg)) continue;
+
+            String label = pkg;
+            try {
+                CharSequence resolvedLabel = info.loadLabel(pm);
+                if (resolvedLabel != null && resolvedLabel.length() > 0) {
+                    label = resolvedLabel.toString();
+                }
+            } catch (Throwable ignored) { }
+
+            byPackage.put(pkg, makeApp(pkg, label));
+        }
+
+        List<JSONObject> sorted = new ArrayList<>(byPackage.values());
+        Collections.sort(sorted, new Comparator<JSONObject>() {
+            @Override public int compare(JSONObject left, JSONObject right) {
+                return left.optString("label", "").compareToIgnoreCase(
+                        right.optString("label", ""));
+            }
+        });
+        for (JSONObject app : sorted) result.put(app);
+        return result;
+    }
+
+    /**
+     * Revalidate a package immediately before each Service Mode apply. This
+     * deliberately repeats the system-app check on every reconciliation tick:
+     * package identity/flags can change after the initial picker selection or
+     * after a firmware update. A failed PackageManager lookup is fail-closed.
+     */
+    public static boolean isUserLaunchableApp(String pkg) {
+        if (pkg == null || !pkg.matches("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+")
+                || "com.overdrive.app".equals(pkg)) return false;
+
+        Context context = CameraDaemon.getAppContext();
+        if (context == null) return false;
+
+        PackageManager pm = context.getPackageManager();
+        try {
+            ApplicationInfo appInfo = pm.getApplicationInfo(
+                    pkg, PackageManager.MATCH_DISABLED_COMPONENTS);
+            if ((appInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0
+                    || (appInfo.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0) {
+                return false;
+            }
+
+            // Do not offer a launcher or an enabled keyboard as a package to
+            // disable. Both are easy ways to strand the head unit without a
+            // usable home screen or input method.
+            if (isHomeLauncher(pm, pkg) || isEnabledInputMethod(context, pkg)) return false;
+
+            Intent launcherIntent = new Intent(Intent.ACTION_MAIN);
+            launcherIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+            List<ResolveInfo> launchers = pm.queryIntentActivities(
+                    launcherIntent, PackageManager.MATCH_DISABLED_COMPONENTS);
+            for (ResolveInfo resolved : launchers) {
+                if (resolved != null && resolved.activityInfo != null
+                        && pkg.equals(resolved.activityInfo.packageName)) return true;
+            }
+        } catch (PackageManager.NameNotFoundException | IllegalArgumentException ignored) {
+            return false;
+        } catch (Throwable error) {
+            logger.warn("isUserLaunchableApp: could not verify " + pkg + ": "
+                    + error.getMessage());
+            return false;
+        }
+        return false;
+    }
+
+    private static boolean isHomeLauncher(PackageManager pm, String pkg) {
+        Intent homeIntent = new Intent(Intent.ACTION_MAIN);
+        homeIntent.addCategory(Intent.CATEGORY_HOME);
+        try {
+            List<ResolveInfo> homes = pm.queryIntentActivities(
+                    homeIntent, PackageManager.MATCH_DISABLED_COMPONENTS);
+            for (ResolveInfo resolved : homes) {
+                if (resolved != null && resolved.activityInfo != null
+                        && pkg.equals(resolved.activityInfo.packageName)) return true;
+            }
+        } catch (Throwable ignored) { }
+        return false;
+    }
+
+    private static boolean isEnabledInputMethod(Context context, String pkg) {
+        try {
+            android.view.inputmethod.InputMethodManager manager =
+                    (android.view.inputmethod.InputMethodManager) context.getSystemService(
+                            Context.INPUT_METHOD_SERVICE);
+            if (manager == null) return false;
+            for (android.view.inputmethod.InputMethodInfo method
+                    : manager.getEnabledInputMethodList()) {
+                if (method != null && pkg.equals(method.getPackageName())) return true;
+            }
+        } catch (Throwable ignored) { }
+        return false;
     }
 
     private static JSONObject makeApp(String pkg, String label) {

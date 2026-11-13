@@ -297,6 +297,11 @@ public class HttpServer {
         // Initialize auth system
         AuthManager.initialize();
         CameraDaemon.log("Auth system initialized");
+        try {
+            ServiceModeManager.start();
+        } catch (Throwable error) {
+            CameraDaemon.log("Service Mode scheduler could not start: " + error.getMessage());
+        }
         
         while (running && CameraDaemon.isRunning()) {
             try {
@@ -860,6 +865,11 @@ public class HttpServer {
             boolean remoteAccessRequest = pathOnly.equals("/remote-access")
                     || pathOnly.equals("/remote-access.html")
                     || pathOnly.startsWith("/api/remote-access/");
+            // Service Mode changes app visibility and must never use the loopback
+            // trust tier. Both its page and every API route require a valid JWT.
+            boolean serviceModeRequest = pathOnly.equals("/service-mode")
+                    || pathOnly.equals("/service-mode.html")
+                    || pathOnly.startsWith("/api/service-mode/");
             if (pathOnly.equals("/api/remote-access/relay")
                     && (!client.getInetAddress().isLoopbackAddress() || hasTunnelHeaders)) {
                 HttpResponse.sendError(out, 403, "Signal relay is local only");
@@ -870,8 +880,8 @@ public class HttpServer {
             // the glassWidgets settings, like the built-ins: the car's own arrange mode writes those over loopback.
             boolean widgetWriteRequest = !method.equals("GET")
                     && (isCustomWidgetsPath(pathOnly) || isCommunityWidgetsPath(pathOnly));
-            boolean authenticated = remoteDevRequest || genAiRequest || wireGuardRequest || remoteAccessRequest
-                    || widgetWriteRequest
+            boolean authenticated = remoteDevRequest || genAiRequest || wireGuardRequest
+                    || remoteAccessRequest || serviceModeRequest || widgetWriteRequest
                 ? AuthMiddleware.checkJwtOnly(path, cookieHeader, authHeader, out)
                 : AuthMiddleware.checkAuth(path, cookieHeader, authHeader, out,
                     client.getRemoteSocketAddress(), hasTunnelHeaders,
@@ -1254,6 +1264,9 @@ public class HttpServer {
      */
     private boolean routeToHandlers(String method, String path, String body, String rangeHeader,
                                      String ifNoneMatchHeader, OutputStream out) throws Exception {
+        if (path.startsWith("/api/service-mode/")) {
+            return ServiceModeApiHandler.handle(method, path, body, out);
+        }
         if (path.startsWith("/api/remote-access/")) {
             try {
                 if (path.equals("/api/remote-access/relay") && method.equals("POST")) {
