@@ -592,6 +592,15 @@ public class CameraDaemon {
         // Resolve the durable selector before committing a cross-platform mode change. If the
         // config cannot be initialized, startup fails without replacing the last active marker.
         com.overdrive.app.config.UnifiedConfigManager.init();
+        // Load the persisted Service Mode automation gate before any background
+        // subsystem can publish an event or enqueue an automation during startup.
+        try {
+            com.overdrive.app.automation.Automations.setServiceModeDisabled(
+                    com.overdrive.app.config.UnifiedConfigManager
+                            .isServiceModeFeatureDisabled("automations"));
+        } catch (Throwable t) {
+            log("Service Mode automation gate startup failed: " + t.getMessage());
+        }
         final com.overdrive.app.camera.dilink5.DiLink5Platform.ModeActivation
                 vehicleModeActivation =
                 com.overdrive.app.camera.dilink5.DiLink5Platform
@@ -832,6 +841,15 @@ public class CameraDaemon {
             try {
                 sharedAppContext = createAppContext();
             } catch (Throwable ignored) {}
+        }
+
+        // Service Mode owns its expiry and package-restoration lifecycle in the
+        // shell-UID daemon. The app launcher entry may be hidden while the mode is
+        // active, so this worker must remain independent of MainActivity.
+        try {
+            com.overdrive.app.server.ServiceModeManager.start();
+        } catch (Throwable t) {
+            log("Service Mode startup failed: " + t.getMessage());
         }
 
         // Dark-panel recovery (boot). If a previous session turned the backlight

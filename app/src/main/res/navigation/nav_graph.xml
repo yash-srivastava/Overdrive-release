@@ -183,6 +183,18 @@
             android:defaultValue="/key-mapping" />
     </fragment>
 
+    <!-- Service Mode (web canonical; shared by the native app and WebUI) -->
+    <fragment
+        android:id="@+id/serviceModeSettingsWebFragment"
+        android:name="com.overdrive.app.ui.fragment.WebViewFragment"
+        android:label="@string/settings_section_service_mode"
+        tools:layout="@layout/fragment_webview">
+        <argument
+            android:name="page_path"
+            app:argType="string"
+            android:defaultValue="/service-mode" />
+    </fragment>
+
     <!-- Integrations: roll-up of Telegram + ABRP + MQTT -->
     <fragment
         android:id="@+id/integrationsFragment"

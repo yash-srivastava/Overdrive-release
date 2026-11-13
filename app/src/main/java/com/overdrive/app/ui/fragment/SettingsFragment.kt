@@ -84,6 +84,7 @@ class SettingsFragment : Fragment() {
         OVERLAY(R.string.settings_section_overlay, R.drawable.ic_overlay_rec_active),
         SECURITY(R.string.settings_section_security, R.drawable.ic_security_lock),
         DAEMONS(R.string.settings_section_daemons, R.drawable.ic_services),
+        SERVICE_MODE(R.string.settings_section_service_mode, R.drawable.ic_services, navigates = true),
         PRIVACY(R.string.settings_section_privacy, R.drawable.ic_delete),
     }
 
@@ -261,6 +262,11 @@ class SettingsFragment : Fragment() {
         Section.OVERLAY -> SettingsOverlayFragment()
         Section.SECURITY -> SettingsSecurityFragment()
         Section.DAEMONS -> SettingsDaemonsFragment()
+        Section.SERVICE_MODE -> WebViewFragment().apply {
+            arguments = Bundle().apply {
+                putString(WebViewFragment.ARG_PAGE_PATH, "/service-mode")
+            }
+        }
         Section.PRIVACY -> SettingsPrivacyFragment()
     }
 
@@ -354,6 +360,9 @@ class SettingsFragment : Fragment() {
         }
         view.findViewById<View>(R.id.cardSectionDaemons)?.setOnClickListener {
             findNavController().navigateDrillDown(R.id.daemonsFragment)
+        }
+        view.findViewById<View>(R.id.cardSectionServiceMode)?.setOnClickListener {
+            findNavController().navigateDrillDown(R.id.serviceModeSettingsWebFragment)
         }
     }
 

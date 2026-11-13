@@ -1053,6 +1053,7 @@
     <string name="settings_section_recording">Recording</string>
     <string name="settings_section_surveillance">Surveillance</string>
     <string name="settings_section_daemons">Daemons</string>
+    <string name="settings_section_service_mode">Service Mode</string>
     <string name="settings_section_privacy">Privacy &amp; data</string>
     <string name="settings_section_overlay">Status overlay</string>
     <string name="settings_section_security">Security</string>
@@ -1549,6 +1550,7 @@
     <string name="settings_section_surveillance_subtitle">Detection zones, schedule, motion sensitivity.</string>
     <string name="settings_section_storage_subtitle">Where recordings go, space limits, BYD dashcam cleanup.</string>
     <string name="settings_section_daemons_subtitle">Cloudflared, Zrok, Telegram, MQTT runners.</string>
+    <string name="settings_section_service_mode_subtitle">Temporarily hide selected apps and pause OverDrive features for a dealer visit.</string>
 
     <!-- About / data row subtitles -->
     <string name="settings_about_row_title">About OverDrive</string>

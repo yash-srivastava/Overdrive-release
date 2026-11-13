@@ -98,6 +98,9 @@ public class Automations {
     // hot path) is a field read instead of a full stream scan of the map. Maintained under SAVE_LOCK
     // alongside every mutation. volatile for cross-thread visibility from the telemetry thread.
     private static volatile int enabledCount = 0;
+    // Service Mode is an independent runtime gate; it never rewrites the user's
+    // saved automation definitions or their enabled flags.
+    private static volatile boolean serviceModeDisabled = false;
     // Bumped whenever the automation feature crosses the enabled/disabled boundary. A publisher
     // samples this before and after its callback so a complete disable -> enable cycle cannot hide
     // between two identical isDisabled() reads and silently drop the observed vehicle state.
@@ -232,11 +235,11 @@ public class Automations {
      * mutation of the automations map or an automation's disabled flag.
      */
     private static void refreshEnabledCount() {
-        boolean wasDisabled = enabledCount == 0;
+        boolean wasDisabled = isDisabled();
         int n = 0;
         for (Automation a : automations.values()) if (!a.isDisabled()) n++;
         enabledCount = n;
-        if (wasDisabled != (n == 0)) {
+        if (wasDisabled != isDisabled()) {
             enabledStateGeneration++;
         }
         // Invalidate the memo. The bump alone is what invalidates (entries stamped with the old
@@ -470,7 +473,7 @@ public class Automations {
     /** Whether {@code id} names an automation that runs automatically right now. */
     public static boolean isAutomaticallyEnabled(String id) {
         Automation automation = id == null ? null : automations.get(id);
-        return automation != null && !automation.isDisabled();
+        return !serviceModeDisabled && automation != null && !automation.isDisabled();
     }
     private static final ThreadLocal<java.util.IdentityHashMap<AutomationAction, Integer>>
             QUEUE_ACTION_OCCURRENCES = new ThreadLocal<>();
@@ -714,7 +717,8 @@ public class Automations {
      * runaway nesting without killing the worker.
      */
     public static boolean runActionList(java.util.List<AutomationAction> actionList) {
-        if (actionList == null || Thread.currentThread().isInterrupted()) return false;
+        if (serviceModeDisabled || actionList == null
+                || Thread.currentThread().isInterrupted()) return false;
         int depth = RUN_DEPTH.get();
         if (depth >= MAX_RUN_DEPTH) {
             logger.warn("Action nesting depth cap (" + MAX_RUN_DEPTH + ") hit — stopping to avoid runaway/cycle");
@@ -732,6 +736,11 @@ public class Automations {
         boolean successful = true;
         try {
             for (AutomationAction automationAction : actionList) {
+                if (serviceModeDisabled) {
+                    ACTION_CHAIN_SUCCEEDED.set(false);
+                    abortChain();
+                    break;
+                }
                 if (!activeQueuedDefinitionIsCurrent()) {
                     ACTION_CHAIN_SUCCEEDED.set(false);
                     abortChain();
@@ -834,7 +843,18 @@ public class Automations {
      * @return Whether the automation feature is enabled
      */
     public static boolean isDisabled() {
-        return enabledCount == 0;
+        return serviceModeDisabled || enabledCount == 0;
+    }
+
+    /**
+     * Apply the transient Service Mode automation gate. This does not mutate
+     * saved rules; the queue is drained on entry and restarted on exit.
+     */
+    public static void setServiceModeDisabled(boolean disabled) {
+        if (serviceModeDisabled == disabled) return;
+        serviceModeDisabled = disabled;
+        enabledStateGeneration++;
+        AutomationQueue.checkWorkerState();
     }
 
     /** Package-local generation used by {@link AutomationQueue} to detect hidden disable cycles. */
@@ -887,7 +907,7 @@ public class Automations {
      * @return true if at least one enabled automation references it (trigger or condition)
      */
     public static boolean isEventReferenced(EventData key) {
-        if (key == null || enabledCount == 0) return false;
+        if (key == null || isDisabled()) return false;
         // Read the generation FIRST, then the entry: an entry stamped with this generation was
         // necessarily computed against the current config. Entries from an older generation are
         // ignored (and overwritten below), which is what makes a stale reinsertion by a slow
@@ -1618,6 +1638,8 @@ public class Automations {
      * @param oldValue The value of the event before this change
      */
     private static void stateChanged(EventData key, Value oldValue) {
+        // Service Mode pauses event delivery without changing the saved rules.
+        if (serviceModeDisabled) return;
         // Don't trigger events when we don't know the previous value
         if (oldValue != null) {
             for (Map.Entry<String, Automation> automation : automations.entrySet()) {
@@ -2605,6 +2627,10 @@ public class Automations {
 
     private static boolean triggerActionsInternal(
             String id, boolean checkConditions, boolean recordStats, boolean explicit) {
+        if (serviceModeDisabled) {
+            logger.info("Skipping automation actions while Service Mode is active: " + id);
+            return true;
+        }
         Automation automation = automations.get(id);
         if (automation == null) return false;
 

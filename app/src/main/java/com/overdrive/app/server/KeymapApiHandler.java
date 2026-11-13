@@ -1148,6 +1148,12 @@ public final class KeymapApiHandler {
     }
 
     private static void handleFire(OutputStream out, String body) throws Exception {
+        if (com.overdrive.app.config.UnifiedConfigManager
+                .isServiceModeFeatureDisabled("keymap")) {
+            HttpResponse.sendError(out, 403,
+                    "Key Mapping is temporarily disabled by Service Mode.");
+            return;
+        }
         try {
             JSONObject req = new JSONObject(body == null ? "" : body);
             // A "sequence" runs several steps in order (one key → N actions).

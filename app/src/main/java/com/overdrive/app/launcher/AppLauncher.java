@@ -842,6 +842,58 @@ public final class AppLauncher {
         return out;
     }
 
+    /**
+     * List only user-installed launchable apps for Service Mode. System packages are
+     * intentionally excluded so the service-mode picker cannot accidentally disable
+     * BYD/OEM components or Android system applications.
+     */
+    public static JSONArray listUserLaunchableApps() {
+        List<JSONObject> apps = new ArrayList<>();
+        Context ctx = CameraDaemon.getAppContext();
+        if (ctx == null) return new JSONArray();
+
+        try {
+            PackageManager pm = ctx.getPackageManager();
+            Intent launcherIntent = new Intent(Intent.ACTION_MAIN);
+            launcherIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+            List<ResolveInfo> resolved = pm.queryIntentActivities(launcherIntent, 0);
+            java.util.LinkedHashMap<String, JSONObject> byPackage =
+                    new java.util.LinkedHashMap<>();
+            for (ResolveInfo ri : resolved) {
+                if (ri == null || ri.activityInfo == null
+                        || ri.activityInfo.applicationInfo == null) continue;
+                String pkg = ri.activityInfo.packageName;
+                if (pkg == null || pkg.isEmpty()
+                        || "com.overdrive.app".equals(pkg)) continue;
+                ApplicationInfo appInfo = ri.activityInfo.applicationInfo;
+                if ((appInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0) continue;
+
+                String label = pkg;
+                try {
+                    CharSequence value = ri.loadLabel(pm);
+                    if (value != null && value.length() > 0) label = value.toString();
+                } catch (Throwable ignored) { }
+                if (!byPackage.containsKey(pkg)) {
+                    byPackage.put(pkg, makeApp(pkg, label));
+                }
+            }
+            apps.addAll(byPackage.values());
+        } catch (Throwable t) {
+            logger.warn("listUserLaunchableApps failed: " + t.getMessage());
+            return new JSONArray();
+        }
+
+        Collections.sort(apps, new Comparator<JSONObject>() {
+            @Override public int compare(JSONObject a, JSONObject b) {
+                return a.optString("label", "")
+                        .compareToIgnoreCase(b.optString("label", ""));
+            }
+        });
+        JSONArray out = new JSONArray();
+        for (JSONObject app : apps) out.put(app);
+        return out;
+    }
+
     private static JSONObject makeApp(String pkg, String label) {
         JSONObject o = new JSONObject();
         try {

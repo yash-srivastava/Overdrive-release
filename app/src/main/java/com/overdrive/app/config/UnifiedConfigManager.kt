@@ -2464,11 +2464,47 @@ object UnifiedConfigManager {
         return loadConfig().optJSONObject("keymap") ?: JSONObject()
     }
 
+    /**
+     * True while Service Mode is active and the named feature was selected for
+     * suspension. The end timestamp is checked here as well as by the daemon's
+     * restoration worker, so feature gates expire on time even between worker ticks.
+     */
+    private fun isServiceModeFeatureDisabled(
+        config: JSONObject,
+        feature: String
+    ): Boolean {
+        if (feature.isBlank()) return false
+        return try {
+            val serviceMode = config.optJSONObject("serviceMode") ?: return false
+            if (!serviceMode.optBoolean("enabled", false)
+                || serviceMode.optBoolean("ending", false)
+            ) return false
+            val endsAt = serviceMode.optLong("endsAtEpochMs", 0L)
+            if (endsAt <= 0L || endsAt <= System.currentTimeMillis()) return false
+            val features = serviceMode.optJSONArray("disabledFeatures") ?: return false
+            (0 until features.length()).any { index ->
+                feature.equals(features.optString(index, ""), ignoreCase = true)
+            }
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    @JvmStatic
+    fun isServiceModeFeatureDisabled(feature: String): Boolean =
+        isServiceModeFeatureDisabled(loadConfig(), feature)
+
     /** Master switch — key interception is a no-op (all keys pass through)
      *  unless this is true. Defaults false so a fresh install never swallows
-     *  hardware buttons until the user opts in. */
+     *  hardware buttons until the user opts in. Service Mode is an additional
+     *  runtime gate and never changes the user's saved keymap preference. */
     @JvmStatic
-    fun isKeymapEnabled(): Boolean = getKeymap().optBoolean("enabled", false)
+    fun isKeymapEnabled(): Boolean {
+        val config = loadConfig()
+        val keymap = config.optJSONObject("keymap") ?: JSONObject()
+        return keymap.optBoolean("enabled", false)
+                && !isServiceModeFeatureDisabled(config, "keymap")
+    }
 
     /** Gate for the advanced escape hatch (raw-CAN / shell bindings). Curated
      *  actions run regardless; advanced payloads are refused at dispatch unless

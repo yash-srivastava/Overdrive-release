@@ -279,14 +279,26 @@
             android:configChanges="keyboardHidden"
             android:launchMode="singleTop">
             <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-            <intent-filter>
                 <action android:name="com.overdrive.app.START_LOCATION_ACTIVITY" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!-- A separate launcher alias lets Service Mode hide OverDrive from the
+             head-unit launcher without disabling the package, daemon, boot receiver,
+             or local WebUI that are responsible for restoring the selected apps. -->
+        <activity-alias
+            android:name=".LauncherActivity"
+            android:targetActivity="com.overdrive.app.ui.MainActivity"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <!-- Private-display instance used only by authenticated Remote Dev View. -->
         <activity

@@ -1015,6 +1015,10 @@ public class HttpServer {
                 if (!serveStaticFile(out, "local/key-mapping.html")) {
                     HttpResponse.sendError(out, 404, "key-mapping.html not found");
                 }
+            } else if (path.equals("/service-mode.html") || path.equals("/service-mode")) {
+                if (!serveStaticFile(out, "local/service-mode.html")) {
+                    HttpResponse.sendError(out, 404, "service-mode.html not found");
+                }
             } else if (path.equals("/about.html") || path.equals("/about")) {
                 if (!serveStaticFile(out, "local/about.html")) {
                     HttpResponse.sendError(out, 404, "about.html not found");
@@ -1581,6 +1585,12 @@ public class HttpServer {
         // than adding a second actuation path.
         if (path.startsWith("/api/quick-controls")) {
             return QuickControlsApiHandler.handle(method, path, body, out);
+        }
+
+        // Service Mode — package visibility + feature gates, protected by the normal
+        // AuthMiddleware path (never exposed through the automation API allowlist).
+        if (path.startsWith("/api/service-mode/")) {
+            return ServiceModeApiHandler.handle(method, path, body, out);
         }
 
         // Installed-app enumeration + launch — shared by the key-mapping app picker

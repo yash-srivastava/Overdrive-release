@@ -683,6 +683,12 @@ public final class AutomationApiHandler {
      * where it is needed.
      */
     private static boolean runActionGroup(String id, OutputStream out) throws Exception {
+        if (com.overdrive.app.config.UnifiedConfigManager
+                .isServiceModeFeatureDisabled("automations")) {
+            HttpResponse.sendError(out, 403,
+                    "Automation action groups are temporarily disabled by Service Mode.");
+            return true;
+        }
         if (!com.overdrive.app.automation.ActionGroups.exists(id)) {
             HttpResponse.sendError(out, 404, "Action group not found.");
             return true;
