@@ -141,6 +141,12 @@ public final class ClusterMapProjector {
      * map Activity onto it. Runs the wait+launch off the caller's thread.
      */
     public static synchronized void start() {
+        // The Android Auto second-screen video and the RoadSense map share the
+        // same physical cluster surface. Require an explicit stop before handoff.
+        if (AndroidAutoClusterBridge.isActive()) {
+            logger.warn("cluster map projection: stop the Android Auto cluster bridge first");
+            return;
+        }
         if (active) {
             if (!com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()
                     || com.overdrive.app.launcher.DiLink5ClusterCast.isMapActive()) {

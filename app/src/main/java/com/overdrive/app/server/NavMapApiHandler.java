@@ -64,8 +64,16 @@ public class NavMapApiHandler {
         // Cluster projection: start / stop / status for projecting the map onto
         // the driver-cluster display (a SUSTAINED holder of ClusterProjectionController).
         if (cleanPath.equals("/api/navmap/cluster/start") && method.equals("POST")) {
-            com.overdrive.app.navmap.ClusterMapProjector.start();
-            sendClusterStatus(out);
+            if (com.overdrive.app.navmap.AndroidAutoClusterBridge.isActive()) {
+                JSONObject response = new JSONObject();
+                response.put("success", false);
+                response.put("projecting", false);
+                response.put("error", "Stop the Android Auto cluster bridge before projecting the RoadSense map.");
+                HttpResponse.sendJson(out, response.toString());
+            } else {
+                com.overdrive.app.navmap.ClusterMapProjector.start();
+                sendClusterStatus(out);
+            }
             return true;
         }
         if (cleanPath.equals("/api/navmap/cluster/stop") && method.equals("POST")) {
@@ -75,6 +83,28 @@ public class NavMapApiHandler {
         }
         if (cleanPath.equals("/api/navmap/cluster/status") && method.equals("GET")) {
             sendClusterStatus(out);
+            return true;
+        }
+        // Optional Android Auto secondary CLUSTER video stream. The factory
+        // receiver is not modified; a compatible receiver pushes H.264/RTP to
+        // the loopback listener owned by AndroidAutoClusterBridge.
+        if (cleanPath.equals("/api/navmap/android-auto-cluster/start") && method.equals("POST")) {
+            boolean started = com.overdrive.app.navmap.AndroidAutoClusterBridge.start();
+            sendAndroidAutoClusterStatus(out, started);
+            return true;
+        }
+        if (cleanPath.equals("/api/navmap/android-auto-cluster/launch-receiver") && method.equals("POST")) {
+            boolean launched = com.overdrive.app.navmap.AndroidAutoClusterBridge.launchReceiver();
+            sendAndroidAutoClusterStatus(out, launched);
+            return true;
+        }
+        if (cleanPath.equals("/api/navmap/android-auto-cluster/stop") && method.equals("POST")) {
+            com.overdrive.app.navmap.AndroidAutoClusterBridge.stop();
+            sendAndroidAutoClusterStatus(out, true);
+            return true;
+        }
+        if (cleanPath.equals("/api/navmap/android-auto-cluster/status") && method.equals("GET")) {
+            sendAndroidAutoClusterStatus(out, true);
             return true;
         }
         if (cleanPath.startsWith(GOOGLE_PREFIX)) {
@@ -93,6 +123,14 @@ public class NavMapApiHandler {
             response.put("success", false);
             response.put("error", e.getMessage());
         }
+        HttpResponse.sendJson(out, response.toString());
+    }
+
+    /** Current Android Auto cluster bridge state. */
+    private static void sendAndroidAutoClusterStatus(OutputStream out, boolean operationSucceeded)
+            throws Exception {
+        JSONObject response = com.overdrive.app.navmap.AndroidAutoClusterBridge.status();
+        response.put("success", operationSucceeded);
         HttpResponse.sendJson(out, response.toString());
     }
 

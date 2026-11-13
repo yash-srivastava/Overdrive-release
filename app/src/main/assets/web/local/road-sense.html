@@ -553,6 +553,43 @@
                     </div>
                 </div>
 
+                <!-- Android Auto's separate CLUSTER video channel. The receiver is optional:
+                     the factory BYD receiver is left untouched, and only a compatible external
+                     receiver that pushes the second H.264 stream to loopback can feed this bridge. -->
+                <div class="card" data-tab="map" id="rsAaClusterCard">
+                    <div class="card-header">
+                        <div class="card-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4M7 8h10M7 11h6"/></svg>
+                            <span data-i18n="road_sense.aa_cluster_title">Android Auto on instrument cluster</span>
+                        </div>
+                        <span class="status-badge inactive" id="rsAaClusterBadge" data-i18n="road_sense.aa_cluster_off">Off</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="setting-row">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="road_sense.aa_cluster_enable">Receive Android Auto cluster video</div>
+                                <div class="setting-desc" data-i18n="road_sense.aa_cluster_enable_desc">Receives the separate navigation video stream from a compatible Android Auto receiver and displays it behind the steering wheel. The main Android Auto screen stays on the infotainment display.</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="rsAaClusterBridge" onchange="RoadSenseSettings.toggleAndroidAutoClusterBridge()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="setting-desc" id="rsAaClusterStatus" style="padding:0 14px 12px;" data-i18n="road_sense.aa_cluster_setup">Requires a compatible receiver configured for a separate CLUSTER display and RTP/UDP output to 127.0.0.1:5004. The factory receiver does not expose this stream.</div>
+                        <div class="setting-row" style="border-bottom:none;">
+                            <div class="setting-info">
+                                <div class="setting-name" data-i18n="road_sense.aa_cluster_receiver">Compatible Android Auto receiver</div>
+                                <div class="setting-desc" data-i18n="road_sense.aa_cluster_receiver_desc">Opens the optional receiver app if it is installed. Pair your phone and configure its second display once.</div>
+                            </div>
+                            <div class="setting-control">
+                                <button type="button" class="btn btn-secondary" id="rsAaClusterLaunchBtn" onclick="RoadSenseSettings.launchAndroidAutoReceiver()" data-i18n="road_sense.aa_cluster_open_receiver">Open receiver</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Detection sensitivity: a multiplier on the EventDetector speed-aware
                      amplitude threshold, applied LIVE by the daemon (no restart). This
                      tunes how easily a hazard is DETECTED (distinct from the Warnings
@@ -1353,7 +1390,7 @@
     <script src="../shared/core.js?v=24"></script>
     <script src="../shared/settings-hydration.js?v=1"></script>
     <script src="../shared/update-flow.js?v=3"></script>
-    <script src="../shared/road-sense.js?v=bsux2"></script>
+    <script src="../shared/road-sense.js?v=aa-cluster-1"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');

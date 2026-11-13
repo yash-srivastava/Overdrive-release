@@ -826,6 +826,15 @@ public final class ClusterProjectionController {
             }
         }
 
+        // Retire the Android Auto video layer before the fission display can
+        // disappear. This callback must not release a token: forceClose owns the
+        // gauge-restore sequence and clears all sustained holders itself.
+        try { com.overdrive.app.navmap.AndroidAutoClusterBridge
+                .onProjectionForceClosed(reason); }
+        catch (Throwable t) {
+            logger.warn("Android Auto cluster pre-close cleanup failed: " + t.getMessage());
+        }
+
         // A direct controller close must invalidate a pending map launch before
         // the fission display can disappear. Several safety paths do not route
         // through ClusterMapProjector.stop().
@@ -1701,6 +1710,11 @@ public final class ClusterProjectionController {
         }
         // Preserve the same source-before-dependent ordering as forceClose even if shutdown()
         // is invoked outside the daemon hook's normal pre-detach sequence.
+        try { com.overdrive.app.navmap.AndroidAutoClusterBridge
+                .onProjectionForceClosed("daemon shutdown"); }
+        catch (Throwable t) {
+            logger.warn("Android Auto cluster shutdown cleanup failed: " + t.getMessage());
+        }
         try { com.overdrive.app.navmap.ClusterMapProjector
                 .onLegacyProjectionForceClosed(); }
         catch (Throwable t) {

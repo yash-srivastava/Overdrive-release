@@ -149,6 +149,10 @@ BYD.roadSense = {
     _routingWritesPending: 0,
     _clusterProjectVersion: 0,
     _clusterProjectPending: false,
+    _aaClusterBridgeVersion: 0,
+    _aaClusterBridgePending: false,
+    _aaClusterStatusInFlight: false,
+    _aaClusterStatusTimer: null,
 
     _enqueueWrite(task) {
         const run = () => task();
@@ -187,7 +191,12 @@ BYD.roadSense = {
     async init() {
         await this.loadConfig();
         this.updateUI(false);
-        await Promise.all([this.loadRoutingStatus(), this.loadClusterStatus(), this.loadGoogleStatus()]);
+        await Promise.all([
+            this.loadRoutingStatus(),
+            this.loadClusterStatus(),
+            this.loadAndroidAutoClusterStatus(),
+            this.loadGoogleStatus()
+        ]);
         this._hydrated = true;
         if (BYD.utils && BYD.utils.unlockSettingsHydration) {
             BYD.utils.unlockSettingsHydration();
@@ -197,6 +206,10 @@ BYD.roadSense = {
         // write is mid-flight). Cheap and keeps the page in sync with the
         // native settings UI / daemon-side changes.
         const self = this;
+        if (this._aaClusterStatusTimer) clearInterval(this._aaClusterStatusTimer);
+        this._aaClusterStatusTimer = setInterval(function () {
+            if (document.visibilityState === 'visible') self.loadAndroidAutoClusterStatus();
+        }, 2500);
 
         // The speed hint / validation error is written imperatively via textContent, so
         // it has no data-i18n for hydrate() to re-translate on an in-page language
@@ -221,15 +234,24 @@ BYD.roadSense = {
             }
             if (document.visibilityState === 'visible' && !self._writing) {
                 self.reload();
+                self.loadAndroidAutoClusterStatus();
             }
         });
         // pagehide/beforeunload cover hard navigation away from the page (the
         // visibilitychange('hidden') above covers background/tab-switch).
         window.addEventListener('pagehide', function () {
+            if (self._aaClusterStatusTimer) {
+                clearInterval(self._aaClusterStatusTimer);
+                self._aaClusterStatusTimer = null;
+            }
             self._flushWarnVolumeOnExit();
             if (self._bsPreviewActive) self.bsPreviewStop();
         });
         window.addEventListener('beforeunload', function () {
+            if (self._aaClusterStatusTimer) {
+                clearInterval(self._aaClusterStatusTimer);
+                self._aaClusterStatusTimer = null;
+            }
             self._flushWarnVolumeOnExit();
             if (self._bsPreviewActive) self.bsPreviewStop();
         });
@@ -480,6 +502,11 @@ BYD.roadSense = {
             clusterCard.style.display = '';
             this._setChecked('rsClusterAuto', c.autoProjectCluster);
             if (loadLiveStatus) this.loadClusterStatus();
+        }
+        var aaClusterCard = document.getElementById('rsAaClusterCard');
+        if (aaClusterCard) {
+            aaClusterCard.style.display = '';
+            if (loadLiveStatus) this.loadAndroidAutoClusterStatus();
         }
 
         this._setChecked('rsWarnEnabled', c.warnEnabled);
@@ -2029,6 +2056,128 @@ BYD.roadSense = {
             this._toastFailed();
         } finally {
             this._clusterProjectPending = false;
+            el.disabled = false;
+        }
+    },
+
+    // Android Auto's separate CLUSTER video stream is received locally from
+    // an optional compatible receiver. The factory receiver is never modified.
+    async loadAndroidAutoClusterStatus() {
+        var el = document.getElementById('rsAaClusterBridge');
+        if (!el || this._aaClusterBridgePending || this._aaClusterStatusInFlight) return;
+        this._aaClusterStatusInFlight = true;
+        var version = this._aaClusterBridgeVersion;
+        try {
+            const resp = await fetch('/api/navmap/android-auto-cluster/status');
+            const data = await resp.json();
+            if (version !== this._aaClusterBridgeVersion || this._aaClusterBridgePending) return;
+            el.checked = !!(data && data.success && data.active);
+            this._setAndroidAutoClusterBadge(data || {});
+        } catch (e) {
+            console.warn('RoadSense: Android Auto cluster status failed:', e);
+            if (version === this._aaClusterBridgeVersion && !this._aaClusterBridgePending) {
+                el.checked = false;
+                this._setAndroidAutoClusterBadge({});
+            }
+        } finally {
+            this._aaClusterStatusInFlight = false;
+        }
+    },
+
+    _setAndroidAutoClusterBadge(data) {
+        var badge = document.getElementById('rsAaClusterBadge');
+        var status = document.getElementById('rsAaClusterStatus');
+        if (!badge) return;
+        var active = !!data.active;
+        var receiving = !!data.receiving;
+        var key = receiving ? 'road_sense.aa_cluster_receiving'
+            : (active ? 'road_sense.aa_cluster_waiting' : 'road_sense.aa_cluster_off');
+        var fallback = receiving ? 'Receiving' : (active ? 'Waiting for receiver' : 'Off');
+        var translated = BYD.i18n.t(key);
+        badge.textContent = (translated && translated !== key) ? translated : fallback;
+        badge.className = 'status-badge ' + (receiving ? 'active' : 'inactive');
+        if (status) {
+            if (data.lastError) {
+                status.textContent = data.lastError;
+            } else if (receiving && data.projecting) {
+                status.textContent = 'Receiving the Android Auto cluster video on the instrument cluster.';
+            } else if (receiving) {
+                var keyframeKey = 'road_sense.aa_cluster_keyframe_wait';
+                var keyframeText = BYD.i18n.t(keyframeKey);
+                status.textContent = (keyframeText && keyframeText !== keyframeKey)
+                    ? keyframeText
+                    : 'Receiving RTP video; waiting for a complete H.264 keyframe.';
+            } else if (active) {
+                status.textContent = 'Listening on 127.0.0.1:' + (data.port || 5004)
+                    + '. Connect a compatible Android Auto receiver to begin streaming.';
+            } else {
+                var setupKey = 'road_sense.aa_cluster_setup';
+                var setupText = BYD.i18n.t(setupKey);
+                status.textContent = (setupText && setupText !== setupKey)
+                    ? setupText
+                    : 'Requires a compatible receiver configured for a separate CLUSTER display and RTP/UDP output to 127.0.0.1:5004. The factory receiver does not expose this stream.';
+            }
+        }
+    },
+
+    async launchAndroidAutoReceiver() {
+        var button = document.getElementById('rsAaClusterLaunchBtn');
+        if (!button || button.disabled) return;
+        button.disabled = true;
+        try {
+            const resp = await fetch('/api/navmap/android-auto-cluster/launch-receiver', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            const data = await resp.json();
+            this._setAndroidAutoClusterBadge(data || {});
+            var toggle = document.getElementById('rsAaClusterBridge');
+            if (toggle && data) toggle.checked = !!data.active;
+            if (data && data.success) {
+                this._toastSaved();
+            } else {
+                this._toastFailed();
+            }
+        } catch (e) {
+            console.warn('RoadSense: compatible Android Auto receiver launch failed:', e);
+            this._toastFailed();
+        } finally {
+            button.disabled = false;
+        }
+    },
+
+    async toggleAndroidAutoClusterBridge() {
+        var el = document.getElementById('rsAaClusterBridge');
+        if (!el || !this._hydrated || el.disabled) return;
+        var on = el.checked;
+        this._aaClusterBridgeVersion++;
+        this._aaClusterBridgePending = true;
+        el.disabled = true;
+        try {
+            const resp = await fetch(on
+                ? '/api/navmap/android-auto-cluster/start'
+                : '/api/navmap/android-auto-cluster/stop', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            const data = await resp.json();
+            if (data && data.success) {
+                el.checked = !!data.active;
+                this._setAndroidAutoClusterBadge(data);
+                this._toastSaved();
+            } else {
+                el.checked = !on;
+                this._setAndroidAutoClusterBadge(data || {});
+                this._toastFailed();
+            }
+        } catch (e) {
+            console.warn('RoadSense: Android Auto cluster bridge toggle failed:', e);
+            el.checked = !on;
+            this._toastFailed();
+        } finally {
+            this._aaClusterBridgePending = false;
             el.disabled = false;
         }
     },

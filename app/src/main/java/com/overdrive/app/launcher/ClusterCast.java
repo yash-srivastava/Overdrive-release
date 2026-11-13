@@ -773,9 +773,9 @@ public final class ClusterCast {
      * reused from {@link AppLauncher}), acquires the OEM projection, waits for the live
      * fission display, then launches + verifies. Returns true if the request was
      * accepted (component resolved + projection acquired) — the actual on-screen resume
-     * is confirmed asynchronously on the launch thread. Returns false only on a bad
-     * package or an unresolvable component (so the caller can report failure), NOT on
-     * the async resume race.
+     * is confirmed asynchronously on the launch thread. Returns false for an invalid
+     * package, an unresolvable component, or a competing active cluster projection,
+     * NOT for the async resume race.
      */
     public static synchronized boolean start(String pkg) {
         if (com.overdrive.app.camera.dilink5.ClusterTransport.isDiLink5()) {
@@ -799,6 +799,12 @@ public final class ClusterCast {
         final String component = AppLauncher.resolveLauncherComponent(pkg);
         if (component == null) {
             logger.warn("cluster cast: could not resolve launcher component for " + pkg);
+            return false;
+        }
+        // A valid cluster app cast and the Android Auto cluster video are
+        // exclusive consumers of the same BYD projection surface.
+        if (com.overdrive.app.navmap.AndroidAutoClusterBridge.isActive()) {
+            logger.warn("cluster cast: stop the Android Auto cluster bridge first");
             return false;
         }
         // REPLACING A LIVE CAST: undo the outgoing app's freeform state FIRST. Without this the old
