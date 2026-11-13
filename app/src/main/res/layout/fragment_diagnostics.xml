@@ -576,7 +576,66 @@
         </com.google.android.material.card.MaterialCardView>
     </LinearLayout>
 
-    <!-- TOOLS row 3: Settings shortcut. Diagnostics is where power users
+    <!-- Module faults: a shared WebView page also used by the standalone WebUI. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/card_gap_vertical"
+        android:orientation="horizontal"
+        android:baselineAligned="false">
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardModuleFaults"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:clickable="true"
+            android:focusable="true"
+            android:foreground="?attr/selectableItemBackground"
+            app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+            app:cardCornerRadius="@dimen/card_radius_standard"
+            app:cardElevation="0dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="@dimen/card_padding_standard">
+
+                <ImageView
+                    android:layout_width="@dimen/card_icon_standard"
+                    android:layout_height="@dimen/card_icon_standard"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_diagnostics"
+                    app:tint="?attr/colorOnSurfaceVariant" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/diagnostics_section_module_faults"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+                        android:textColor="?attr/colorOnSurface" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="3dp"
+                        android:text="@string/diagnostics_module_faults_summary"
+                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+    </LinearLayout>
+
+    <!-- TOOLS row 4: Settings shortcut. Diagnostics is where power users
          land for tuning; surfacing Settings here closes the loop without
          making them hop back to the rail. -->
     <LinearLayout

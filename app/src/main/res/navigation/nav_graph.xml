@@ -287,6 +287,18 @@
         android:label="@string/diagnostics_section_adb_console"
         tools:layout="@layout/fragment_adb_console" />
 
+    <!-- Read-only partial module-fault overview, shared with the WebUI. -->
+    <fragment
+        android:id="@+id/moduleFaultsFragment"
+        android:name="com.overdrive.app.ui.fragment.WebViewFragment"
+        android:label="@string/diagnostics_section_module_faults"
+        tools:layout="@layout/fragment_webview">
+        <argument
+            android:name="page_path"
+            app:argType="string"
+            android:defaultValue="/module-faults" />
+    </fragment>
+
     <!-- Settings: native, with sub-rail of sections -->
     <fragment
         android:id="@+id/settingsFragment"
