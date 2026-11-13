@@ -145,6 +145,10 @@ public final class GeoCache {
      */
     public synchronized void put(double lat, double lng, PlaceResult pr) {
         if (pr == null) return;
+        // A cache write can be the first operation after daemon startup.
+        // Preserve entries already on disk instead of replacing them with a
+        // new map containing only this first put.
+        ensureLoaded();
         String hash = Geohash.encode(lat, lng);
         entries.put(key(hash, pr.locale), pr);
         evictIfOverCap();
@@ -163,9 +167,16 @@ public final class GeoCache {
             p.cancel(false);
             pendingFlush = null;
         }
-        if (dirty.compareAndSet(true, false)) {
-            saveToDisk();
-        }
+        flushDirty();
+        // An I/O failure keeps the cache dirty. Retry without waiting for
+        // another place-name update to happen.
+        if (dirty.get()) scheduleFlush();
+    }
+
+    /** Save only if needed; clear dirty only after a successful disk write.
+     *  All callers hold this cache instance's monitor. */
+    private void flushDirty() {
+        if (dirty.get() && saveToDisk()) dirty.set(false);
     }
 
     /**
@@ -182,10 +193,11 @@ public final class GeoCache {
         try {
             pendingFlush = flushExecutor.schedule(() -> {
                 synchronized (GeoCache.this) {
-                    if (dirty.compareAndSet(true, false)) {
-                        saveToDisk();
-                    }
                     pendingFlush = null;
+                    flushDirty();
+                    // Retry transient errors on the same daemon executor, with
+                    // the normal delay so a full disk cannot cause a busy loop.
+                    if (dirty.get()) scheduleFlush();
                 }
             }, FLUSH_COALESCE_MS, TimeUnit.MILLISECONDS);
         } catch (Throwable t) {
@@ -194,7 +206,7 @@ public final class GeoCache {
             // happens during daemon shutdown and we pay the rewrite cost
             // once, which is fine.
             CameraDaemon.log(TAG + ": flush schedule failed, saving inline: " + t.getMessage());
-            if (dirty.compareAndSet(true, false)) saveToDisk();
+            flushDirty();
         }
     }
 
@@ -331,7 +343,8 @@ public final class GeoCache {
         }
     }
 
-    private void saveToDisk() {
+    /** Return success only after the JSON has been written and closed. */
+    private boolean saveToDisk() {
         File target = new File(CACHE_PATH);
         File tmp = new File(CACHE_PATH + ".tmp");
         try {
@@ -370,8 +383,10 @@ public final class GeoCache {
                 target.setWritable(true, false);
                 try { tmp.delete(); } catch (Throwable ignored) {}
             }
+            return true;
         } catch (Throwable t) {
             CameraDaemon.log(TAG + ": save failed: " + t.getMessage());
+            return false;
         }
     }
 }
