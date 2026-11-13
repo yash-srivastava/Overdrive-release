@@ -21,10 +21,9 @@ import org.json.JSONObject;
  *       itself by retrying every cold start.</li>
  * </ol>
  *
- * <p>Lock-free for the hot path (single-token bucket means a CAS over the
- * "next token at" timestamp is enough). Cooldown reads/writes synchronize
- * on this class because they touch UnifiedConfigManager which serializes
- * disk I/O internally.
+ * <p>Acquisition and non-consuming probes synchronize on this class to share
+ * the single-token gate across resolver callers. The persisted cooldown also
+ * touches UnifiedConfigManager, which serializes configuration I/O internally.
  */
 public final class NominatimRateLimiter {
 
@@ -39,8 +38,8 @@ public final class NominatimRateLimiter {
             6L * 60L * 60L * 1000L   // 6 hours (cap)
     };
 
-    /** Bucket head: nanoTime() the next token becomes available. */
-    private static volatile long nextTokenAtNs = 0L;
+    /** Process-local token gate; all access is under synchronized class methods. */
+    private static final NominatimTokenGate tokenGate = new NominatimTokenGate(TOKEN_INTERVAL_NS);
 
     /** Index into BACKOFF_MS used by {@link #recordFailure()}. Clamped to last entry. */
     private static int failureStreak = 0;
@@ -66,12 +65,7 @@ public final class NominatimRateLimiter {
         if (cooldownUntil > nowMs) {
             return false;
         }
-        long now = System.nanoTime();
-        if (now < nextTokenAtNs) {
-            return false;
-        }
-        nextTokenAtNs = now + TOKEN_INTERVAL_NS;
-        return true;
+        return tokenGate.tryAcquire(System.nanoTime());
     }
 
     /**
@@ -85,7 +79,7 @@ public final class NominatimRateLimiter {
      */
     public static synchronized boolean isThrottled() {
         if (readCooldownUntilMs() > System.currentTimeMillis()) return true;
-        return System.nanoTime() < nextTokenAtNs;
+        return tokenGate.isThrottled(System.nanoTime());
     }
 
     /**
