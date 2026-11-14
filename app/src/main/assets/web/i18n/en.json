@@ -3142,7 +3142,7 @@
   },
   "logs": {
     "section_title": "Diagnostics",
-    "section_sub": "Choose the log that best matches the issue. If you're unsure, send Camera first; for remote-access problems, also send the tunnel you use.",
+    "section_sub": "Hit a bug? Send a daemon's log here — you'll get a short code, then share it with us on Discord, GitHub Issues or WhatsApp and tell us what went wrong.",
     "when_to_send": "Send this log when: ",
     "component_unavailable": "Component details are unavailable in this app version.",
     "send_when_unavailable": "Send this log when the problem involves this service.",
