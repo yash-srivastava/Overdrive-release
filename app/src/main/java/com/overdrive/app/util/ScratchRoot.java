@@ -172,6 +172,29 @@ public final class ScratchRoot {
     }
 
     /**
+     * Maps {@code name} onto the counterpart scratch root ({@link #ALT_DIR}
+     * when currently on {@link #LEGACY_DIR}, or {@link #LEGACY_DIR} when on
+     * {@link #ALT_DIR}) so watchdogs and lifecycle commands can observe or
+     * clear stop/parked sentinels across a mixed-root split-brain.
+     */
+    public static String counterpartPath(String name) {
+        String root = dir();
+        String other = LEGACY_DIR.equals(root) ? ALT_DIR : LEGACY_DIR;
+        if (name == null || name.isEmpty()) return other;
+        if (name.charAt(0) == '/') {
+            if (name.equals(LEGACY_DIR) || name.equals(ALT_DIR)) return other;
+            if (name.startsWith(LEGACY_DIR + "/")) {
+                return other + name.substring(LEGACY_DIR.length());
+            }
+            if (name.startsWith(ALT_DIR + "/")) {
+                return other + name.substring(ALT_DIR.length());
+            }
+            return name;
+        }
+        return other + "/" + name;
+    }
+
+    /**
      * Rewrites every legacy root inside a shell command onto the live root.
      * Identity while legacy, so existing command text is unchanged. Only
      * whole path components are rewritten: {@code /data/local/tmp/x} and

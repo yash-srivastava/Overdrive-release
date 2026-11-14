@@ -158,7 +158,8 @@ public class DaemonCommandHandler implements TelegramCommandHandler {
         // process is already alive or this launch attempt fails.
         String startSentinel = sentinelForProcess(processName);
         if (startSentinel != null) {
-            ctx.execShell("rm -f " + startSentinel + " 2>/dev/null");
+            String counterpartSentinel = com.overdrive.app.util.ScratchRoot.counterpartPath(startSentinel);
+            ctx.execShell("rm -f " + startSentinel + " " + counterpartSentinel + " 2>/dev/null");
         }
         clearDaemonStoppedState(name);
 
