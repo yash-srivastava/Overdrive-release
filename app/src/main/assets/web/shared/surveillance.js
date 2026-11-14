@@ -350,6 +350,12 @@ BYD.surveillance = {
         ]);
         this.savedConfig = JSON.parse(JSON.stringify(this.config));
         this.updateUI();
+        this.refreshImpactSensorStatus();
+        if (!this._impactStatusTimer) {
+            this._impactStatusTimer = setInterval(() => {
+                if (document.visibilityState === 'visible') this.refreshImpactSensorStatus();
+            }, 5000);
+        }
         this._hydrated = true;
         this.updateBluetoothKeepAliveUI();
         this.startClock();
@@ -4377,6 +4383,33 @@ BYD.surveillance = {
             });
     },
 
+    async refreshImpactSensorStatus() {
+        const target = document.getElementById('impactSensorStatus');
+        if (!target) return;
+        if (this.config.impactDetection !== true) {
+            target.textContent = 'Disabled';
+            return;
+        }
+        try {
+            const response = await fetch('/api/surveillance/impact/status', { cache: 'no-store' });
+            const data = await response.json();
+            if (!data.success || !data.status) throw new Error('status unavailable');
+            const status = data.status;
+            const labels = {
+                registered: 'Sensor listener registered; waiting for sample confirmation',
+                sampling: 'Receiving accelerometer samples',
+                unavailable: 'No usable accelerometer is available',
+                stale: 'No recent sensor heartbeat — parked sensor may be asleep',
+                inactive: 'Not active (vehicle is not in the parked sentry watch window)',
+                waiting: 'Waiting for sensor service'
+            };
+            const detail = (status.sensor ? ' · ' + status.sensor : '') + (status.samples > 0 ? ' · ' + status.samples + ' samples/15s' : '');
+            target.textContent = (labels[status.state] || 'Status unknown') + detail;
+        } catch (_) {
+            target.textContent = 'Status unavailable — daemon or sensor service not reporting';
+        }
+    },
+
     updateImpactUI() {
         const enabled = this.config.impactDetection === true;
         const toggle = document.getElementById('impactDetection');
@@ -4385,6 +4418,7 @@ BYD.surveillance = {
         if (row) row.style.display = enabled ? '' : 'none';
         const select = document.getElementById('impactSensitivity');
         if (select) select.value = this.config.impactSensitivity || 'medium';
+        this.refreshImpactSensorStatus();
     },
 
     updateDeterrentUI() {
