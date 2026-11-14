@@ -2225,7 +2225,7 @@
             var _qSel = document.getElementById('qualitySelector');
             const quality = (_qSel && _qSel.value) || 'LOW';
             try {
-                const qRes = await fetch('/api/stream/quality/' + quality, { method: 'POST' });
+                const qRes = await fetch('/api/stream/quality/' + quality, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
                 const qData = await qRes.json();
                 if (qData.fps) this.activeFps = qData.fps;
             } catch(e) {}
