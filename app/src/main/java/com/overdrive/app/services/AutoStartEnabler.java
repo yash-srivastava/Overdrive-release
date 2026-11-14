@@ -27,12 +27,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * is toggled OFF. That value is RESET (app re-blocked) on every install/update but
  * PERSISTS across ordinary reboots.
  *
- * <p>This runs ONLY when the user deliberately taps the autostart button in the
- * setup wizard ({@link com.overdrive.app.overlay.SetupGuideDialog}), which appears
- * once per fresh install with the user present and the display on. There is no
- * auto-run: the earlier onServiceConnected + install-fingerprint trigger was
- * removed because it re-fired on every a11y reconnect / app churn and repeatedly
- * popped the BYD dialog.
+ * <p>This runs from the visible setup wizard after an update, or when the user
+ * deliberately taps its retry button. The update flow is guarded once per
+ * install-time fingerprint; it is never triggered from onServiceConnected,
+ * because service reconnects can recur during ordinary app churn.
  *
  * <p>The dialog is a {@code mShowToOwnerOnly} window above the launcher, so
  * {@code getRootInActiveWindow()} returns the launcher, not the dialog. Only

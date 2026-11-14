@@ -54,7 +54,7 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
     }
 
     /**
-     * Result of a deliberate, button-triggered autostart-enable run. Delivered on the
+     * Result of a setup-guide autostart-enable run. Delivered on the
      * main thread so UI callers can update views directly.
      */
     public interface Callback {
@@ -412,10 +412,10 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
      * Drive {@link AutoStartEnabler} once, off the main thread, reporting the outcome back
      * on it.
      *
-     * <p>Triggered deliberately from the setup wizard's button and never automatically. An
-     * earlier version ran it from onServiceConnected, which re-fired on every reconnect and
-     * app-churn and repeatedly popped BYD's dialog in the user's face. Single-flight is
-     * enforced inside the enabler, so a double-tap cannot double-run.
+     * <p>Triggered by the visible post-update setup guide or its manual retry button. It is
+     * intentionally not called from onServiceConnected: that callback can recur during
+     * ordinary service churn and repeatedly pop BYD's dialog. Single-flight is enforced
+     * inside the enabler.
      */
     public void runAutoStartEnabler(final Callback callback) {
         try {

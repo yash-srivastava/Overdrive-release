@@ -37,6 +37,7 @@ public class SetupGuideDialog {
     private static final String TAG = "SetupGuideDialog";
     private static final String PREFS_NAME = "overdrive_setup";
     private static final String KEY_LAST_SEEN_INSTALL_TIME = "last_seen_install_time";
+    private static final String KEY_AUTOSTART_ATTEMPT_INSTALL_TIME = "autostart_attempt_install_time";
     private static final long AUTOSTART_SERVICE_WAIT_MS = 5000L;
     private static final long AUTOSTART_SERVICE_POLL_MS = 200L;
 
@@ -199,6 +200,38 @@ public class SetupGuideDialog {
         view.findViewById(R.id.btnSkip).setOnClickListener(v -> dialog.dismiss());
 
         dialog.show();
+
+        // BYD resets the per-app auto-start permission on every package install.
+        // The update guide is shown only while the owner is present, so it is a
+        // safe place to run the existing accessibility flow once for this
+        // install. Never trigger this from onServiceConnected: that callback
+        // can recur during ordinary service churn and would repeatedly open
+        // BYD's settings dialog.
+        if (isUpdate) {
+            maybeAutoEnableAfterUpdate(context, autoStartStep);
+        }
+    }
+
+    private static void maybeAutoEnableAfterUpdate(Context context, StepRow step) {
+        long installTime = getCurrentInstallTime(context);
+        if (installTime <= 0L) return;
+
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        if (prefs.getLong(KEY_AUTOSTART_ATTEMPT_INSTALL_TIME, 0L) >= installTime) {
+            return;
+        }
+
+        // Record before starting asynchronous work. This prevents a second
+        // activity launch or service reconnect from opening another BYD dialog
+        // while the first attempt is still running. The visible action remains
+        // available if the automatic attempt fails.
+        prefs.edit().putLong(KEY_AUTOSTART_ATTEMPT_INSTALL_TIME, installTime).apply();
+        step.button.setEnabled(false);
+        step.button.setText(context.getString(R.string.setup_autostart_enabling));
+        runAutoStartWhenServiceReady(
+                context,
+                step,
+                SystemClock.elapsedRealtime() + AUTOSTART_SERVICE_WAIT_MS);
     }
 
     /**
