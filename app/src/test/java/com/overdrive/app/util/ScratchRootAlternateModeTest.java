@@ -132,4 +132,20 @@ public class ScratchRootAlternateModeTest {
         assertEquals("'a'\\''b'", ScratchRoot.shellQuote("a'b"));
         assertEquals("''", ScratchRoot.shellQuote(null));
     }
+
+    @Test
+    public void counterpartPathMapsBothRootsSymmetrically() {
+        ScratchRoot.setResolvedDirForTest(ALT);
+        assertEquals(ScratchRoot.LEGACY_DIR + "/acc_sentry_daemon.disabled",
+                ScratchRoot.counterpartPath("acc_sentry_daemon.disabled"));
+        assertEquals(ScratchRoot.LEGACY_DIR + "/acc_sentry_daemon.disabled",
+                ScratchRoot.counterpartPath(ALT + "/acc_sentry_daemon.disabled"));
+
+        ScratchRoot.setResolvedDirForTest(ScratchRoot.LEGACY_DIR);
+        assertEquals(ALT + "/acc_sentry_daemon.disabled",
+                ScratchRoot.counterpartPath("acc_sentry_daemon.disabled"));
+        assertEquals(ALT + "/acc_sentry_daemon.disabled",
+                ScratchRoot.counterpartPath(ScratchRoot.LEGACY_DIR + "/acc_sentry_daemon.disabled"));
+        assertEquals("/sdcard/DCIM", ScratchRoot.counterpartPath("/sdcard/DCIM"));
+    }
 }
