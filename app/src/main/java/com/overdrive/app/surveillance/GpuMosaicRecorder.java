@@ -1435,7 +1435,8 @@ public class GpuMosaicRecorder {
             //     hot remount; one-shot — cleared after consumption so the
             //     next call falls back to live StorageManager.getRecordingsDir()
             //     unless the watchdog re-pokes it again).
-            //  3) Live StorageManager.getRecordingsDir() (default).
+            //  3) Live configured recordings dir (default), not the cached
+            //     field which is frozen while a recording is active.
             java.io.File overrideDir = this.pendingOutputDirOverride;
             java.io.File targetDir;
             if (outputDir != null) {
@@ -1461,7 +1462,7 @@ public class GpuMosaicRecorder {
                         + targetDir.getAbsolutePath() + " (was " + overrideDir.getAbsolutePath() + ")");
                 }
             } else {
-                targetDir = storageManager.getRecordingsDir();
+                targetDir = storageManager.getLiveRecordingsDirIfMounted();
             }
 
             // ENOSPC fallback (false-GREEN fix): if the resolved target lives on

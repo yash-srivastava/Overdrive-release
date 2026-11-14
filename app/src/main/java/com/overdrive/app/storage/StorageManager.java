@@ -5783,6 +5783,41 @@ public class StorageManager {
     public File getRecordingsDir() {
         return recordingsDir;
     }
+
+    /**
+     * Resolve the configured recordings volume live instead of reading the
+     * cached {@link #recordingsDir}. The cached field is intentionally frozen
+     * while a recording is active so cleanup and directory migration cannot
+     * move an in-flight session. That also means it can remain on the old
+     * internal fallback after the configured SD card has mounted, which is
+     * wrong for independent writers such as instant-replay exports and for a
+     * new recorder session that has no explicit output-dir override.
+     */
+    public File getLiveRecordingsDir() {
+        synchronized (recordingsCleanupLock) {
+            ResolvedDir resolved = resolveActive(recordingsStorageType,
+                internalRecordingsDir, sdCardRecordingsDir, usbRecordingsDir, "recordings");
+            return resolved.dir;
+        }
+    }
+
+    /**
+     * Live recordings directory with a mount-liveness check. The availability
+     * flag can lag a just-removed card until the volume watchdog runs; do not
+     * hand a fresh writer a stale removable-volume path during that window.
+     * Normal configured-volume fallback semantics remain unchanged.
+     */
+    public File getLiveRecordingsDirIfMounted() {
+        File live = getLiveRecordingsDir();
+        StorageType volume = externalVolumeOf(live);
+        if (volume == null) return live;
+        String root = (volume == StorageType.SD_CARD) ? sdCardPath : usbPath;
+        if (root != null && isPathLikelyMounted(root)) return live;
+        File internal = internalRecordingsDir;
+        logWarn("Recordings restart: " + volume + " at " + root + " is not reachable — using "
+            + (internal != null ? internal.getAbsolutePath() : "the live dir"));
+        return (internal != null) ? internal : live;
+    }
     
     public File getSurveillanceDir() {
         return surveillanceDir;
