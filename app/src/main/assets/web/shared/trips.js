@@ -3291,6 +3291,7 @@ const TRIPS = {
         let summaryBound = false;
         document.getElementById('tripListView').classList.add('hidden');
         document.getElementById('tripDetail').classList.add('active');
+        document.body.classList.add('trip-detail-open');
         window.scrollTo(0, 0);
 
         try {
@@ -3589,6 +3590,7 @@ const TRIPS = {
         const list = document.getElementById('tripListView');
         if (detail) detail.classList.remove('active');
         if (list) list.classList.remove('hidden');
+        document.body.classList.remove('trip-detail-open');
     },
 
     // ==================== TIMELINE SLIDER ====================
