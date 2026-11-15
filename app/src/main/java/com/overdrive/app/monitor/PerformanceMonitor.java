@@ -80,6 +80,11 @@ public class PerformanceMonitor {
     // Lets the freq-ratio fallback tag its estimate honestly (issue #173).
     // Sampler-thread-confined (collectMetrics runs on a single scheduler task).
     private boolean lastGpuMaxFreqWasReal = false;
+    // Cache immutable hardware-ceiling sources and the unavailable result.
+    // devfreq max_freq nodes are policy caps and can change at runtime, so
+    // those values are deliberately re-read instead of being cached.
+    // 0 = unresolved; -1 = resolved-absent (use the conservative default).
+    private double cachedGpuMaxFreqMhz = 0;
     // Cache the resolved busy-counter path, including a confirmed missing path.
     // The kernel's sysfs topology is stable for the daemon's lifetime.
     private java.io.File resolvedGpuBusyFile = null;
@@ -583,6 +588,11 @@ public class PerformanceMonitor {
      * conservative Adreno default if no sysfs path resolves.
      */
     private double readGpuMaxFrequency() {
+        if (cachedGpuMaxFreqMhz != 0) {
+            lastGpuMaxFreqWasReal = cachedGpuMaxFreqMhz > 0;
+            return cachedGpuMaxFreqMhz > 0 ? cachedGpuMaxFreqMhz : 650.0;
+        }
+
         lastGpuMaxFreqWasReal = false;
         String[] paths = {
             "/sys/class/kgsl/kgsl-3d0/max_gpuclk",
@@ -605,11 +615,27 @@ public class PerformanceMonitor {
                             if (v > maxRaw) maxRaw = v;
                         } catch (NumberFormatException ignored) {}
                     }
-                    if (maxRaw > 0) { lastGpuMaxFreqWasReal = true; return normalizeFrequency(maxRaw); }
+                    if (maxRaw > 0) {
+                        lastGpuMaxFreqWasReal = true;
+                        double maxMhz = normalizeFrequency(maxRaw);
+                        cachedGpuMaxFreqMhz = maxMhz;
+                        return maxMhz;
+                    }
                 } else {
                     try {
                         long v = Long.parseLong(line.trim());
-                        if (v > 0) { lastGpuMaxFreqWasReal = true; return normalizeFrequency(v); }
+                        if (v > 0) {
+                            lastGpuMaxFreqWasReal = true;
+                            double maxMhz = normalizeFrequency(v);
+                            // devfreq max_freq is a runtime policy cap, not a
+                            // hardware ceiling. Keep it live; the KGSL/Mali
+                            // hardware-max and available_frequencies nodes are
+                            // immutable for the daemon's lifetime.
+                            boolean immutableMaximum = path.endsWith("max_gpuclk")
+                                    || path.endsWith("max_clock");
+                            if (immutableMaximum) cachedGpuMaxFreqMhz = maxMhz;
+                            return maxMhz;
+                        }
                     } catch (NumberFormatException ignored) {}
                 }
             } catch (Exception ignored) {}
@@ -617,6 +643,7 @@ public class PerformanceMonitor {
         // Conservative estimate for Adreno GPUs — matches the original behavior
         // before the multi-sample rewrite. lastGpuMaxFreqWasReal stays false so
         // the caller can tag this as a hardcoded (not measured) ratio.
+        cachedGpuMaxFreqMhz = -1;
         return 650.0;
     }
 
