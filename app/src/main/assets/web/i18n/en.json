@@ -3152,7 +3152,54 @@
     "uploaded_title": "Log uploaded",
     "uploaded_body": "Share this code with the maintainer, along with what you were doing when it broke:",
     "uploaded_where": "Post it on Discord, GitHub Issues or WhatsApp:",
-    "copy_code": "Copy code"
+    "copy_code": "Copy code",
+    "desc": {
+      "camera": {
+        "name": "Camera",
+        "component": "Core OverDrive service — WebUI, HTTP/API, camera feeds and streaming, plus shared vehicle/app integrations.",
+        "sendWhen": "the WebUI or API fails, camera/video feeds fail, vehicle data is missing, or no other daemon clearly matches."
+      },
+      "accsentry": {
+        "name": "ACC Sentry",
+        "component": "Vehicle ACC and power-state monitor — ignition transitions, parked state, Sentry-mode coordination, screen/backlight and MCU wake.",
+        "sendWhen": "ACC/ignition detection, park/wake transitions, screen/backlight control or Sentry-mode activation behaves incorrectly."
+      },
+      "sentry": {
+        "name": "Sentry",
+        "component": "System keep-awake service — ACC lock, wake lock, and app/network allowlisting.",
+        "sendWhen": "the head unit sleeps unexpectedly, OverDrive is suspended while parked, or background/network access is lost."
+      },
+      "telegram": {
+        "name": "Telegram Bot",
+        "component": "Telegram bot service — command polling, command execution and bot replies/notifications.",
+        "sendWhen": "the bot does not respond, commands fail, or Telegram notifications are missing."
+      },
+      "cloudflared": {
+        "name": "Cloudflared Tunnel",
+        "component": "Cloudflare remote-access tunnel.",
+        "sendWhen": "the Cloudflare tunnel will not start, its URL is unavailable, or remote access through Cloudflare fails."
+      },
+      "zrok": {
+        "name": "Zrok Tunnel",
+        "component": "zrok remote-sharing tunnel — reserved/public share and proxy startup.",
+        "sendWhen": "a zrok share or URL fails to start, cannot be reached, or disconnects."
+      },
+      "tailscale": {
+        "name": "Tailscale",
+        "component": "Tailscale VPN/tailnet service — device connectivity, tunnel and optional proxy/ADB endpoints.",
+        "sendWhen": "the vehicle disappears from your tailnet, Tailscale connectivity fails, or its configured endpoint/proxy is unreachable."
+      },
+      "wireguard": {
+        "name": "WireGuard",
+        "component": "WireGuard tunnel (wgproxy) — WireGuard interface and tunnel traffic.",
+        "sendWhen": "the WireGuard tunnel fails to start, handshake/connectivity fails, or traffic does not pass through it."
+      },
+      "singbox": {
+        "name": "Sing-box Proxy",
+        "component": "sing-box proxy service — local proxy process and configured outbound routing.",
+        "sendWhen": "the proxy will not start, proxy routing is incorrect, or apps cannot reach the network through the proxy."
+      }
+    }
   },
   "vehicle": {
     "model_name_seagull": "BYD Seagull",
