@@ -167,32 +167,13 @@ public class AppAudioCaptureController {
     private byte[] drainScratch;
 
     // ---- Sample-accurate audio PTS (drain thread only) ----------------------
-    // AAC-LC emits a FIXED 1024 samples per frame; at SAMPLE_RATE that is a
-    // constant 21.333 ms. We stamp each frame at that exact cadence instead of
-    // reading wall-clock at drain time. The old drain-time System.nanoTime()
-    // stamp inherited the drain thread's scheduling jitter (GC pauses, encoder /
-    // Adreno contention, TCP write stalls): consecutive frames that are really
-    // 21.3 ms apart got timestamps bunched together or spread out, so the muxed
-    // audio track played back choppy, and any frame whose jittered pts landed
-    // <= the previous one was DROPPED by the daemon's per-track monotonic guard
-    // (writeRebasedAudio) — an audible gap. A sample-count clock is perfectly
-    // even and strictly monotonic, eliminating both.
-    //
-    // Anchored ONCE to System.nanoTime()/1000 at the first emitted frame so the
-    // audio timeline shares the same clock domain as the video PTS
-    // (eglPresentationTimeANDROID uses System.nanoTime()), letting the daemon
-    // rebase A/V against one origin.
+    // AAC-LC emits 1024 samples per access unit. The timeline advances only
+    // when an encoded access unit is emitted; encoder/drain scheduling delays
+    // must never be converted into artificial gaps in the media timeline.
+    // The base uses nanoTime so audio and the GL video pipeline share a clock
+    // domain and the daemon can rebase both tracks against one origin.
     private static final int AAC_SAMPLES_PER_FRAME = 1024;
-    private long audioPtsBaseUs = -1L;   // nanoTime/1000 captured at first frame
-    private long emittedSamples = 0L;    // running total of samples emitted
-    // If the even-cadence clock falls behind real wall-clock by more than this
-    // — which happens when captureLoop drops PCM chunks under encoder
-    // backpressure, so fewer AAC frames are emitted than real time elapsed —
-    // re-anchor the cadence clock FORWARD to real time. This inserts a gap that
-    // matches the real dropped-audio gap, bounding audio-vs-video drift to this
-    // window while keeping spacing perfectly even in the common no-drop case.
-    // Forward-only, so PTS stays strictly monotonic.
-    private static final long AUDIO_PTS_RESYNC_THRESHOLD_US = 120_000L; // 120 ms
+    private AacPresentationTimeline audioTimeline;
     // Mic-claim contention back-off. BYD voice-asst can grab the mic
     // mid-trip; AudioRecord then throws ERROR_INVALID_OPERATION on read.
     // We close + retry every 5 s instead of busy-looping or giving up.
@@ -546,13 +527,9 @@ public class AppAudioCaptureController {
 
             synchronized (lifecycleLock) {
                 running.set(true);
-                // Reset the sample-accurate PTS clock for this session. The
-                // drain thread captures audioPtsBaseUs from the first frame; a
-                // stale base from a prior session would back-date the new
-                // session's timeline. emittedSamples is read/written only on
-                // the single drain thread after this point.
-                audioPtsBaseUs = -1L;
-                emittedSamples = 0L;
+                // The drain thread creates a fresh sample clock on its first
+                // output packet. Never carry a previous session's timeline.
+                audioTimeline = null;
                 executor = Executors.newFixedThreadPool(
                         recordForMuxing ? 2 : 1, r -> {
                     Thread t = new Thread(r);
@@ -673,11 +650,13 @@ public class AppAudioCaptureController {
         if (minBuf == AudioRecord.ERROR_BAD_VALUE || minBuf == AudioRecord.ERROR) {
             throw new IllegalStateException("AudioRecord.getMinBufferSize=" + minBuf);
         }
-        // 4× minBuf gives ~80 ms of headroom — enough to absorb a
-        // capture-thread stall without dropping samples, but not so
-        // much that a transient pause shows up as audible latency on
-        // subsequent recordings.
-        int bufSize = Math.max(minBuf * 4, captureSampleRate / 5);
+        // Keep up to two seconds of mono PCM in AudioRecord's native buffer.
+        // The capture thread may briefly wait for an AAC input slot; without
+        // this headroom, the HAL can overrun while that thread is retrying and
+        // discard samples before they ever reach our code. This is only a
+        // buffer-capacity increase, not a two-second playback delay.
+        int backpressureBufferBytes = captureSampleRate * BYTES_PER_SAMPLE * 2;
+        int bufSize = Math.max(minBuf * 4, backpressureBufferBytes);
         // audioSource is MediaRecorder.AudioSource.MIC unless the voice assistant asked for
         // VOICE_RECOGNITION or VOICE_COMMUNICATION (see audioSourceFor).
         audioRecord = new AudioRecord(audioSource,
@@ -846,28 +825,43 @@ public class AppAudioCaptureController {
 
             if (!recordForMuxing) continue;
 
-            // PTS handling: the input PTS is irrelevant here — the drain loop
-            // assigns each output frame a PTS from a sample-count clock (see
-            // the field doc on audioPtsBaseUs / the drainLoop stamp). We pass 0
-            // to queueInputBuffer because (a) some BYD AOSP AAC encoders rewrite
-            // input PTSs anyway, and (b) the output PTS is derived from the
-            // emitted-frame count, not from this value.
-
+            // PTS handling: the drain loop assigns each output frame a PTS
+            // from a sample-count clock. A zero input PTS is intentional because
+            // some BYD AOSP AAC encoders rewrite input timestamps.
+            //
+            // Do not discard this PCM chunk when the encoder has no input slot.
+            // A 20 ms dequeue timeout is only a poll interval, not permission to
+            // lose 40 ms of microphone audio. Retry while capture is active;
+            // cleanup() stops AudioRecord and clears running before signalling
+            // encoder EOS, so this wait is bounded by the lifecycle shutdown.
             try {
-                int inputIndex = aacEncoder.dequeueInputBuffer(20_000);
-                if (inputIndex >= 0) {
-                    ByteBuffer inBuf = aacEncoder.getInputBuffer(inputIndex);
-                    if (inBuf != null) {
-                        inBuf.clear();
-                        inBuf.put(consumerPcm, 0, consumerLength);
-                        aacEncoder.queueInputBuffer(
-                                inputIndex, 0, consumerLength, 0L, 0);
-                    }
+                int inputIndex;
+                do {
+                    inputIndex = aacEncoder.dequeueInputBuffer(20_000);
+                } while (inputIndex == MediaCodec.INFO_TRY_AGAIN_LATER && running.get());
+
+                if (!running.get()) break;
+                if (inputIndex < 0) {
+                    Log.w(TAG, "AAC encoder returned unexpected input status=" + inputIndex);
+                    running.set(false);
+                    break;
                 }
-                // dequeueInputBuffer returning negative just means the
-                // encoder is busy — drop this PCM chunk rather than
-                // block indefinitely. With 20 ms chunks at 64 kbps the
-                // encoder catches up within milliseconds.
+
+                ByteBuffer inBuf = aacEncoder.getInputBuffer(inputIndex);
+                if (inBuf == null) {
+                    Log.w(TAG, "AAC encoder returned a null input buffer; stopping capture");
+                    running.set(false);
+                    break;
+                }
+                inBuf.clear();
+                if (consumerLength > inBuf.remaining()) {
+                    Log.w(TAG, "AAC encoder input buffer too small: " + inBuf.remaining()
+                            + " < " + consumerLength);
+                    running.set(false);
+                    break;
+                }
+                inBuf.put(consumerPcm, 0, consumerLength);
+                aacEncoder.queueInputBuffer(inputIndex, 0, consumerLength, 0L, 0);
             } catch (IllegalStateException ise) {
                 Log.w(TAG, "Encoder queue failed: " + ise.getMessage());
                 running.set(false);
@@ -989,36 +983,16 @@ public class AppAudioCaptureController {
                 outBuf.position(info.offset);
                 outBuf.limit(info.offset + info.size);
 
-                // Sample-accurate PTS. AAC-LC = AAC_SAMPLES_PER_FRAME (1024)
-                // samples/frame = a constant 21.333 ms at SAMPLE_RATE, so we
-                // advance a sample counter rather than read wall-clock here.
-                // This makes frame spacing perfectly even and strictly
-                // monotonic, which is what fixes the choppy-audio + dropped-
-                // frame symptoms (see the field doc on audioPtsBaseUs). The
-                // base is captured once from System.nanoTime()/1000 so audio
-                // shares the video clock domain; thereafter PTS is pure
-                // arithmetic. We DELIBERATELY ignore info.presentationTimeUs —
-                // some BYD AOSP AAC encoders rewrite it to start at 0.
-                long nowUs = System.nanoTime() / 1000L;
-                if (audioPtsBaseUs < 0) {
-                    audioPtsBaseUs = nowUs;
-                    emittedSamples = 0L;
+                // Stamp from the number of encoded samples, never from drain
+                // wall-clock time. A delayed drain is scheduling latency, not an
+                // audio discontinuity; converting it into a PTS jump creates the
+                // invalid-PTS gaps reported by players. The input queue now waits
+                // for encoder capacity instead of dropping whole PCM chunks.
+                if (audioTimeline == null) {
+                    audioTimeline = new AacPresentationTimeline(
+                            System.nanoTime() / 1000L, SAMPLE_RATE, AAC_SAMPLES_PER_FRAME);
                 }
-                long ptsUs = audioPtsBaseUs
-                    + (emittedSamples * 1_000_000L) / SAMPLE_RATE;
-                // Drift guard: if captureLoop dropped PCM chunks under encoder
-                // backpressure, fewer frames were emitted than real time
-                // elapsed, so the cadence clock lags wall-clock. When the lag
-                // exceeds the threshold, jump the base FORWARD to real time so
-                // the audio gap matches the real dropped-audio gap (bounded
-                // drift) — forward-only keeps PTS monotonic.
-                long realElapsedUs = nowUs - audioPtsBaseUs;
-                long cadenceElapsedUs = (emittedSamples * 1_000_000L) / SAMPLE_RATE;
-                if (realElapsedUs - cadenceElapsedUs > AUDIO_PTS_RESYNC_THRESHOLD_US) {
-                    audioPtsBaseUs = nowUs - cadenceElapsedUs;
-                    ptsUs = audioPtsBaseUs + cadenceElapsedUs;
-                }
-                emittedSamples += AAC_SAMPLES_PER_FRAME;
+                long ptsUs = audioTimeline.nextPtsUs();
 
                 // Frame format: [4 totalLength][4 msgType][8 ptsUs][N AAC bytes]
                 // totalLength counts msgType + ptsUs + AAC = 4 + 8 + N = 12 + N
