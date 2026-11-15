@@ -814,10 +814,10 @@ public class GpuStreamScaler {
      *
      * @param mode 0=Mosaic, 1=Front, 2=Right, 3=Rear, 4=Left,
      *             5=Raw (legacy debug passthrough — pano strip), 6=OEM Dashcam,
-     *             7=BlindSpot L, 8=BlindSpot R
+     *             7=BlindSpot L, 8=BlindSpot R, 9=AVM mosaic + DVR
      */
     public void setViewMode(int mode) {
-        if (mode < 0 || mode > 8) return;
+        if (mode < 0 || mode > 9) return;
         if (mode != 6) {
             synchronized (oemViewLock) {
                 oemViewRequested = false;
@@ -1247,6 +1247,15 @@ public class GpuStreamScaler {
         logger.info("OEM source bound to streamScaler (tex=" + oemTextureId + ")");
     }
 
+    /** True when a shared OEM texture has published its first frame transform. */
+    public boolean isOemSourceBound() {
+        return oemSourceActive && oemTextureId != 0 && oemSurfaceTexture != null;
+    }
+
+    public boolean isOemSourceReady() {
+        return isOemSourceBound() && oemTexMatrixSnapshot != null;
+    }
+
     public void unbindOemSource() {
         synchronized (oemViewLock) {
             this.oemSourceActive = false;
@@ -1663,11 +1672,11 @@ public class GpuStreamScaler {
                     + "            else if (uViewMode == 4) corner = uProducerForLeft;\n"
                     // dl5Unfish* are identity unless the DiLink 5 fisheye
                     // strength was pushed (setDiLink5FisheyeStrength).
-                    + "            samplePos = corner + dl5Unfish(vTexCoord) * 0.5;\n"
+                    + "            samplePos = corner + dl5Unfish(sampleCoord) * 0.5;\n"
                     + "        } else {\n"
-                    + "            samplePos = dl5UnfishMosaic(vTexCoord);\n"
+                    + "            samplePos = dl5UnfishMosaic(sampleCoord);\n"
                     + "        }\n"
-                : "        samplePos = vTexCoord;\n";
+                : "        samplePos = sampleCoord;\n";
         String cameraSampler = isTexture2D
             ? "uniform sampler2D uCameraTex;\n"
             : "uniform samplerExternalOES uCameraTex;\n";
@@ -1914,6 +1923,14 @@ public class GpuStreamScaler {
             "    // encodes the producer's Y-flip — applying a manual\n" +
             "    // 1.0 - vUnit.y on top double-flips and lands the feed\n" +
             "    // upside-down. Sample with the raw vUnit.\n" +
+            // Combined view 9: full-width DVR band above the canonical AVM
+            // mosaic. The lower two-thirds retain Front/Right/Rear/Left order.
+            "    if (uViewMode == 9 && uOemActive == 1 && vTexCoord.y >= (2.0 / 3.0)) {\n" +
+            "        vec2 panelUv = vec2(vUnit.x, (vTexCoord.y - (2.0 / 3.0)) * 3.0);\n" +
+            "        vec2 oemTc = (uOemTexMatrix * vec4(panelUv, 0.0, 1.0)).xy;\n" +
+            "        gl_FragColor = texture2D(uOemTex, oemTc);\n" +
+            "        return;\n" +
+            "    }\n" +
             "    if (uViewMode == 6 && uOemActive == 1) {\n" +
             "        vec2 oemTc = (uOemTexMatrix * vec4(vUnit, 0.0, 1.0)).xy;\n" +
             "        gl_FragColor = texture2D(uOemTex, oemTc);\n" +
@@ -1926,25 +1943,30 @@ public class GpuStreamScaler {
             "        gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);\n" +
             "        return;\n" +
             "    }\n" +
+            "    if (uViewMode == 9 && uOemActive != 1 && vTexCoord.y >= (2.0 / 3.0)) {\n" +
+            "        gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); return;\n" +
+            "    }\n" +
+            "    vec2 sampleCoord = vTexCoord;\n" +
+            "    if (uViewMode == 9) sampleCoord.y = vTexCoord.y * 1.5;\n" +
             "    vec2 samplePos;\n" +
             "    float frontOffset = %.5f;\n" +
             "    float rightOffset = %.5f;\n" +
             "    float rearOffset  = %.5f;\n" +
             "    float leftOffset  = %.5f;\n" +
-            "    if (uApaMode > 2.5 && uViewMode == 0) {\n" +
+            "    if (uApaMode > 2.5 && (uViewMode == 0 || uViewMode == 9)) {\n" +
             "        // DiLink 4 mosaic: rearrange the HAL's 2x2 into the\n" +
             "        // canonical Front=TL / Right=TR / Rear=BL / Left=BR\n" +
             "        // arrangement with per-role X/Y flip applied inside the\n" +
             "        // role's 0.5×0.5 slot. Mirrors GpuMosaicRecorder so the\n" +
             "        // live stream matches the recording.\n" +
-            "        bool inRight = (vTexCoord.x >= 0.5 && vTexCoord.y <  0.5);\n" +
-            "        bool inRear  = (vTexCoord.x <  0.5 && vTexCoord.y >= 0.5);\n" +
-            "        bool inLeft  = (vTexCoord.x >= 0.5 && vTexCoord.y >= 0.5);\n" +
+            "        bool inRight = (vTexCoord.x >= 0.5 && sampleCoord.y <  0.5);\n" +
+            "        bool inRear  = (vTexCoord.x <  0.5 && sampleCoord.y >= 0.5);\n" +
+            "        bool inLeft  = (vTexCoord.x >= 0.5 && sampleCoord.y >= 0.5);\n" +
             "        vec2 localOffset = vec2(0.0);\n" +
             "        if (inRight) localOffset = vec2(0.5, 0.0);\n" +
             "        else if (inRear) localOffset = vec2(0.0, 0.5);\n" +
             "        else if (inLeft) localOffset = vec2(0.5, 0.5);\n" +
-            "        vec2 local = vTexCoord - localOffset;\n" +
+            "        vec2 local = sampleCoord - localOffset;\n" +
             "        vec2 producerCorner = uProducerForFront;\n" +
             "        vec2 flip = uFlipForFront;\n" +
             "        if (inRight) { producerCorner = uProducerForRight; flip = uFlipForRight; }\n" +
@@ -2056,33 +2078,33 @@ public class GpuStreamScaler {
             "        gl_FragColor = vec4(rgb * outA, outA);\n" +
             "        return;\n" +
             "    } else if (uViewMode == 5) {\n" +
-            "        samplePos = vTexCoord;\n" +
+            "        samplePos = sampleCoord;\n" +
             "    } else if (uApaMode > 1.5) {\n" +
-            "        if (uViewMode == 1) { samplePos = vec2(0.75 + vTexCoord.x * 0.25, vTexCoord.y); }\n" +
-            "        else if (uViewMode == 3) { samplePos = vec2(vTexCoord.x * 0.25, vTexCoord.y); }\n" +
-            "        else if (uViewMode == 2 || uViewMode == 4) { samplePos = vec2(0.25 + vTexCoord.x * 0.5, vTexCoord.y); }\n" +
+            "        if (uViewMode == 1) { samplePos = vec2(0.75 + sampleCoord.x * 0.25, sampleCoord.y); }\n" +
+            "        else if (uViewMode == 3) { samplePos = vec2(sampleCoord.x * 0.25, sampleCoord.y); }\n" +
+            "        else if (uViewMode == 2 || uViewMode == 4) { samplePos = vec2(0.25 + sampleCoord.x * 0.5, sampleCoord.y); }\n" +
             "        else {\n" +
-            "            if (vTexCoord.x < 0.5) {\n" +
-            "                float lx = vTexCoord.x * 0.5;\n" +
-            "                float ly = mod(vTexCoord.y, 0.5) * 2.0;\n" +
-            "                if (vTexCoord.y < 0.5) { samplePos = vec2(lx + 0.75, ly); }\n" +
+            "            if (sampleCoord.x < 0.5) {\n" +
+            "                float lx = sampleCoord.x * 0.5;\n" +
+            "                float ly = mod(sampleCoord.y, 0.5) * 2.0;\n" +
+            "                if (sampleCoord.y < 0.5) { samplePos = vec2(lx + 0.75, ly); }\n" +
             "                else { samplePos = vec2(lx, ly); }\n" +
             "            } else {\n" +
-            "                samplePos = vec2(0.25 + (vTexCoord.x - 0.5) * 0.5, vTexCoord.y);\n" +
+            "                samplePos = vec2(0.25 + (sampleCoord.x - 0.5) * 0.5, sampleCoord.y);\n" +
             "            }\n" +
             "        }\n" +
             "    } else if (uApaMode > 0.5) {\n" +
             fullFrameSampling +
-            "    } else if (uViewMode == 0) {\n" +
-            "        vec2 gridPos = step(0.5, vTexCoord);\n" +
+            "    } else if (uViewMode == 0 || uViewMode == 9) {\n" +
+            "        vec2 gridPos = step(0.5, sampleCoord);\n" +
             "        float stripOffsetX;\n" +
             "        if (gridPos.x < 0.5) {\n" +
             "            stripOffsetX = gridPos.y < 0.5 ? frontOffset : rearOffset;\n" +
             "        } else {\n" +
             "            stripOffsetX = gridPos.y < 0.5 ? rightOffset : leftOffset;\n" +
             "        }\n" +
-            "        float localX = mod(vTexCoord.x, 0.5) * 0.5;\n" +
-            "        float localY = mod(vTexCoord.y, 0.5) * 2.0;\n" +
+            "        float localX = mod(sampleCoord.x, 0.5) * 0.5;\n" +
+            "        float localY = mod(sampleCoord.y, 0.5) * 2.0;\n" +
             "        samplePos = vec2(localX + stripOffsetX, localY);\n" +
             "    } else if (uViewMode == 7 || uViewMode == 8) {\n" +
             "        // View 7/8 sampler (legacy 4-strip).\n" +

@@ -677,7 +677,7 @@ public class OemDashcamApiHandler {
      *  <p>Two signals are accepted, and BOTH are needed:
      *  <ul>
      *    <li>the live scaler view-mode (6) — the steady state once the route landed;</li>
-     *    <li>the persisted DESIRED view-mode (6) — the user's pick during the OEM
+     *    <li>the persisted DESIRED view-mode (6 or 9) — the user's pick during the OEM
      *        warmup window. The scaler is deliberately NOT switched to 6 until the
      *        OEM bind succeeds (a view-6 scaler with uOemActive=0 falls through the
      *        shader's OEM gate and paints the 4-cam AVM mosaic). Without this second
@@ -690,8 +690,9 @@ public class OemDashcamApiHandler {
             com.overdrive.app.surveillance.GpuSurveillancePipeline pano =
                 com.overdrive.app.daemon.CameraDaemon.getGpuPipeline();
             if (pano == null || !pano.isStreamingEnabled()) return false;
-            if (pano.getStreamViewMode() == 6) return true;
-            return com.overdrive.app.server.StreamingApiHandler.getLastDesiredViewMode() == 6;
+            if (pano.getStreamViewMode() == 6 || pano.getStreamViewMode() == 9) return true;
+            int desired = com.overdrive.app.server.StreamingApiHandler.getLastDesiredViewMode();
+            return desired == 6 || desired == 9;
         } catch (Throwable t) {
             return false;
         }

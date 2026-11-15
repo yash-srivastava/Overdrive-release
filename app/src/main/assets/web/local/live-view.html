@@ -264,6 +264,11 @@
                                         <div class="hotspot-ring"></div>
                                         <span class="hotspot-label" data-i18n="stream.hotspot_oem_dashcam">DVR</span>
                                     </div>
+                                    <div class="cam-hotspot cam-dvr-combined" data-cam="9" style="display:none;" onclick="BYD.stream.selectCamera(9)">
+                                        <div class="hotspot-pulse"></div>
+                                        <div class="hotspot-ring"></div>
+                                        <span class="hotspot-label">ALL + DVR</span>
+                                    </div>
                                     <div class="cam-hotspot" data-cam="3" onclick="BYD.stream.selectCamera(3)">
                                         <div class="hotspot-pulse"></div>
                                         <div class="hotspot-ring"></div>
@@ -912,6 +917,7 @@
            is anchored to the right side of its hotspot to avoid colliding
            with the FRONT label that sits directly above the same column. */
         .cam-hotspot[data-cam="6"] { top: 30px; left: 62%; transform: translateX(-50%); }
+        .cam-hotspot[data-cam="9"] { top: 68%; left: 50%; transform: translate(-50%, -50%); }
         
         .hotspot-ring {
             width: 26px; height: 26px;
@@ -1409,6 +1415,7 @@
             .hotspot-label { font-size: 9px; padding: 3px 5px; }
             /* DVR sits a touch closer to FRONT on the smaller silhouette. */
             .cam-hotspot[data-cam="6"] { top: 24px; left: 62%; }
+            .cam-hotspot[data-cam="9"] { top: 68%; left: 50%; }
             .idle-icon { width: 48px; height: 48px; }
             .idle-icon svg { width: 24px; height: 24px; }
             .idle-text { font-size: var(--fs-label); }
@@ -2066,7 +2073,7 @@
                 return;
             }
             
-            const camKeys = {0: 'pip.title_all_cameras', 1: 'pip.title_front_camera', 2: 'pip.title_right_camera', 3: 'pip.title_rear_camera', 4: 'pip.title_left_camera', 6: 'pip.title_oem_dashcam'};
+            const camKeys = {0: 'pip.title_all_cameras', 1: 'pip.title_front_camera', 2: 'pip.title_right_camera', 3: 'pip.title_rear_camera', 4: 'pip.title_left_camera', 6: 'pip.title_oem_dashcam', 9: 'stream.view_name_9'};
             const labelEl = document.getElementById('currentCameraLabel');
             const overlayEl = document.getElementById('cameraLabelOverlay');
 
@@ -2753,12 +2760,48 @@
                 if (hotspot) {
                     hotspot.style.display = camId >= 0 ? '' : 'none';
                 }
+                const combined = document.querySelector('.cam-hotspot[data-cam="9"]');
+                if (combined) {
+                    combined.style.display = oem && oem.combinedViewAvailable === true ? '' : 'none';
+                }
             } catch (e) {
                 // Backend unreachable or response shape changed — leave
                 // the hotspot hidden (its inline default). The feature
                 // is opt-in; silent suppression is the safe fallback.
                 console.log('[Init] OEM dashcam gating skipped:', e && e.message);
             }
+        })();
+
+        // Keep the combined option truthful while the page remains open. The
+        // daemon checks the actual concurrent-capture capability and recent DVR
+        // frame cadence; a stale feed hides the option and restores the AVM mosaic.
+        (function monitorCombinedCameraAvailability() {
+            const combined = document.querySelector('.cam-hotspot[data-cam="9"]');
+            if (!combined) return;
+            const refresh = async function () {
+                if (document.visibilityState === 'hidden') return;
+                try {
+                    const res = await fetch('/api/stream/combined-availability', { cache: 'no-store' });
+                    if (!res.ok) throw new Error('availability ' + res.status);
+                    const state = await res.json();
+                    const available = !!(state && state.available === true);
+                    combined.style.display = available ? '' : 'none';
+                    if (!available && BYD.stream.currentViewMode === 9) {
+                        BYD.stream.selectCamera(0);
+                    } else if (available && BYD.stream.currentViewMode === 9) {
+                        // A WebSocket reconnect may have recreated the pano scaler.
+                        // Re-assert the composite route with the current selection
+                        // token so a stale poll cannot override a newer camera pick.
+                        BYD.stream._requestViewRoute(9, BYD.stream._viewSelectionToken)
+                            .catch(function () {});
+                    }
+                } catch (e) {
+                    combined.style.display = 'none';
+                    if (BYD.stream.currentViewMode === 9) BYD.stream.selectCamera(0);
+                }
+            };
+            setInterval(refresh, 5000);
+            refresh();
         })();
         
         // Gate the vehicle controls on availability: horn + flash (issue #118) need
