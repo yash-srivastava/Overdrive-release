@@ -8951,7 +8951,7 @@ public class SurveillanceEngineGpu {
             }
             File tmpFile = new File(outFile.getAbsolutePath() + ".tmp");
             try (java.io.FileOutputStream fos = new java.io.FileOutputStream(tmpFile)) {
-                frame.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, fos);
+                frame.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, fos);
                 try { fos.getFD().sync(); } catch (Throwable ignored) {}
             } finally {
                 frame.recycle();
