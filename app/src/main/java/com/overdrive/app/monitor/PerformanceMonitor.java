@@ -104,6 +104,11 @@ public class PerformanceMonitor {
     private static final java.io.File TEMP_PATH_NOT_FOUND = new java.io.File("");
     private java.io.File resolvedCpuTempFile = null;
     private java.io.File resolvedGpuTempFile = null;
+    // CPU and GPU temperature discovery share the same thermal-zone topology.
+    // Read each zone type once instead of independently opening every /type
+    // file during both first-use scans. Null means the shared index is unresolved.
+    private String[] cachedThermalZoneTypes = null;
+    private boolean[] loadedThermalZoneTypes = null;
     
     // Scheduler
     private ScheduledExecutorService scheduler;
@@ -826,29 +831,22 @@ public class PerformanceMonitor {
         };
 
         for (int i = 0; i < 30; i++) {
-            try {
-                String typePath = "/sys/class/thermal/thermal_zone" + i + "/type";
-                BufferedReader typeReader = new BufferedReader(new FileReader(typePath));
-                String type = typeReader.readLine();
-                typeReader.close();
-
-                if (type != null) {
-                    String typeLower = type.toLowerCase().trim();
-                    for (String keyword : cpuThermalKeywords) {
-                        if (typeLower.contains(keyword)) {
-                            java.io.File tempFile = new java.io.File(
-                                "/sys/class/thermal/thermal_zone" + i + "/temp");
-                            Double result = readTempFile(tempFile, true);
-                            // Only accept a zone that yields a sane temperature,
-                            // then cache it so subsequent samples skip the scan.
-                            if (result != null) {
-                                resolvedCpuTempFile = tempFile;
-                                return result;
-                            }
-                        }
+            String type = getThermalZoneType(i);
+            if (type == null) continue;
+            String typeLower = type.toLowerCase().trim();
+            for (String keyword : cpuThermalKeywords) {
+                if (typeLower.contains(keyword)) {
+                    java.io.File tempFile = new java.io.File(
+                        "/sys/class/thermal/thermal_zone" + i + "/temp");
+                    Double result = readTempFile(tempFile, true);
+                    // Only accept a zone that yields a sane temperature,
+                    // then cache it so subsequent samples skip the scan.
+                    if (result != null) {
+                        resolvedCpuTempFile = tempFile;
+                        return result;
                     }
                 }
-            } catch (Exception ignored) {}
+            }
         }
 
         // Fallback to direct paths.
@@ -870,6 +868,28 @@ public class PerformanceMonitor {
         // Nothing usable on this device — remember that so we never re-scan.
         resolvedCpuTempFile = TEMP_PATH_NOT_FOUND;
         return 0;
+    }
+
+    /**
+     * Read each thermal-zone type at most once across CPU and GPU discovery.
+     * Resolve entries lazily so a match near the start of the zone list does
+     * not force reads of every later zone. Missing entries are cached too.
+     */
+    private String getThermalZoneType(int index) {
+        if (cachedThermalZoneTypes == null) {
+            cachedThermalZoneTypes = new String[30];
+            loadedThermalZoneTypes = new boolean[30];
+        }
+        if (loadedThermalZoneTypes[index]) return cachedThermalZoneTypes[index];
+
+        try (BufferedReader reader = new BufferedReader(new FileReader(
+                "/sys/class/thermal/thermal_zone" + index + "/type"))) {
+            cachedThermalZoneTypes[index] = reader.readLine();
+        } catch (Exception ignored) {
+            // A missing/unreadable zone is cached as null.
+        }
+        loadedThermalZoneTypes[index] = true;
+        return cachedThermalZoneTypes[index];
     }
 
     /**
@@ -1001,27 +1021,20 @@ public class PerformanceMonitor {
         };
 
         for (int i = 0; i < 30; i++) {
-            try {
-                String typePath = "/sys/class/thermal/thermal_zone" + i + "/type";
-                BufferedReader typeReader = new BufferedReader(new FileReader(typePath));
-                String type = typeReader.readLine();
-                typeReader.close();
-
-                if (type != null) {
-                    String typeLower = type.toLowerCase().trim();
-                    for (String keyword : gpuThermalKeywords) {
-                        if (typeLower.contains(keyword)) {
-                            java.io.File tempFile = new java.io.File(
-                                "/sys/class/thermal/thermal_zone" + i + "/temp");
-                            Double result = readTempFile(tempFile, false);
-                            if (result != null) {
-                                resolvedGpuTempFile = tempFile;
-                                return result;
-                            }
-                        }
+            String type = getThermalZoneType(i);
+            if (type == null) continue;
+            String typeLower = type.toLowerCase().trim();
+            for (String keyword : gpuThermalKeywords) {
+                if (typeLower.contains(keyword)) {
+                    java.io.File tempFile = new java.io.File(
+                        "/sys/class/thermal/thermal_zone" + i + "/temp");
+                    Double result = readTempFile(tempFile, false);
+                    if (result != null) {
+                        resolvedGpuTempFile = tempFile;
+                        return result;
                     }
                 }
-            } catch (Exception ignored) {}
+            }
         }
 
         // Fallback: try direct GPU thermal paths.
