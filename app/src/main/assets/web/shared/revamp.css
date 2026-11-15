@@ -124,24 +124,7 @@ html { scroll-padding-top: 144px; }
     .r-hero-stats { grid-column: 1 / 3; grid-row: 3; }
 }
 
-/* Long row descriptions fold to two lines behind More / Less (app-shell.js). */
-.setting-desc[data-fold="clamp"]:not(.is-open) {
-    display: -webkit-box;
-    overflow: hidden;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-}
-.setting-desc[data-fold="hint"]:not(.is-open) { display: none; }
-/* When the row's helper text is hidden by the page, its description shows instead (clamped). */
-.setting-hint[style*="display: none"] + .setting-desc[data-fold="hint"]:not(.is-open),
-.setting-hint[style*="display:none"] + .setting-desc[data-fold="hint"]:not(.is-open),
-.setting-hint[hidden] + .setting-desc[data-fold="hint"]:not(.is-open) {
-    display: -webkit-box;
-    overflow: hidden;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-}
-/* A row's helper text sits under its title as the visible description (app-shell.js moves it in). */
+/* Setting helper text is displayed inline with its option description. */
 .setting-info > .setting-hint {
     margin: 2px 0 0;
     padding: 0;
@@ -152,26 +135,6 @@ html { scroll-padding-top: 144px; }
     font-size: var(--fs-label);
     line-height: 1.45;
 }
-.setting-info > .setting-desc[data-fold="hint"].is-open { margin-top: 6px; }
-.desc-more {
-    display: inline-flex;
-    align-items: center;
-    min-height: 32px;
-    margin-top: 2px;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: var(--primary);
-    font: inherit;
-    font-size: var(--fs-label);
-    font-weight: 600;
-    cursor: pointer;
-}
-.desc-more[hidden] { display: none; }
-.desc-more svg { width: 16px; height: 16px; margin-left: 4px; transition: transform var(--duration-med) var(--easing-standard); }
-[dir="rtl"] .desc-more svg { margin-left: 0; margin-right: 4px; }
-.desc-more[aria-expanded="true"] svg { -webkit-transform: rotate(180deg); transform: rotate(180deg); }
-:root[data-android-embed="1"] .desc-more { min-height: 44px; font-size: var(--fs-body); }
 
 /* ── Settings rows ────────────────────────────────────────────────────── */
 .setting-row, .setting-stack { border-bottom-color: var(--hairline); }
