@@ -3314,6 +3314,8 @@ BYD.surveillance = {
     _heatmapInterval: null,
     _heatmapCanvas: null,
     _heatmapWasRunning: false,
+    _heatmapPollGeneration: 0,
+    _heatmapRequestInFlight: false,
 
     /**
      * Start the motion heatmap overlay.
@@ -3342,17 +3344,22 @@ BYD.surveillance = {
 
         this._heatmapCanvas.style.display = 'block';
 
-        // Poll at 3 FPS (333ms)
-        this._heatmapInterval = setInterval(() => this._pollHeatmap(), 333);
-        console.log('[Heatmap] Started polling at 3 FPS');
+        // Schedule the next poll only after the previous request has settled.
+        // setInterval(async ...) can overlap requests when the daemon or vehicle
+        // is busy, building a queue of stale heatmap responses.
+        const generation = ++this._heatmapPollGeneration;
+        this._heatmapInterval = setTimeout(() => this._pollHeatmap(generation), 333);
+        console.log('[Heatmap] Started polling at up to 3 FPS');
     },
 
     /**
      * Stop the motion heatmap overlay and clean up.
      */
     stopHeatmap() {
+        // Invalidate any in-flight request as well as the pending timeout.
+        this._heatmapPollGeneration++;
         if (this._heatmapInterval) {
-            clearInterval(this._heatmapInterval);
+            clearTimeout(this._heatmapInterval);
             this._heatmapInterval = null;
         }
 
@@ -3367,12 +3374,24 @@ BYD.surveillance = {
     /**
      * Fetch heatmap data and draw on canvas.
      */
-    async _pollHeatmap() {
-        if (!this._heatmapCanvas) return;
+    async _pollHeatmap(generation) {
+        const canvas = this._heatmapCanvas;
+        if (!canvas || generation !== this._heatmapPollGeneration) return;
+
+        // A request from a stopped session may still be settling. Do not let a
+        // rapid restart overlap it; retry after the normal idle interval.
+        if (this._heatmapRequestInFlight) {
+            this._heatmapInterval = setTimeout(() => this._pollHeatmap(generation), 333);
+            return;
+        }
+        this._heatmapRequestInFlight = true;
 
         try {
             const resp = await fetch('/api/surveillance/heatmap');
             const data = await resp.json();
+            // A stop/restart may happen while fetch is pending. Never paint an
+            // old response onto a removed canvas or a newer heatmap session.
+            if (generation !== this._heatmapPollGeneration || canvas !== this._heatmapCanvas) return;
             if (data && data.quadrants) {
                 // Override viewMode with client-side stream selection if available.
                 // BYD.stream tracks which camera the user selected — use that
@@ -3380,12 +3399,21 @@ BYD.surveillance = {
                 if (typeof BYD !== 'undefined' && BYD.stream && BYD.stream.currentViewMode >= 0) {
                     data.viewMode = BYD.stream.currentViewMode;
                 }
-                this._drawHeatmap(this._heatmapCanvas, data);
+                this._drawHeatmap(canvas, data);
             }
         } catch (e) {
             // Surveillance not running or API error — clear the canvas
-            const ctx = this._heatmapCanvas.getContext('2d');
-            if (ctx) ctx.clearRect(0, 0, this._heatmapCanvas.width, this._heatmapCanvas.height);
+            if (generation === this._heatmapPollGeneration && canvas === this._heatmapCanvas) {
+                const ctx = canvas.getContext('2d');
+                if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        } finally {
+            this._heatmapRequestInFlight = false;
+            // Fixed-delay polling provides backpressure: at most one request is
+            // in flight, with a 333ms idle gap after each completed request.
+            if (generation === this._heatmapPollGeneration && canvas === this._heatmapCanvas) {
+                this._heatmapInterval = setTimeout(() => this._pollHeatmap(generation), 333);
+            }
         }
     },
 
