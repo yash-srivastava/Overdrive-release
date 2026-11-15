@@ -153,52 +153,43 @@
             #chargeCustomTab:hover { background: var(--well-2); }
             #chargeCustomTab.active:hover { background: var(--secondary-container); }
         }
-        /* Sticky chrome height: only the filter chips / nav controls, not a
-           full-width strip around them. Custom range + hints scroll in flow. */
+        /* Sticky on wrappers (full scroll range); transparent shell so only chips
+           show. Custom range row lives outside #sessionFilters in markup. */
         body.charging-page {
             --ch-sticky-top: calc(var(--page-header-h, 64px) + var(--tabs-h, 48px) + 8px);
             --ch-sticky-top-tabs: calc(var(--tabs-h, 48px) + 8px);
             --ch-sticky-detail-top: calc(var(--tabs-h, 48px) + 12px);
-            /* period seg row (44px tabs + 3px*2 well padding) + row gap */
-            --ch-sticky-period-stack: 52px;
         }
         #sessionFilters {
-            margin-bottom: 4px;
-            padding: 0;
-            background: transparent;
-        }
-        #sessionFilters > .filter-tabs.charge-period-control,
-        #sessionFilters > .filter-tabs.charge-segmented-control.charge-period-control {
             position: -webkit-sticky;
             position: sticky;
             top: var(--ch-sticky-top);
             z-index: 5;
             margin-bottom: 4px;
+            padding: 0;
             background: transparent;
+            pointer-events: none;
+        }
+        #sessionFilters > * { pointer-events: auto; }
+        :root[data-app-shell="1"] #sessionFilters {
+            top: var(--ch-sticky-top-tabs);
+        }
+        #sessionFilters > .filter-tabs.charge-segmented-control.charge-period-control {
+            margin-bottom: 4px;
         }
         #sessionFilters > .filter-tabs.charge-segmented-control.charge-period-control > * {
             margin-bottom: 0;
         }
-        :root[data-app-shell="1"] #sessionFilters > .filter-tabs.charge-period-control,
-        :root[data-app-shell="1"] #sessionFilters > .filter-tabs.charge-segmented-control.charge-period-control {
-            top: var(--ch-sticky-top-tabs);
-        }
-        #sessionFilters > #chargeLocationFilterRow,
-        #sessionFilters > .charge-location-filter-row {
-            position: -webkit-sticky;
-            position: sticky;
-            top: calc(var(--ch-sticky-top) + var(--ch-sticky-period-stack));
-            z-index: 5;
-            margin-bottom: 4px;
-            background: transparent;
-        }
-        #sessionFilters > #chargeLocationFilterRow > *,
-        #sessionFilters > .charge-location-filter-row > * {
+        #sessionFilters > .charge-location-filter-row,
+        #sessionFilters > #chargeLocationFilterRow {
             margin-bottom: 0;
         }
-        :root[data-app-shell="1"] #sessionFilters > #chargeLocationFilterRow,
-        :root[data-app-shell="1"] #sessionFilters > .charge-location-filter-row {
-            top: calc(var(--ch-sticky-top-tabs) + var(--ch-sticky-period-stack));
+        #sessionFilters > .charge-location-filter-row > *,
+        #sessionFilters > #chargeLocationFilterRow > * {
+            margin-bottom: 0;
+        }
+        #sessionFilters > .charge-location-hint {
+            margin-bottom: 4px;
         }
         /* Custom From → To range. Collapsed by default; .open reveals it with a
            height + fade transition (display:none cannot animate). Phones stack
@@ -939,41 +930,25 @@
         @media (hover: none) { .session-delete-btn { opacity: .7; } }
         @media (pointer: coarse) { .session-delete-btn { width: 44px; height: 44px; } }
         #chargingDetail { width: 100%; max-width: 1900px; margin-right: auto; margin-left: auto; }
-        /* Detail nav: back (and optional .ch-pager) stay sticky; no full-width bar. */
+        /* Detail nav wrapper stays sticky for the full drill-in scroll. */
         .ch-detail-nav {
             display: flex; align-items: center; flex-wrap: wrap;
             min-height: 0;
             margin: 0 0 8px;
             padding: 0;
             background: transparent;
-        }
-        .ch-detail-nav .ch-back-btn,
-        .ch-detail-nav .ch-pager {
+            pointer-events: none;
             position: -webkit-sticky;
             position: sticky;
             top: var(--ch-sticky-top);
             z-index: 5;
         }
-        body.charging-detail-open .ch-detail-nav .ch-back-btn,
-        body.charging-detail-open .ch-detail-nav .ch-pager,
-        :root[data-app-shell="1"] .ch-detail-nav .ch-back-btn,
-        :root[data-app-shell="1"] .ch-detail-nav .ch-pager {
+        .ch-detail-nav > * { pointer-events: auto; }
+        body.charging-detail-open .ch-detail-nav,
+        :root[data-app-shell="1"] .ch-detail-nav {
             top: var(--ch-sticky-detail-top);
         }
-        .ch-detail-nav .ch-pager {
-            display: -webkit-inline-flex; display: inline-flex;
-            align-items: center;
-            min-height: 44px;
-            margin-left: auto;
-            padding: 0 12px;
-            border: 0;
-            border-radius: var(--radius-full);
-            background: var(--well);
-            color: var(--on-surface);
-            font-family: inherit;
-            font-size: var(--fs-label);
-            font-weight: 600;
-        }
+        .ch-detail-nav .ch-pager { margin-left: auto; }
         [dir="rtl"] .ch-detail-nav .ch-pager {
             margin-left: 0;
             margin-right: auto;
@@ -1491,9 +1466,10 @@
                                 </select>
                             </label>
                         </div>
-                        <!-- Custom date range (hidden until "Custom" is tapped).
-                             Each field opens the shared calendar popup — matches
-                             the events-page date picker look & feel. -->
+                    </div>
+                    <!-- Custom date range (hidden until "Custom" is tapped); outside
+                         #sessionFilters so the sticky shell stays compact. -->
+                    <div data-tab="sessions" id="chargeCustomRangeSlot">
                         <div class="ch-range-row" id="chargeRangeRow">
                             <div class="ch-range-dates">
                                 <button class="calendar-toggle" id="chargeFromToggle" onclick="CHARGING.openCalendar('from')">
