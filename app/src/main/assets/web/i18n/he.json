@@ -3175,13 +3175,13 @@
         "sendWhen": "הבוט לא מגיב, פקודות נכשלות, או התראות טלגרם חסרות."
       },
       "cloudflared": {
-        "name": "מנהור Cloudflared",
-        "component": "מנהור Cloudflare לגישה מרחוק.",
-        "sendWhen": "מנהור Cloudflare לא עולה, כתובת ה-URL אינה זמינה, או גישה מרחוק דרך Cloudflare נכשלת."
+        "name": "מנהרת Cloudflared",
+        "component": "מנהרת Cloudflare לגישה מרחוק.",
+        "sendWhen": "מנהרת Cloudflare לא עולה, כתובת ה-URL אינה זמינה, או גישה מרחוק דרך Cloudflare נכשלת."
       },
       "zrok": {
-        "name": "מנהור Zrok",
-        "component": "מנהור שיתוף zrok מרחוק — שיתוף שמור/ציבורי והפעלת פרוקסי.",
+        "name": "מנהרת Zrok",
+        "component": "מנהרת שיתוף zrok מרחוק — שיתוף שמור/ציבורי והפעלת פרוקסי.",
         "sendWhen": "שיתוף או כתובת zrok לא עולים, לא נגישים, או מתנתקים."
       },
       "tailscale": {
@@ -3191,8 +3191,8 @@
       },
       "wireguard": {
         "name": "WireGuard",
-        "component": "מנהור WireGuard (wgproxy) — ממשק WireGuard ותעבורת מנהרה.",
-        "sendWhen": "מנהור WireGuard לא עולה, handshake/קישוריות נכשלים, או תעבורה לא עוברת דרכו."
+        "component": "מנהרת WireGuard (wgproxy) — ממשק WireGuard ותעבורת מנהרה.",
+        "sendWhen": "מנהרת WireGuard לא עולה, handshake/קישוריות נכשלים, או תעבורה לא עוברת דרכו."
       },
       "singbox": {
         "name": "פרוקסי Sing-box",
