@@ -222,7 +222,11 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
      *   on the in-memory set as a same-process race backstop.
      */
     @JvmOverloads
-    fun startDaemon(type: DaemonType, userInitiated: Boolean = true) {
+    fun startDaemon(
+        type: DaemonType,
+        userInitiated: Boolean = true,
+        onComplete: ((DaemonStatus, String) -> Unit)? = null
+    ) {
         val controller = controllers[type] ?: return
 
         if (userInitiated) {
@@ -263,8 +267,9 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
                     LogManager.getInstance().info("Daemons",
                         "Start cancelled for ${type.displayName} — user stopped it while preparing")
                     updateState(type, DaemonStatus.STOPPED, "Stopped")
+                    onComplete?.invoke(DaemonStatus.STOPPED, "Stopped")
                 } else {
-                    launchController(type, controller)
+                    launchController(type, controller, onComplete)
                 }
             }
             return
@@ -284,31 +289,60 @@ class DaemonsViewModel(app: Application) : AndroidViewModel(app) {
             // Without a token every attempt fails at once; skip it and let the status poll show the setup prompt.
             if (type == DaemonType.ZROK_TUNNEL) {
                 zrokController.hasEnableToken { hasToken ->
-                    if (!hasToken) return@hasEnableToken
+                    if (!hasToken) {
+                        onComplete?.invoke(DaemonStatus.ERROR, "Zrok enable token is missing")
+                        return@hasEnableToken
+                    }
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        if (type !in DaemonStartupManager.userStoppedDaemons) launchController(type, controller)
+                        if (type !in DaemonStartupManager.userStoppedDaemons) {
+                            launchController(type, controller, onComplete)
+                        } else {
+                            onComplete?.invoke(DaemonStatus.STOPPED, "Stopped by user")
+                        }
                     }
                 }
                 return
             }
         }
 
-        launchController(type, controller)
+        launchController(type, controller, onComplete)
     }
 
-    private fun launchController(type: DaemonType, controller: DaemonController) {
+    private fun launchController(
+        type: DaemonType,
+        controller: DaemonController,
+        onComplete: ((DaemonStatus, String) -> Unit)? = null
+    ) {
         updateState(type, DaemonStatus.STARTING, appStr(R.string.daemon_status_starting))
 
+        val completionDelivered = java.util.concurrent.atomic.AtomicBoolean(false)
+        fun complete(status: DaemonStatus, message: String) {
+            if (status == DaemonStatus.RUNNING || status == DaemonStatus.ERROR || status == DaemonStatus.STOPPED) {
+                if (completionDelivered.compareAndSet(false, true)) {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        onComplete?.invoke(status, message)
+                    }
+                }
+            }
+        }
         controller.start(object : DaemonCallback {
             override fun onStatusChanged(status: DaemonStatus, message: String) {
-                if (lateAfterUserStop(type)) return
+                if (lateAfterUserStop(type)) {
+                    complete(DaemonStatus.STOPPED, "Stopped by user")
+                    return
+                }
                 updateState(type, status, message)
+                complete(status, message)
             }
 
             override fun onError(error: String) {
-                if (lateAfterUserStop(type)) return
+                if (lateAfterUserStop(type)) {
+                    complete(DaemonStatus.STOPPED, "Stopped by user")
+                    return
+                }
                 lastLaunchError[type] = error
                 updateState(type, DaemonStatus.ERROR, error)
+                complete(DaemonStatus.ERROR, error)
             }
         })
     }

@@ -360,10 +360,42 @@ public class AppUpdaterRestartSafetyContractTest {
                 "UpdateLifecycle.hardResetDaemons(this)"));
         assertTrue(main.contains(
                 "daemonStartupManager.initializeOnAppLaunch()"));
-        assertTrue(startup.contains(
-                "handler.postDelayed({ startCoreDaemons() }, 45000)"));
-        assertTrue(startup.contains(
-                "handler.postDelayed({ startOptionalDaemonsFromPreferences() }, 60000)"));
+        // Startup is dependency-driven: ADB shell readiness releases the
+        // independent core branches, while enabled tunnels wait for Singbox
+        // only when Singbox is enabled. No guessed boot-age or daemon-order timers.
+        assertTrue(startup.contains("awaitAdbReadiness {"));
+        assertTrue(startup.contains("getprop sys.boot_completed"));
+        assertTrue(startup.contains("echo overdrive_boot_ready"));
+        assertTrue(startup.contains("startupReleased.compareAndSet(false, true)"));
+        assertTrue(startup.contains("vm.startDaemon(DaemonType.SINGBOX_PROXY, userInitiated = false) { status, message ->"));
+        assertTrue(startup.contains("Singbox startup completed; releasing tunnel branches"));
+        assertTrue(startup.contains("minOf(30_000L, 1_000L shl minOf(attempt - 1, 5))"));
+        assertFalse(startup.contains("handler.postDelayed({ startCoreDaemons() }, 45000)"));
+        assertFalse(startup.contains("handler.postDelayed({ startOptionalDaemonsFromPreferences() }, 60000)"));
+        assertFalse(startup.contains("handler.postDelayed({ startDaemonHealthCheck() }, 90000)"));
+
+        String coreStartup = methodBody(
+                startup,
+                "private fun startCoreDaemons()",
+                "private fun startCoreDaemonsViaAdb()");
+        assertTrue(coreStartup.contains("DaemonType.CAMERA_DAEMON"));
+        assertTrue(coreStartup.contains("DaemonType.SENTRY_DAEMON"));
+        assertTrue(coreStartup.contains("DaemonType.ACC_SENTRY_DAEMON"));
+        assertFalse(coreStartup.contains("postDelayed"));
+
+        String optionalStartup = methodBody(
+                startup,
+                "private fun startOptionalDaemonsFromPreferences()",
+                "private fun hasEnabledTunnel()");
+        assertTrue(optionalStartup.contains("awaitSingboxDependency(vm)"));
+        assertFalse(optionalStartup.contains("postDelayed"));
+
+        String singboxDependency = methodBody(
+                startup,
+                "private fun awaitSingboxDependency(",
+                "private fun scheduleSingboxDependencyRetry(");
+        assertTrue(singboxDependency.contains("DaemonStatus.RUNNING"));
+        assertTrue(singboxDependency.contains("scheduleSingboxDependencyRetry(vm, message)"));
     }
 
     private static boolean inRange(int value, int start, int end) {
