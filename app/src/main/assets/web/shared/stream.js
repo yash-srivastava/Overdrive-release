@@ -229,9 +229,17 @@ BYD.stream = {
             + '&selection=' + selectionToken;
     },
 
+    _postEmpty(url) {
+        return fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+        });
+    },
+
     _requestStreamDisable(selectionToken) {
         return this._enqueueViewMutation(selectionToken, async () => {
-            const res = await fetch('/api/stream/disable', { method: 'POST' });
+            const res = await this._postEmpty('/api/stream/disable');
             if (!res.ok) throw new Error('stream disable failed: ' + res.status);
             return res.json();
         });
@@ -329,7 +337,7 @@ BYD.stream = {
         try {
             const endpoint = '/api/stream/enable' +
                 (this._willUseBroadway() ? '?decoder=broadway' : '');
-            const res = await fetch(endpoint, { method: 'POST' });
+            const res = await this._postEmpty(endpoint);
             const data = await res.json();
             this.isDiLink5 = data.dilink5 === true;
             return data.success;
@@ -875,7 +883,7 @@ BYD.stream = {
 
         // Apply preset quality and capture the active fps for JMuxer timing
         try {
-            const qRes = await fetch('/api/stream/quality/' + this.selectedQuality, { method: 'POST' });
+            const qRes = await this._postEmpty('/api/stream/quality/' + this.selectedQuality);
             const qData = await qRes.json();
             if (qData.fps) this.activeFps = qData.fps;
         } catch (e) {}
@@ -1150,7 +1158,7 @@ BYD.stream = {
     async setQuality(quality) {
         this.selectedQuality = quality;
         try {
-            const res = await fetch('/api/stream/quality/' + quality, { method: 'POST' });
+            const res = await this._postEmpty('/api/stream/quality/' + quality);
             const data = await res.json();
             if (data.success) {
                 const displayName = data.displayName || quality;
