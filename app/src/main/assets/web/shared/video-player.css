@@ -884,3 +884,21 @@
     from { transform: scale(0.95); opacity: 0; }
     to { transform: scale(1); opacity: 1; }
 }
+
+/* Auto-play controls are shared by Events and Parking player surfaces. */
+.auto-play-toggle { width: auto; min-width: 96px; padding: 0 10px; font-size: 12px; white-space: nowrap; }
+.auto-play-toggle.active { color: var(--primary, #00876c); }
+.auto-play-settings {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    color: var(--on-surface, #fff);
+    background: rgba(255,255,255,0.06);
+    font-size: 12px;
+}
+.auto-play-settings label { display: inline-flex; align-items: center; gap: 6px; }
+.auto-play-settings select { max-width: 210px; padding: 5px 8px; border-radius: 8px; }
+.auto-play-toggle,
+.auto-play-settings { display: none; }

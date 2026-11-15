@@ -87,6 +87,9 @@ BYD.events = {
     _layout: 'standard',
     _quadrantWired: false,
     _playerLifecycleWired: false,
+    _autoPlaySettings: { enabled: false, direction: 'previous', skipDvr: true },
+    _autoPlayAdvancePending: false,
+    _autoPlayCursor: null,
     _externalRecordingKey: null,
     _QUADRANT_LS_KEY: 'byd.events.quadrant',
     _QUADRANT_VALID: ['all', 'front', 'right', 'rear', 'left'],
@@ -139,6 +142,191 @@ BYD.events = {
         }
     },
 
+    async loadAutoPlaySettings() {
+        try {
+            const response = await fetch('/api/settings/unified');
+            const payload = await response.json();
+            const saved = payload && payload.success && payload.config
+                ? payload.config.webEvents : null;
+            if (saved) {
+                this._autoPlaySettings = {
+                    enabled: !!saved.autoPlayEnabled,
+                    direction: saved.autoPlayDirection === 'next' ? 'next' : 'previous',
+                    skipDvr: saved.autoPlaySkipDvr !== false
+                };
+            }
+        } catch (e) {
+            // Keep safe defaults when settings cannot be reached.
+        }
+        this.updateAutoPlayControls();
+    },
+
+    async saveAutoPlaySettings() {
+        const settings = this._autoPlaySettings;
+        try {
+            const response = await fetch('/api/settings/unified', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    section: 'webEvents',
+                    data: {
+                        autoPlayEnabled: !!settings.enabled,
+                        autoPlayDirection: settings.direction === 'next' ? 'next' : 'previous',
+                        autoPlaySkipDvr: !!settings.skipDvr
+                    }
+                })
+            });
+            const result = await response.json();
+            if (!response.ok || !result || !result.success) throw new Error('Settings save failed');
+        } catch (e) {
+            console.warn('[events] Unable to save auto-play settings:', e);
+        }
+    },
+
+    wireAutoPlayControls() {
+        const toggle = document.getElementById('autoPlayToggle');
+        const direction = document.getElementById('autoPlayDirection');
+        const skipDvr = document.getElementById('autoPlaySkipDvr');
+        if (!toggle || toggle.dataset.wired) return;
+        toggle.dataset.wired = '1';
+        toggle.style.display = 'inline-flex';
+        const settingsPanel = document.getElementById('autoPlaySettings');
+        if (settingsPanel) settingsPanel.style.display = 'flex';
+        toggle.addEventListener('click', () => {
+            this._autoPlaySettings.enabled = !this._autoPlaySettings.enabled;
+            this.updateAutoPlayControls();
+            this.saveAutoPlaySettings();
+        });
+        direction.addEventListener('change', () => {
+            this._autoPlaySettings.direction = direction.value === 'next' ? 'next' : 'previous';
+            this.saveAutoPlaySettings();
+        });
+        skipDvr.addEventListener('change', () => {
+            this._autoPlaySettings.skipDvr = !!skipDvr.checked;
+            this.saveAutoPlaySettings();
+        });
+    },
+
+    updateAutoPlayControls() {
+        const toggle = document.getElementById('autoPlayToggle');
+        const direction = document.getElementById('autoPlayDirection');
+        const skipDvr = document.getElementById('autoPlaySkipDvr');
+        if (toggle) {
+            toggle.textContent = this._autoPlaySettings.enabled ? 'Auto-play: On' : 'Auto-play: Off';
+            toggle.setAttribute('aria-pressed', this._autoPlaySettings.enabled ? 'true' : 'false');
+            toggle.classList.toggle('active', this._autoPlaySettings.enabled);
+        }
+        if (direction) direction.value = this._autoPlaySettings.direction;
+        if (skipDvr) skipDvr.checked = this._autoPlaySettings.skipDvr;
+    },
+
+    async autoPlayAdjacent(directionOverride) {
+        if ((!this._autoPlaySettings.enabled && directionOverride === undefined) || this._autoPlayAdvancePending) return;
+        const player = document.getElementById('videoPlayer');
+        const current = this._activeRecording;
+        if (!player || !current) return;
+        this._autoPlayAdvancePending = true;
+        try {
+            const manualNavigation = directionOverride === 1 || directionOverride === -1;
+            const direction = manualNavigation ? directionOverride
+                : (this._autoPlaySettings.direction === 'next' ? 1 : -1);
+            const skipDvr = !manualNavigation && this._autoPlaySettings.skipDvr;
+            const currentKey = this.recordingKey(current);
+            const filterKey = JSON.stringify({
+                type: this.currentFilter,
+                storage: this.storageFilter,
+                actor: this.actorFilter,
+                place: this.placeContainsQuery,
+                parkingSessionId: this.parkingSessionId
+            });
+            const queryForPage = (page) => {
+                const query = new URLSearchParams();
+                if (this.currentFilter !== 'all') query.set('type', this.currentFilter);
+                if (this.storageFilter) query.set('storage', this.storageFilter);
+                if (this.actorFilter.class) query.set('class', this.actorFilter.class);
+                if (this.actorFilter.severity) query.set('severity', this.actorFilter.severity);
+                if (this.actorFilter.proximity) query.set('proximity', this.actorFilter.proximity);
+                if (this.actorFilter.place) query.set('place', this.actorFilter.place);
+                if (this.placeContainsQuery) query.set('placeContains', this.placeContainsQuery);
+                if (this.parkingSessionId) query.set('parkingSessionId', this.parkingSessionId);
+                // Deliberately omit the calendar's exact-date filter: when a
+                // user starts on an older date, "previous" must continue into
+                // newer dates instead of stopping at midnight.
+                query.set('page', String(page));
+                query.set('pageSize', '200');
+                return query.toString();
+            };
+            const fetchPage = async (page) => {
+                const response = await fetch('/api/recordings?' + queryForPage(page));
+                const data = await response.json();
+                if (!data || !data.success || !Array.isArray(data.recordings)) return null;
+                return { recordings: data.recordings, totalPages: data.totalPages || 1 };
+            };
+
+            let page = 1;
+            let records = null;
+            let totalPages = 1;
+            let index = -1;
+            const cursor = this._autoPlayCursor;
+            if (cursor && cursor.key === currentKey && cursor.filterKey === filterKey) {
+                page = cursor.page;
+                records = cursor.records;
+                totalPages = cursor.totalPages;
+                index = cursor.index;
+            } else {
+                // The list endpoint sorts newest first. Search from its newest
+                // page so a date-filtered starting clip can join the full
+                // chronological sequence without relying on the UI page index.
+                while (page <= totalPages) {
+                    const result = await fetchPage(page);
+                    if (!result) break;
+                    records = result.recordings;
+                    totalPages = result.totalPages;
+                    index = records.findIndex(item => this.recordingKey(item) === currentKey);
+                    if (index >= 0) break;
+                    page++;
+                }
+            }
+            if (!records || index < 0) return;
+
+            let target = null;
+            let targetIndex = index + direction;
+            while (page >= 1 && page <= totalPages) {
+                while (targetIndex >= 0 && targetIndex < records.length) {
+                    const candidate = records[targetIndex];
+                    if (!skipDvr || !/^dvr_p_/i.test(candidate.filename || '')) {
+                        target = candidate;
+                        break;
+                    }
+                    targetIndex += direction;
+                }
+                if (target) break;
+                page += direction;
+                if (page < 1 || page > totalPages) break;
+                const result = await fetchPage(page);
+                if (!result || !result.recordings.length) break;
+                records = result.recordings;
+                totalPages = result.totalPages;
+                targetIndex = direction > 0 ? 0 : records.length - 1;
+            }
+            if (target) {
+                this._autoPlayCursor = {
+                    key: this.recordingKey(target),
+                    filterKey: filterKey,
+                    page: page,
+                    index: targetIndex,
+                    records: records,
+                    totalPages: totalPages
+                };
+                this.openRecording(target);
+            }
+        } catch (e) {
+            console.warn('[events] Auto-play could not advance:', e);
+        } finally {
+            this._autoPlayAdvancePending = false;
+        }
+    },
+
     /**
      * Mount the shared player lifecycle on any page that includes video-player.js.
      * Events and Parking use the same modal, controls, quadrant handling and cleanup.
@@ -149,6 +337,7 @@ BYD.events = {
         const player = document.getElementById('videoPlayer');
         if (!modal || !player) return;
 
+        player.addEventListener('ended', () => this.autoPlayAdjacent());
         this.wireQuadrantBar();
         document.addEventListener('keydown', (e) => {
             if (!modal.classList.contains('active')) return;
@@ -607,6 +796,8 @@ BYD.events = {
         await this.loadStorageStats();
         await this.loadRecordings();
         this.initPlayer();
+        await this.loadAutoPlaySettings();
+        this.wireAutoPlayControls();
 
         // Deep-link from a notification.
         //   - If the recording is finalized (in this.recordings): open the player.
@@ -1942,6 +2133,9 @@ BYD.events = {
     },
 
     openRecording(rec) {
+        const openingKey = this.recordingKey(rec);
+        if (this._autoPlayCursor && this._autoPlayCursor.key !== openingKey) this._autoPlayCursor = null;
+        this._activeRecording = rec;
         document.getElementById('videoTitle').textContent = rec.filename;
         document.getElementById('videoDate').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> ' + (rec.dateFormatted || '');
         document.getElementById('videoTime').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> ' + (rec.timeFormatted || '');
@@ -2015,6 +2209,7 @@ BYD.events = {
     closeVideo() {
         this._cancelWatchedTimer();
         this._watchActiveKey = null;
+        this._activeRecording = null;
         const player = document.getElementById('videoPlayer');
         player.pause();
         player.src = '';

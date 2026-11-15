@@ -91,6 +91,7 @@
                          transport survive. Native <video> fullscreen would
                          drop us into the browser's player chrome and lose
                          the zoom transform. -->
+                    <button type="button" class="video-ctrl-btn auto-play-toggle" id="autoPlayToggle" aria-pressed="false" title="Auto-play: Off">Auto-play: Off</button>
                     <button type="button" class="video-ctrl-btn" id="videoFullscreenBtn" data-i18n-attr="title:events.player_fullscreen;aria-label:events.player_fullscreen" title="Fullscreen" aria-label="Fullscreen">
                         <svg id="videoFullscreenIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <!-- Initial state — enter fullscreen (corner brackets). -->
@@ -101,6 +102,15 @@
                         </svg>
                     </button>
                 </div>
+            </div>
+            <div class="auto-play-settings" id="autoPlaySettings" aria-label="Auto-play options">
+                <label>Direction
+                    <select id="autoPlayDirection">
+                        <option value="previous">Previous (more recent)</option>
+                        <option value="next">Next (older)</option>
+                    </select>
+                </label>
+                <label><input type="checkbox" id="autoPlaySkipDvr" checked> Skip DVR recordings</label>
             </div>
             <div class="video-details">
                 <div class="video-meta">
