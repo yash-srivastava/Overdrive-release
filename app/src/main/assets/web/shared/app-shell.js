@@ -25,6 +25,144 @@
 (function () {
     'use strict';
 
+    // Keep the last visible state of settings toggles across full-page
+    // navigation. The daemon remains authoritative: this is a short-lived,
+    // per-tab paint cache only, and the page's normal settings fetch replaces
+    // it as soon as fresh configuration arrives. It prevents a slow request
+    // from making every switch appear OFF during the transition.
+    (function restoreSettingTogglePaint() {
+        var path = window.location.pathname || '/';
+        var key = 'overdrive_setting_toggle_paint:' + path;
+        var maxAgeMs = 5 * 60 * 1000;
+        var cache = {};
+        var cacheAt = 0;
+
+        function readCache() {
+            try {
+                var saved = window.sessionStorage.getItem(key);
+                if (!saved) return;
+                var parsed = JSON.parse(saved);
+                if (!parsed || typeof parsed !== 'object'
+                        || typeof parsed.savedAt !== 'number'
+                        || Date.now() - parsed.savedAt > maxAgeMs
+                        || !parsed.values || typeof parsed.values !== 'object') {
+                    window.sessionStorage.removeItem(key);
+                    return;
+                }
+                cache = parsed.values;
+                cacheAt = parsed.savedAt;
+            } catch (e) {
+                cache = {};
+            }
+        }
+
+        function saveCache() {
+            try {
+                window.sessionStorage.setItem(key, JSON.stringify({
+                    savedAt: cacheAt,
+                    values: cache
+                }));
+            } catch (e) {
+                // Storage can be disabled or full; normal settings loading wins.
+            }
+        }
+
+        function captureVisibleSettings() {
+            var inputs = document.querySelectorAll('.toggle-switch input[type="checkbox"]');
+            var hasEnabledSetting = false;
+            var current = {};
+            for (var i = 0; i < inputs.length; i++) {
+                if (!inputs[i].id) continue;
+                current[inputs[i].id] = !!inputs[i].checked;
+                if (inputs[i].checked) hasEnabledSetting = true;
+            }
+            // An unrelated response can finish before settings hydration. Do
+            // not replace a useful cache with the page's all-unchecked defaults.
+            if (!hasEnabledSetting && !Object.keys(cache).length) return;
+            if (!hasEnabledSetting && Object.keys(cache).length) {
+                // Keep a known all-off state only when the user explicitly
+                // changed a toggle; the change handler below records that.
+                return;
+            }
+            cache = current;
+            cacheAt = Date.now();
+            saveCache();
+        }
+
+        function restoreInput(input) {
+            if (!input || input.type !== 'checkbox' || !input.id
+                    || !input.closest || !input.closest('.toggle-switch')
+                    || input.getAttribute('data-setting-paint-restored') === '1') return;
+            if (Object.prototype.hasOwnProperty.call(cache, input.id)
+                    && typeof cache[input.id] === 'boolean') {
+                input.checked = cache[input.id];
+                input.setAttribute('data-setting-paint-restored', '1');
+            }
+        }
+
+        function scan(node) {
+            if (!node || node.nodeType !== 1) return;
+            if (node.matches && node.matches('.toggle-switch input[type="checkbox"]')) {
+                restoreInput(node);
+            }
+            if (node.querySelectorAll) {
+                var inputs = node.querySelectorAll('.toggle-switch input[type="checkbox"]');
+                for (var i = 0; i < inputs.length; i++) restoreInput(inputs[i]);
+            }
+        }
+
+        readCache();
+        // Snapshot after JSON hydration handlers have had a chance to apply
+        // their response. This also seeds the cache on a first visit, even if
+        // the user has never touched a switch. The fetch wrapper is defensive:
+        // unsupported/frozen response objects simply keep the normal behavior.
+        if (typeof window.fetch === 'function') {
+            var originalFetch = window.fetch;
+            window.fetch = function () {
+                return originalFetch.apply(this, arguments).then(function (response) {
+                    try {
+                        if (response && typeof response.json === 'function') {
+                            var originalJson = response.json;
+                            response.json = function () {
+                                return originalJson.apply(this, arguments).then(function (data) {
+                                    window.setTimeout(captureVisibleSettings, 0);
+                                    return data;
+                                });
+                            };
+                        }
+                    } catch (e) {}
+                    return response;
+                });
+            };
+        }
+        document.addEventListener('change', function (event) {
+            var input = event.target;
+            if (!input || input.type !== 'checkbox' || !input.id
+                    || !input.closest || !input.closest('.toggle-switch')) return;
+            cache[input.id] = !!input.checked;
+            cacheAt = Date.now();
+            saveCache();
+        }, true);
+
+        // app-shell.js is loaded in <head>; observing <html> catches controls
+        // as the parser creates them, before the browser paints the page.
+        if (window.MutationObserver && document.documentElement) {
+            var observer = new MutationObserver(function (records) {
+                for (var i = 0; i < records.length; i++) {
+                    for (var j = 0; j < records[i].addedNodes.length; j++) {
+                        scan(records[i].addedNodes[j]);
+                    }
+                }
+            });
+            observer.observe(document.documentElement, { childList: true, subtree: true });
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function () { scan(document.body); });
+        } else {
+            scan(document.body);
+        }
+    })();
+
     // The Android app supplies its own navigation rail and injects
     // AndroidBridge before the page starts loading. Its post-load CSS hides
     // this web sidebar, so rendering the sidebar's 3D vehicle there wastes a
