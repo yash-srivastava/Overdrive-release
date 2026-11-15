@@ -2140,6 +2140,9 @@
     "filter_distance": "Distance:",
     "filter_storage": "Storage:",
     "filter_place": "Place:",
+    "filters_toggle": "Filters",
+    "filter_remove": "Remove filter",
+    "filter_place_search": "Place search",
     "place_search_hint": "Search places…",
     "place_search_hits": {
       "one": "{count} match",
