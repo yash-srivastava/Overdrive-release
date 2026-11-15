@@ -1,7 +1,6 @@
 package com.overdrive.app.overlay;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.nio.charset.StandardCharsets;
@@ -11,7 +10,7 @@ import java.nio.file.Paths;
 
 import org.junit.Test;
 
-/** Chip visibility + live preview follow-up (icon transparency preserved). */
+/** Chip visibility + icon visibility sliders share the same higher-is-more-visible UX. */
 public class StatusOverlayChipOpacityContractTest {
 
     @Test
@@ -22,13 +21,14 @@ public class StatusOverlayChipOpacityContractTest {
     }
 
     @Test
-    public void layoutKeepsIconTransparencySliderAndDirectChipRange() throws Exception {
+    public void layoutUsesDirectVisibilityRanges() throws Exception {
         String layout = readRepositoryFile(
                 "app/src/main/res/layout/fragment_settings_overlay.xml");
         assertTrue(layout.contains("sliderOverlayChipOpacity"));
         assertTrue(layout.contains("android:valueFrom=\"10\""));
         assertTrue(layout.contains("android:valueTo=\"100\""));
         assertTrue(layout.contains("sliderOverlayIconOpacity"));
+        assertTrue(layout.contains("android:valueFrom=\"20\""));
         assertTrue(layout.contains("tvOverlayIconOpacity"));
     }
 
@@ -43,19 +43,21 @@ public class StatusOverlayChipOpacityContractTest {
     }
 
     @Test
-    public void settingsBindsIconTransparencyUnchanged() throws Exception {
+    public void settingsBindsIconVisibilityLikeChip() throws Exception {
         String fragment = readRepositoryFile(
                 "app/src/main/java/com/overdrive/app/ui/fragment/settings/SettingsOverlayFragment.kt");
         assertTrue(fragment.contains("sliderOverlayIconOpacity"));
-        assertTrue(fragment.contains("persistInt(\"iconOpacity\""));
+        assertTrue(fragment.contains("previewIconOpacity"));
+        assertTrue(fragment.contains("commitIconOpacity"));
         assertTrue(fragment.contains("chipOpacitySaveGeneration"));
         assertTrue(fragment.contains("previewChipOpacity"));
     }
 
     @Test
-    public void englishKeepsIconTransparencyStrings() throws Exception {
+    public void englishUsesVisibilityLabels() throws Exception {
         String en = readRepositoryFile("app/src/main/res/values/strings.xml");
-        assertTrue(en.contains("settings_overlay_icon_opacity\">Icon transparency"));
+        assertTrue(en.contains("settings_overlay_icon_opacity\">Icon visibility"));
+        assertTrue(en.contains("settings_overlay_icon_opacity_subtitle"));
         assertTrue(en.contains("Chip visibility"));
     }
 

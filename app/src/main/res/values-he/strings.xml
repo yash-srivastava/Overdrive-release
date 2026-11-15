@@ -749,7 +749,8 @@
     <string name="settings_overlay_chip_opacity">נראות הצ\'יפ</string>
     <string name="settings_overlay_chip_opacity_subtitle">ערך גבוה = בולט יותר. טווח 10 עד 100 (האחוזים מימין).</string>
     <string name="settings_overlay_chip_opacity_value">%1$d%%</string>
-    <string name="settings_overlay_icon_opacity">שקיפות האייקונים</string>
+    <string name="settings_overlay_icon_opacity">נראות האייקונים</string>
+    <string name="settings_overlay_icon_opacity_subtitle">ערך גבוה = בולט יותר. טווח 20 עד 100 (האחוזים מימין).</string>
     <string name="settings_overlay_icon_opacity_value">%1$d%%</string>
     <string name="settings_overlay_icon_size">גודל האייקונים</string>
     <string name="settings_overlay_icon_size_value">%1$d</string>

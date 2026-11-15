@@ -11,14 +11,25 @@ import java.nio.file.Paths;
 
 import org.junit.Test;
 
-/** Live preview for icon opacity/size sliders (icon transparency range preserved). */
+/** Icon visibility slider maps 1:1 to stored iconOpacity (like chip visibility). */
 public class StatusOverlayIconAppearanceContractTest {
 
     @Test
     public void iconOpacityStoredTwentyToOneHundred() {
         assertEquals(20, StatusOverlayIconAppearance.clampStoredOpacity(0));
         assertEquals(100, StatusOverlayIconAppearance.clampStoredOpacity(150));
-        assertEquals(55, StatusOverlayIconAppearance.storedOpacityFromSliderTransparency(45));
+        assertEquals(80f, StatusOverlayIconAppearance.snapOpacitySliderValue(80), 0f);
+        assertEquals(20f, StatusOverlayIconAppearance.snapOpacitySliderValue(12), 0f);
+    }
+
+    @Test
+    public void higherSliderValueMeansHigherStoredVisibility() {
+        int prev = StatusOverlayIconAppearance.clampStoredOpacity(20);
+        for (int slider = 25; slider <= 100; slider += 5) {
+            int stored = StatusOverlayIconAppearance.clampStoredOpacity(slider);
+            assertTrue(stored >= prev);
+            prev = stored;
+        }
     }
 
     @Test
@@ -46,14 +57,18 @@ public class StatusOverlayIconAppearanceContractTest {
         assertFalse(fragment.contains("persistInt(\"iconOpacity\""));
         assertTrue(fragment.contains("persistIconOpacity"));
         assertTrue(fragment.contains("clearIconAppearancePreview"));
+        assertFalse(fragment.contains("storedOpacityFromSliderTransparency"));
     }
 
     @Test
-    public void layoutKeepsIconTransparencySlider() throws Exception {
+    public void layoutKeepsDirectIconVisibilitySlider() throws Exception {
         String layout = readRepositoryFile(
                 "app/src/main/res/layout/fragment_settings_overlay.xml");
         assertTrue(layout.contains("sliderOverlayIconOpacity"));
         assertTrue(layout.contains("sliderOverlayIconSize"));
+        assertTrue(layout.contains("settings_overlay_icon_opacity_subtitle"));
+        assertTrue(layout.contains("android:valueFrom=\"20\""));
+        assertTrue(layout.contains("android:valueTo=\"100\""));
     }
 
     private static String readRepositoryFile(String relativePath) throws Exception {

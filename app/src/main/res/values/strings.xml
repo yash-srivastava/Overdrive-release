@@ -1068,7 +1068,8 @@
     <string name="settings_overlay_chip_opacity">Chip visibility</string>
     <string name="settings_overlay_chip_opacity_subtitle">Higher = more prominent. Range 10 to 100 (percent shown at right).</string>
     <string name="settings_overlay_chip_opacity_value">%1$d%%</string>
-    <string name="settings_overlay_icon_opacity">Icon transparency</string>
+    <string name="settings_overlay_icon_opacity">Icon visibility</string>
+    <string name="settings_overlay_icon_opacity_subtitle">Higher = more prominent. Range 20 to 100 (percent shown at right).</string>
     <string name="settings_overlay_icon_opacity_value">%1$d%%</string>
     <string name="settings_overlay_icon_size">Icon size</string>
     <string name="settings_overlay_icon_size_value">%1$d</string>

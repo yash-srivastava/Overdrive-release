@@ -774,7 +774,7 @@
     <string name="settings_overlay_replay_subtitle">Muestra la insignia CLIP: verde mientras se graba una repetición, azul durante 5 s una vez guardada y roja si falla. Solo aparece si existe una asignación o una automatización de repetición.</string>
     <string name="settings_overlay_roadsense_title">Superposición de RoadSense</string>
     <string name="settings_overlay_roadsense_subtitle">Muestra el indicador flotante de RoadSense y la tarjeta de peligros mientras RoadSense está activado.</string>
-    <string name="settings_overlay_icon_opacity">Transparencia de los iconos</string>
+    <string name="settings_overlay_icon_opacity">Visibilidad de los iconos</string>
     <string name="settings_overlay_icon_opacity_value">%1$d%%</string>
     <string name="settings_overlay_icon_size">Tamaño de los iconos</string>
     <string name="settings_overlay_icon_size_value">%1$d</string>
