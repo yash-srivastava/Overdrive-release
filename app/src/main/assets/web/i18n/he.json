@@ -3192,7 +3192,7 @@
       "wireguard": {
         "name": "WireGuard",
         "component": "מנהרת WireGuard (wgproxy) — ממשק WireGuard ותעבורת מנהרה.",
-        "sendWhen": "מנהרת WireGuard לא עולה, handshake/קישוריות נכשלים, או תעבורה לא עוברת דרכו."
+        "sendWhen": "מנהרת WireGuard לא עולה, handshake/קישוריות נכשלים, או תעבורה לא עוברת דרכה."
       },
       "singbox": {
         "name": "פרוקסי Sing-box",
