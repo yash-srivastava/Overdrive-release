@@ -3729,7 +3729,7 @@ public class GpuSurveillancePipeline {
                 // and defer + retry instead of hanging.
                 java.io.File probeDir = resolveProbeDirWithEnospcFallback(
                         (outputDir != null) ? outputDir
-                                : StorageManager.getInstance().getRecordingsDir());
+                                : StorageManager.getInstance().getLiveRecordingsDirIfMounted());
                 if (!isRecordingProbeWriteReady(probeDir)) {
                     logger.warn("Recordings volume not write-ready (probe failed/timed out) — "
                         + "deferring and scheduling retry");
@@ -3870,7 +3870,7 @@ public class GpuSurveillancePipeline {
         // schedule the storage-ready retry instead of pinning the
         // PendingRecKickoff thread.
         java.io.File probeDir = resolveProbeDirWithEnospcFallback(
-                (dir != null) ? dir : StorageManager.getInstance().getRecordingsDir());
+                (dir != null) ? dir : StorageManager.getInstance().getLiveRecordingsDirIfMounted());
         if (!isRecordingProbeWriteReady(probeDir)) {
             logger.warn("Deferred start: storage volume not write-ready (probe failed/timed out) — "
                 + "rescheduling retry instead of issuing inner recorder.startRecording");
@@ -4015,7 +4015,7 @@ public class GpuSurveillancePipeline {
                     // only the gate target is redirected (symmetric with the direct sites).
                     java.io.File probeDir = resolveProbeDirWithEnospcFallback(
                             (outputDir != null) ? outputDir
-                                    : StorageManager.getInstance().getRecordingsDir());
+                                    : StorageManager.getInstance().getLiveRecordingsDirIfMounted());
                     // FIX (audit R1): snapshot recorder + re-verify pipeline is
                     // running BEFORE startRecording so a concurrent stop() that
                     // nulled recorder/encoder mid-probe can't drop us into
@@ -4155,7 +4155,7 @@ public class GpuSurveillancePipeline {
                     // retry forever. startRecording still gets the ORIGINAL outputDir.
                     java.io.File probeDir = resolveProbeDirWithEnospcFallback(
                             (outputDir != null) ? outputDir
-                                    : StorageManager.getInstance().getRecordingsDir());
+                                    : StorageManager.getInstance().getLiveRecordingsDirIfMounted());
                     // FIX (audit R1): snapshot recorder + re-verify pipeline
                     // is running before startRecording (concurrent-stop NPE
                     // / zombie-recording guard).

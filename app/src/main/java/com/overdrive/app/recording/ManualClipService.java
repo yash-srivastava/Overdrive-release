@@ -559,7 +559,12 @@ public final class ManualClipService {
         try {
             StorageManager storage = StorageManager.getInstance();
             storage.ensureStorageReady(false);
-            File dir = storage.getRecordingsDir();
+            // Do not use the cached recordingsDir here: it is intentionally
+            // frozen while the primary recorder is active and can still point
+            // at the internal fallback even after the configured SD card has
+            // mounted. A replay is an independent writer, so resolve the
+            // user's configured destination live for this export.
+            File dir = storage.getLiveRecordingsDirIfMounted();
             // Replay is a secondary writer. Only the primary cam_* writer may
             // mutate the global fallback state used by UI and cleanup routing.
             dir = storage.resolveTargetWithEnospcFallback(dir, OUTPUT_RESERVE_BYTES, false);
