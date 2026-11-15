@@ -1779,7 +1779,7 @@
     <string name="nav_page_remote_access">Доступ по приближению</string>
     <string name="settings_overlay_chip_opacity">Видимость плавающего индикатора</string>
     <string name="settings_overlay_chip_opacity_subtitle">Чем выше значение, тем заметнее индикатор. Диапазон от 10 до 100 %.</string>
-    <string name="settings_overlay_icon_opacity">Прозрачность значка</string>
+    <string name="settings_overlay_icon_opacity">Видимость значков</string>
     <string name="settings_overlay_icon_size">Размер значка</string>
     <string name="diagnostics_section_daemon_storage">Хранилище служб</string>
     <string name="vehicle_setup_title">Настройка автомобиля</string>

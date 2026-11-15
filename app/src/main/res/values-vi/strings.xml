@@ -1443,7 +1443,7 @@
     <string name="settings_overlay_replay_subtitle">Hiển thị huy hiệu CLIP: xanh lá khi đang ghi bản phát lại, xanh dương trong 5 giây sau khi lưu, đỏ khi lỗi. Chỉ xuất hiện khi có liên kết hoặc tự động hóa phát lại.</string>
     <string name="settings_overlay_roadsense_title">Lớp phủ RoadSense</string>
     <string name="settings_overlay_roadsense_subtitle">Hiển thị thẻ RoadSense nổi và thẻ cảnh báo nguy hiểm khi RoadSense được bật.</string>
-    <string name="settings_overlay_icon_opacity">Độ trong suốt biểu tượng</string>
+    <string name="settings_overlay_icon_opacity">Độ hiển thị biểu tượng</string>
     <string name="settings_overlay_icon_opacity_value">%1$d%%</string>
     <string name="settings_overlay_icon_size">Kích cỡ biểu tượng</string>
     <string name="settings_overlay_icon_size_value">%1$d</string>

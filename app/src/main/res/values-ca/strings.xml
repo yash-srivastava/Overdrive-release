@@ -1695,7 +1695,7 @@
     <string name="voice_overlay_blocked_moving">No disponible mentre condueixes</string>
     <string name="voice_overlay_refused">Això no es pot fer amb la veu</string>
     <string name="voice_overlay_failed">No s\'ha pogut completar</string>
-    <string name="settings_overlay_icon_opacity">Transparència de les icones</string>
+    <string name="settings_overlay_icon_opacity">Visibilitat de les icones</string>
     <string name="settings_overlay_icon_opacity_value">%1$d%%</string>
     <string name="settings_overlay_icon_size">Mida de la icona</string>
     <string name="settings_overlay_icon_size_value">%1$d</string>

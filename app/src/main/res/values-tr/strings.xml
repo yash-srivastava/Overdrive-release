@@ -1466,7 +1466,7 @@
     <string name="settings_overlay_replay_subtitle">CLIP rozetini göster: tekrar kaydedilirken yeşil, kaydedildikten sonra 5 sn mavi, başarısız olursa kırmızı. Yalnızca bir tekrar tuş ataması veya otomasyonu varsa görünür.</string>
     <string name="settings_overlay_roadsense_title">RoadSense ekran katmanı</string>
     <string name="settings_overlay_roadsense_subtitle">RoadSense etkinken kayan RoadSense rozetini ve tehlike kartını göster.</string>
-    <string name="settings_overlay_icon_opacity">Simge saydamlığı</string>
+    <string name="settings_overlay_icon_opacity">Simge görünürlüğü</string>
     <string name="settings_overlay_icon_opacity_value">%%%1$d</string>
     <string name="settings_overlay_icon_size">Simge boyutu</string>
     <string name="settings_overlay_icon_size_value">%1$d</string>
