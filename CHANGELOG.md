@@ -4,6 +4,10 @@ Tutte le modifiche e gli sviluppi in corso vengono tracciati in questo file e ve
 
 ## [In corso / Unreleased]
 
+- **Improve surveillance notification image fidelity (`ThumbnailBuffer.java`, `SurveillanceEngineGpu.java`)**:
+  - Hero notification JPEGs now retain the detector crop's native dimensions instead of stretching smaller 320×240 mosaic crops into a 640×640 square, avoiding interpolation blur and aspect-ratio distortion.
+  - Increased hero JPEG quality from 85 to 95 and MP4-keyframe fallback quality from 85 to 92. The same hero asset continues to serve Telegram photos and Web Push snapshots, so both delivery paths benefit without changing notification routing or detection.
+
 - **Fix DiLink 5 Drive Mode Actuation (`BydDataCollector.java`, `BydModeCommand.java`, `BydDriveModeEncodingTest.java`)**:
   - **Native `setDrvingMode` OEM Spelling & Setting Device Fallback**: On BYD DiLink 5 (Qualcomm SA8155P / DiLink 100), the SettingAdapterManager and BYDAutoSettingDevice native method for drive mode is named `setDrvingMode(int)` (OEM typo without 'e'). Added reflective fallback to `setDrvingMode` when `setDriveConfig` is absent, and wired support into `BydModeCommand` shell execution. This resolves drive mode automations (e.g., AutoSport mode on accelerator threshold) failing on DiLink 5 vehicles.
 

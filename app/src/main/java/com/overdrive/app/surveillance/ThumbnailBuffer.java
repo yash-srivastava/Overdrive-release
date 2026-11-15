@@ -42,10 +42,14 @@ public final class ThumbnailBuffer {
 
     private static final DaemonLogger logger = DaemonLogger.getInstance("ThumbBuf");
 
-    /** Output JPEG side-length. The crop is resized to this from whatever the
-     *  source dimensions were (typically 640×640 foveated or 320×240 mosaic). */
-    private static final int OUT_SIDE = 640;
-    private static final int JPEG_QUALITY = 85;
+    /**
+     * Preserve the detector crop's native dimensions. Foveated crops are already
+     * 640×640; mosaic crops can be only 320×240. Stretching the latter to a
+     * 640×640 square adds no detail and distorts both the scene and the bbox.
+     * Keep more of the available JPEG detail because this file is shared by
+     * Telegram sendPhoto and Web Push notification images.
+     */
+    private static final int JPEG_QUALITY = 95;
 
     /** Package-visible so the caller-driven per-actor writer (see
      *  {@link #writePerActorJpeg}) can iterate a snapshot of slots after
@@ -989,21 +993,11 @@ public final class ThumbnailBuffer {
             }
             bmp.setPixels(pixels, 0, s.srcW, 0, 0, s.srcW, s.srcH);
 
-            // Resize to OUT_SIDE if needed
-            if (s.srcW != OUT_SIDE || s.srcH != OUT_SIDE) {
-                out = Bitmap.createScaledBitmap(bmp, OUT_SIDE, OUT_SIDE, true);
-                // bmp is now redundant — recycle eagerly (and null it so the
-                // finally block doesn't double-recycle). createScaledBitmap
-                // can also return the same bitmap if dims happened to match;
-                // guard by identity.
-                if (out != bmp) {
-                    bmp.recycle();
-                    bmp = null;
-                }
-            } else {
-                out = bmp;
-                bmp = null;  // ownership transferred to `out`
-            }
+            // Do not upscale small mosaic crops or force them into a square.
+            // Native-size output avoids interpolation blur and preserves the
+            // source aspect ratio; foveated 640×640 crops remain unchanged.
+            out = bmp;
+            bmp = null;  // ownership transferred to `out`
 
             // Draw bbox + label
             Canvas canvas = new Canvas(out);
@@ -1012,8 +1006,8 @@ public final class ThumbnailBuffer {
             stroke.setStrokeWidth(4f);
             stroke.setColor(severityColor(s.severity));
 
-            float scaleX = (float) OUT_SIDE / s.srcW;
-            float scaleY = (float) OUT_SIDE / s.srcH;
+            float scaleX = 1f;
+            float scaleY = 1f;
             Rect r = new Rect(
                     Math.round(s.bboxX * scaleX),
                     Math.round(s.bboxY * scaleY),
