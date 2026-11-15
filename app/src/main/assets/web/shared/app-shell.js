@@ -599,55 +599,6 @@
         }
     }
 
-    // Long row descriptions fold to two lines behind a More / Less button
-    // (revamp.css .is-folded); the button only shows when text is clipped.
-    var FOLD_MIN_CHARS = 100;
-    var CHEVRON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
-
-    function i18nText(key, fallback) {
-        try {
-            var v = window.BYD && window.BYD.i18n && window.BYD.i18n.t ? window.BYD.i18n.t(key) : null;
-            return v && v !== key ? v : fallback;
-        } catch (e) { return fallback; }
-    }
-
-    function foldDescriptions(root) {
-        var descs = root.querySelectorAll('.setting-row .setting-desc:not([data-fold]), .setting-stack .setting-desc:not([data-fold])');
-        for (var i = 0; i < descs.length; i++) {
-            var d = descs[i], info = d.parentNode;
-            var hint = info && info.classList.contains('has-hint') ? info.querySelector('.setting-hint') : null;
-            if (!hint && (d.textContent || '').replace(/\s+/g, ' ').length < FOLD_MIN_CHARS) continue;
-            d.setAttribute('data-fold', hint ? 'hint' : 'clamp');
-            d.classList.add('is-folded');
-            var btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'desc-more';
-            btn.setAttribute('aria-expanded', 'false');
-            btn.hidden = !hint;
-            btn.innerHTML = '<span data-i18n="common.more">' + i18nText('common.more', 'More') + '</span>' + CHEVRON;
-            btn.addEventListener('click', (function (desc) {
-                return function () {
-                    var open = !desc.classList.contains('is-open');
-                    desc.classList.toggle('is-open', open);
-                    this.setAttribute('aria-expanded', open ? 'true' : 'false');
-                    var label = this.firstChild;
-                    label.setAttribute('data-i18n', open ? 'common.less' : 'common.more');
-                    label.textContent = i18nText(open ? 'common.less' : 'common.more', open ? 'Less' : 'More');
-                };
-            }(d)));
-            d.parentNode.insertBefore(btn, d.nextSibling);
-        }
-    }
-
-    function refreshFolds(root) {
-        var descs = root.querySelectorAll('.setting-desc[data-fold="clamp"]:not(.is-open)');
-        for (var i = 0; i < descs.length; i++) {
-            var d = descs[i], btn = d.nextSibling;
-            if (!btn || btn.className !== 'desc-more' || !d.offsetHeight) continue;
-            btn.hidden = !(d.scrollHeight > d.clientHeight + 2);
-        }
-    }
-
     // The section tab bar sits under the page header, which some pages grow
     // (subtitles, wrapped titles) or hide (detail views).
     var lastHeaderH = null;
@@ -700,19 +651,13 @@
         function sweep() {
             tagSwitchRows(main);
             inlineHints(main);
-            foldDescriptions(main);
-            refreshFolds(main);
             syncHeaderHeight();
         }
         sweep();
-        requestAnimationFrame(function () { refreshFolds(main); });
-        document.addEventListener('ot-tabs:active-changed', function () {
-            requestAnimationFrame(function () { refreshFolds(main); });
-        });
         var resizeTimer = null;
         window.addEventListener('resize', function () {
             if (resizeTimer) clearTimeout(resizeTimer);
-            resizeTimer = setTimeout(function () { resizeTimer = null; refreshFolds(main); syncHeaderHeight(); }, 200);
+            resizeTimer = setTimeout(function () { resizeTimer = null; syncHeaderHeight(); }, 200);
         });
         if (typeof MutationObserver === 'undefined') return;
         var pending = null;
