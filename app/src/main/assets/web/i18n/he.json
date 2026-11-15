@@ -71,7 +71,8 @@
     "parking": "חניה",
     "safekeep": "SafeKeep",
     "remote_access": "קרבה",
-    "remote_dev_view": "תצוגת מפתח מרחוק"
+    "remote_dev_view": "תצוגת מפתח מרחוק",
+    "module_faults": "תקלות מודולים"
   },
   "parking": {
     "page_title": "חניה",
@@ -3065,7 +3066,18 @@
     "soc_will_appear": "היסטוריית רמת הסוללה תופיע לאחר איסוף הנתונים",
     "soc_current_label": "רמת סוללה נוכחית",
     "soc_history_will_build": "ההיסטוריה תיבנה עם הזמן",
-    "page_header_short": "ביצועים"
+    "page_header_short": "ביצועים",
+    "card_system_cpu": "מעבד המערכת",
+    "card_system_ram": "זיכרון המערכת",
+    "card_overdrive_app": "אפליקציית OverDrive",
+    "card_app_pss": "PSS של OverDrive",
+    "cpu_per_core_prefix": "לפי ליבה (עליון)",
+    "system_ram_basis": "בשימוש = סה״כ − פנוי; מטמון הניתן לשחרור אינו נכלל.",
+    "app_memory_basis": "PSS כולל חלק יחסי מזיכרון משותף. Native ו-Java heap הם מדידות נפרדות ברמת האפליקציה, ולכן הסכומים אינם אמורים להתאים.",
+    "process_scope_hint": "השורות האלה הן לפי תהליך, לא סכומי המכשיר. מעבד הוא לפי ליבה (100% = ליבה אחת עמוסה במלואה; תהליכים רב-ליבתיים יכולים לעלות על 100%). אחוז הזיכרון הוא חלקו של כל תהליך מסך הזיכרון; Resident הוא הזיכרון התושב שלו.",
+    "col_cpu_per_core": "מעבד / ליבה",
+    "col_ram_percent": "זיכרון %",
+    "system_cpu_basis": "כל המכשיר · כל הליבות יחד (0–100%)."
   },
   "update": {
     "check_for_updates": "בדוק עדכונים",
@@ -3137,7 +3149,10 @@
     "uploaded_title": "היומן הועלה בהצלחה",
     "uploaded_body": "שתף קוד זה עם המפתח, יחד עם תיאור של מה שעשית כאשר התקלה קרתה:",
     "uploaded_where": "פרסם זאת ב-Discord, ב-GitHub Issues או ב-WhatsApp:",
-    "copy_code": "העתק קוד"
+    "copy_code": "העתק קוד",
+    "when_to_send": "שלח יומן זה כאשר: ",
+    "component_unavailable": "פרטי הרכיב אינם זמינים בגרסת האפליקציה הזו.",
+    "send_when_unavailable": "שלח יומן זה כאשר התקלה קשורה לשירות הזה."
   },
   "vehicle": {
     "model_name_seagull": "BYD Seagull",
@@ -3419,7 +3434,14 @@
     "deterrent_confirm_ok": "הפעל",
     "deterrent_horn_sent": "צופר ואורות הופעלו",
     "deterrent_flash_sent": "האורות הובהבו",
-    "deterrent_failed": "לא ניתן היה לשלוח את הפקודה"
+    "deterrent_failed": "לא ניתן היה לשלוח את הפקודה",
+    "actions": "פעולות",
+    "unlock_confirm_title": "לפתוח את הרכב?",
+    "unlock_confirm_body": "פעולה זו תפתח את דלתות הרכב.",
+    "trunk_open_confirm_title": "לפתוח את תא המטען?",
+    "trunk_open_confirm_body": "פעולה זו תפתח את תא המטען של הרכב.",
+    "trunk_close_confirm_title": "לסגור את תא המטען?",
+    "trunk_close_confirm_body": "ודא שאזור תא המטען פנוי לפני הסגירה."
   },
   "map": {
     "your_vehicle": "הרכב שלך",
@@ -6724,5 +6746,32 @@
     "time_minutes": "לפני {n} דק'",
     "time_hours": "לפני {n} שע'",
     "time_days": "לפני {n} ימים"
+  },
+  "moduleFaults": {
+    "page_title": "תקלות מודולים",
+    "page_subtitle": "סקירת קריאה בלבד של אזהרות הרכב הזמינות כרגע דרך טלמטריית BYD.",
+    "scope_title": "כיסוי אבחון חלקי",
+    "scope_body": "הגרסה הראשונה קוראת את נתוני TPMS, מצבר 12V ומצב הטעינה הקיימים. היא אינה קוראת קודי תקלה (DTC) שמורים ב-ECU, ואינה שולחת פקודות CAN/UDS, לא מנקה תקלות, לא מאפסת מודולים ולא משנה הגדרות רכב.",
+    "refresh": "רענן קריאות",
+    "copy_report": "העתק דוח",
+    "loading": "קורא טלמטריית רכב זמינה…",
+    "load_error": "לא ניתן היה לטעון אינדיקטורי אבחון מהרכב.",
+    "last_updated": "עודכן לאחרונה",
+    "status_warning": "דווחה אזהרה",
+    "status_clear": "לא דווחה אזהרה",
+    "status_partial": "נתונים חלקיים",
+    "status_unavailable": "לא זמין",
+    "status_not_scanned": "לא נסרק",
+    "warning_modules": "אזהרות",
+    "clear_modules": "ללא אזהרה",
+    "partial_modules": "חלקי",
+    "unavailable_modules": "לא זמין",
+    "not_scanned_modules": "לא נסרק",
+    "empty": "אין עדיין קריאות זמינות. ודא שהרכב ער ונסה לרענן.",
+    "dtc_note": "עדיין נדרש כלי אבחון BYD בבית מלאכה לכיסוי DTC מלא של ECU, כולל בלמים, כריות אוויר, היגוי, ADAS ומודול סוללת ההנעה.",
+    "copied": "דוח האבחון הועתק ללוח.",
+    "copy_failed": "לא ניתן היה להעתיק את הדוח.",
+    "fallback_module_name": "מודול",
+    "fallback_reading_name": "מדידה"
   }
 }

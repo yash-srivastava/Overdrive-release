@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_security_byd_tools_title">תפריטי שירות BYD</string>
+    <string name="settings_security_byd_tools_description">פתיחת כלי ההגדרות המובנים של יחידת המולטימדיה.</string>
+    <string name="settings_security_byd_adb_title">ADB / אפשרויות מפתחים</string>
+    <string name="settings_security_byd_adb_hint">פתח את אפשרויות המפתחים והפעל שם ניפוי USB.</string>
+    <string name="settings_security_byd_adb_unavailable">הגדרות ADB אינן זמינות בקושחה זו.</string>
+    <string name="settings_security_country_code_title">קוד מדינה</string>
+    <string name="settings_security_country_code_warning">פעולה זו פותחת את הגדרות המדינה/אזור של BYD. שינוי קוד המדינה עלול להשפיע על שירותים אזוריים או לדרוש הפעלה מחדש של יחידת המולטימדיה. המשך רק כשהרכב חונה.</string>
+    <string name="settings_security_country_code_open">פתיחת הגדרות</string>
+    <string name="settings_security_country_code_unavailable">קוד מדינה אינו זמין ביחידת מולטימדיה זו.</string>
+</resources>

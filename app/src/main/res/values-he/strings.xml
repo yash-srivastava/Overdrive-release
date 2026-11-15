@@ -1594,6 +1594,9 @@
     <string name="vehicle_setup_done_title">הכול מוכן</string>
     <string name="vehicle_setup_done_subtitle">פתח את התצוגה החיה כדי לבדוק את המצלמות.</string>
 
+    <string name="diagnostics_section_module_faults">תקלות מודולים</string>
+    <string name="diagnostics_module_faults_summary">תצוגת אזהרות מהרכב הזמינות כרגע (כיסוי חלקי)</string>
+
     <!-- Daemon storage (scratch root) -->
     <string name="diagnostics_section_daemon_storage">אחסון הדמונים</string>
     <string name="scratch_root_dialog_title">אחסון הדמונים</string>

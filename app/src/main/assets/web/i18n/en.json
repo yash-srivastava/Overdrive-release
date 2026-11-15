@@ -3143,6 +3143,9 @@
   "logs": {
     "section_title": "Diagnostics",
     "section_sub": "Hit a bug? Send a daemon's log here — you'll get a short code, then share it with us on Discord, GitHub Issues or WhatsApp and tell us what went wrong.",
+    "when_to_send": "Send this log when: ",
+    "component_unavailable": "Component details are unavailable in this app version.",
+    "send_when_unavailable": "Send this log when the problem involves this service.",
     "send": "Send",
     "uploading": "Uploading…",
     "upload_failed": "Upload failed",
@@ -6767,6 +6770,8 @@
     "empty": "No readings are available yet. Make sure the vehicle is awake and try refreshing.",
     "dtc_note": "A BYD-capable workshop diagnostic tool is still required for full ECU DTC coverage, including brakes, airbags, steering, ADAS and traction-battery modules.",
     "copied": "Diagnostic report copied to clipboard.",
-    "copy_failed": "Could not copy the report."
+    "copy_failed": "Could not copy the report.",
+    "fallback_module_name": "Module",
+    "fallback_reading_name": "Reading"
   }
 }

@@ -114,14 +114,14 @@ const ModuleFaultsPage = {
             }
             const metricHtml = metrics.length ? '<small>' + metrics.join(' · ') + '</small>' : '';
             return '<div class="mf-reading"><div class="mf-reading-head"><strong>'
-                + this.escape(reading.label || reading.id || 'Reading')
+                + this.escape(reading.label || reading.id || this.t('fallback_reading_name', 'Reading'))
                 + '</strong><span class="mf-status ' + this.escape(readingStatus) + '">'
                 + this.escape(this.t(readingKey, readingStatus))
                 + '</span></div><p>' + this.escape(reading.summary || '')
                 + '</p>' + metricHtml + '</div>';
         }).join('');
         return '<article class="mf-card ' + this.escape(status) + '">'
-            + '<div class="mf-card-head"><h2>' + this.escape(module.name || module.id || 'Module')
+            + '<div class="mf-card-head"><h2>' + this.escape(module.name || module.id || this.t('fallback_module_name', 'Module'))
             + '</h2><span class="mf-status ' + this.escape(status) + '">'
             + this.escape(statusText) + '</span></div>'
             + '<p class="mf-summary-text">' + this.escape(module.summary || '') + '</p>'
