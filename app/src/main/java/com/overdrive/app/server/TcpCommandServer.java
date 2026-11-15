@@ -10,6 +10,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Map;
@@ -40,8 +41,10 @@ public class TcpCommandServer {
                     try { serverSocket.close(); } catch (Exception e) {}
                 }
                 
-                serverSocket = new ServerSocket(port, 5, InetAddress.getByName("127.0.0.1"));
+                serverSocket = new ServerSocket();
                 serverSocket.setReuseAddress(true);
+                serverSocket.bind(new InetSocketAddress(
+                        InetAddress.getByName("127.0.0.1"), port), 5);
                 bindFailures = 0;
                 CameraDaemon.log("TCP server listening on 127.0.0.1:" + port);
 
