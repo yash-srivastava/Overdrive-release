@@ -1986,24 +1986,52 @@ BYD.events = {
         // listener registered in bindTransport.
         const self = this;
         player.oncanplay = function() {
-            player.play().catch(function() {});
-            try {
-                const stored = localStorage.getItem('byd.events.unmuted');
-                if (stored !== null) {
-                    player.muted = stored !== '1';
-                } else {
-                    // Loopback fetch (~5ms). Keep muted while in flight —
-                    // autoplay is gated on it, so the muted→unmuted flip
-                    // is imperceptible.
+            // Do not change the audio output state while play() is still
+            // starting. Some WebViews begin emitting audio as soon as the
+            // muted autoplay request is issued; unmuting in the same task
+            // can leave the first part of a clip sounding distorted until
+            // the media pipeline is restarted (replaying the buffered part
+            // then sounds normal). Wait for the play promise to confirm that
+            // playback has actually started before restoring the preference.
+            const source = player.src;
+            const applyMutePreference = function() {
+                // A clip may have been closed or replaced while the
+                // preference lookup was in flight. Never alter the new
+                // player's audio state from an older startup callback.
+                if (player.src !== source ||
+                        !document.getElementById('videoModal').classList.contains('active')) return;
+                try {
+                    const stored = localStorage.getItem('byd.events.unmuted');
+                    if (stored !== null) {
+                        player.muted = stored !== '1';
+                    } else {
+                        self.getAudioRecordingEnabled().then(function(enabled) {
+                            if (player.src !== source ||
+                                    !document.getElementById('videoModal').classList.contains('active')) return;
+                            player.muted = !enabled;
+                            self._lastMutedState = player.muted;
+                        });
+                    }
+                } catch (e) {
                     player.muted = true;
-                    self.getAudioRecordingEnabled().then(function(enabled) {
-                        if (enabled) player.muted = false;
-                    });
                 }
-            } catch (e) {
+                self._lastMutedState = player.muted;
+            };
+
+            const playRequest = player.play();
+            if (playRequest && typeof playRequest.then === 'function') {
+                playRequest.then(applyMutePreference, function() {
+                    // Autoplay may be rejected by browser policy. Restore the
+                    // preference while paused so a later user-initiated play
+                    // starts with the expected audio state.
+                    applyMutePreference();
+                });
+            } else {
+                // Older WebViews may not return a promise from play().
+                // Retain muted autoplay rather than racing the audio state.
                 player.muted = true;
+                self._lastMutedState = true;
             }
-            self._lastMutedState = player.muted;
             player.oncanplay = null;
         };
 
