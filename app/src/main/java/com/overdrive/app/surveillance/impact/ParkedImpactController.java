@@ -33,6 +33,10 @@ public final class ParkedImpactController {
     private static String runningSensitivity;
     private static long lastStartMs;
     private static long lastNotifyMs;
+    private static String sensorState = "waiting";
+    private static String sensorName = "";
+    private static long lastSensorReportMs;
+    private static long lastSampleCount;
 
     private ParkedImpactController() {}
 
@@ -109,12 +113,52 @@ public final class ParkedImpactController {
                 serviceRunning = true;
                 runningSensitivity = sensitivity;
                 lastStartMs = now;
-            } else if (!want && serviceRunning) {
-                ParkedImpactSensorService.stop();
-                serviceRunning = false;
-                runningSensitivity = null;
-                logger.info("watch stopped");
+            } else if (!want) {
+                if (serviceRunning) {
+                    ParkedImpactSensorService.stop();
+                    serviceRunning = false;
+                    runningSensitivity = null;
+                    logger.info("watch stopped");
+                }
+                sensorState = "inactive";
+                sensorName = "";
+                lastSensorReportMs = 0L;
+                lastSampleCount = 0L;
             }
+        }
+    }
+
+    /** Record the app-process sensor heartbeat. */
+    public static void onSensorStatus(String state, long samples, String name) {
+        if (!"registered".equals(state) && !"sampling".equals(state)
+                && !"unavailable".equals(state)) return;
+        synchronized (LOCK) {
+            sensorState = state;
+            sensorName = name == null ? "" : name;
+            lastSampleCount = Math.max(0L, samples);
+            lastSensorReportMs = System.currentTimeMillis();
+        }
+    }
+
+    /** Snapshot for the WebUI; stale heartbeats are never presented as healthy. */
+    public static JSONObject getSensorStatus() {
+        boolean enabled = isEnabled();
+        boolean watchWindow = isWatchWindow();
+        synchronized (LOCK) {
+            long age = lastSensorReportMs == 0 ? Long.MAX_VALUE
+                    : Math.max(0L, System.currentTimeMillis() - lastSensorReportMs);
+            String state = age > 45_000L ? (enabled && watchWindow ? "stale" : "inactive")
+                    : sensorState;
+            JSONObject result = new JSONObject();
+            try {
+                result.put("enabled", enabled);
+                result.put("watchWindow", watchWindow);
+                result.put("state", state);
+                result.put("sensor", sensorName);
+                result.put("lastReportAgeMs", age == Long.MAX_VALUE ? JSONObject.NULL : age);
+                result.put("samples", lastSampleCount);
+            } catch (Exception ignored) {}
+            return result;
         }
     }
 

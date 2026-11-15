@@ -22,6 +22,8 @@ import com.overdrive.app.roadsense.detect.ImuSource
 import com.overdrive.app.services.DaemonKeepaliveService
 import com.overdrive.app.util.DaemonHttpClient
 import org.json.JSONObject
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * App-process accelerometer watch for parked impacts.
@@ -42,6 +44,10 @@ class ParkedImpactSensorService : Service(), SensorEventListener {
 
     private var samplesSinceHeartbeat = 0L
     private var lastHeartbeatMs = 0L
+    private var sensorName = ""
+    private val statusExecutor: ExecutorService = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "parked-impact-status").apply { isDaemon = true }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -65,6 +71,7 @@ class ParkedImpactSensorService : Service(), SensorEventListener {
         try { sensorManager?.unregisterListener(this) } catch (_: Throwable) {}
         registered = false
         ioThread?.quitSafely()
+        statusExecutor.shutdownNow()
         ioThread = null
         ioHandler = null
         Log.i(TAG, "stopped")
@@ -84,6 +91,7 @@ class ParkedImpactSensorService : Service(), SensorEventListener {
         val sm = getSystemService(SENSOR_SERVICE) as? SensorManager
         if (sm == null) {
             Log.e(TAG, "no SensorManager — impact detection unavailable")
+            reportStatus("unavailable", 0L, "")
             stopSelf()
             return
         }
@@ -92,15 +100,18 @@ class ParkedImpactSensorService : Service(), SensorEventListener {
         val accel = resolved.accelerometer
         if (accel == null || !resolved.usableForDetection) {
             Log.w(TAG, "no real inertial accelerometer — impact detection unavailable on this trim")
+            reportStatus("unavailable", 0L, "")
             stopSelf()
             return
         }
+        sensorName = accel.name ?: "Accelerometer"
         registered = sm.registerListener(this, accel, SAMPLE_PERIOD_US, ioHandler)
         lastHeartbeatMs = SystemClock.elapsedRealtime()
         samplesSinceHeartbeat = 0L
         Log.i(TAG, "watching ${accel.name} at ${1_000_000 / SAMPLE_PERIOD_US} Hz, " +
                 "sensitivity=$sensitivity threshold=${threshold}m/s² registered=$registered")
-        if (!registered) stopSelf()
+        if (registered) reportStatus("registered", 0L, sensorName)
+        else { reportStatus("unavailable", 0L, sensorName); stopSelf() }
     }
 
     override fun onSensorChanged(event: SensorEvent) {
@@ -110,7 +121,9 @@ class ParkedImpactSensorService : Service(), SensorEventListener {
         if (now - lastHeartbeatMs >= HEARTBEAT_MS) {
             // Proves the sensor still delivers with the car off — the one thing not yet
             // confirmed on-car. A heartbeat with 0 samples means the HAL went quiet.
-            Log.i(TAG, "heartbeat: $samplesSinceHeartbeat samples in ${(now - lastHeartbeatMs) / 1000}s")
+            val count = samplesSinceHeartbeat
+            Log.i(TAG, "heartbeat: $count samples in ${(now - lastHeartbeatMs) / 1000}s")
+            reportStatus("sampling", count, sensorName)
             samplesSinceHeartbeat = 0L
             lastHeartbeatMs = now
         }
@@ -123,6 +136,26 @@ class ParkedImpactSensorService : Service(), SensorEventListener {
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+
+    private fun reportStatus(state: String, samples: Long, name: String) {
+        try {
+            statusExecutor.execute {
+                try {
+                    val conn = DaemonHttpClient.open(STATUS_PATH, "POST", 1000, 1500)
+                    conn.doOutput = true
+                    conn.setRequestProperty("Content-Type", "application/json")
+                    val body = JSONObject().put("state", state).put("samples", samples)
+                        .put("sensor", name).put("timestamp", System.currentTimeMillis()).toString()
+                    conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                    val code = conn.responseCode
+                    if (code !in 200..299) Log.w(TAG, "status report rejected: HTTP $code")
+                    conn.disconnect()
+                } catch (t: Throwable) { Log.w(TAG, "status report failed: ${t.message}") }
+            }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            // Service is shutting down; no more status reports are needed.
+        }
+    }
 
     private fun reportImpact(peak: Float) {
         // Already on the background sensor thread; a short bounded call is acceptable here and
@@ -177,8 +210,9 @@ class ParkedImpactSensorService : Service(), SensorEventListener {
         private const val CHANNEL_ID = "parked_impact"
         private const val NOTIFICATION_ID = 9988
         private const val SAMPLE_PERIOD_US = 20_000
-        private const val HEARTBEAT_MS = 5 * 60 * 1000L
+        private const val HEARTBEAT_MS = 15 * 1000L
         private const val IMPACT_PATH = "/api/surveillance/impact"
+        private const val STATUS_PATH = "/api/surveillance/impact/status"
 
         const val EXTRA_SENSITIVITY = "sensitivity"
 

@@ -40,6 +40,21 @@ public class SurveillanceApiHandler {
             handleConfigPost(out, body);
             return true;
         }
+        if (cleanPath.equals("/api/surveillance/impact/status") && method.equals("POST")) {
+            JSONObject report = new JSONObject(body == null ? "{}" : body);
+            com.overdrive.app.surveillance.impact.ParkedImpactController.onSensorStatus(
+                    report.optString("state", ""), report.optLong("samples", 0L),
+                    report.optString("sensor", ""));
+            HttpResponse.sendJsonSuccess(out);
+            return true;
+        }
+        if (cleanPath.equals("/api/surveillance/impact/status") && method.equals("GET")) {
+            JSONObject result = new JSONObject();
+            result.put("success", true);
+            result.put("status", com.overdrive.app.surveillance.impact.ParkedImpactController.getSensorStatus());
+            HttpResponse.sendJson(out, result.toString());
+            return true;
+        }
         // POST /api/surveillance/impact — one confirmed hit from the app-side impact watch.
         if (cleanPath.equals("/api/surveillance/impact") && method.equals("POST")) {
             double peak = Double.NaN;
