@@ -60,10 +60,11 @@
 
     function descriptionFor(key, descriptions) {
         var info = descriptions && descriptions[key] ? descriptions[key] : {};
+        var prefix = 'logs.desc.' + key + '.';
         return {
-            name: info.name || prettyName(key),
-            component: info.component || t('logs.component_unavailable', 'Component details are unavailable in this app version.'),
-            sendWhen: info.sendWhen || t('logs.send_when_unavailable', 'Send this log when the problem involves this service.')
+            name: t(prefix + 'name', info.name || prettyName(key)),
+            component: t(prefix + 'component', info.component || t('logs.component_unavailable', 'Component details are unavailable in this app version.')),
+            sendWhen: t(prefix + 'sendWhen', info.sendWhen || t('logs.send_when_unavailable', 'Send this log when the problem involves this service.'))
         };
     }
 
@@ -85,7 +86,7 @@
                     return;
                 }
                 if (act) act.textContent = '✓';
-                showCode(prettyName(key), res.code);
+                showCode(descriptionFor(key, {}).name, res.code);
             })
             .catch(function (e) {
                 rowEl.className = 'diag-row';
