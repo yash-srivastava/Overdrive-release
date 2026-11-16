@@ -153,19 +153,43 @@
             #chargeCustomTab:hover { background: var(--well-2); }
             #chargeCustomTab.active:hover { background: var(--secondary-container); }
         }
-        /* Sessions period bar (7d / 30d / all / custom): pinned under the page
-           header and sticky section tabs while the session list scrolls. */
+        /* Sticky on wrappers (full scroll range); transparent shell so only chips
+           show. Custom range row lives outside #sessionFilters in markup. */
+        body.charging-page {
+            --ch-sticky-top: calc(var(--page-header-h, 64px) + var(--tabs-h, 48px) + 8px);
+            --ch-sticky-top-tabs: calc(var(--tabs-h, 48px) + 8px);
+            --ch-sticky-detail-top: calc(var(--tabs-h, 48px) + 12px);
+        }
         #sessionFilters {
             position: -webkit-sticky;
             position: sticky;
-            top: calc(var(--page-header-h, 64px) + var(--tabs-h, 48px) + 8px);
+            top: var(--ch-sticky-top);
             z-index: 5;
             margin-bottom: 4px;
-            padding: 4px 0 8px;
-            background: var(--page);
+            padding: 0;
+            background: transparent;
+            pointer-events: none;
         }
+        #sessionFilters > * { pointer-events: auto; }
         :root[data-app-shell="1"] #sessionFilters {
-            top: calc(var(--tabs-h, 48px) + 8px);
+            top: var(--ch-sticky-top-tabs);
+        }
+        #sessionFilters > .filter-tabs.charge-segmented-control.charge-period-control {
+            margin-bottom: 4px;
+        }
+        #sessionFilters > .filter-tabs.charge-segmented-control.charge-period-control > * {
+            margin-bottom: 0;
+        }
+        #sessionFilters > .charge-location-filter-row,
+        #sessionFilters > #chargeLocationFilterRow {
+            margin-bottom: 0;
+        }
+        #sessionFilters > .charge-location-filter-row > *,
+        #sessionFilters > #chargeLocationFilterRow > * {
+            margin-bottom: 0;
+        }
+        #sessionFilters > .charge-location-hint {
+            margin-bottom: 4px;
         }
         /* Custom From → To range. Collapsed by default; .open reveals it with a
            height + fade transition (display:none cannot animate). Phones stack
@@ -906,22 +930,28 @@
         @media (hover: none) { .session-delete-btn { opacity: .7; } }
         @media (pointer: coarse) { .session-delete-btn { width: 44px; height: 44px; } }
         #chargingDetail { width: 100%; max-width: 1900px; margin-right: auto; margin-left: auto; }
-        /* Back link (mock .back-link) — stays reachable while session detail scrolls. */
+        /* Detail nav wrapper stays sticky for the full drill-in scroll. */
         .ch-detail-nav {
-            display: flex; align-items: center; min-height: 44px;
+            display: flex; align-items: center; flex-wrap: wrap;
+            min-height: 0;
+            margin: 0 0 8px;
+            padding: 0;
+            background: transparent;
+            pointer-events: none;
             position: -webkit-sticky;
             position: sticky;
-            top: calc(var(--page-header-h, 64px) + var(--tabs-h, 48px) + 8px);
+            top: var(--ch-sticky-top);
             z-index: 5;
-            margin: 0 0 8px;
-            padding: 6px 0 10px;
-            background: var(--page);
         }
-        body.charging-detail-open .ch-detail-nav {
-            top: calc(var(--tabs-h, 48px) + 12px);
-        }
+        .ch-detail-nav > * { pointer-events: auto; }
+        body.charging-detail-open .ch-detail-nav,
         :root[data-app-shell="1"] .ch-detail-nav {
-            top: calc(var(--tabs-h, 48px) + 12px);
+            top: var(--ch-sticky-detail-top);
+        }
+        .ch-detail-nav .ch-pager { margin-left: auto; }
+        [dir="rtl"] .ch-detail-nav .ch-pager {
+            margin-left: 0;
+            margin-right: auto;
         }
         /* Document scrolls (app-tabs.js). Sticky needs every ancestor up to the
            viewport to avoid a scrollport; body { overflow-x: hidden } in
@@ -936,7 +966,7 @@
             display: inline-flex; align-items: center;   /* svg+span spacing via sibling margin (Chrome-58: flex gap unsupported) */
             min-height: 44px; margin-left: -6px; padding: 0 12px 0 6px;
             border: 0; border-radius: var(--radius-full);
-            background: transparent; color: var(--primary);
+            background: var(--page); color: var(--primary);
             font-family: inherit; font-size: var(--fs-label); font-weight: 600;
             cursor: pointer;
         }
@@ -1436,9 +1466,10 @@
                                 </select>
                             </label>
                         </div>
-                        <!-- Custom date range (hidden until "Custom" is tapped).
-                             Each field opens the shared calendar popup — matches
-                             the events-page date picker look & feel. -->
+                    </div>
+                    <!-- Custom date range (hidden until "Custom" is tapped); outside
+                         #sessionFilters so the sticky shell stays compact. -->
+                    <div data-tab="sessions" id="chargeCustomRangeSlot">
                         <div class="ch-range-row" id="chargeRangeRow">
                             <div class="ch-range-dates">
                                 <button class="calendar-toggle" id="chargeFromToggle" onclick="CHARGING.openCalendar('from')">
