@@ -111,7 +111,7 @@ public final class RemoteAccessSettings {
     private static final String[] BOOLEAN_KEYS = {
             "enabled", "unlockEnabled", "lockEnabled", "dryRun", "keepBluetoothOn", "notifyPush", "notifyTelegram",
             "advancedMode", "keyFobEnabled", "keyFobLockEnabled",
-            "restrictLockToOutsideSafeZones", "restrictUnlockToOutsideSafeZones", CLOUD_FALLBACK_KEY,
+            "restrictLockToOutsideSafeZones", "restrictUnlockToOutsideSafeZones", "parkedBluetoothSafeZoneEnabled", CLOUD_FALLBACK_KEY,
             DI5_LOCK_SETTINGS_EXPLICIT_KEY, CONFIRM_WITH_VEHICLE_KEY, TIMING_EXPLICIT_KEY,
             UNLOCK_TRIGGER_EXPLICIT_KEY, LOCK_WAITS_FOR_KEY_ABSENCE_KEY, KEY_FOB_LOCK_EXPLICIT_KEY
     };
@@ -132,7 +132,8 @@ public final class RemoteAccessSettings {
                     .put("notifyPush", false).put("notifyTelegram", false).put("phones", new JSONArray())
                     .put("advancedMode", false).put("keyFobEnabled", false).put("keyFobLockEnabled", false)
                     .put("restrictLockToOutsideSafeZones", false)
-                    .put("restrictUnlockToOutsideSafeZones", false).put("proximitySafeZoneIds", new JSONArray())
+                    .put("restrictUnlockToOutsideSafeZones", false).put("parkedBluetoothSafeZoneEnabled", false)
+                    .put("proximitySafeZoneIds", new JSONArray())
                     .put("keyFobLockWindowMs", KEY_FOB_LOCK_WINDOW_MS_DEFAULT)
                     .put(KEY_FOB_LOCK_SAMPLES_KEY, KEY_FOB_LOCK_SAMPLES_DEFAULT)
                     .put(LOCK_WAITS_FOR_KEY_ABSENCE_KEY, LOCK_WAITS_FOR_KEY_ABSENCE_DEFAULT)
@@ -426,7 +427,8 @@ public final class RemoteAccessSettings {
         if (result.getBoolean("keyFobLockEnabled") && !result.getBoolean("keyFobEnabled"))
             throw new IllegalArgumentException("Enable key fob detection before key fob locking");
         if ((result.getBoolean("restrictLockToOutsideSafeZones")
-                || result.getBoolean("restrictUnlockToOutsideSafeZones"))
+                || result.getBoolean("restrictUnlockToOutsideSafeZones")
+                || result.getBoolean("parkedBluetoothSafeZoneEnabled"))
                 && result.getJSONArray("proximitySafeZoneIds").length() == 0)
             throw new IllegalArgumentException("Select at least one safe zone for the proximity restriction");
         String address = result.getString("deviceAddress");

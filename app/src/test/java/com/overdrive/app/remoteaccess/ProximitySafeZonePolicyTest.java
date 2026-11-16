@@ -66,6 +66,38 @@ public class ProximitySafeZonePolicyTest {
         assertTrue(outside.allowed("unlock"));
     }
 
+    @Test public void parkedBluetoothRequiresItsOwnOptInAndConfidentInsideFix() {
+        assertFalse(both(INSIDE).shouldDisableBluetooth());
+        assertTrue(ProximitySafeZonePolicy.evaluate(true, false, false, true,
+                Collections.singletonList("home"), Collections.singletonList(HOME), INSIDE, null)
+                .shouldDisableBluetooth());
+        assertFalse(ProximitySafeZonePolicy.evaluate(true, false, false, true,
+                Collections.singletonList("home"), Collections.singletonList(HOME), OUTSIDE, null)
+                .shouldDisableBluetooth());
+        assertFalse(ProximitySafeZonePolicy.evaluate(true, false, false, true,
+                Collections.singletonList("home"), Collections.singletonList(HOME), null, null)
+                .shouldDisableBluetooth());
+        assertFalse(ProximitySafeZonePolicy.evaluate(false, false, false, true,
+                Collections.singletonList("home"), Collections.singletonList(HOME), INSIDE, null)
+                .shouldDisableBluetooth());
+    }
+
+    @Test public void parkedBluetoothHasItsOwnDefaultOffRestriction() {
+        ProximitySafeZonePolicy.Result defaultOff = ProximitySafeZonePolicy.evaluate(
+                true, false, false, Collections.singletonList("home"),
+                Collections.singletonList(HOME), INSIDE);
+        assertEquals("UNRESTRICTED", defaultOff.state);
+        assertFalse(defaultOff.shouldDisableBluetooth());
+
+        ProximitySafeZonePolicy.Result independentlyEnabled = ProximitySafeZonePolicy.evaluate(
+                true, false, false, true, Collections.singletonList("home"),
+                Collections.singletonList(HOME), INSIDE, null);
+        assertEquals("INSIDE", independentlyEnabled.state);
+        assertTrue(independentlyEnabled.shouldDisableBluetooth());
+        assertTrue(independentlyEnabled.allowed("unlock"));
+        assertTrue(independentlyEnabled.toJson().getJSONObject("bluetooth").getBoolean("restricted"));
+    }
+
     @Test public void boundaryAndAccuracyOverlapRemainUnknown() {
         // One degree latitude is about 111 km: this is approximately 100 m.
         ProximitySafeZonePolicy.Result onBoundary = both(

@@ -66,7 +66,7 @@ public final class ProximitySafeZonePolicy {
     }
 
     public static final class Result {
-        public final boolean enabled, lockRestricted, unlockRestricted;
+        public final boolean enabled, lockRestricted, unlockRestricted, bluetoothRestricted;
         public final String state, reason;
         public final long fixAgeMs;
         public final double accuracyMeters;
@@ -76,12 +76,13 @@ public final class ProximitySafeZonePolicy {
         private final List<Zone> selectedZones;
         private final String geometryScope;
 
-        private Result(boolean enabled, boolean lockRestricted, boolean unlockRestricted,
+        private Result(boolean enabled, boolean lockRestricted, boolean unlockRestricted, boolean bluetoothRestricted,
                        String state, String reason, Fix fix, boolean parked, List<String> selectedIds,
                        List<Zone> selectedZones, String geometryScope) {
             this.enabled = enabled;
             this.lockRestricted = lockRestricted;
             this.unlockRestricted = unlockRestricted;
+            this.bluetoothRestricted = bluetoothRestricted;
             this.state = state;
             this.reason = reason;
             this.fixAgeMs = fix == null ? -1 : fix.ageMs;
@@ -103,6 +104,15 @@ public final class ProximitySafeZonePolicy {
             if ("DISABLED".equals(state)) return "disabled";
             if (!"lock".equals(action) && !"unlock".equals(action)) return "invalid_action";
             return ("lock".equals(action) ? lockRestricted : unlockRestricted) ? reason : "not_restricted";
+        }
+
+        /**
+         * Parked Bluetooth has its own opt-in restriction, independent of automatic unlock.
+         * Only a confident INSIDE result authorizes suppression; boundary and unknown
+         * positions deliberately keep the radio available.
+         */
+        public boolean shouldDisableBluetooth() {
+            return enabled && bluetoothRestricted && "INSIDE".equals(state);
         }
 
         public Lease lease(String action) {
@@ -136,7 +146,10 @@ public final class ProximitySafeZonePolicy {
                     .put("lock", new JSONObject().put("restricted", lockRestricted)
                             .put("allowed", allowed("lock")).put("reason", actionReason("lock")))
                     .put("unlock", new JSONObject().put("restricted", unlockRestricted)
-                            .put("allowed", allowed("unlock")).put("reason", actionReason("unlock")));
+                            .put("allowed", allowed("unlock")).put("reason", actionReason("unlock")))
+                    .put("bluetooth", new JSONObject().put("restricted", bluetoothRestricted)
+                            .put("disableEligible", shouldDisableBluetooth()))
+                    .put("bluetoothDisableEligible", shouldDisableBluetooth());
         }
     }
 
@@ -146,12 +159,19 @@ public final class ProximitySafeZonePolicy {
      */
     public static Result evaluate(boolean masterEnabled, boolean restrictLock, boolean restrictUnlock,
                                   List<String> selectedIds, List<Zone> availableZones, Fix fix) {
-        return evaluate(masterEnabled, restrictLock, restrictUnlock, selectedIds, availableZones, fix, null);
+        return evaluate(masterEnabled, restrictLock, restrictUnlock, false, selectedIds, availableZones, fix, null);
+    }
+
+    /** Legacy overload: Bluetooth suppression remains disabled unless explicitly configured. */
+    public static Result evaluate(boolean masterEnabled, boolean restrictLock, boolean restrictUnlock,
+                                  List<String> selectedIds, List<Zone> availableZones, Fix fix, Fix parked) {
+        return evaluate(masterEnabled, restrictLock, restrictUnlock, false, selectedIds, availableZones, fix, parked);
     }
 
     /** {@code parked} stands in only when {@code fix} fails; it has no age limit, only the accuracy one. */
     public static Result evaluate(boolean masterEnabled, boolean restrictLock, boolean restrictUnlock,
-                                  List<String> selectedIds, List<Zone> availableZones, Fix fix, Fix parked) {
+                                  boolean restrictBluetooth, List<String> selectedIds,
+                                  List<Zone> availableZones, Fix fix, Fix parked) {
         List<String> ids = selectedIds == null ? Collections.emptyList() : new ArrayList<>(selectedIds);
         List<Zone> selected = new ArrayList<>();
         TreeMap<String, Zone> geometry = new TreeMap<>();
@@ -163,53 +183,53 @@ public final class ProximitySafeZonePolicy {
             }
         }
         for (String id : ids) selected.add(id == null ? null : geometry.get(id));
-        String scope = geometryScope(masterEnabled, restrictLock, restrictUnlock, ids, geometry);
+        String scope = geometryScope(masterEnabled, restrictLock, restrictUnlock, restrictBluetooth, ids, geometry);
         if (!masterEnabled)
-            return result(false, restrictLock, restrictUnlock, "DISABLED", "disabled", null, ids, selected, scope);
-        if (!restrictLock && !restrictUnlock)
-            return result(false, false, false, "UNRESTRICTED", "not_restricted", null, ids, selected, scope);
+            return result(false, restrictLock, restrictUnlock, restrictBluetooth, "DISABLED", "disabled", null, ids, selected, scope);
+        if (!restrictLock && !restrictUnlock && !restrictBluetooth)
+            return result(false, false, false, restrictBluetooth, "UNRESTRICTED", "not_restricted", null, ids, selected, scope);
         if (ids.isEmpty())
-            return result(true, restrictLock, restrictUnlock, "UNKNOWN", "no_safe_zones_selected",
+            return result(true, restrictLock, restrictUnlock, restrictBluetooth, "UNKNOWN", "no_safe_zones_selected",
                     fix, ids, selected, scope);
         HashSet<String> uniqueIds = new HashSet<>();
         if (ids.size() > 10)
-            return result(true, restrictLock, restrictUnlock, "UNKNOWN", "safe_zone_invalid", fix, ids, selected, scope);
+            return result(true, restrictLock, restrictUnlock, restrictBluetooth, "UNKNOWN", "safe_zone_invalid", fix, ids, selected, scope);
         for (int i = 0; i < ids.size(); i++) {
             String id = ids.get(i);
             Zone zone = selected.get(i);
             if (id == null || id.isEmpty() || !uniqueIds.add(id) || duplicateZones.contains(id))
-                return result(true, restrictLock, restrictUnlock, "UNKNOWN", "safe_zone_invalid",
+                return result(true, restrictLock, restrictUnlock, restrictBluetooth, "UNKNOWN", "safe_zone_invalid",
                         fix, ids, selected, scope);
             if (zone == null)
-                return result(true, restrictLock, restrictUnlock, "UNKNOWN", "safe_zone_missing",
+                return result(true, restrictLock, restrictUnlock, restrictBluetooth, "UNKNOWN", "safe_zone_missing",
                         fix, ids, selected, scope);
             if (!zone.geometryValid || !validCoordinate(zone.latitude, zone.longitude)
                     || zone.radiusMeters < 15 || zone.radiusMeters > 500)
-                return result(true, restrictLock, restrictUnlock, "UNKNOWN", "safe_zone_invalid",
+                return result(true, restrictLock, restrictUnlock, restrictBluetooth, "UNKNOWN", "safe_zone_invalid",
                         fix, ids, selected, scope);
         }
         String fixFailure = fixFailure(fix, false);
         boolean usingParked = fixFailure != null && fixFailure(parked, true) == null;
         if (usingParked) fix = parked;
         else if (fixFailure != null)
-            return result(true, restrictLock, restrictUnlock, "UNKNOWN", fixFailure, fix, ids, selected, scope);
+            return result(true, restrictLock, restrictUnlock, restrictBluetooth, "UNKNOWN", fixFailure, fix, ids, selected, scope);
         double uncertainty = Math.max(10.0, fix.accuracyMeters * 2.0);
         boolean boundary = false;
         for (Zone zone : selected) {
             double distance = distanceMeters(fix.latitude, fix.longitude, zone.latitude, zone.longitude);
             if (distance + uncertainty <= zone.radiusMeters)
-                return new Result(true, restrictLock, restrictUnlock, "INSIDE", "inside_safe_zone",
+                return new Result(true, restrictLock, restrictUnlock, restrictBluetooth, "INSIDE", "inside_safe_zone",
                         fix, usingParked, ids, selected, scope);
             if (distance - uncertainty <= zone.radiusMeters) boundary = true;
         }
-        return new Result(true, restrictLock, restrictUnlock, boundary ? "UNKNOWN" : "OUTSIDE",
+        return new Result(true, restrictLock, restrictUnlock, restrictBluetooth, boundary ? "UNKNOWN" : "OUTSIDE",
                 boundary ? "safe_zone_boundary" : "outside_safe_zones", fix, usingParked, ids, selected, scope);
     }
 
-    private static Result result(boolean enabled, boolean restrictLock, boolean restrictUnlock,
+    private static Result result(boolean enabled, boolean restrictLock, boolean restrictUnlock, boolean restrictBluetooth,
                                  String state, String reason, Fix fix, List<String> ids,
                                  List<Zone> selected, String scope) {
-        return new Result(enabled, restrictLock, restrictUnlock, state, reason, fix, false, ids, selected, scope);
+        return new Result(enabled, restrictLock, restrictUnlock, restrictBluetooth, state, reason, fix, false, ids, selected, scope);
     }
 
     private static String fixFailure(Fix fix, boolean parked) {
@@ -239,9 +259,9 @@ public final class ProximitySafeZonePolicy {
                 Math.sqrt(Math.max(0, 1 - a)));
     }
 
-    private static String geometryScope(boolean master, boolean lock, boolean unlock,
+    private static String geometryScope(boolean master, boolean lock, boolean unlock, boolean bluetooth,
                                         List<String> ids, TreeMap<String, Zone> zones) {
-        StringBuilder value = new StringBuilder().append(master).append('/').append(lock).append('/').append(unlock);
+        StringBuilder value = new StringBuilder().append(master).append('/').append(lock).append('/').append(unlock).append('/').append(bluetooth);
         ArrayList<String> sorted = new ArrayList<>();
         for (String id : ids) sorted.add(id == null ? "" : id);
         Collections.sort(sorted);
