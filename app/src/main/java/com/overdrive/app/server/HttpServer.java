@@ -870,8 +870,12 @@ public class HttpServer {
             // the glassWidgets settings, like the built-ins: the car's own arrange mode writes those over loopback.
             boolean widgetWriteRequest = !method.equals("GET")
                     && (isCustomWidgetsPath(pathOnly) || isCommunityWidgetsPath(pathOnly));
+            // Formatting erases an entire removable volume. Unlike ordinary local
+            // storage settings, it must never accept the loopback/same-device fallback.
+            boolean destructiveStorageFormatRequest = method.equals("POST")
+                    && pathOnly.equals("/api/storage/external/format");
             boolean authenticated = remoteDevRequest || genAiRequest || wireGuardRequest || remoteAccessRequest
-                    || widgetWriteRequest
+                    || widgetWriteRequest || destructiveStorageFormatRequest
                 ? AuthMiddleware.checkJwtOnly(path, cookieHeader, authHeader, out)
                 : AuthMiddleware.checkAuth(path, cookieHeader, authHeader, out,
                     client.getRemoteSocketAddress(), hasTunnelHeaders,

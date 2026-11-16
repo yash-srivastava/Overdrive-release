@@ -1314,6 +1314,44 @@ BYD.storagePage = {
         }
     },
 
+    // ==================== SD card formatting ====================
+
+    async formatSdCard() {
+        const button = this._el('sdFormatButton');
+        const status = this._el('sdFormatStatus');
+        if (!button || button.disabled) return;
+        const warning = this._tr('storage.sd_format_confirm_body');
+        const confirmed = BYD.utils && BYD.utils.confirmDialog
+            ? await Promise.resolve(BYD.utils.confirmDialog({
+                title: this._tr('storage.sd_format_confirm_title'), body: warning,
+                confirmLabel: this._tr('storage.sd_format_confirm'), cancelLabel: this._tr('common.cancel'), danger: true
+            })).catch(() => false)
+            : window.confirm(warning);
+        if (!confirmed) return;
+        button.disabled = true;
+        if (status) status.textContent = this._tr('storage.sd_format_progress');
+        try {
+            const response = await fetch('/api/storage/external/format', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ confirmed: true })
+            });
+            const data = await response.json();
+            const message = data.message || data.error || this._tr('storage.sd_format_failed');
+            if (status) status.textContent = message;
+            this._toast(message, data.success ? 'success' : 'error');
+            if (data.success) {
+                this.loadCdrConfig();
+                this.loadStorageStats();
+            }
+        } catch (e) {
+            const message = this._tr('storage.sd_format_request_failed').replace('{error}', e && e.message ? e.message : 'request failed');
+            if (status) status.textContent = message;
+            this._toast(message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    },
+
     // ==================== Recover missing trips ====================
 
     /**
