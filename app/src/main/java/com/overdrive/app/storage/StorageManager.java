@@ -6573,6 +6573,21 @@ public class StorageManager {
         return sdCardPath;
     }
 
+    /** Serialize destructive SD operations against mount/unmount discovery. */
+    public boolean acquireSdCardFormatLock() {
+        try {
+            return mountLock.tryLock(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    /** Release the lock acquired by {@link #acquireSdCardFormatLock()}. */
+    public void releaseSdCardFormatLock() {
+        if (mountLock.isHeldByCurrentThread()) mountLock.unlock();
+    }
+
     public boolean isUsbAvailable() {
         return usbAvailable;
     }

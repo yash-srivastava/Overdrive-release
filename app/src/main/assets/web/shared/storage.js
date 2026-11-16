@@ -1291,6 +1291,48 @@ BYD.storagePage = {
         }
     },
 
+    // ==================== SD card formatting ====================
+
+    async formatSdCard() {
+        const button = this._el('sdFormatButton');
+        const selector = this._el('sdFormatFilesystem');
+        const status = this._el('sdFormatStatus');
+        if (!button || !selector || button.disabled) return;
+        const filesystem = selector.value;
+        const warning = 'Formatting the SD card as ' + filesystem + ' permanently erases ALL data on it. Continue only after backing up your files and moving Overdrive storage off the SD card.';
+        const confirmed = BYD.utils && BYD.utils.confirmDialog
+            ? await Promise.resolve(BYD.utils.confirmDialog({
+                title: 'Erase and format SD card?', body: warning,
+                confirmLabel: 'Erase and format', cancelLabel: this._tr('common.cancel'), danger: true
+            })).catch(() => false)
+            : window.confirm(warning);
+        if (!confirmed) return;
+        button.disabled = true;
+        selector.disabled = true;
+        if (status) status.textContent = 'Formatting…';
+        try {
+            const response = await fetch('/api/storage/external/format', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filesystem: filesystem, confirmed: true })
+            });
+            const data = await response.json();
+            const message = data.message || data.error || 'Formatting failed.';
+            if (status) status.textContent = message;
+            this._toast(message, data.success ? 'success' : 'error');
+            if (data.success) {
+                this.loadCdrConfig();
+                this.loadStorageStats();
+            }
+        } catch (e) {
+            const message = 'Could not format the SD card: ' + (e && e.message ? e.message : 'request failed');
+            if (status) status.textContent = message;
+            this._toast(message, 'error');
+        } finally {
+            button.disabled = false;
+            selector.disabled = false;
+        }
+    },
+
     // ==================== Recover missing trips ====================
 
     /**

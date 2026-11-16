@@ -86,10 +86,39 @@ public class ExternalStorageApiHandler {
             refreshPaths(out);
             return true;
         }
+
+        if (path.equals("/api/storage/external/format") && method.equals("POST")) {
+            formatSdCard(body, out);
+            return true;
+        }
         
         return false;
     }
     
+    /** POST /api/storage/external/format — destructive, user-confirmed SD formatting. */
+    private static void formatSdCard(String body, OutputStream out) throws Exception {
+        JSONObject response = new JSONObject();
+        try {
+            JSONObject request = new JSONObject(body == null ? "{}" : body);
+            if (!request.optBoolean("confirmed", false)) {
+                response.put("success", false);
+                response.put("error", "Explicit confirmation is required.");
+                sendJson(out, 400, response);
+                return;
+            }
+            String filesystem = request.optString("filesystem", "");
+            com.overdrive.app.storage.SdCardFormatter.Result result =
+                    com.overdrive.app.storage.SdCardFormatter.getInstance().format(filesystem);
+            response.put("success", result.success);
+            response.put(result.success ? "message" : "error", result.message);
+            sendJson(out, result.success ? 200 : 409, response);
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("error", e.getMessage() == null ? "Unable to format SD card." : e.getMessage());
+            sendJson(out, 400, response);
+        }
+    }
+
     /**
      * GET /api/storage/external
      * Returns SD card status, CDR info, and cleanup configuration.
