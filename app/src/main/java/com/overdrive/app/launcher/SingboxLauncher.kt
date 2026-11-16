@@ -36,28 +36,41 @@ class SingboxLauncher(
      * Launch sing-box proxy via ADB shell.
      */
     fun launchSingbox(callback: SingboxCallback) {
-        logManager.info(TAG, "Launching sing-box...")
-        callback.onLog("Setting up sing-box...")
-        
-        // Check if binary is installed
-        adbShellExecutor.execute(
-            command = "test -x $SINGBOX_TMP_PATH && echo yes || echo no",
-            callback = object : AdbShellExecutor.ShellCallback {
-                override fun onSuccess(output: String) {
-                    if (output.trim() == "yes") {
-                        killExistingAndLaunch(callback)
-                    } else {
+        logManager.info(TAG, "Checking sing-box readiness before launch...")
+        callback.onLog("Checking sing-box proxy...")
+
+        // A healthy listener is authoritative. Do not tear down a working proxy
+        // just because the app or a dependent tunnel is being initialized again.
+        // The bounded socket check runs off the UI thread.
+        probeProxyPort { alreadyRunning ->
+            if (alreadyRunning) {
+                logManager.info(TAG, "sing-box is already accepting connections on port $PROXY_PORT")
+                callback.onLog("sing-box already running on port $PROXY_PORT")
+                callback.onStarted()
+                return@probeProxyPort
+            }
+
+            callback.onLog("Setting up sing-box...")
+            // Check if binary is installed
+            adbShellExecutor.execute(
+                command = "test -x $SINGBOX_TMP_PATH && echo yes || echo no",
+                callback = object : AdbShellExecutor.ShellCallback {
+                    override fun onSuccess(output: String) {
+                        if (output.trim() == "yes") {
+                            killExistingAndLaunch(callback)
+                        } else {
+                            installSingbox(callback)
+                        }
+                    }
+
+                    override fun onError(error: String) {
                         installSingbox(callback)
                     }
                 }
-                
-                override fun onError(error: String) {
-                    installSingbox(callback)
-                }
-            }
-        )
+            )
+        }
     }
-    
+
     private fun installSingbox(callback: SingboxCallback) {
         val nativeLibDir = context.applicationInfo.nativeLibraryDir
         val srcPath = "$nativeLibDir/libsingbox.so"
@@ -255,27 +268,19 @@ class SingboxLauncher(
         
         Thread.sleep(500)
         
-        // Check if process is running
-        adbShellExecutor.execute(
-            command = "pgrep -f sing-box && echo RUNNING || echo NOT_RUNNING",
-            callback = object : AdbShellExecutor.ShellCallback {
-                override fun onSuccess(output: String) {
-                    if (output.contains("RUNNING") && !output.contains("NOT_RUNNING")) {
-                        logManager.info(TAG, "sing-box started successfully")
-                        callback.onLog("sing-box running on port $PROXY_PORT")
-                        callback.onStarted()
-                    } else {
-                        callback.onLog("Waiting... ($attempt/10)")
-                        waitForStartup(callback, attempt + 1)
-                    }
-                }
-                
-                override fun onError(error: String) {
-                    callback.onLog("Waiting... ($attempt/10)")
-                    waitForStartup(callback, attempt + 1)
-                }
+        // A loopback listener proves the proxy has bound its service port. A
+        // full-command process search is unsafe here: the ADB `sh -c` wrapper
+        // contains the probe text in its own argv and can report itself as sing-box.
+        probeProxyPort { ready ->
+            if (ready) {
+                logManager.info(TAG, "sing-box started successfully")
+                callback.onLog("sing-box running on port $PROXY_PORT")
+                callback.onStarted()
+            } else {
+                callback.onLog("Waiting... ($attempt/10)")
+                waitForStartup(callback, attempt + 1)
             }
-        )
+        }
     }
     
     /**
@@ -311,17 +316,18 @@ class SingboxLauncher(
      * Check if sing-box is running.
      */
     fun isRunning(callback: (Boolean) -> Unit) {
-        adbShellExecutor.execute(
-            command = "pgrep -f sing-box",
-            callback = object : AdbShellExecutor.ShellCallback {
-                override fun onSuccess(output: String) {
-                    callback(output.trim().isNotEmpty())
-                }
-                
-                override fun onError(error: String) {
-                    callback(false)
-                }
-            }
-        )
+        // Check the actual proxy listener, not process-name text in a shell
+        // wrapper. This also avoids treating a stale/crashed process as ready.
+        probeProxyPort(callback)
+    }
+
+    /** Run the bounded localhost socket probe away from the main/UI thread. */
+    private fun probeProxyPort(callback: (Boolean) -> Unit) {
+        Thread({
+            callback(com.overdrive.app.mqtt.ProxyHelper.probePort(PROXY_PORT))
+        }, "singbox-port-probe").apply {
+            isDaemon = true
+            start()
+        }
     }
 }

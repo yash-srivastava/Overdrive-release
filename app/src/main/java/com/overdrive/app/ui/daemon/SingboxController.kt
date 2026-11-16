@@ -18,21 +18,34 @@ class SingboxController(
     override val type = DaemonType.SINGBOX_PROXY
     
     override fun start(callback: DaemonCallback) {
-        callback.onStatusChanged(DaemonStatus.STARTING, "Starting sing-box proxy...")
-        
-        adbLauncher.launchProxyDaemon(object : AdbDaemonLauncher.LaunchCallback {
-            override fun onLog(message: String) {
-                callback.onStatusChanged(DaemonStatus.STARTING, message)
+        callback.onStatusChanged(DaemonStatus.STARTING, "Checking sing-box proxy...")
+        adbLauncher.isSingboxRunning { running ->
+            if (running) {
+                callback.onStatusChanged(
+                    DaemonStatus.RUNNING,
+                    AppLocaleContext.of(context).getString(R.string.singbox_status_running)
+                )
+                return@isSingboxRunning
             }
-            
-            override fun onLaunched() {
-                callback.onStatusChanged(DaemonStatus.RUNNING, AppLocaleContext.of(context).getString(R.string.singbox_status_running))
-            }
-            
-            override fun onError(error: String) {
-                callback.onError(error)
-            }
-        })
+
+            callback.onStatusChanged(DaemonStatus.STARTING, "Starting sing-box proxy...")
+            adbLauncher.launchProxyDaemon(object : AdbDaemonLauncher.LaunchCallback {
+                override fun onLog(message: String) {
+                    callback.onStatusChanged(DaemonStatus.STARTING, message)
+                }
+
+                override fun onLaunched() {
+                    callback.onStatusChanged(
+                        DaemonStatus.RUNNING,
+                        AppLocaleContext.of(context).getString(R.string.singbox_status_running)
+                    )
+                }
+
+                override fun onError(error: String) {
+                    callback.onError(error)
+                }
+            })
+        }
     }
     
     override fun stop(callback: DaemonCallback) {
@@ -59,18 +72,9 @@ class SingboxController(
     }
     
     override fun isRunning(callback: (Boolean) -> Unit) {
-        adbLauncher.executeShellCommand(
-            "ps -A | grep sing-box | grep -v grep",
-            object : AdbDaemonLauncher.LaunchCallback {
-                override fun onLog(message: String) {
-                    callback(message.trim().isNotEmpty())
-                }
-                override fun onLaunched() {}
-                override fun onError(error: String) {
-                    callback(false)
-                }
-            }
-        )
+        // The listening socket is the readiness contract; process-list output
+        // can include the shell wrapper used to run the probe itself.
+        adbLauncher.isSingboxRunning(callback)
     }
     
     override fun cleanup() {
