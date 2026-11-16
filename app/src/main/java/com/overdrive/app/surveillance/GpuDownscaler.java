@@ -707,9 +707,9 @@ public class GpuDownscaler {
         // ---- 1. Render the current camera frame into the FBO ----
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, directFbo);
         GLES20.glViewport(0, 0, WIDTH, HEIGHT);
-        GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-
+        // The direct shader writes gl_FragColor for every fragment and the
+        // quad covers the complete viewport. Clearing this FBO first only
+        // adds a second full-surface GPU pass before every AI readback.
         GLES20.glUseProgram(directProgram);
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
         GLES20.glBindTexture(
