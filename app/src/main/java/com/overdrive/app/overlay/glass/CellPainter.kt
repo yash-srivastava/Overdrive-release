@@ -115,11 +115,16 @@ class CellPainter(private val theme: GlassTheme, x: Float, y: Float, w: Float, h
             // light from the liquid spilling onto the glass pane
             if (cell.level > 0.001f) {
                 val hrx = cell.rx * 1.35f + 12f; val hry = hh / 2f + 24f
-                m.setScale(hrx, hry); m.postTranslate(cell.cx, sy + hh / 2f)
-                cell.haloShader?.setLocalMatrix(m)
+                // Keep the radial shader in unit space. Updating a Shader local
+                // matrix every frame makes HWUI rebuild its native shader state;
+                // transform the canvas instead.
+                c.save()
+                c.translate(cell.cx, sy + hh / 2f)
+                c.scale(hrx, hry)
                 live.shade(cell.haloShader)
                 live.alpha = (min(1f, cell.level * 5f) * 255).toInt()
-                c.drawOval(cell.cx - hrx, sy + hh / 2f - hry, cell.cx + hrx, sy + hh / 2f + hry, live)
+                c.drawCircle(0f, 0f, 1f, live)
+                c.restore()
                 live.alpha = 255
             }
             if (cell.level <= 0.006f) continue
@@ -138,12 +143,26 @@ class CellPainter(private val theme: GlassTheme, x: Float, y: Float, w: Float, h
 
             val ag = if (agitation != null && i < agitation.size) agitation[i] else 0f
             val ry = cell.lry + min(2.2f, abs(ag) * 2f)
-            m.setScale(cell.lrx * 1.5f, ry * 1.5f); m.postTranslate(cell.cx - cell.lrx * 0.28f, sy - ry * 0.24f)
-            cell.surfaceShader?.setLocalMatrix(m)
+            // Preserve the offset highlight geometry while moving the radial
+            // transform to the canvas: per-frame setLocalMatrix() causes
+            // avoidable native shader updates.
+            val shaderCx = cell.cx - cell.lrx * 0.28f
+            val shaderCy = sy - ry * 0.24f
+            val shaderRx = cell.lrx * 1.5f
+            val shaderRy = ry * 1.5f
+            c.save()
+            c.translate(shaderCx, shaderCy)
+            c.scale(shaderRx, shaderRy)
             live.shade(cell.surfaceShader)
             live.alpha = 245
-            r.set(cell.cx - cell.lrx, sy - ry, cell.cx + cell.lrx, sy + ry)
-            c.drawOval(r, live)
+            c.drawOval(
+                (cell.cx - cell.lrx - shaderCx) / shaderRx,
+                (sy - ry - shaderCy) / shaderRy,
+                (cell.cx + cell.lrx - shaderCx) / shaderRx,
+                (sy + ry - shaderCy) / shaderRy,
+                live
+            )
+            c.restore()
             live.alpha = 255
             live.shader = null
             rimPath.rewind()
