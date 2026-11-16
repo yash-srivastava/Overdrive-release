@@ -1914,31 +1914,13 @@ public class HardwareEventRecorderGpu {
             logger.info("Encoder OPERATING_RATE pin skipped (secondary encoder)");
         }
         
-        // H.265 specific optimizations for Snapdragon 665
-        if (codecMimeType.equals(MediaFormat.MIMETYPE_VIDEO_HEVC)) {
-            try {
-                // Use Main profile for better compatibility
-                format.setInteger(MediaFormat.KEY_PROFILE, 
-                        MediaCodecInfo.CodecProfileLevel.HEVCProfileMain);
-                format.setInteger(MediaFormat.KEY_LEVEL,
-                        MediaCodecInfo.CodecProfileLevel.HEVCMainTierLevel4);
-                logger.info("H.265 profile set to Main/Level 4");
-            } catch (Exception e) {
-                logger.warn("Could not set H.265 profile: " + e.getMessage());
-            }
-        } else {
-            // H.264: Use Baseline Profile for iOS Safari compatibility
-            try {
-                format.setInteger(MediaFormat.KEY_PROFILE,
-                        MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline);
-                format.setInteger(MediaFormat.KEY_LEVEL,
-                        MediaCodecInfo.CodecProfileLevel.AVCLevel31);
-                logger.info("H.264 profile set to Baseline/Level 3.1 (iOS compatible)");
-            } catch (Exception e) {
-                logger.warn("Could not set H.264 profile: " + e.getMessage());
-            }
-        }
-        
+        // Profile/level hints are applied only after createEncoderByType(),
+        // when the selected component's actual capabilities are available.
+        // In particular, never pin every H.264 recording to Level 3.1: a
+        // 2560x1920 frame already needs 19,200 macroblocks, above Level 3.1's
+        // 3,600-macroblock picture limit. The encoder must advertise a level
+        // that covers the requested geometry, rate and bitrate.
+
         // CRITICAL: All MediaCodec operations can block if hardware encoder is stuck
         // Wrap each operation with a timeout to prevent daemon freeze
         final MediaFormat finalFormat = format;
@@ -1970,6 +1952,11 @@ public class HardwareEventRecorderGpu {
             throw createError[0];
         }
         encoder = encoderResult[0];
+        // Select profile/level hints from the component that was actually
+        // created. Unsupported or insufficient hints are omitted so the
+        // platform encoder can negotiate a valid bitstream rather than being
+        // forced into an impossible level.
+        applyCodecCapabilityHints(encoder, finalFormat, finalCodecMimeType);
         // Confirm the negotiated codec name on this device, not just our intent.
         // If the device-side codec selection silently downgraded HEVC→AVC (rare,
         // but possible if the platform encoder list rejects HEVC for our params),
@@ -2581,6 +2568,140 @@ public class HardwareEventRecorderGpu {
         if (callback == null) return;
         synchronized (streamCallbackLock) {
             streamCallbacks.remove(callback);
+        }
+    }
+
+    /**
+     * Applies only profile/level hints supported by the selected encoder.
+     * VideoCapabilities is also used to diagnose unsupported geometry/rate
+     * and bitrate combinations. Capability reports on vehicle firmware can
+     * be incomplete, so a negative report is logged but is not treated as a
+     * hard failure; MediaCodec.configure() remains the final authority.
+     */
+    private void applyCodecCapabilityHints(MediaCodec codec, MediaFormat format,
+                                           String mimeType) {
+        try {
+            MediaCodecInfo.CodecCapabilities capabilities = codec.getCodecInfo()
+                    .getCapabilitiesForType(mimeType);
+            MediaCodecInfo.VideoCapabilities video = capabilities.getVideoCapabilities();
+            boolean sizeRateSupported = video != null
+                    && video.areSizeAndRateSupported(width, height, (double) fps);
+            boolean bitrateSupported = video != null
+                    && video.getBitrateRange().contains(bitrate);
+            logger.info("Encoder capability check: codec=" + codec.getName()
+                    + ", size=" + width + "x" + height + "@" + fps
+                    + " supported=" + sizeRateSupported
+                    + ", bitrate=" + bitrate + " supported=" + bitrateSupported);
+            if (video == null) {
+                logger.warn("Encoder did not expose VideoCapabilities; omitting profile/level hints");
+                return;
+            }
+
+            int requestedProfile = MediaFormat.MIMETYPE_VIDEO_HEVC.equals(mimeType)
+                    ? MediaCodecInfo.CodecProfileLevel.HEVCProfileMain
+                    : MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline;
+            java.util.ArrayList<Integer> advertisedLevels = new java.util.ArrayList<>();
+            boolean profileSupported = false;
+            if (capabilities.profileLevels != null) {
+                for (MediaCodecInfo.CodecProfileLevel profileLevel : capabilities.profileLevels) {
+                    if (profileLevel.profile == requestedProfile) {
+                        profileSupported = true;
+                        advertisedLevels.add(profileLevel.level);
+                    }
+                }
+            }
+
+            if (!profileSupported) {
+                logger.warn("Encoder does not advertise requested profile "
+                        + (MediaFormat.MIMETYPE_VIDEO_HEVC.equals(mimeType) ? "HEVC Main" : "AVC Baseline")
+                        + "; leaving profile and level to platform negotiation");
+                return;
+            }
+
+            int[] levels = new int[advertisedLevels.size()];
+            for (int i = 0; i < advertisedLevels.size(); i++) levels[i] = advertisedLevels.get(i);
+            if (MediaFormat.MIMETYPE_VIDEO_HEVC.equals(mimeType)) {
+                int selectedLevel = HevcLevelSelector.selectAdvertisedMainTierLevel(
+                        width, height, fps, bitrate, levels);
+                if (selectedLevel == 0) {
+                    // Never request a profile without its matching level: a
+                    // number of vendor encoders reject that partial hint at
+                    // configure(). Leave BOTH fields unset for platform
+                    // negotiation when the advertised maximum is insufficient.
+                    logger.warn("No advertised HEVC Main-tier maximum covers " + width + "x" + height
+                            + "@" + fps + " at " + bitrate + " bps; omitting both profile and level hints");
+                } else {
+                    format.setInteger(MediaFormat.KEY_PROFILE, requestedProfile);
+                    format.setInteger(MediaFormat.KEY_LEVEL, selectedLevel);
+                    logger.info("HEVC Main profile supported; selected required level "
+                            + HevcLevelSelector.describe(selectedLevel)
+                            + " within the encoder's advertised maximum");
+                }
+                if (!sizeRateSupported || !bitrateSupported) {
+                    logger.warn("Requested HEVC format exceeds or is absent from advertised encoder capabilities");
+                }
+                return;
+            }
+
+            int selectedLevel = AvcLevelSelector.selectAdvertisedBaselineLevel(
+                    width, height, fps, bitrate, levels);
+            if (selectedLevel == 0) {
+                logger.warn("No advertised AVC Baseline level covers " + width + "x" + height
+                        + "@" + fps + " at " + bitrate + " bps; leaving profile/level to encoder negotiation");
+                if (!sizeRateSupported || !bitrateSupported) {
+                    logger.warn("Requested AVC format is outside the encoder's reported capability ranges");
+                }
+                return;
+            }
+            format.setInteger(MediaFormat.KEY_PROFILE, requestedProfile);
+            format.setInteger(MediaFormat.KEY_LEVEL, selectedLevel);
+            logger.info("AVC Baseline profile supported; selected minimum advertised level "
+                    + AvcLevelSelector.describe(selectedLevel));
+            if (!sizeRateSupported || !bitrateSupported) {
+                logger.warn("Encoder capability range disagrees with selected AVC level; configure result will decide support");
+            }
+        } catch (Throwable t) {
+            // Vendor codec capability APIs are not always complete. A failed
+            // query must not prevent a recording; omit hints and let configure
+            // perform the authoritative validation.
+            logger.warn("Could not inspect encoder profile/level capabilities; using platform negotiation: "
+                    + t.getMessage());
+        }
+    }
+
+    /** Logs the negotiated output format and, for AVC, the profile/level in its SPS. */
+    private void logNegotiatedEncoderFormat(MediaFormat format) {
+        try {
+            String mime = format.containsKey(MediaFormat.KEY_MIME)
+                    ? format.getString(MediaFormat.KEY_MIME) : codecMimeType;
+            String details = "mime=" + mime
+                    + ", size=" + formatInt(format, MediaFormat.KEY_WIDTH) + "x"
+                    + formatInt(format, MediaFormat.KEY_HEIGHT)
+                    + ", fps=" + formatInt(format, MediaFormat.KEY_FRAME_RATE)
+                    + ", bitrate=" + formatInt(format, MediaFormat.KEY_BIT_RATE)
+                    + ", profile=" + formatInt(format, MediaFormat.KEY_PROFILE)
+                    + ", level=" + formatInt(format, MediaFormat.KEY_LEVEL);
+            logger.info("Negotiated encoder output format: " + details);
+            if (MediaFormat.MIMETYPE_VIDEO_AVC.equals(mime)) {
+                AvcSpsInfo sps = AvcSpsInfo.parse(format.getByteBuffer("csd-0"));
+                if (sps != null) {
+                    logger.info("Actual AVC SPS: profile=" + sps.profileName()
+                            + " (profile_idc=" + sps.profileIdc + "), level="
+                            + sps.levelName() + " (level_idc=" + sps.levelIdc + ")");
+                } else {
+                    logger.warn("AVC output format did not expose a parseable SPS in csd-0");
+                }
+            }
+        } catch (Throwable t) {
+            logger.warn("Could not inspect negotiated encoder output format: " + t.getMessage());
+        }
+    }
+
+    private static String formatInt(MediaFormat format, String key) {
+        try {
+            return format.containsKey(key) ? String.valueOf(format.getInteger(key)) : "not-reported";
+        } catch (Throwable ignored) {
+            return "not-reported";
         }
     }
 
@@ -6084,6 +6205,7 @@ public class HardwareEventRecorderGpu {
             } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                 // Format changed - add track to muxer and send SPS/PPS to stream
                 MediaFormat format = encoder.getOutputFormat();
+                logNegotiatedEncoderFormat(format);
                 
                 // Save format for reuse in subsequent recordings
                 if (savedFormat == null) {
