@@ -185,6 +185,17 @@ public class TelemetrySample {
     }
 
     /**
+     * Whether a lat/lon pair is a plausible on-disk GPS fix for map traces.
+     * Mirrors the trip-detail map filter in trips.js (0,0 = no fix; reject OOB).
+     */
+    public static boolean hasGpsFix(double lat, double lon) {
+        if (lat == 0.0 || lon == 0.0) return false;
+        if (!Double.isFinite(lat) || !Double.isFinite(lon)) return false;
+        if (Math.abs(lat) > 90.0 || Math.abs(lon) > 180.0) return false;
+        return true;
+    }
+
+    /**
      * Serialize to JSON with compact keys for storage.
      * Keys: t, s, a, b, bp, g, la, lo, al, va, am, ss, pu, nl, sz, sp, ha, dl
      * "va"/"am"/"ss"/"pu"/"nl"/"sz"/"sp"/"ha"/"dl" are written only when informative (va, ha, dl > 0 /

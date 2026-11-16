@@ -3690,7 +3690,7 @@ const TRIPS = {
         for (var i = lo; i < hi; i++) {
             var a = samples[i];
             var b = samples[i + 1];
-            if (!a || !b || !a.la || !a.lo || !b.la || !b.lo) continue;
+            if (!a || !b || !this._telemetryHasGps(a) || !this._telemetryHasGps(b)) continue;
             if (Math.abs(b.la - a.la) < minDelta && Math.abs(b.lo - a.lo) < minDelta) continue;
             var dLon = (b.lo - a.lo) * Math.PI / 180;
             var lat1 = a.la * Math.PI / 180;
@@ -3733,7 +3733,7 @@ const TRIPS = {
         }
 
         // 2. Sync Map Marker with heading rotation
-        if (this.leafletMap && this.sliderMarker && s.la && s.lo) {
+        if (this.leafletMap && this.sliderMarker && this._telemetryHasGps(s)) {
             this.sliderMarker.setLatLng([s.la, s.lo]);
             // Compute a smoothed heading.
             //
@@ -5142,6 +5142,38 @@ const TRIPS = {
 
     // ==================== ROUTE MAP ====================
 
+    _telemetryHasGps(sample) {
+        if (!sample) return false;
+        var la = sample.la;
+        var lo = sample.lo;
+        if (typeof la !== 'number' || typeof lo !== 'number') return false;
+        if (!isFinite(la) || !isFinite(lo)) return false;
+        if (la === 0 && lo === 0) return false;
+        if (Math.abs(la) > 90 || Math.abs(lo) > 180) return false;
+        return true;
+    },
+
+    _gpsPointsFromTelemetry(telemetry) {
+        if (!telemetry || !telemetry.length) return [];
+        var out = [];
+        for (var i = 0; i < telemetry.length; i++) {
+            if (this._telemetryHasGps(telemetry[i])) out.push(telemetry[i]);
+        }
+        return out;
+    },
+
+    _showTripMapMessage(container, i18nKey) {
+        if (!container) return;
+        var msg = BYD.i18n.t(i18nKey);
+        if (!msg || msg === i18nKey) {
+            msg = i18nKey === 'trip.map_unavailable'
+                ? 'Map library not available'
+                : 'No GPS data available';
+        }
+        container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);">'
+            + this.esc(msg) + '</div>';
+    },
+
     renderRouteMap(container, telemetry, detailRequest) {
         if (detailRequest && !this._isCurrentDetailRequest(detailRequest)) return;
         const isCurrentMap = () => {
@@ -5161,6 +5193,7 @@ const TRIPS = {
         }
         if (!telemetry || telemetry.length < 2) {
             console.warn('[Trips] renderRouteMap: not enough telemetry');
+            this._showTripMapMessage(container, 'trip.no_gps_data');
             return;
         }
 
@@ -5176,6 +5209,7 @@ const TRIPS = {
                 }, 1000);
             } else {
                 console.error('[Trips] Leaflet never loaded after 5 retries');
+                this._showTripMapMessage(container, 'trip.map_unavailable');
             }
             return;
         }
@@ -5201,10 +5235,11 @@ const TRIPS = {
         }
         this._layoutRetries = 0;
 
-        const points = telemetry.filter(s => s.la && s.lo && s.la !== 0 && s.lo !== 0);
+        const points = this._gpsPointsFromTelemetry(telemetry);
         console.log('[Trips] GPS points with coordinates:', points.length);
         if (points.length < 2) {
             console.warn('[Trips] renderRouteMap: not enough GPS points with coordinates');
+            this._showTripMapMessage(container, 'trip.no_gps_data');
             return;
         }
 
@@ -5392,7 +5427,7 @@ const TRIPS = {
             let closestIdx = 0, minDist = Infinity;
             const allTel = self.telemetryCache || [];
             for (let i = 0; i < allTel.length; i++) {
-                if (!allTel[i].la || !allTel[i].lo) continue;
+                if (!self._telemetryHasGps(allTel[i])) continue;
                 const dLat = allTel[i].la - clickLat;
                 const dLon = allTel[i].lo - clickLon;
                 const dist = dLat * dLat + dLon * dLon;
