@@ -44,26 +44,34 @@ public final class CameraConfigResolver {
         boolean requestedAutoProfile = selectedProfileId.isEmpty()
                 || CameraProfiles.PROFILE_AUTO.equalsIgnoreCase(selectedProfileId);
         boolean autoProfile = requestedAutoProfile && !dilink5;
+        // DiLink 100 legacy mode: the head unit, not the picked model, fixes the
+        // AVMCamera geometry (an "atto3-evo" pick would otherwise infer the
+        // DiLink 3 Atto 3 slice order). Stale probe ids from other modes are
+        // ignored so camera 0 (pano_h) is always used.
+        boolean dilink100 = autoProfile && !dilink4 && DiLink100Platform.isDiLink100();
         String vehicleModelHint = preferSelectedVehicleModel(
                 readSelectedVehicleModel(), vehicleModel);
         CameraProfile profile = dilink5
                 ? CameraProfiles.get(CameraProfiles.PROFILE_DILINK5_SEALION7)
+                : dilink100
+                ? CameraProfiles.get(CameraProfiles.PROFILE_DILINK100_AVM)
                 : autoProfile
                 ? CameraProfiles.infer(vehicleModelHint)
                 : CameraProfiles.get(selectedProfileId);
 
-        int persistedPanoCameraId = dilink5 ? profile.getPanoCameraId()
+        int persistedPanoCameraId = (dilink5 || dilink100) ? profile.getPanoCameraId()
                 : optNonNegative(camera, "probedCameraId", profile.getPanoCameraId());
         int panoCameraId = persistedPanoCameraId;
-        int panoSurfaceMode = dilink5 ? profile.getPanoSurfaceMode()
+        boolean fixedGeometry = dilink5 || dilink100;
+        int panoSurfaceMode = fixedGeometry ? profile.getPanoSurfaceMode()
                 : optNonNegative(camera, "probedSurfaceMode", profile.getPanoSurfaceMode());
-        int panoWidth = dilink5 ? profile.getPanoWidth()
+        int panoWidth = fixedGeometry ? profile.getPanoWidth()
                 : optNonNegative(camera, "probedWidth", profile.getPanoWidth());
-        int panoHeight = dilink5 ? profile.getPanoHeight()
+        int panoHeight = fixedGeometry ? profile.getPanoHeight()
                 : optNonNegative(camera, "probedHeight", profile.getPanoHeight());
-        boolean manual = !dilink5 && camera.optBoolean("manualOverride", false);
-        boolean validated = dilink5 || camera.optBoolean("probedAndValidated", false);
-        boolean fallback = !dilink5 && camera.optBoolean("fallbackFromProbe", false);
+        boolean manual = !fixedGeometry && camera.optBoolean("manualOverride", false);
+        boolean validated = fixedGeometry || camera.optBoolean("probedAndValidated", false);
+        boolean fallback = !fixedGeometry && camera.optBoolean("fallbackFromProbe", false);
 
         if (dilink4) {
             // DIPlus panoramic recording does not use a vehicle-profile pin
@@ -99,7 +107,7 @@ public final class CameraConfigResolver {
         JSONObject mappingsJson = camera.optJSONObject("roleMappings");
         // The native DiLink 5 hook emits one fixed canonical 2x2 order.
         // Do not let stale legacy role overrides desynchronize AI/preview geometry.
-        if (!dilink5 && mappingsJson != null) {
+        if (!fixedGeometry && mappingsJson != null) {
             for (CameraRole role : CameraRole.values()) {
                 JSONObject item = mappingsJson.optJSONObject(role.getKey());
                 CameraSourceRef sourceRef = CameraSourceRef.fromJson(item);

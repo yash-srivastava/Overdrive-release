@@ -171,8 +171,9 @@ public final class CameraPreviewHelper {
         byte[] mosaicJpeg = engineMosaicJpeg();
         if (mosaicJpeg == null || mosaicJpeg.length == 0) return null;
         if (CameraConfigResolver.isPassiveApaModeEnabled()) return mosaicJpeg;
-        if (com.overdrive.app.camera.camera2.Camera2Platform.isSelected()) {
-            return cropMosaicJpegToSlice(mosaicJpeg, camera2MosaicQuadrant(slice));
+        java.util.EnumMap<CameraRole, CameraSourceRef> tileOrder = nonLegacyTileOrder();
+        if (tileOrder != null) {
+            return cropMosaicJpegToSlice(mosaicJpeg, mosaicQuadrant(slice, tileOrder));
         }
         return cropMosaicJpegToSlice(mosaicJpeg, slice);
     }
@@ -189,13 +190,35 @@ public final class CameraPreviewHelper {
     }
 
     /**
-     * The mosaic places views by role (front TL, right TR, rear BL, left BR); camera2
+     * Role → physical slice for super-frames whose tile order is not the legacy
+     * one (Camera2 360, and DiLink 100 AVMCamera where tiles run front, right,
+     * left, rear). Null means the legacy fixed order applies.
+     */
+    private static java.util.EnumMap<CameraRole, CameraSourceRef> nonLegacyTileOrder() {
+        if (com.overdrive.app.camera.camera2.Camera2Platform.isSelected()) {
+            return CameraProfiles.camera2Avm(
+                    com.overdrive.app.camera.camera2.Camera2AvmBackend.cachedSliceRoles())
+                    .getDefaultRoleMappings();
+        }
+        if (DiLink100Platform.isDiLink100()) {
+            try {
+                CameraProfile profile = CameraConfigResolver.resolve().getProfile();
+                if (profile != null && CameraProfiles.PROFILE_DILINK100_AVM.equals(profile.getId())) {
+                    return profile.getDefaultRoleMappings();
+                }
+            } catch (Throwable t) {
+                logger.warn("DiLink 100 tile order lookup failed: " + t.getMessage());
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The mosaic places views by role (front TL, right TR, rear BL, left BR); these
      * slices carry other roles, so map to the legacy slice that owns that quadrant.
      */
-    private static PanoramicSlice camera2MosaicQuadrant(PanoramicSlice slice) {
-        java.util.EnumMap<CameraRole, CameraSourceRef> mappings = CameraProfiles.camera2Avm(
-                com.overdrive.app.camera.camera2.Camera2AvmBackend.cachedSliceRoles())
-                .getDefaultRoleMappings();
+    private static PanoramicSlice mosaicQuadrant(PanoramicSlice slice,
+            java.util.EnumMap<CameraRole, CameraSourceRef> mappings) {
         for (java.util.Map.Entry<CameraRole, CameraSourceRef> entry : mappings.entrySet()) {
             if (entry.getValue().getPanoramicSlice() != slice) continue;
             switch (entry.getKey()) {
@@ -279,14 +302,16 @@ public final class CameraPreviewHelper {
      */
     public static byte[] capturePanoramicViewJpeg(CameraVirtualView view) {
         if (view == null) return null;
-        if (com.overdrive.app.camera.camera2.Camera2Platform.isSelected()) {
-            return capturePanoramicSliceJpeg(camera2SliceForView(view));
+        java.util.EnumMap<CameraRole, CameraSourceRef> tileOrder = nonLegacyTileOrder();
+        if (tileOrder != null) {
+            return capturePanoramicSliceJpeg(sliceForView(view, tileOrder));
         }
         return capturePanoramicSliceJpeg(PanoramicSlice.fromLegacyView(view));
     }
 
-    /** camera2: the physical slice that holds this view under the run's tile order. */
-    private static PanoramicSlice camera2SliceForView(CameraVirtualView view) {
+    /** The physical slice that holds this view under a non-legacy tile order. */
+    private static PanoramicSlice sliceForView(CameraVirtualView view,
+            java.util.EnumMap<CameraRole, CameraSourceRef> tileOrder) {
         CameraRole role;
         switch (view) {
             case RIGHT: role = CameraRole.PANO_RIGHT; break;
@@ -295,9 +320,7 @@ public final class CameraPreviewHelper {
             case FRONT:
             default: role = CameraRole.PANO_FRONT; break;
         }
-        CameraSourceRef ref = CameraProfiles.camera2Avm(
-                com.overdrive.app.camera.camera2.Camera2AvmBackend.cachedSliceRoles())
-                .getDefaultRoleMappings().get(role);
+        CameraSourceRef ref = tileOrder.get(role);
         PanoramicSlice slice = ref != null ? ref.getPanoramicSlice() : null;
         return slice != null ? slice : PanoramicSlice.fromLegacyView(view);
     }
