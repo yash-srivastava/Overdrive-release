@@ -5595,6 +5595,43 @@ public class PanoramicCameraGpu {
     }
 
     /**
+     * DiLink 100: opens the pano_h AVMCamera without the static factory's
+     * BmmCameraInfo id validation (see {@link DiLink100Platform}). Uses
+     * {@code new AVMCamera(id, camDevType=0)} plus the instance {@code open()},
+     * which is exactly what the static factory does after validation.
+     *
+     * @return the open AVMCamera, or null when bmmcameraserver refused it
+     */
+    private Object openDiLink100Camera(Class<?> avmClass) {
+        final int id = DiLink100Platform.PANO_CAMERA_ID;
+        Object candidate = null;
+        try {
+            Constructor<?> constructor =
+                    avmClass.getDeclaredConstructor(int.class, int.class);
+            constructor.setAccessible(true);
+            candidate = constructor.newInstance(id, 0);
+            Method mOpen = avmClass.getDeclaredMethod("open");
+            mOpen.setAccessible(true);
+            if ((boolean) mOpen.invoke(candidate)) {
+                logger.info("DiLink 100 camera opened via AVMCamera(int,int) + open() (id="
+                        + id + ")");
+                return candidate;
+            }
+            logger.warn("DiLink 100 AVMCamera(" + id + ", 0).open() returned false");
+        } catch (Throwable t) {
+            logger.warn("DiLink 100 AVMCamera(int,int) open failed: " + t);
+        }
+        if (candidate != null) {
+            try {
+                avmClass.getMethod("close").invoke(candidate);
+            } catch (Throwable ignored) {
+                // Never opened; nothing more to release.
+            }
+        }
+        return null;
+    }
+
+    /**
      * Opens camera via AVMCamera reflection.
      *
      * Strategy:
@@ -5790,6 +5827,18 @@ public class PanoramicCameraGpu {
                                 cameraIdOverride = tryId;
                                 break;
                             }
+                        }
+                    }
+                    if (cameraObj == null && DiLink100Platform.isDiLink100()) {
+                        // === ATTEMPT 3 (DiLink 100): AVMCamera(int,int) + open() ===
+                        // The static factory validates ids through BmmCameraInfo,
+                        // which reads a vendor property the shell daemon cannot
+                        // see, so every id looks invalid. The constructor plus
+                        // the instance open() skip that check. Only pano_h
+                        // (camera 0) is tried: unvalidated ids are never probed.
+                        cameraObj = openDiLink100Camera(avmClass);
+                        if (cameraObj != null) {
+                            cameraIdOverride = DiLink100Platform.PANO_CAMERA_ID;
                         }
                     }
                     if (cameraObj == null) {

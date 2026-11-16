@@ -3160,11 +3160,20 @@ object UnifiedConfigManager {
      */
     @JvmStatic
     fun resolveOemDashcamId(): Int {
-        val camera = loadConfig().optJSONObject("camera") ?: return 0
+        val camera = loadConfig().optJSONObject("camera")
         if (com.overdrive.app.camera.dilink5.DiLink5Platform.isSelected()) return -1
-        if (camera.optBoolean("oemDashcamManualOverride", false)) {
+        if (camera != null && camera.optBoolean("oemDashcamManualOverride", false)) {
             return camera.optInt("oemDashcamCameraId", -1)
         }
+        // DiLink 100: the head unit's BMM camera config lists only the 360
+        // super-frame (cam_sort "pano_h:0;"), and BYD's own recorder (com.byd.cdr)
+        // reports no DVR camera; the windshield camera belongs to the ADAS
+        // controller. Auto-picking 0 opens the 360 camera and 1 is unconfigured,
+        // so there is no OEM dashcam unless the owner picks an id by hand.
+        // Checked before the missing-section default below, so a config without
+        // a camera section cannot auto-pick camera 0 either.
+        if (com.overdrive.app.camera.DiLink100Platform.isDiLink100()) return -1
+        if (camera == null) return 0
         val panoId = if (camera.optBoolean("manualOverride", false)) {
             camera.optInt("manualCameraId", -1)
         } else {

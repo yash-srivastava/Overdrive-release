@@ -1,6 +1,8 @@
 package com.overdrive.app.camera;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
@@ -55,6 +57,35 @@ public class CameraProfilesTest {
         assertEquals(PanoramicSlice.SLICE_1,
                 profile.getDefaultRoleMappings().get(CameraRole.PANO_REAR)
                         .getPanoramicSlice());
+    }
+
+    @Test
+    public void dilink100ProfileUsesCameraZeroAndFrontRightLeftRearSlices() {
+        CameraProfile profile = CameraProfiles.get(CameraProfiles.PROFILE_DILINK100_AVM);
+
+        assertEquals(CameraProfiles.PROFILE_DILINK100_AVM, profile.getId());
+        assertEquals(0, profile.getPanoCameraId());
+        assertEquals(5120, profile.getPanoWidth());
+        assertEquals(960, profile.getPanoHeight());
+        assertEquals(0, profile.getPanoSurfaceMode());
+        assertEquals(PanoramicSlice.SLICE_1, profile.getDefaultRoleMappings()
+                .get(CameraRole.PANO_FRONT).getPanoramicSlice());
+        assertEquals(PanoramicSlice.SLICE_2, profile.getDefaultRoleMappings()
+                .get(CameraRole.PANO_RIGHT).getPanoramicSlice());
+        assertEquals(PanoramicSlice.SLICE_3, profile.getDefaultRoleMappings()
+                .get(CameraRole.PANO_LEFT).getPanoramicSlice());
+        assertEquals(PanoramicSlice.SLICE_4, profile.getDefaultRoleMappings()
+                .get(CameraRole.PANO_REAR).getPanoramicSlice());
+    }
+
+    @Test
+    public void dilink100DetectedFromVehicleTypeOnly() {
+        assertTrue(DiLink100Platform.isDiLink100VehicleType("DiLink100_5.0UI"));
+        assertTrue(DiLink100Platform.isDiLink100VehicleType(" dilink100_6.0 "));
+        assertFalse(DiLink100Platform.isDiLink100VehicleType("DiLink50_5.0UI"));
+        assertFalse(DiLink100Platform.isDiLink100VehicleType("Di5.0_SA8155"));
+        assertFalse(DiLink100Platform.isDiLink100VehicleType(""));
+        assertFalse(DiLink100Platform.isDiLink100VehicleType(null));
     }
 
     @Test

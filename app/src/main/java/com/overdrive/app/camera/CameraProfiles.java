@@ -24,6 +24,7 @@ public final class CameraProfiles {
     public static final String PROFILE_TANG_2022 = "tang_2022";
     public static final String PROFILE_DILINK5_SEALION7 = "dilink5_sealion7";
     public static final String PROFILE_CAMERA2_AVM = "camera2_avm";
+    public static final String PROFILE_DILINK100_AVM = "dilink100_avm";
 
     /** Role shown in each super-frame slice (slice1..slice4) when the HAL names no order. */
     public static final CameraRole[] CAMERA2_DEFAULT_SLICE_ROLES = {
@@ -105,6 +106,27 @@ public final class CameraProfiles {
                 FOV_DEG_DEFAULT,
                 1920,
                 1080));
+
+        // Field-verified on a DiLink 100 New E2 GS X (Android 14): BYD's
+        // AVMCamera opens pano_h camera 0 at 5120x960 through bmmcameraserver.
+        // Slices left to right are front, right, left, rear (the same order the
+        // Camera2 360 HAL default names).
+        EnumMap<CameraRole, CameraSourceRef> dilink100Mappings = new EnumMap<>(CameraRole.class);
+        dilink100Mappings.put(CameraRole.PANO_FRONT, CameraSourceRef.panoramicSlice(PanoramicSlice.SLICE_1));
+        dilink100Mappings.put(CameraRole.PANO_RIGHT, CameraSourceRef.panoramicSlice(PanoramicSlice.SLICE_2));
+        dilink100Mappings.put(CameraRole.PANO_LEFT, CameraSourceRef.panoramicSlice(PanoramicSlice.SLICE_3));
+        dilink100Mappings.put(CameraRole.PANO_REAR, CameraSourceRef.panoramicSlice(PanoramicSlice.SLICE_4));
+        register(new CameraProfile(
+                PROFILE_DILINK100_AVM,
+                "BYD DiLink 100 (AVMCamera, field verified)",
+                DiLink100Platform.PANO_CAMERA_ID,
+                5120,
+                960,
+                0,
+                1280,
+                960,
+                dilink100Mappings,
+                FOV_DEG_DEFAULT));
 
         EnumMap<CameraRole, CameraSourceRef> tangMappings = new EnumMap<>(legacyMappings);
         tangMappings.put(CameraRole.WINDSHIELD, CameraSourceRef.direct(0));
