@@ -82,7 +82,8 @@ public final class CopiedFrameRing {
     // monitor makes {select+mark writing} and {check writing+pin} atomic;
     // both operations run once per frame, so contention is negligible.
     private int lastWritten = -1;     // guarded by this
-    private int writingSlot = NO_PIN; // guarded by this — mid-blit slot
+    private int writingSlot = NO_PIN; // guarded by this — submitted or mid-blit slot
+    private int pendingSlot = NO_PIN; // guarded by this — blit queued, barrier not issued
     private int pinnedSlot = NO_PIN;  // guarded by this — lane-held slot
     // Each completed overwrite advances the slot generation. A queued encoder
     // packet must not sample a slot that now contains a different frame.
@@ -206,8 +207,10 @@ public final class CopiedFrameRing {
     }
 
     /**
-     * Blits the given EXTERNAL_OES texture into the next free slot and
-     * returns the slot index (-1 on failure). Writer GL thread only.
+     * Queues a blit of the given EXTERNAL_OES texture into the next free slot
+     * and returns its reserved slot index (-1 on failure). The slot remains
+     * unavailable to readers until {@link #completePendingWrites} publishes
+     * it after the shared GPU completion barrier. Writer GL thread only.
      *
      * <p>Round-robin skips the lane-pinned slot, so with N≥3 slots the
      * writer can always make progress even while the encoder lane holds one
@@ -219,6 +222,10 @@ public final class CopiedFrameRing {
         if (!initialized || oesTextureId == 0) return -1;
         final int slot;
         synchronized (this) {
+            // A caller must complete the previous write before submitting
+            // another one to this ring. This keeps the slot reservation and
+            // publication barrier unambiguous across shared EGL contexts.
+            if (pendingSlot != NO_PIN || writingSlot != NO_PIN) return -1;
             int candidate = (lastWritten + 1) % slotCount;
             if (candidate == pinnedSlot) {
                 candidate = (candidate + 1) % slotCount;
@@ -247,32 +254,59 @@ public final class CopiedFrameRing {
             GLES20.glDisableVertexAttribArray(aPositionLoc);
             GLES20.glDisableVertexAttribArray(aTexCoordLoc);
 
-            // COMPLETION BARRIER — inside the write reservation. glDrawArrays
-            // only SUBMITS the blit; clearing writingSlot here-without-finish
-            // left a gap in which a stale lane packet could pin this slot and
-            // sample it cross-context while the GPU was still writing it
-            // (release-blocker review round 2, finding 2). glFinish before the
-            // reservation clears makes copyFrom's contract "returns only when
-            // the slot content is GPU-complete and safe to publish/sample" —
-            // it doubles as the publish barrier for the caller's camera-buffer
-            // close and the cross-context consumers (bounded: only this
-            // frame's blits are queued at this point, ~1-2 ms).
-            GLES20.glFinish();
-
+            // Keep the write reservation until completePendingWrites() issues
+            // the shared barrier. The caller can queue camera and windshield
+            // blits first, then pay for one GPU drain instead of one per ring.
             synchronized (this) {
-                slotGenerations[slot]++;
-                lastWritten = slot;
-                writingSlot = NO_PIN;
+                pendingSlot = slot;
             }
             return slot;
         } catch (Throwable t) {
             logger.warn(name + ": copyFrom failed: " + t.getMessage());
             synchronized (this) {
                 writingSlot = NO_PIN;
+                pendingSlot = NO_PIN;
             }
             return -1;
         } finally {
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+        }
+    }
+
+    /**
+     * Completes all queued ring blits with one GPU barrier and publishes their
+     * slots atomically with respect to each ring's pin protocol. Must run on
+     * the writer GL thread with the shared EGL context current. A failed
+     * barrier invalidates the pending writes; callers must not close source
+     * buffers or publish the returned slot indices on false.
+     */
+    public static boolean completePendingWrites(CopiedFrameRing... rings) {
+        if (rings == null || rings.length == 0) return true;
+        try {
+            GLES20.glFinish();
+            for (CopiedFrameRing ring : rings) {
+                if (ring == null) continue;
+                synchronized (ring) {
+                    int slot = ring.pendingSlot;
+                    if (slot != NO_PIN) {
+                        ring.slotGenerations[slot]++;
+                        ring.lastWritten = slot;
+                        ring.pendingSlot = NO_PIN;
+                        ring.writingSlot = NO_PIN;
+                    }
+                }
+            }
+            return true;
+        } catch (Throwable t) {
+            for (CopiedFrameRing ring : rings) {
+                if (ring == null) continue;
+                synchronized (ring) {
+                    ring.pendingSlot = NO_PIN;
+                    ring.writingSlot = NO_PIN;
+                }
+            }
+            logger.error("GPU copy completion barrier failed: " + t.getMessage());
+            return false;
         }
     }
 
@@ -345,6 +379,7 @@ public final class CopiedFrameRing {
         synchronized (this) {
             pinnedSlot = NO_PIN;
             writingSlot = NO_PIN;
+            pendingSlot = NO_PIN;
             lastWritten = -1;
             java.util.Arrays.fill(slotGenerations, 0L);
         }

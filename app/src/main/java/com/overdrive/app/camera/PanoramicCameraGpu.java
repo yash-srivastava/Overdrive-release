@@ -6756,8 +6756,8 @@ public class PanoramicCameraGpu {
      *      FRESH windshield frame only (the previous slot stays valid for
      *      re-composition — re-blitting a released OES source would be the
      *      exact use-after-free this design removes).
-     *   3. COMPLETION BARRIER: CopiedFrameRing.copyFrom glFinish-es INSIDE
-     *      its write reservation before returning, covering three needs at
+     *   3. COMPLETION BARRIER: queue camera and fresh windshield blits, then
+     *      complete them behind one glFinish, covering three needs at
      *      once. (a) Cross-context completeness: the lane and AI contexts
      *      may sample the slot immediately after publish, and glFlush only
      *      SUBMITS the blit — sampling a half-written slot is a visible-
@@ -6854,10 +6854,20 @@ public class PanoramicCameraGpu {
             }
         }
 
-        // Inline release behind the ring's completion barrier (see method
-        // doc, steps 3-4): every successful copyFrom above glFinish-ed before
-        // returning, so the GPU has provably retired the blits that sampled
-        // these buffers. The windshield Image is only closed when its pixels
+        // One completion barrier covers both rings when the windshield also
+        // produced a fresh frame. This preserves the source-buffer lifetime
+        // and cross-context publication guarantees while avoiding a second
+        // full GPU drain on those frames.
+        if (!CopiedFrameRing.completePendingWrites(camRing,
+                wsCopiedThisFrame ? decoupledWsRing : null)) {
+            if (wsCopiedThisFrame) decoupledLastWsSlot = -1;
+            return;
+        }
+
+        // Inline release behind the shared completion barrier (see method
+        // doc, steps 3-4): the GPU has provably retired every queued blit that
+        // sampled these buffers. The windshield Image is only closed when
+        // its pixels
         // were captured into the ring THIS frame — otherwise it stays held
         // (legacy release-at-next-bind), because the OES texture must keep a
         // live backing buffer until a fresh frame replaces it.
