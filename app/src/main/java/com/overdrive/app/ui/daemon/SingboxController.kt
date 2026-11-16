@@ -59,8 +59,11 @@ class SingboxController(
     }
     
     override fun isRunning(callback: (Boolean) -> Unit) {
+        // Match the kernel process name, not the full command line. A full-
+        // command-line grep/pgrep can match the `sh -c` wrapper that carries
+        // its own search pattern and falsely report a live proxy.
         adbLauncher.executeShellCommand(
-            "ps -A | grep sing-box | grep -v grep",
+            "pidof sing-box",
             object : AdbDaemonLauncher.LaunchCallback {
                 override fun onLog(message: String) {
                     callback(message.trim().isNotEmpty())
