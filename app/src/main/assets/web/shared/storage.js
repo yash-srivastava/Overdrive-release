@@ -311,12 +311,12 @@ BYD.storagePage = {
     _applySettingsPayload(data, version) {
         if (!data || !data.success) return false;
         if (this._canAdopt('surveillance', version)) {
-            this.config.surveillanceLimitMb = data.surveillanceLimitMb || 500;
+            this.config.surveillanceLimitMb = typeof data.surveillanceLimitMb === 'number' ? data.surveillanceLimitMb : 500;
             this.config.surveillanceStorageType = data.surveillanceStorageType || 'INTERNAL';
             this._commit('surveillance');
         }
         if (this._canAdopt('recordings', version)) {
-            this.config.recordingsLimitMb = data.recordingsLimitMb || 500;
+            this.config.recordingsLimitMb = typeof data.recordingsLimitMb === 'number' ? data.recordingsLimitMb : 500;
             this.config.recordingsStorageType = data.recordingsStorageType || 'INTERNAL';
             this._commit('recordings');
         }
@@ -355,7 +355,7 @@ BYD.storagePage = {
         const s = data.storage;
         if (this._canAdopt('trips', version)) {
             this.config.tripsStorageType = s.storageType || 'INTERNAL';
-            this.config.tripsLimitMb = s.limitMb || 500;
+            this.config.tripsLimitMb = typeof s.limitMb === 'number' ? s.limitMb : 500;
             this._commit('trips');
             // Ceilings follow full reads only: a volume remounting mid-response
             // can report a wrong ceiling (see trips.js _refreshBudgetOnly).
@@ -522,7 +522,11 @@ BYD.storagePage = {
             slider.value = Math.min(limitMb, maxMb);
             slider.disabled = !loaded;
         }
-        this._setText(valueId, this._fmtMb(limitMb));
+        this._setText(valueId, limitMb === 0 ? this._tr('storage.no_limit', null, 'No Limit') : this._fmtMb(limitMb));
+        const category = sliderId === 'survLimitSlider' ? 'surveillance' : (sliderId === 'recLimitSlider' ? 'recordings' : 'trips');
+        const noLimit = this._el(category + 'NoLimit');
+        if (noLimit) { noLimit.checked = limitMb === 0; noLimit.disabled = !loaded; }
+        if (slider) slider.disabled = !loaded || limitMb === 0;
         this._setText(minId, this._fmtMb(100));
         this._setText(maxId, this._fmtMb(maxMb));
     },
@@ -649,8 +653,8 @@ BYD.storagePage = {
         const s = this.stats;
         if (!s) return;
         const pct = (bytes, mb) => Math.min(100, Math.round(bytes * 100 / (mb * 1024 * 1024)));
-        const survMb = this.config.surveillanceLimitMb || 500;
-        const recMb = this.config.recordingsLimitMb || 500;
+        const survMb = this.config.surveillanceLimitMb;
+        const recMb = this.config.recordingsLimitMb;
         let survUsed = this._tr('surveillance.size_used', { size: s.sentryFormatted });
         let recUsed = this._tr('recording.storage_used', { size: this.formatSize(s.recBytes) });
         // Index still building: show progress instead of a stale 0 MB.
@@ -663,24 +667,25 @@ BYD.storagePage = {
             recUsed = this._tr('recording.storage_indexing', { done: done, total: total, pct: p }, fb);
         }
         this._setText('survStorageUsed', survUsed);
-        this._setText('survStorageLimit', this._tr('surveillance.size_limit_mb', { mb: survMb }));
-        this._setFill('survStorageFill', pct(s.sentryBytes, survMb));
+        this._setText('survStorageLimit', survMb === 0 ? this._tr('storage.no_limit', null, 'No Limit') : this._tr('surveillance.size_limit_mb', { mb: survMb }));
+        this._setFill('survStorageFill', survMb > 0 ? pct(s.sentryBytes, survMb) : 0);
         this._setText('storageUsed', recUsed);
-        this._setText('storageLimit', this._tr('recording.storage_limit_mb', { mb: recMb }));
-        this._setFill('storageFill', pct(s.recBytes, recMb));
+        this._setText('storageLimit', recMb === 0 ? this._tr('storage.no_limit', null, 'No Limit') : this._tr('recording.storage_limit_mb', { mb: recMb }));
+        this._setFill('storageFill', recMb > 0 ? pct(s.recBytes, recMb) : 0);
     },
 
     renderTripUsage() {
         const u = this.tripUsage;
         if (!u) return;
-        const limitMb = this.config.tripsLimitMb || 500;
+        const limitMb = this.config.tripsLimitMb;
         const fill = this._el('storageUsageFill');
         if (fill) {
-            const pct = u.unit === 'KB' ? ((u.usedMb / 1024) / limitMb * 100) : (u.usedMb / limitMb * 100);
+            const pct = limitMb > 0 ? (u.unit === 'KB' ? ((u.usedMb / 1024) / limitMb * 100) : (u.usedMb / limitMb * 100)) : 0;
             fill.style.width = Math.min(100, Math.max(pct, u.count > 0 ? 0.5 : 0)) + '%';
         }
         let used;
-        if (u.unit === 'KB') used = u.usedMb + ' KB / ' + limitMb + ' MB';
+        if (limitMb === 0) used = this.formatSize(u.unit === 'KB' ? u.usedMb * 1024 : u.usedMb * 1024 * 1024) + ' / ' + this._tr('storage.no_limit', null, 'No Limit');
+        else if (u.unit === 'KB') used = u.usedMb + ' KB / ' + limitMb + ' MB';
         else if (u.usedMb === 0 && u.count > 0) used = '< 1 MB / ' + limitMb + ' MB';
         else used = u.usedMb.toFixed(1) + ' MB / ' + limitMb + ' MB';
         this._setText('storageUsedText', used);
@@ -729,6 +734,24 @@ BYD.storagePage = {
         this.renderUsage();
         this.updateCdrVisibility();
         this.markChanged();
+    },
+
+    setNoLimit(section, enabled) {
+        if ((section === 'surveillance' || section === 'recordings') && !this._editable('settings')) return;
+        if (section === 'trips' && !this._editable('trips')) return;
+        const key = section === 'surveillance' ? 'surveillanceLimitMb'
+            : (section === 'recordings' ? 'recordingsLimitMb' : 'tripsLimitMb');
+        const previous = this.config[key];
+        const ceiling = section === 'trips' ? this._tripMaxFor(this.config.tripsStorageType)
+            : this._maxFor(section === 'surveillance' ? this.config.surveillanceStorageType : this.config.recordingsStorageType);
+        this.config[key] = enabled ? 0 : Math.max(100, Math.min(500, ceiling));
+        if (section === 'surveillance') this.renderSurveillance();
+        else if (section === 'recordings') this.renderRecordings();
+        else this.renderTrips();
+        if (previous !== this.config[key]) {
+            this.renderUsage();
+            this.markChanged();
+        }
     },
 
     updateSurvLimit(value) {
