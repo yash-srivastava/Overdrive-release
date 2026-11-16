@@ -1873,4 +1873,6 @@
     <string name="settings_overlay_chip_opacity">Visibilitat del xip</string>
     <string name="settings_overlay_chip_opacity_subtitle">Més alt = més prominent. Interval de 10 a 100 (percentatge es mostra a la dreta).</string>
     <string name="settings_overlay_chip_opacity_value">%1$d%%</string>
+    <string name="diagnostics_section_module_faults">Falles del mòdul</string>
+    <string name="diagnostics_module_faults_summary">Mostra els avisos comunicats pel vehicle disponibles (cobertura parcial)</string>
 </resources>
