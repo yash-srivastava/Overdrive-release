@@ -7,23 +7,30 @@ const {chromium} = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const assets = path.join(root, 'app/src/main/assets/web');
 
-const tariffStore = {
-  nextId: 1,
-  rows: [],
-  meta: {
-    defaultTariffId: '',
-    matchedTariffId: '',
-    maxTariffs: 40,
-    lat: 32.081,
-    lng: 34.781
-  }
-};
+const HOME = {lat: 32.081, lng: 34.781};
+const OFFICE = {lat: 32.15, lng: 34.85};
 
-function tariffsPayload() {
+function makeStore() {
+  return {
+    nextId: 1,
+    rows: [],
+    sessions: [],
+    meta: {
+      defaultTariffId: '',
+      matchedTariffId: '',
+      maxTariffs: 40,
+      lat: HOME.lat,
+      lng: HOME.lng
+    }
+  };
+}
+
+function tariffsPayload(store) {
+  const rows = store.rows.slice(0);
   return {
     success: true,
-    tariffs: tariffStore.rows.slice(0),
-    meta: Object.assign({tariffs: tariffStore.rows.slice(0)}, tariffStore.meta)
+    tariffs: rows,
+    meta: Object.assign({tariffs: rows}, store.meta)
   };
 }
 
@@ -31,8 +38,8 @@ function jsonResponse(body) {
   return {status: 200, contentType: 'application/json', body: JSON.stringify(body)};
 }
 
-async function servePage(page) {
-  await page.route('**/*', async route => {
+function wireRoutes(page, store) {
+  return page.route('**/*', async route => {
     const url = new URL(route.request().url());
     const p = url.pathname;
     if (p.endsWith('/local/charging.html')) {
@@ -50,41 +57,40 @@ async function servePage(page) {
             success: true,
             config: {enabled: true, electricityRate: 0.35, currency: '₪', dcRate: 0}
           },
-          summary: {success: true, summary: {periodSessions: 0, live: {charging: false}}},
-          sessions: {success: true, sessions: []},
-          tariffs: tariffsPayload(),
+          summary: {success: true, summary: {periodSessions: store.sessions.length, live: {charging: false}}},
+          sessions: {success: true, sessions: store.sessions.slice(0)},
+          tariffs: tariffsPayload(store),
           soc: {success: true, soc: {points: []}}
         }
       }));
     }
     if (p === '/api/charging/tariffs' && route.request().method() === 'GET') {
-      return route.fulfill(jsonResponse(tariffsPayload()));
+      return route.fulfill(jsonResponse(tariffsPayload(store)));
     }
-  if (p === '/api/charging/tariffs' && route.request().method() === 'POST') {
+    if (p === '/api/charging/tariffs' && route.request().method() === 'POST') {
       const body = JSON.parse(route.request().postData() || '{}');
-      if (body.id) {
-        const idx = tariffStore.rows.findIndex(t => t.id === body.id);
-        if (idx >= 0) Object.assign(tariffStore.rows[idx], body);
-      } else {
-        const created = {
-          id: 't' + (tariffStore.nextId++),
-          label: body.label || '',
-          lat: body.lat != null ? body.lat : tariffStore.meta.lat,
-          lng: body.lng != null ? body.lng : tariffStore.meta.lng,
-          radiusM: body.radiusM || 50,
-          acRate: body.acRate || 0,
-          dcRate: body.dcRate || 0,
-          currency: body.currency || '₪',
-          enabled: true,
-          useCount: 0
-        };
-        tariffStore.rows.push(created);
-        return route.fulfill(jsonResponse({success: true, tariff: created}));
-      }
-      return route.fulfill(jsonResponse({success: true, tariff: tariffStore.rows.find(t => t.id === body.id)}));
+      assert.ok(!body.id, 'create must not send id (not an edit)');
+      const created = {
+        id: 't' + (store.nextId++),
+        label: body.label || '',
+        lat: body.lat != null ? body.lat : store.meta.lat,
+        lng: body.lng != null ? body.lng : store.meta.lng,
+        radiusM: body.radiusM || 50,
+        acRate: body.acRate || 0,
+        dcRate: body.dcRate || 0,
+        currency: body.currency || '₪',
+        enabled: true,
+        useCount: 0
+      };
+      store.rows.push(created);
+      return route.fulfill(jsonResponse({success: true, tariff: created}));
     }
     if (p.startsWith('/api/charging/overview')) {
-      return route.fulfill(jsonResponse({success: true, summary: {}, sessions: []}));
+      return route.fulfill(jsonResponse({
+        success: true,
+        summary: {},
+        sessions: store.sessions.slice(0)
+      }));
     }
     if (p.startsWith('/api/charging/')) {
       return route.fulfill(jsonResponse({success: true}));
@@ -93,7 +99,7 @@ async function servePage(page) {
       const lang = p.split('/').pop().replace('.json', '');
       const catalog = path.join(assets, 'i18n', lang + '.json');
       if (fs.existsSync(catalog)) {
-        return route.fulfill({contentType: 'application/json', path: catalog});
+        return route.fulfill(jsonResponse(JSON.parse(fs.readFileSync(catalog, 'utf8'))));
       }
     }
     const file = path.resolve(assets, '.' + p);
@@ -104,13 +110,35 @@ async function servePage(page) {
   });
 }
 
+async function openSettingsTariffs(page) {
+  await page.goto('http://tariffs-multi.invalid/local/charging.html#settings', {waitUntil: 'networkidle'});
+  await page.waitForSelector('.bottom-tab[data-tab-target="settings"].is-active');
+  await page.waitForSelector('#tariffAddBtn', {state: 'visible'});
+}
+
+async function saveTariff(page, label, acRate, {pickValue} = {}) {
+  await page.click('#tariffAddBtn');
+  await page.waitForFunction(() => {
+    var ed = document.getElementById('tariffEditor');
+    return ed && ed.style.display !== 'none';
+  });
+  if (pickValue != null) {
+    await page.waitForSelector('#tariffLocPick', {state: 'visible'});
+    await page.selectOption('#tariffLocPick', pickValue);
+  }
+  await page.fill('#tariffLabelInput', label);
+  await page.fill('#tariffAcRateInput', String(acRate));
+  await page.fill('#tariffRadiusInput', '50');
+  await page.click('#tariffSaveBtn');
+}
+
 const launchOpts = {headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage']};
 if (process.env.CHROMIUM_EXECUTABLE) launchOpts.executablePath = process.env.CHROMIUM_EXECUTABLE;
 
 const browser = await chromium.launch(launchOpts);
+const results = [];
 try {
   const page = await browser.newPage({viewport: {width: 412, height: 900}});
-  await servePage(page);
   await page.addInitScript(() => {
     window.AndroidBridge = {
       getAppLocale: () => window.__TEST_LOCALE || 'he',
@@ -122,30 +150,53 @@ try {
       }
     };
   });
-  await page.goto('http://tariffs-multi.invalid/local/charging.html#settings', {waitUntil: 'networkidle'});
-  await page.waitForSelector('.bottom-tab[data-tab-target="settings"].is-active');
-  await page.waitForSelector('#tariffAddBtn', {state: 'visible'});
-  const labels = ['בית', 'עבודה', 'קניון'];
-  for (let i = 0; i < labels.length; i++) {
-    await page.click('#tariffAddBtn');
-    await page.waitForFunction(() => {
-      var ed = document.getElementById('tariffEditor');
-      return ed && ed.style.display !== 'none';
-    });
-    await page.fill('#tariffLabelInput', labels[i]);
-    await page.fill('#tariffAcRateInput', String(1 + i * 0.1));
-    await page.fill('#tariffRadiusInput', '50');
-    await page.click('#tariffSaveBtn');
-    await page.waitForFunction(n => document.querySelectorAll('.tariff-row').length === n, i + 1);
-    const addBtn = await page.$('#tariffAddBtn');
-    assert.equal(await addBtn.isDisabled(), false, 'add stays enabled after tariff ' + (i + 1));
-  }
-  assert.equal(tariffStore.rows.length, 3);
+
+  // A: canonical JSON array, 1 saved tariff, GPS unchanged at same spot — 2nd create must append
+  const storeA = makeStore();
+  storeA.rows.push({
+    id: 't0', label: 'בית', lat: HOME.lat, lng: HOME.lng,
+    radiusM: 50, acRate: 1, dcRate: 0, currency: '₪', enabled: true, useCount: 0
+  });
+  storeA.meta.matchedTariffId = 't0';
+  await wireRoutes(page, storeA);
+  await openSettingsTariffs(page);
+  assert.equal(await page.locator('.tariff-row').count(), 1);
+  await saveTariff(page, 'חניה', 1.2);
+  await page.waitForFunction(() => document.querySelectorAll('.tariff-row').length === 2);
+  assert.equal(storeA.rows.length, 2);
+  assert.ok(storeA.rows[0].id !== storeA.rows[1].id);
+  assert.equal(storeA.rows[1].lat, HOME.lat);
+  assert.equal(storeA.rows[1].lng, HOME.lng);
+  results.push({scenario: 'array_same_gps', pass: true});
+
+  await page.unroute('**/*');
+
+  // B: at home GPS, add office tariff via session-history picker (different coordinates)
+  const storeB = makeStore();
+  storeB.sessions = [
+    {
+      id: 1, lat: HOME.lat, lng: HOME.lng, placeLabel: 'בית',
+      energyAdded: 10, cost: 3, isDc: false, durationMinutes: 60
+    },
+    {
+      id: 2, lat: OFFICE.lat, lng: OFFICE.lng, placeLabel: 'משרד',
+      energyAdded: 8, cost: 2.5, isDc: false, durationMinutes: 45
+    }
+  ];
+  await wireRoutes(page, storeB);
+  await openSettingsTariffs(page);
+  await saveTariff(page, 'בית', 1.0);
+  await page.waitForFunction(() => document.querySelectorAll('.tariff-row').length === 1);
+  await saveTariff(page, 'משרד', 1.1, {pickValue: OFFICE.lat + ',' + OFFICE.lng});
+  await page.waitForFunction(() => document.querySelectorAll('.tariff-row').length === 2);
+  assert.equal(storeB.rows[1].lat, OFFICE.lat);
+  assert.equal(storeB.rows[1].lng, OFFICE.lng);
   await page.reload({waitUntil: 'networkidle'});
   await page.click('.bottom-tab[data-tab-target="settings"]');
-  await page.waitForSelector('.bottom-tab[data-tab-target="settings"].is-active');
-  await page.waitForFunction(() => document.querySelectorAll('.tariff-row').length === 3);
-  console.log(JSON.stringify({status: 'PASS', persisted: tariffStore.rows.length}));
+  await page.waitForFunction(() => document.querySelectorAll('.tariff-row').length === 2);
+  results.push({scenario: 'session_pick_different_gps', pass: true});
+
+  console.log(JSON.stringify({status: 'PASS', results, totalTariffs: storeB.rows.length}));
 } finally {
   await browser.close();
 }

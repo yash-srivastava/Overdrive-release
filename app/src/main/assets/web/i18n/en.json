@@ -1189,6 +1189,8 @@
     "tariff_radius": "Match radius",
     "tariff_radius_hint": "How close a charge must be to use this tariff",
     "tariff_location": "Location",
+    "tariff_loc_gps": "Current position",
+    "tariff_loc_pick_desc": "Or choose a place from charging history",
     "tariff_ac_short": "AC",
     "tariff_dc_short": "DC",
     "tariff_no_rate": "No rate set",
