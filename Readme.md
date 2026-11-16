@@ -9,7 +9,7 @@
   <a href="https://www.overdrive.qd.je">Website</a> •
   <a href="https://discord.gg/PZutk9fg4h">Discord</a> •
   <a href="#features">Features</a> •
-  <a href="#quick-start-use-pre-built-apk">Setup Guide</a> •
+  <a href="https://www.overdrive.qd.je/guide/">Setup Guide</a> •
   <a href="#home-assistant-integration">Home Assistant</a> •
   <a href="#translations">Translate</a>
 </p>
