@@ -416,25 +416,21 @@ public class PerformanceMonitor {
     
     private void collectMemoryMetrics(PerformanceSnapshot snapshot) {
         try {
-            // System memory from /proc/meminfo
-            BufferedReader reader = new BufferedReader(new FileReader("/proc/meminfo"));
-            String line;
-            long memTotal = 0, memFree = 0, memAvailable = 0, buffers = 0, cached = 0;
-            
-            while ((line = reader.readLine()) != null) {
-                String[] parts = line.split("\\s+");
-                if (parts.length >= 2) {
-                    long value = Long.parseLong(parts[1]); // in KB
-                    switch (parts[0]) {
-                        case "MemTotal:": memTotal = value; break;
-                        case "MemFree:": memFree = value; break;
-                        case "MemAvailable:": memAvailable = value; break;
-                        case "Buffers:": buffers = value; break;
-                        case "Cached:": cached = value; break;
+            // Only MemTotal and MemAvailable contribute to the dashboard's
+            // memory metrics. Avoid regex splitting and parsing unrelated
+            // /proc/meminfo values on every sample.
+            long memTotal = 0;
+            long memAvailable = 0;
+            try (BufferedReader reader = new BufferedReader(new FileReader("/proc/meminfo"))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (line.startsWith("MemTotal:")) {
+                        memTotal = parseMemInfoValueKb(line);
+                    } else if (line.startsWith("MemAvailable:")) {
+                        memAvailable = parseMemInfoValueKb(line);
                     }
                 }
             }
-            reader.close();
             
             snapshot.memTotalMb = memTotal / 1024.0;
             snapshot.memUsedMb = (memTotal - memAvailable) / 1024.0;
@@ -453,6 +449,24 @@ public class PerformanceMonitor {
         }
     }
     
+    /** Parse the numeric kB value after a /proc/meminfo field label. */
+    private static long parseMemInfoValueKb(String line) {
+        int index = line.indexOf(':') + 1;
+        while (index < line.length() && Character.isWhitespace(line.charAt(index))) {
+            index++;
+        }
+        int valueStart = index;
+        while (index < line.length() && line.charAt(index) >= '0' && line.charAt(index) <= '9') {
+            index++;
+        }
+        if (valueStart == index) return 0;
+        try {
+            return Long.parseLong(line.substring(valueStart, index));
+        } catch (NumberFormatException ignored) {
+            return 0;
+        }
+    }
+
     private void collectGpuMetrics(PerformanceSnapshot snapshot) {
         try {
             // Auto-detect GPU via /sys/class/devfreq/.
