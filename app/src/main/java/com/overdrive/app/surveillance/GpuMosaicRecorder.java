@@ -298,30 +298,25 @@ public class GpuMosaicRecorder {
 
     // Per-stage timing diagnostic for drawFrame.
     //
-    // The encoder GL thread's drawFrame() bundles five distinct GPU/CPU
-    // operations under one timer in PanoramicCameraGpu.renderLoop's stage
-    // log: makeCurrent + clear + mosaic-shader-draw + overlay-upload-and-
-    // draw + eglSwapBuffersWithTimestamp. When the bundled "mosaic+swap"
-    // worst-frame goes high, we can't tell which sub-stage was responsible.
+    // The encoder GL thread's drawFrame() bundles the render setup, mosaic
+    // shader draw, overlay upload/composite, and eglSwapBuffersWithTimestamp
+    // under one timer in PanoramicCameraGpu.renderLoop's stage log. When the
+    // bundled "mosaic+swap" worst-frame goes high, we need to distinguish
+    // shader/setup cost from overlay work and encoder backpressure.
     //
     // This per-stage timer logs the worst frame in a 30s window (matching
     // the parent stage timer's cadence) and breaks out:
     //   - mc:    makeCurrent
     //   - vp:    glViewport (near-free client-side state)
-    //   - rt:    glClear = the FIRST GL command after makeCurrent, so the
-    //            driver's lazy producer-side dequeueBuffer on the encoder's
-    //            BufferQueue lands here. glClear is ~free on tiled Adreno; a
-    //            non-trivial rt is encoder-input backpressure (the render
-    //            target could not be acquired), NOT clearing cost. (This was
-    //            previously mislabeled "cls" — see issue #176.)
-    //   - shd:   mosaic shader bind + draw
+    //   - shd:   first GL work (which may dequeue the encoder input buffer),
+    //            mosaic shader setup + full-screen draw
     //   - ovl:   overlay (texSubImage2D upload + composite draw)
     //   - swap:  eglSwapBuffersWithTimestamp itself (also blocks on encoder
     //            input-pool backpressure)
     //
-    // Encoder backpressure therefore surfaces in EITHER rt (dequeue) or swap
-    // (queue), depending on when MediaCodec returns an input buffer — treat
-    // rt+swap together as the encoder-queue wait.
+    // Encoder backpressure can surface in either shd (lazy input-buffer
+    // dequeue) or swap (queue), depending on when MediaCodec returns an input
+    // buffer; treat those spans together when diagnosing encoder-queue waits.
     //
     // Once a stutter event is captured, the dominant sub-stage tells us
     // where to look — overlay upload vs shader draw vs encoder backpressure
@@ -331,7 +326,6 @@ public class GpuMosaicRecorder {
     private long drawStageWorstTotalNs = 0;
     private long drawStageWorstMakeCurrentNs = 0;
     private long drawStageWorstViewportNs = 0;
-    private long drawStageWorstRenderTargetNs = 0;
     private long drawStageWorstShaderNs = 0;
     private long drawStageWorstOverlayNs = 0;
     private long drawStageWorstSwapNs = 0;
@@ -794,12 +788,6 @@ public class GpuMosaicRecorder {
         // OemDashcamPipeline's post-create reconcile.
         reconcileOverlayWorker();
         
-        // Set GL clear color once. GL context state, persists across
-        // drawFrame calls; the encoder EGL context is exclusive to this
-        // recorder. Saves ~one glClearColor call per frame (~30/sec at
-        // 30 fps) on the encoder GL thread.
-        GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-
         // The shader program is fresh; its uApaMode uniform defaults to 0.0f.
         // Force the next drawFrame to re-publish the current cameraLayout so
         // an EGL recovery (release → init) doesn't pin the new programId at
@@ -944,16 +932,13 @@ public class GpuMosaicRecorder {
         GLES20.glViewport(0, 0, viewportWidth, viewportHeight);
         long tAfterViewportNs = System.nanoTime();
 
-        // Clear. glClearColor was hoisted to init() — it's GL context state
-        // that persists; the encoder's EGL context is exclusive to this
-        // recorder so no other code path can change it under us.
-        //
-        // NB: this is the FIRST GL command after makeCurrent, so the driver
-        // lazily dequeues the encoder-input buffer HERE. On encoder
-        // backpressure the block is charged to this segment ("rt"), not to a
-        // clearing cost (glClear is ~free on tiled Adreno). See issue #176.
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-        long tAfterClearNs = System.nanoTime();
+        // The mosaic shader draws a full-screen quad and writes gl_FragColor
+        // on every control-flow path (including the dashcam windshield early
+        // return). This recorder does not enable scissor testing or a partial
+        // color mask, so every pixel of the encoder buffer is replaced by the
+        // draw below. The preceding clear is therefore redundant. Tile-based
+        // drivers may optimize clears cheaply, so the actual performance gain
+        // must be measured rather than assumed.
 
         // Use our shader program
         GLES20.glUseProgram(programId);
@@ -1205,14 +1190,13 @@ public class GpuMosaicRecorder {
         // this log will tell us which sub-stage was responsible (overlay
         // upload? encoder backpressure in rt/swap? shader draw?).
         //
-        // rt = glClear span = first GL cmd after makeCurrent, where the
-        // encoder-input buffer is dequeued; treat rt+swap together as the
-        // encoder-queue wait. See issue #176 (was previously labeled "cls").
+        // The encoder-input buffer may be dequeued by the first GL command
+        // after makeCurrent; that cost is included in the shader/setup span.
+        // See issue #176 for the original encoder-queue backpressure analysis.
         long stageTotalNs    = tAfterSwapNs       - t0;
         long stageMakeNs     = tAfterMakeCurrentNs - t0;
         long stageViewportNs = tAfterViewportNs   - tAfterMakeCurrentNs;
-        long stageRtNs       = tAfterClearNs      - tAfterViewportNs;
-        long stageShaderNs   = tAfterShaderNs     - tAfterClearNs;
+        long stageShaderNs   = tAfterShaderNs     - tAfterViewportNs;
         long stageOverlayNs  = tAfterOverlayNs    - tAfterShaderNs;
         long stageSwapNs     = tAfterSwapNs       - tAfterOverlayNs;
         drawStageWindowFrames++;
@@ -1220,7 +1204,6 @@ public class GpuMosaicRecorder {
             drawStageWorstTotalNs        = stageTotalNs;
             drawStageWorstMakeCurrentNs  = stageMakeNs;
             drawStageWorstViewportNs     = stageViewportNs;
-            drawStageWorstRenderTargetNs = stageRtNs;
             drawStageWorstShaderNs       = stageShaderNs;
             drawStageWorstOverlayNs      = stageOverlayNs;
             drawStageWorstSwapNs         = stageSwapNs;
@@ -1230,11 +1213,10 @@ public class GpuMosaicRecorder {
             drawStageWindowStartMs = nowMsForStage;
         } else if (nowMsForStage - drawStageWindowStartMs >= DRAW_STAGE_LOG_INTERVAL_MS) {
             logger.info(String.format(
-                    "DrawStage(worst/30s): total=%dms mc=%dms vp=%dms rt=%dms shd=%dms ovl=%dms swap=%dms (frames=%d)",
+                    "DrawStage(worst/30s): total=%dms mc=%dms vp=%dms shd=%dms ovl=%dms swap=%dms (frames=%d)",
                     drawStageWorstTotalNs        / 1_000_000,
                     drawStageWorstMakeCurrentNs  / 1_000_000,
                     drawStageWorstViewportNs     / 1_000_000,
-                    drawStageWorstRenderTargetNs / 1_000_000,
                     drawStageWorstShaderNs       / 1_000_000,
                     drawStageWorstOverlayNs      / 1_000_000,
                     drawStageWorstSwapNs         / 1_000_000,
@@ -1242,7 +1224,6 @@ public class GpuMosaicRecorder {
             drawStageWorstTotalNs = 0;
             drawStageWorstMakeCurrentNs = 0;
             drawStageWorstViewportNs = 0;
-            drawStageWorstRenderTargetNs = 0;
             drawStageWorstShaderNs = 0;
             drawStageWorstOverlayNs = 0;
             drawStageWorstSwapNs = 0;
