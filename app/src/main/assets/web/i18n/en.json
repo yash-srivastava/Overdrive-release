@@ -6822,6 +6822,11 @@
     "copied": "Diagnostic report copied to clipboard.",
     "copy_failed": "Could not copy the report.",
     "fallback_module_name": "Module",
-    "fallback_reading_name": "Reading"
+    "fallback_reading_name": "Reading",
+    "dashboard_kicker": "Vehicle health",
+    "dashboard_title": "Module faults detected",
+    "dashboard_summary": "The vehicle is reporting diagnostic warnings.",
+    "dashboard_details": "View module fault details",
+    "dashboard_warning_count": "{count} module warning(s)"
   }
 }
