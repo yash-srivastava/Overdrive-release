@@ -520,6 +520,7 @@ BYD.events = {
             // even if every other dimension is unchanged.
             self._invalidatePlaceMemo();
             self.loadRecordings();
+            self.syncCompactActorFiltersUI();
         };
 
         input.addEventListener('input', function() {
@@ -628,6 +629,7 @@ BYD.events = {
         }
         
         this.wirePlaceSearch();
+        this.syncCompactActorFiltersUI();
 
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') this.closeCalendar();
@@ -917,6 +919,7 @@ BYD.events = {
         // re-render piggybacks on the loadRecordings completion — see
         // loadRecordings() which calls loadPlaceChips() after the fetch.
         this.loadRecordings();
+        this.syncCompactActorFiltersUI();
     },
 
     /**
@@ -932,6 +935,131 @@ BYD.events = {
         });
         this.currentPage = 1;
         this.loadRecordings();
+        this.syncCompactActorFiltersUI();
+    },
+
+    _evLabel(key, fallback) {
+        try {
+            var v = BYD.i18n && BYD.i18n.t ? BYD.i18n.t(key) : null;
+            if (v && v !== key) return v;
+        } catch (e) { /* ignore */ }
+        return fallback;
+    },
+
+    _activeChipText(rowKind, dataKey) {
+        const row = document.querySelector('.filter-tabs[data-filter-row="' + rowKind + '"]');
+        if (!row) return '';
+        const val = this._rowFilterValue(rowKind, dataKey);
+        if (!val) return '';
+        const chips = row.querySelectorAll('.filter-chip');
+        for (let i = 0; i < chips.length; i++) {
+            const chip = chips[i];
+            if ((chip.dataset[dataKey] || '') === val) {
+                return (chip.textContent || '').trim();
+            }
+        }
+        return val;
+    },
+
+    _rowFilterValue(rowKind, dataKey) {
+        if (rowKind === 'storage') return this.storageFilter || '';
+        if (!this.actorFilter) return '';
+        return this.actorFilter[rowKind] || '';
+    },
+
+    _countActorFilterSelections() {
+        let n = 0;
+        const af = this.actorFilter || {};
+        if (af.class) n++;
+        if (af.severity) n++;
+        if (af.proximity) n++;
+        if (af.place) n++;
+        if (this.storageFilter) n++;
+        if (this.placeContainsQuery) n++;
+        return n;
+    },
+
+    toggleActorFilterPanel() {
+        const panel = document.getElementById('actorFilterPanel');
+        const btn = document.getElementById('eventsActorFiltersToggle');
+        if (!panel) return;
+        const open = !panel.classList.contains('is-open');
+        panel.classList.toggle('is-open', open);
+        if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    },
+
+    _clearActorFilterRow(kind) {
+        if (kind === 'storage') this.setStorageFilter('');
+        else if (kind === 'placeContains') {
+            const input = document.getElementById('placeSearchInput');
+            const wrap = document.getElementById('placeSearchWrap');
+            if (input) input.value = '';
+            if (wrap) wrap.classList.remove('has-query');
+            this.placeContainsQuery = '';
+            if (this._placeSearchTimer) {
+                clearTimeout(this._placeSearchTimer);
+                this._placeSearchTimer = null;
+            }
+            this.currentPage = 1;
+            this.loadRecordings();
+            this.syncCompactActorFiltersUI();
+        } else this.setActorFilter(kind, '');
+    },
+
+    _renderActiveActorFilterChips() {
+        const host = document.getElementById('eventsActiveFilterChips');
+        if (!host) return;
+        const self = this;
+        const rows = [
+            { kind: 'class', key: 'class', labelKey: 'events.filter_what' },
+            { kind: 'severity', key: 'severity', labelKey: 'events.filter_severity' },
+            { kind: 'proximity', key: 'proximity', labelKey: 'events.filter_distance' },
+            { kind: 'storage', key: 'storage', labelKey: 'events.filter_storage' },
+            { kind: 'place', key: 'place', labelKey: 'events.filter_place' }
+        ];
+        let html = '';
+        rows.forEach(function (row) {
+            const val = self._rowFilterValue(row.kind, row.key);
+            if (!val) return;
+            const prefix = self._evLabel(row.labelKey, row.kind);
+            const valueText = self._activeChipText(row.kind, row.key);
+            const label = prefix + ' ' + valueText;
+            html += '<span class="events-active-filter-chip" data-filter-kind="' + self._esc(row.kind) + '">'
+                + '<span>' + self._esc(label) + '</span>'
+                + '<button type="button" class="events-active-filter-chip-remove"'
+                + ' onclick="BYD.events._clearActorFilterRow(\'' + self._jsStr(row.kind) + '\')"'
+                + ' data-i18n-attr="aria-label:events.filter_remove" aria-label="Remove filter">'
+                + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">'
+                + '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
+                + '</button></span>';
+        });
+        if (this.placeContainsQuery) {
+            const qLabel = this._evLabel('events.filter_place_search', 'Place search');
+            const label = qLabel + ': ' + this.placeContainsQuery;
+            html += '<span class="events-active-filter-chip" data-filter-kind="placeContains">'
+                + '<span>' + this._esc(label) + '</span>'
+                + '<button type="button" class="events-active-filter-chip-remove"'
+                + ' onclick="BYD.events._clearActorFilterRow(\'placeContains\')"'
+                + ' data-i18n-attr="aria-label:events.filter_remove" aria-label="Remove filter">'
+                + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">'
+                + '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
+                + '</button></span>';
+        }
+        host.innerHTML = html;
+        host.hidden = !html;
+        if (window.BYD && BYD.i18n && typeof BYD.i18n.applyAll === 'function') {
+            try { BYD.i18n.applyAll(host); } catch (e) { /* ignore */ }
+        }
+    },
+
+    syncCompactActorFiltersUI() {
+        const n = this._countActorFilterSelections();
+        const badge = document.getElementById('eventsActorFiltersBadge');
+        if (badge) {
+            badge.textContent = String(n);
+            badge.hidden = n === 0;
+        }
+        this._renderActiveActorFilterChips();
     },
 
     /**

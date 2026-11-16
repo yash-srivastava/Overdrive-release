@@ -704,6 +704,30 @@ body.ot-tabs-on .bottom-tab {
     font-weight: 600;
     letter-spacing: 0;
 }
+/* In-flow section tabs: equal-width pills across the full track (Chromium 58: no gap). */
+body.ot-tabs-on .bottom-tabs.is-inflow .bottom-tabs-track {
+    -webkit-box-flex: 1;
+    -webkit-flex: 1 1 auto;
+    flex: 1 1 auto;
+    width: 0;
+    min-width: 0;
+    overflow-x: hidden;
+}
+body.ot-tabs-on .bottom-tabs.is-inflow .bottom-tabs-track .bottom-tab {
+    -webkit-box-flex: 1;
+    -webkit-flex: 1 1 0;
+    flex: 1 1 0;
+    -webkit-box-pack: center;
+    -webkit-justify-content: center;
+    justify-content: center;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+body.ot-tabs-on .bottom-tabs.is-inflow .bottom-tabs-track .bottom-tab-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 body.ot-tabs-on .bottom-tab + .bottom-tab { margin-left: 4px; }
 [dir="rtl"] body.ot-tabs-on .bottom-tab + .bottom-tab { margin-left: 0; margin-right: 4px; }
 body.ot-tabs-on .bottom-tab-icon { display: none; }

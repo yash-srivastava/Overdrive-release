@@ -588,6 +588,37 @@
 
         /* ===== PERIOD FILTER (mock .toolbar): day seg + Custom date chip, wrapping
            row (negative-margin toolbar, no flex gap), the From → To row below. ===== */
+        body.trips-page {
+            --trip-sticky-top: calc(var(--page-header-h, 64px) + var(--tabs-h, 48px) + 8px);
+            --trip-sticky-top-shell: calc(var(--tabs-h, 48px) + 8px);
+            --trip-sticky-detail-top: calc(var(--tabs-h, 48px) + 12px);
+        }
+        body.trips-page,
+        body.trips-page .app-layout,
+        body.trips-page .main-content,
+        body.trips-page .main-content > .page-body {
+            overflow: visible;
+        }
+        #tripListView > #tripFilters.trips-period-sticky {
+            position: -webkit-sticky;
+            position: sticky;
+            top: var(--trip-sticky-top);
+            z-index: 5;
+            margin-bottom: 4px;
+            padding: 0;
+            background: transparent;
+            pointer-events: none;
+        }
+        #tripListView > #tripFilters.trips-period-sticky > * { pointer-events: auto; }
+        :root[data-app-shell="1"] #tripListView > #tripFilters.trips-period-sticky {
+            top: var(--trip-sticky-top-shell);
+        }
+        #tripListView > #tripFilters.trips-period-sticky .trip-period-row {
+            margin-bottom: 0;
+        }
+        #tripListView > #tripFilters.trips-period-sticky .trip-period-row > * {
+            margin-bottom: 0;
+        }
         .trip-period-row {
             display: flex;
             flex-wrap: wrap;
@@ -1225,7 +1256,19 @@
             flex-wrap: wrap;
             justify-content: space-between;
             align-items: center;
+            position: -webkit-sticky;
+            position: sticky;
+            top: var(--trip-sticky-top);
+            z-index: 5;
             margin-bottom: var(--card-gap);
+            padding: 0;
+            background: transparent;
+            pointer-events: none;
+        }
+        .detail-header > * { pointer-events: auto; }
+        body.trip-detail-open .detail-header,
+        :root[data-app-shell="1"] .trip-detail.active .detail-header {
+            top: var(--trip-sticky-detail-top);
         }
         .detail-back-btn {
             display: flex;
@@ -1839,7 +1882,7 @@
         }
     </style>
 </head>
-<body>
+<body class="trips-page">
     <div class="app-layout">
         <!-- Sidebar -->
         <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=19) -->
@@ -1971,9 +2014,9 @@
                         </div>
                     </div>
 
-                    <!-- Top Bar: Quick Filters + Custom range -->
-                    <div class="trips-top-bar" data-tab="trips" id="tripFilters">
-                        <!-- Wrappers are presentational: trips.js finds the buttons with #tripFilters .filter-tab. -->
+                    <!-- Period filters (sticky); custom range sits below, outside the sticky shell. -->
+                    <div class="trips-top-bar trips-period-sticky" data-tab="trips" id="tripFilters">
+                        <!-- trips.js finds the buttons with #tripFilters .filter-tab. -->
                         <div class="trip-period-row">
                             <div class="filter-tabs">
                                 <button class="filter-tab active" data-days="7" onclick="TRIPS.quickFilter(7, this)" data-i18n="trip.filter.days_7">7 Days</button>
@@ -1982,10 +2025,11 @@
                             </div>
                             <button class="filter-tab" id="tripCustomTab" onclick="TRIPS.toggleCustomRange(this)" data-i18n="trip.filter.custom"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="3"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/><path d="M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01"/></svg>Custom</button>
                         </div>
+                    </div>
                         <!-- Custom date range (hidden until "Custom" is tapped). Each
                              field opens the shared calendar popup — mirrors the
                              charging-page date picker look & feel. -->
-                        <div class="trip-range-row" id="tripRangeRow">
+                        <div class="trip-range-row" data-tab="trips" id="tripRangeRow">
                             <div class="trip-range-dates">
                                 <button class="calendar-toggle" id="tripFromToggle" onclick="TRIPS.openCalendar('from')">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
@@ -1999,7 +2043,6 @@
                             </div>
                             <button class="btn btn-primary trip-range-apply" onclick="TRIPS.applyCustomRange()" data-i18n="trip.daterange.apply">Apply</button>
                         </div>
-                    </div>
 
                     <!-- Weekly Summary — lives on the Trips tab now (was on Stats);
                          it summarises the visible trip list, so it belongs alongside it. -->

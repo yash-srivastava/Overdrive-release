@@ -2140,6 +2140,9 @@
     "filter_distance": "מרחק:",
     "filter_storage": "אחסון:",
     "filter_place": "מקום:",
+    "filters_toggle": "סנן",
+    "filter_remove": "הסר סינון",
+    "filter_place_search": "חיפוש מקום",
     "place_search_hint": "חפש מקומות…",
     "place_search_hits": {
       "one": "התאמה {count}",

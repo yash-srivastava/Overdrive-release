@@ -49,6 +49,125 @@
             .events-container > * + * { margin-top: 12px; }
         }
 
+        body.events-page {
+            --events-sticky-top: calc(var(--page-header-h, 64px) + 8px);
+            --events-sticky-top-shell: 8px;
+        }
+        body.events-page,
+        body.events-page .app-layout,
+        body.events-page .main-content,
+        body.events-page .main-content > .page-body {
+            overflow: visible;
+        }
+        .events-sticky-shell {
+            position: -webkit-sticky;
+            position: sticky;
+            top: var(--events-sticky-top);
+            z-index: 6;
+            margin-bottom: 4px;
+            padding: 0;
+            background: transparent;
+            pointer-events: none;
+        }
+        .events-sticky-shell > * { pointer-events: auto; }
+        :root[data-app-shell="1"] .events-sticky-shell {
+            top: var(--events-sticky-top-shell);
+        }
+        .events-sticky-shell .events-top-bar {
+            margin-bottom: 0;
+        }
+        .events-compact-filters-btn {
+            display: -webkit-inline-flex;
+            display: inline-flex;
+            -webkit-align-items: center;
+            align-items: center;
+            min-height: 44px;
+            margin: 0 8px 8px 0;
+            padding: 0 16px;
+            border: 0;
+            border-radius: var(--radius-full);
+            background: var(--well);
+            color: var(--on-surface);
+            font-size: var(--fs-label);
+            font-weight: 600;
+            cursor: pointer;
+        }
+        [dir="rtl"] .events-compact-filters-btn { margin: 0 0 8px 8px; }
+        .events-filter-badge {
+            display: -webkit-inline-flex;
+            display: inline-flex;
+            -webkit-align-items: center;
+            align-items: center;
+            -webkit-justify-content: center;
+            justify-content: center;
+            min-width: 20px;
+            height: 20px;
+            margin-left: 8px;
+            padding: 0 6px;
+            border-radius: var(--radius-full);
+            background: var(--primary);
+            color: var(--on-primary);
+            font-size: var(--fs-caption);
+            font-weight: 700;
+            line-height: 1;
+        }
+        [dir="rtl"] .events-filter-badge { margin-left: 0; margin-right: 8px; }
+        .events-filter-badge[hidden] { display: none; }
+        .events-active-filter-chips {
+            display: -webkit-flex;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            min-width: 0;
+            margin: 0 -6px -6px 0;
+            padding: 0 0 4px;
+        }
+        [dir="rtl"] .events-active-filter-chips { margin: 0 0 -6px -6px; }
+        .events-active-filter-chips[hidden] { display: none; }
+        .events-active-filter-chip {
+            display: -webkit-inline-flex;
+            display: inline-flex;
+            -webkit-align-items: center;
+            align-items: center;
+            max-width: 100%;
+            min-height: 32px;
+            margin: 0 6px 6px 0;
+            padding: 0 6px 0 12px;
+            border: 0;
+            border-radius: var(--radius-full);
+            background: var(--secondary-container);
+            color: var(--on-secondary-container);
+            font-size: var(--fs-caption);
+            font-weight: 600;
+        }
+        [dir="rtl"] .events-active-filter-chip { margin: 0 0 6px 6px; padding: 0 12px 0 6px; }
+        .events-active-filter-chip > span {
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+        .events-active-filter-chip-remove {
+            display: -webkit-inline-flex;
+            display: inline-flex;
+            -webkit-align-items: center;
+            align-items: center;
+            -webkit-justify-content: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            margin-left: 2px;
+            padding: 0;
+            border: 0;
+            border-radius: var(--radius-full);
+            background: transparent;
+            color: inherit;
+            cursor: pointer;
+        }
+        [dir="rtl"] .events-active-filter-chip-remove { margin-left: 0; margin-right: 2px; }
+        .events-active-filter-chip-remove svg { width: 14px; height: 14px; }
+        .actor-filter-panel { display: none; margin-bottom: 12px; }
+        .actor-filter-panel.is-open { display: block; }
+
         /* Toolbar (mock .toolbar): date chip and type segments, then the storage meter and Select at the end. Wraps; margins stand in for flex gap. */
         .events-top-bar {
             display: flex;
@@ -1544,7 +1663,7 @@
         :root[data-android-embed="1"] .empty-text { font-size: var(--fs-body); }
     </style>
 </head>
-<body>
+<body class="events-page">
     <div class="app-layout">
         <!-- Sidebar -->
         <!-- App shell sidebar (rendered by ../shared/app-shell.js?v=19) -->
@@ -1565,6 +1684,7 @@
                 <h1 class="page-title" data-i18n="nav.recordings">Recordings</h1>
             </header>
             <div class="events-container">
+                <div class="events-sticky-shell" id="eventsStickyShell">
                 <!-- Toolbar: date chip + type segments, then storage meter + Select at the end -->
                 <div class="events-top-bar">
                     <button class="calendar-toggle" id="calendarToggle" onclick="BYD.events.toggleCalendar()">
@@ -1619,14 +1739,16 @@
                             </svg>
                         </button>
                     </div>
+                    <button type="button" class="events-compact-filters-btn" id="eventsActorFiltersToggle" onclick="BYD.events.toggleActorFilterPanel()" aria-expanded="false" aria-controls="actorFilterPanel" data-i18n="events.filters_toggle">Filters<span class="events-filter-badge" id="eventsActorFiltersBadge" hidden>0</span></button>
+                </div>
+                <div class="events-active-filter-chips" id="eventsActiveFilterChips" hidden></div>
                 </div>
 
                 <!--
-                  v3 actor / severity / proximity chip rows. Lives OUTSIDE
-                  .events-top-bar so the desktop horizontal flex layout for
-                  calendar+type-tabs+storage stays uncluttered. Three labelled
-                  rows below, each with its own "Any" to clear that dimension.
+                  v3 actor / severity / proximity chip rows. Collapsed behind the
+                  Filters control; default closed to save vertical space.
                 -->
+                <div class="actor-filter-panel" id="actorFilterPanel">
                 <div class="actor-filter-rows">
                     <div class="filter-tabs filter-tabs-row2" data-filter-row="class">
                         <span class="filter-row-label" data-i18n="events.filter_what">What:</span>
@@ -1709,6 +1831,7 @@
                         <!-- Data chips injected by BYD.events.renderPlaceChips() -->
                         <span class="place-search-hits" id="placeSearchHits" aria-live="polite"></span>
                     </div>
+                </div>
                 </div>
                 
                 <!-- Recordings: summary line, clips grouped by day, pagination, selection bar -->
