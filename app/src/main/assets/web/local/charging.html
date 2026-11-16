@@ -110,19 +110,34 @@
         .filter-tabs.charge-segmented-control > * { margin: 0 8px 8px 0; }
         [dir="rtl"] .filter-tabs.charge-segmented-control { margin: 0 0 8px -8px; }
         [dir="rtl"] .filter-tabs.charge-segmented-control > * { margin: 0 0 8px 8px; }
+        /* Presentational flex row only (no segmented well); each tab is its own pill. */
         .charge-period-seg {
             display: -webkit-inline-flex; display: inline-flex;
             max-width: 100%;
-            padding: 3px;
+            padding: 0;
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
             scrollbar-width: none;
-            border-radius: var(--radius-full);
-            background: var(--well);
+            border: 0;
+            border-radius: 0;
+            background: transparent;
+            box-shadow: none;
         }
         .charge-period-seg::-webkit-scrollbar { display: none; }
-        .charge-period-seg > * + * { margin-left: 2px; }
-        [dir="rtl"] .charge-period-seg > * + * { margin-left: 0; margin-right: 2px; }
+        .charge-period-seg .filter-tab {
+            min-height: 44px;
+            background: var(--well);
+        }
+        .charge-period-seg .filter-tab.active {
+            background: var(--secondary-container);
+            color: var(--on-secondary-container);
+        }
+        @media (hover: hover) {
+            .charge-period-seg .filter-tab:hover { background: var(--well-2); }
+            .charge-period-seg .filter-tab.active:hover { background: var(--secondary-container); }
+        }
+        .charge-period-seg > * + * { margin-left: 8px; }
+        [dir="rtl"] .charge-period-seg > * + * { margin-left: 0; margin-right: 8px; }
         .charge-location-filter-row {
             display: -webkit-flex; display: flex;
             flex-wrap: wrap;
@@ -190,6 +205,21 @@
         }
         #sessionFilters > .charge-location-hint {
             margin-bottom: 4px;
+        }
+        /* No visible chrome on sticky shells (old WebView paints --well as a dark band). */
+        #sessionFilters,
+        #sessionFilters > .filter-tabs.charge-segmented-control.charge-period-control,
+        #sessionFilters .charge-period-seg,
+        #sessionFilters > .charge-location-filter-row,
+        #sessionFilters > #chargeLocationFilterRow {
+            border: 0;
+            outline: none;
+            box-shadow: none;
+        }
+        #sessionFilters > .filter-tabs.charge-segmented-control.charge-period-control,
+        #sessionFilters .charge-period-seg {
+            padding: 0;
+            background: transparent;
         }
         /* Custom From → To range. Collapsed by default; .open reveals it with a
            height + fade transition (display:none cannot animate). Phones stack
@@ -936,6 +966,9 @@
             min-height: 0;
             margin: 0 0 8px;
             padding: 0;
+            border: 0;
+            outline: none;
+            box-shadow: none;
             background: transparent;
             pointer-events: none;
             position: -webkit-sticky;
