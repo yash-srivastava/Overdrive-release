@@ -2,6 +2,7 @@ package com.overdrive.app.camera;
 
 import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
+import android.opengl.GLES30;
 import com.overdrive.app.logging.DaemonLogger;
 
 import java.nio.ByteBuffer;
@@ -248,16 +249,13 @@ public final class CopiedFrameRing {
             GLES20.glDisableVertexAttribArray(aTexCoordLoc);
 
             // COMPLETION BARRIER — inside the write reservation. glDrawArrays
-            // only SUBMITS the blit; clearing writingSlot here-without-finish
-            // left a gap in which a stale lane packet could pin this slot and
-            // sample it cross-context while the GPU was still writing it
-            // (release-blocker review round 2, finding 2). glFinish before the
-            // reservation clears makes copyFrom's contract "returns only when
-            // the slot content is GPU-complete and safe to publish/sample" —
-            // it doubles as the publish barrier for the caller's camera-buffer
-            // close and the cross-context consumers (bounded: only this
-            // frame's blits are queued at this point, ~1-2 ms).
-            GLES20.glFinish();
+            // only SUBMITS the blit; clearing writingSlot before the GPU has
+            // finished would let a stale lane packet pin and sample a slot
+            // while it is still being written. A GLES3 fence waits for this
+            // context's preceding copy commands without draining unrelated
+            // queued work. Keep the hard finish as a safety fallback for GLES2,
+            // fence creation/wait failures, and drivers that do not signal.
+            awaitCopyCompletion();
 
             synchronized (this) {
                 slotGenerations[slot]++;
@@ -273,6 +271,51 @@ public final class CopiedFrameRing {
             return -1;
         } finally {
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+        }
+    }
+
+    /**
+     * Wait until the just-submitted OES-to-2D blit is complete before publishing
+     * the slot or allowing the caller to release the camera-owned source buffer.
+     *
+     * <p>On GLES3, the fence scopes the wait to commands submitted before it in
+     * this context. {@code glFinish()} is deliberately retained only as a hard
+     * correctness fallback: GLES2 contexts cannot create GLES3 sync objects,
+     * and a timeout or failed wait must never let the source buffer be recycled
+     * while the GPU may still be sampling it.
+     */
+    private static void awaitCopyCompletion() {
+        long fence = 0L;
+        try {
+            fence = GLES30.glFenceSync(
+                GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            if (fence == 0L) {
+                GLES20.glFinish();
+                return;
+            }
+
+            int result = GLES30.glClientWaitSync(fence,
+                GLES30.GL_SYNC_FLUSH_COMMANDS_BIT, 50_000_000L);
+            if (result != GLES30.GL_ALREADY_SIGNALED
+                    && result != GLES30.GL_CONDITION_SATISFIED) {
+                // Timeout / wait failure / unexpected driver status: preserve
+                // the original lifetime guarantee rather than publish early.
+                GLES20.glFinish();
+            }
+        } catch (Throwable t) {
+            // GLES2 fallback and defensive recovery for vendor-driver errors.
+            try {
+                GLES20.glFinish();
+            } catch (Throwable finishError) {
+                // Do not convert a driver-level GL failure into a published
+                // slot: the caller's existing copy failure handling applies.
+                throw new IllegalStateException(
+                    "Unable to establish camera-copy completion", finishError);
+            }
+        } finally {
+            if (fence != 0L) {
+                try { GLES30.glDeleteSync(fence); } catch (Throwable ignored) {}
+            }
         }
     }
 
