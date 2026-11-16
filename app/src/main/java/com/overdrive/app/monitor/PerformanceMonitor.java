@@ -358,10 +358,14 @@ public class PerformanceMonitor {
             appReader.close();
             
             if (appLine != null) {
-                String[] parts = appLine.split("\\s+");
-                if (parts.length > 14) {
-                    long utime = Long.parseLong(parts[13]);
-                    long stime = Long.parseLong(parts[14]);
+                // /proc/<pid>/stat field 2 (comm) is parenthesized and may
+                // itself contain spaces or ')'. Splitting the whole line both
+                // allocates an array of every field and misindexes CPU times
+                // when the process name contains whitespace. Read only fields
+                // 14 (utime) and 15 (stime), anchored after the final ')'.
+                long utime = readProcStatField(appLine, 14);
+                long stime = readProcStatField(appLine, 15);
+                if (utime >= 0 && stime >= 0) {
                     long appCpuTime = utime + stime;
                     
                     if (lastAppCpuTime > 0 && lastCpuTime > 0) {
@@ -414,6 +418,44 @@ public class PerformanceMonitor {
     }
 
     
+    /**
+     * Read one numeric field from /proc/<pid>/stat without splitting the line.
+     * Linux field 2 (comm) is enclosed in parentheses but can contain spaces
+     * and closing parentheses, so field numbering must begin after its final
+     * closing parenthesis. Returns -1 when the requested field is absent or
+     * malformed; CPU time fields are non-negative.
+     */
+    private static long readProcStatField(String statLine, int targetField) {
+        if (statLine == null || targetField < 3) return -1;
+        int commandEnd = statLine.lastIndexOf(')');
+        if (commandEnd < 0) return -1;
+
+        int cursor = commandEnd + 1;
+        int field = 3;
+        while (field <= targetField) {
+            while (cursor < statLine.length()
+                    && Character.isWhitespace(statLine.charAt(cursor))) {
+                cursor++;
+            }
+            if (cursor >= statLine.length()) return -1;
+
+            int start = cursor;
+            while (cursor < statLine.length()
+                    && !Character.isWhitespace(statLine.charAt(cursor))) {
+                cursor++;
+            }
+            if (field == targetField) {
+                try {
+                    return Long.parseLong(statLine.substring(start, cursor));
+                } catch (NumberFormatException e) {
+                    return -1;
+                }
+            }
+            field++;
+        }
+        return -1;
+    }
+
     private void collectMemoryMetrics(PerformanceSnapshot snapshot) {
         try {
             // Only MemTotal and MemAvailable contribute to the dashboard's
