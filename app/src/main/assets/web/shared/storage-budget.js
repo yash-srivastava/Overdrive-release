@@ -179,12 +179,15 @@ BYD.storageBudget = {
      * A generic name keeps the plural copy (the accurate one) and stays honest about
      * there being another contributor.
      */
-    others: function (categories, self) {
+    others: function (categories, self, categoryLimitsMb) {
         var out = [];
         var unnamed = 0;
         for (var i = 0; i < (categories || []).length; i++) {
             var c = categories[i];
             if (c === self) continue;
+            // A zero cap is the explicit No Limit sentinel, not a configured
+            // retention budget and therefore not a contributor to this warning.
+            if (categoryLimitsMb && Number(categoryLimitsMb[i]) === 0) continue;
             var key = 'storage.category_' + c;
             var name = BYD.i18n.t(key);
             if (name == null || name === key) { unnamed++; continue; }
@@ -215,7 +218,11 @@ BYD.storageBudget = {
             var b = budget[i];
             // The payload includes untargeted volumes (empty categories) so a pending
             // switch can be evaluated against them; those must never match here.
-            if (b && b.categories && b.categories.indexOf(category) !== -1) return b;
+            if (b && b.categories && b.categories.indexOf(category) !== -1) {
+                var index = b.categories.indexOf(category);
+                if (b.categoryLimitsMb && Number(b.categoryLimitsMb[index]) === 0) return null;
+                return b;
+            }
         }
         return null;
     },
@@ -481,6 +488,9 @@ BYD.storageBudget = {
         if (!el) return false;
 
         var b = this.forCategory(budget, category);
+        // The caller's pending zero is No Limit, not a zero-byte budget. Suppress
+        // this category's warning immediately, including while its volume is moving.
+        if (pendingMb != null && Number(pendingMb) === 0) b = null;
         var movedVolumes = pendingType && b && b.storageType !== pendingType;
         if (movedVolumes) {
             // Retarget to the destination. If nothing is configured there yet the
@@ -514,7 +524,7 @@ BYD.storageBudget = {
             return false;
         }
 
-        var others = this.others(b.categories, category);
+        var others = this.others(b.categories, category, b.categoryLimitsMb);
         // Show the pair that the FIRED threshold actually compared, so the sentence is
         // arithmetically true as written. overCapacity weighs the full configured sum
         // against physical size; overReachable weighs only the measurable subset
