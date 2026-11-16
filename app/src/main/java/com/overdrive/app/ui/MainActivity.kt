@@ -4810,10 +4810,10 @@ open class MainActivity : AppCompatActivity() {
                 .setIcon(R.drawable.ic_traffic_monitor)
                 .setTitle(getString(R.string.dialog_traffic_enable_title))
                 .setMessage(getString(R.string.dialog_traffic_enable_message))
-                .setPositiveButton(getString(R.string.dialog_enable)) { _, _ ->
+                .setPositiveButton(getString(R.string.dialog_keep_disabled), null)
+                .setNegativeButton(getString(R.string.dialog_enable)) { _, _ ->
                     setTrafficMonitorEnabled(true)
                 }
-                .setNegativeButton(getString(R.string.dialog_keep_disabled), null)
                 .show()
         }
     }
