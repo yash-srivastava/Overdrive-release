@@ -555,7 +555,10 @@
     document.addEventListener('fullscreenchange', function () { syncOverlay(false); });
     document.addEventListener('webkitfullscreenchange', function () { syncOverlay(false); });
 
-    function iconSvg(type) {
+    // Type-only glyphs kept for entries whose page has no nav registry match
+    // (shouldn't happen for shipped pages). Tabs/settings inherit the parent
+    // page's sidebar icon via entryIconSvg, not the tab strip / gear shapes.
+    function iconSvgFallback(type) {
         if (type === 'page') {
             return '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>';
         }
@@ -564,6 +567,12 @@
         }
         // setting — gear
         return '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>';
+    }
+
+    function entryIconSvg(entry) {
+        var pm = pagesMap()[basename(entry.href)];
+        if (pm && pm.svg) return pm.svg;
+        return iconSvgFallback(entry.type);
     }
 
     function buildOverlay() {
@@ -618,7 +627,7 @@
         var label = escapeHtml(resolveLabel(e));
         var crumb = escapeHtml(resolveCrumb(e));
         return '<li class="od-search-item" role="option" data-i="' + i + '">'
-            + '<span class="od-search-item-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + iconSvg(e.type) + '</svg></span>'
+            + '<span class="od-search-item-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + entryIconSvg(e) + '</svg></span>'
             + '<span class="od-search-item-text">'
             +   '<span class="od-search-item-label">' + label + '</span>'
             +   (crumb ? '<span class="od-search-item-crumb">' + crumb + '</span>' : '')
