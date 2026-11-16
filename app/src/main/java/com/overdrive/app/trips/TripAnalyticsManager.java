@@ -731,6 +731,22 @@ public class TripAnalyticsManager {
     private void handleTripStarted(TripRecord trip) {
         logger.info("Trip started at " + trip.startTime);
 
+        // Trip map is rendered from telemetry la/lo, which are copied from
+        // GpsMonitor on each 5 Hz tick. Distance can still come from CAN speed
+        // with no GPS fix, producing trips that look real but have a blank map.
+        try {
+            com.overdrive.app.monitor.GpsMonitor gps =
+                    com.overdrive.app.monitor.GpsMonitor.getInstance();
+            gps.ensureTripRecordingFeed();
+            if (!gps.getFixSnapshot().hasLocation()) {
+                logger.warn("Trip started with no GPS fix in GpsMonitor — "
+                        + "LocationSidecar may be down or location permission missing; "
+                        + "telemetry will record 0,0 until a fix arrives");
+            }
+        } catch (Throwable t) {
+            logger.warn("Failed to ensure GPS pipeline for trip: " + t.getMessage());
+        }
+
         // Ensure TelemetryDataCollector is polling so we get fresh data
         // It may not be polling if no recording/overlay is active
         if (telemetryDataCollector != null) {
