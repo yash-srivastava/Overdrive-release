@@ -2664,6 +2664,35 @@ public class HttpServer {
                 }
             }
             
+            // Combined view 9 keeps the pano encoder as the WebSocket source,
+            // but must rebind the OEM camera as the scaler's secondary texture
+            // after a fresh stream scaler is created on reconnect.
+            if (savedViewMode == 9
+                    && StreamingApiHandler.getLastDesiredViewMode() == 9) {
+                try {
+                    org.json.JSONObject cameraCfg =
+                        com.overdrive.app.config.UnifiedConfigManager.loadConfig()
+                            .optJSONObject("camera");
+                    com.overdrive.app.camera.OemDashcamPipeline oem =
+                        CameraDaemon.getOemDashcamPipeline();
+                    boolean supported = cameraCfg != null
+                        && cameraCfg.optInt("concurrentAvmSupported", -1) == 1;
+                    boolean rebound = supported && oem != null
+                        && oem.isRouteReady() && oem.hasRecentFrame(5000L)
+                        && pipeline.bindOemSourceForComposite(oem);
+                    if (rebound) {
+                        pipeline.setStreamViewMode(9);
+                        CameraDaemon.log("WS: Restored combined AVM + DVR view");
+                    } else {
+                        pipeline.setStreamViewMode(0);
+                        CameraDaemon.log("WS: Combined view unavailable after reconnect; restored AVM mosaic");
+                    }
+                } catch (Throwable t) {
+                    pipeline.setStreamViewMode(0);
+                    CameraDaemon.log("WS: Combined view restore failed: " + t.getMessage());
+                }
+            }
+
             // Stream callback with congestion control
             final java.util.concurrent.atomic.AtomicBoolean headersReceived =
                 new java.util.concurrent.atomic.AtomicBoolean(false);

@@ -1300,6 +1300,11 @@ public class QualitySettingsApiHandler {
                 || (oemCfg.has("codec") && !oemC.equalsIgnoreCase(panoC))
                 || (oemCfg.has("fps") && oemF != panoF);
             oem.put("hasOwnQuality", diverged);
+            com.overdrive.app.camera.OemDashcamPipeline liveOem = CameraDaemon.getOemDashcamPipeline();
+            boolean combinedReady = oemId >= 0 && concurrent == 1
+                && liveOem != null && liveOem.getCameraId() == oemId
+                && liveOem.isRouteReady() && liveOem.hasRecentFrame(5000L);
+            oem.put("combinedViewAvailable", combinedReady);
             response.put("oemDashcam", oem);
         } catch (Exception ignored) {}
         
