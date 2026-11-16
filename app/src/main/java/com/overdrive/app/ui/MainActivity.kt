@@ -795,8 +795,6 @@ open class MainActivity : AppCompatActivity() {
         var pendingWatchdog: Runnable? = null
         var watchdogHandler: android.os.Handler? = null
     }
-
-    
     override fun onResume() {
         super.onResume()
         // PIN gate: if Settings → Security has the app lock enabled and the
