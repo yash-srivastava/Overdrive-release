@@ -344,64 +344,38 @@ public final class AiLaneGl {
         // acquired it will have cleared the flag, and once we hold the lock the
         // encoder cannot start a new teardown until we release.
         final Object camLock = cameraState.cameraTextureLock();
+        byte[] frameForWorker = null;
+        SurveillanceEngineGpu.FoveatedServiceResult pendingFoveated = null;
         synchronized (camLock) {
             if (!cameraState.isCameraTextureValid()) return;
 
             // Readback pacing gate. Two mutually-exclusive modes:
-            //  (1) wall-clock (readbackMinIntervalMs > 0, parked-idle throttle):
-            //      PASS A fires only every N ms, pinning motion cadence to a
-            //      fixed rate regardless of the HAL delivery rate. This is what
-            //      keeps detection identical when the HAL fps is dropped/ramped.
-            //  (2) frame-count modulo (legacy default): AI cadence scales with
-            //      HAL rate. Byte-identical to pre-throttle behaviour.
+            //  (1) wall-clock (parked-idle throttle), or (2) frame-count modulo.
             final long minIntervalMs = readbackMinIntervalMs;
             final boolean skipReadback;
             if (minIntervalMs > 0L) {
                 long nowMs = android.os.SystemClock.uptimeMillis();
-                // First tick after enabling (lastReadbackWallMs==0) always runs.
                 skipReadback = lastReadbackWallMs != 0L
                         && (nowMs - lastReadbackWallMs) < minIntervalMs;
-                if (!skipReadback) {
-                    lastReadbackWallMs = nowMs;
-                }
+                if (!skipReadback) lastReadbackWallMs = nowMs;
             } else {
                 skipReadback = readbackModulo > 1 && (seq % readbackModulo) != 0;
             }
-            if (skipReadback) {
-                // Even though we skip readback, still let the foveated mailbox
-                // drain — the foveated cropper has its own 150ms throttle and
-                // is what carries event-correlated work.
-                // The fence is needed only if a foveated crop actually
-                // submitted GL work. An idle tick must not synchronize the GPU.
-                if (serviceFoveated(textureId)) {
-                    gpuSampleBarrier();
-                }
-                return;
-            }
 
-            // Track submitted GL work, not whether a CPU-side result was
-            // returned. The async PBO readback can return null after issuing
-            // an OES-sampling draw, which still requires the lifetime barrier.
             boolean sampledCameraTexture = false;
-
-            // PASS A — mosaic 640×480 readback for V2 motion + actor pipeline.
-            // PBO + fence-sync inside readPixelsDirect makes this non-blocking
-            // even when the GPU's command queue is busy. With YOLO migrated
-            // off the GPU (CPU-only XNNPACK), the previous "Adreno mid-OpenCL"
-            // gate is no longer meaningful — the only contention left here is
-            // the AI worker still processing the prior frame, which the
-            // isBusy() check covers.
-            try {
-                if (sentry != null && sentry.isActive()
-                        && downscaler != null && aiLaneWorker != null) {
-                    if (!aiLaneWorker.isBusy()) {
-                        // Set before invoking: an exception or null result does
-                        // not establish that no GPU commands were queued.
+            if (!skipReadback) {
+                // PASS A — mosaic 640×480 readback for V2 motion + actor pipeline.
+                // PBO + fence-sync keeps readback asynchronous. The result is
+                // submitted to the CPU worker only AFTER the camera lock/barrier.
+                try {
+                    if (sentry != null && sentry.isActive()
+                            && downscaler != null && aiLaneWorker != null
+                            && !aiLaneWorker.isBusy()) {
+                        // Set before invoking: an exception/null result does not
+                        // prove that no GPU commands were queued.
                         sampledCameraTexture = true;
-                        byte[] smallFrame = downscaler.readPixelsDirect(textureId);
-                        if (smallFrame != null) {
-                            // Lazy-wire foveated cropper into the sentry on
-                            // first valid frame so it picks up the same OES tex.
+                        frameForWorker = downscaler.readPixelsDirect(textureId);
+                        if (frameForWorker != null) {
                             if (foveatedCropper != null && foveatedCropper.isInitialized()
                                     && sentry.getFoveatedCropper() == null) {
                                 sentry.setFoveatedCropper(foveatedCropper, textureId);
@@ -409,44 +383,40 @@ public final class AiLaneGl {
                                         + textureId + ")");
                             } else if (sentry.getFoveatedCropper() == null
                                     && System.currentTimeMillis() - lastFoveatedWireDiagMs > 5000) {
-                                // DIAGNOSTIC: the wire is reachable but a sub-term genuinely
-                                // blocked it (cropper still null/uninitialized). The
-                                // already-wired case (engineAlreadyWired=true) is SUCCESS, not
-                                // a blocker, so it is excluded here — otherwise this logged
-                                // every 5s for the daemon's life describing the healthy state.
                                 lastFoveatedWireDiagMs = System.currentTimeMillis();
                                 logger.info("FOVEATED-DIAG: lazy-wire NOT firing: cropperNull="
                                         + (foveatedCropper == null) + " cropperInit="
                                         + (foveatedCropper != null && foveatedCropper.isInitialized())
                                         + " engineAlreadyWired=" + (sentry.getFoveatedCropper() != null));
                             }
-                            aiLaneWorker.submitFrame(smallFrame);
                         }
                     }
+                } catch (Throwable t) {
+                    logger.warn("AI lane readback error: " + t.getMessage());
                 }
-            } catch (Throwable t) {
-                logger.warn("AI lane readback error: " + t.getMessage());
             }
 
-            // PASS B — service the foveated mailbox. Inside the lock: it samples
-            // the same OES texture (foveated crop binds GL_TEXTURE_EXTERNAL_OES),
-            // so it must be serialized against updateTexImage/release too.
-            sampledCameraTexture |= serviceFoveated(textureId);
+            // PASS B — only the GL crop submission stays under the lifetime
+            // lock. Its borrowed CPU result is copied/published after the GPU
+            // barrier and lock release.
+            pendingFoveated = serviceFoveated(textureId);
+            sampledCameraTexture |= pendingFoveated != null && pendingFoveated.attempted;
 
-            // CRASH FIX (GPU-timeline barrier): the OES-sampling draws above only
-            // QUEUE GPU work; the Java lock serializes CPU command ISSUANCE, not
-            // GPU EXECUTION. Without a barrier, this lock releases while the GPU
-            // sample of the camera EXTERNAL_OES texture is still pending, and the
-            // encoder thread then rebinds/frees that texture's backing buffer
-            // (consumeLatestImageAndBind) → use-after-free in libGLESv2_adreno.
-            // The barrier forces THIS lane's sample to COMPLETE on the GPU before
-            // we release camLock, so the encoder can never recycle a buffer that's
-            // still being read. See gpuSampleBarrier() for why a fence (not a full
-            // glFinish) is used. No fence is needed when neither pass submitted
-            // any OES-sampling draw (e.g. no pending crop and worker busy).
-            if (sampledCameraTexture) {
-                gpuSampleBarrier();
-            }
+            // Java lock serializes command issuance; the GPU fence guarantees
+            // the camera-owned backing buffer is no longer sampled before the
+            // encoder may update/release it.
+            if (sampledCameraTexture) gpuSampleBarrier();
+        }
+
+        // These operations touch only app-owned CPU arrays / worker state, not
+        // the camera OES texture. Keep them outside cameraTextureLock so the
+        // encoder can advance SurfaceTexture buffers while CPU work proceeds.
+        if (frameForWorker != null && aiLaneWorker != null) {
+            aiLaneWorker.submitFrame(frameForWorker);
+        }
+        if (pendingFoveated != null && sentry != null) {
+            try { sentry.publishFoveatedResult(pendingFoveated); }
+            catch (Throwable t) { logger.warn("Foveated publish error: " + t.getMessage()); }
         }
     }
 
@@ -496,15 +466,15 @@ public final class AiLaneGl {
         }
     }
 
-    private boolean serviceFoveated(int textureId) {
-        if (sentry == null || !sentry.isActive()) return false;
-        // True means a crop was ATTEMPTED, not necessarily completed. On
-        // exceptions, the draw may already be queued and still needs a fence.
+    private SurveillanceEngineGpu.FoveatedServiceResult serviceFoveated(int textureId) {
+        if (sentry == null || !sentry.isActive()) return null;
         try {
             return sentry.serviceFoveatedRequestsOnGlThread();
         } catch (Throwable t) {
             logger.warn("Foveated service error: " + t.getMessage());
-            return true; // Conservatively preserve the GPU lifetime barrier.
+            // Conservatively preserve the GPU lifetime barrier when a crop
+            // may have queued work before throwing.
+            return new SurveillanceEngineGpu.FoveatedServiceResult(true, null);
         }
     }
 
