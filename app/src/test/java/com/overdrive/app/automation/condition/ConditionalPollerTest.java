@@ -9,6 +9,8 @@ import org.junit.Test;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /** Verifies that automation polling consumes no periodic work while unreferenced. */
 public class ConditionalPollerTest {
@@ -69,6 +71,98 @@ public class ConditionalPollerTest {
         referenced.set(false);
         poller.refresh();
         assertFalse(poller.isScheduledForTest());
+    }
+
+
+    @Test
+    public void blockedSignalDoesNotStarveAnotherSignal() throws Exception {
+        AtomicBoolean referenced = new AtomicBoolean(true);
+        CountDownLatch blockedStarted = new CountDownLatch(1);
+        CountDownLatch releaseBlocked = new CountDownLatch(1);
+        AtomicInteger independentRuns = new AtomicInteger();
+        ConditionalPoller blocked = new ConditionalPoller(
+                "blocked isolation test", 20L, referenced::get, () -> {
+                    blockedStarted.countDown();
+                    try {
+                        releaseBlocked.await(2, TimeUnit.SECONDS);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+        ConditionalPoller independent = new ConditionalPoller(
+                "independent isolation test", 20L, referenced::get,
+                independentRuns::incrementAndGet);
+        try {
+            blocked.refresh();
+            independent.refresh();
+            assertTrue(blockedStarted.await(1, TimeUnit.SECONDS));
+            long deadline = System.currentTimeMillis() + 1000L;
+            while (independentRuns.get() == 0 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(10L);
+            }
+            assertTrue("independent signal was starved by blocked signal",
+                    independentRuns.get() > 0);
+        } finally {
+            releaseBlocked.countDown();
+            referenced.set(false);
+            blocked.refresh();
+            independent.refresh();
+        }
+    }
+
+    @Test
+    public void failedFirstSampleDoesNotConsumeSilentBaseline() throws Exception {
+        AtomicBoolean referenced = new AtomicBoolean(true);
+        AtomicInteger attempts = new AtomicInteger();
+        AtomicInteger silentRuns = new AtomicInteger();
+        ConditionalPoller poller = new ConditionalPoller(
+                "baseline retry test", 20L, referenced::get, () -> {
+                    if (attempts.incrementAndGet() == 1) {
+                        throw new IllegalStateException("service not ready");
+                    }
+                    if (com.overdrive.app.automation.Automations.isSilentSeedActive()) {
+                        silentRuns.incrementAndGet();
+                    }
+                });
+        try {
+            poller.refresh();
+            long deadline = System.currentTimeMillis() + 1000L;
+            while (silentRuns.get() == 0 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(10L);
+            }
+            assertEquals(1, silentRuns.get());
+        } finally {
+            referenced.set(false);
+            poller.refresh();
+        }
+    }
+
+
+    @Test
+    public void oneSignalNeverRunsOverlappingReads() throws Exception {
+        AtomicBoolean referenced = new AtomicBoolean(true);
+        AtomicInteger active = new AtomicInteger();
+        AtomicInteger maximumActive = new AtomicInteger();
+        ConditionalPoller poller = new ConditionalPoller(
+                "overlap isolation test", 10L, referenced::get, () -> {
+                    int current = active.incrementAndGet();
+                    maximumActive.accumulateAndGet(current, Math::max);
+                    try {
+                        Thread.sleep(45L);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                    } finally {
+                        active.decrementAndGet();
+                    }
+                });
+        try {
+            poller.refresh();
+            Thread.sleep(180L);
+            assertEquals(1, maximumActive.get());
+        } finally {
+            referenced.set(false);
+            poller.refresh();
+        }
     }
 
     private static void awaitAtLeastOneRun(AtomicInteger runs) throws InterruptedException {
