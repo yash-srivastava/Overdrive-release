@@ -33,7 +33,8 @@
     "communicate_title": "תקשורת - OverDrive",
     "assistant_title": "עוזר - OverDrive",
     "parking_title": "חניה - OverDrive",
-    "safekeep_title": "SafeKeep - OverDrive"
+    "safekeep_title": "SafeKeep - OverDrive",
+    "service_mode_title": "מצב שירות - OverDrive"
   },
   "nav": {
     "dashboard": "לוח בקרה",
@@ -72,7 +73,8 @@
     "safekeep": "SafeKeep",
     "remote_access": "קרבה",
     "remote_dev_view": "תצוגת מפתח מרחוק",
-    "module_faults": "תקלות מודולים"
+    "module_faults": "תקלות מודולים",
+    "service_mode": "מצב שירות"
   },
   "parking": {
     "page_title": "חניה",
@@ -6773,5 +6775,46 @@
     "copy_failed": "לא ניתן היה להעתיק את הדוח.",
     "fallback_module_name": "מודול",
     "fallback_reading_name": "מדידה"
+  },
+  "service_mode": {
+    "page_title": "מצב שירות",
+    "header_badge": "הגנה במהלך ביקור במוסך",
+    "status_inactive": "מצב השירות כבוי",
+    "status_inactive_desc": "האפליקציות ו-OverDrive זמינים כרגיל.",
+    "status_active": "מצב השירות פעיל",
+    "status_until": "שחזור אוטומטי: {date}",
+    "status_restoring": "משחזר אפליקציות ותכונות…",
+    "status_restoring_desc": "תהליך הרקע ינסה שוב לשחזר פריטים שטרם שוחזרו.",
+    "schedule_title": "תזמון מועד הסיום",
+    "schedule_desc": "מצב השירות מתחיל מיד. כל הפריטים שנבחרו ישוחזרו אוטומטית בסוף התאריך שנבחר, או מוקדם יותר בלחיצה על סיום עכשיו.",
+    "end_date": "תאריך סיום",
+    "visibility_title": "הסתרת אפליקציות ממערכת הרכב",
+    "visibility_desc": "OverDrive נשאר מותקן ותהליך הרקע ממשיך לפעול.",
+    "hide_overdrive": "הסתרת OverDrive מהמפעיל",
+    "hide_overdrive_desc": "ממשק האינטרנט נשאר זמין כדי לסיים את מצב השירות מוקדם.",
+    "choose_apps": "אפליקציות מותקנות",
+    "choose_apps_desc": "בחר אפליקציות צד שלישי להסתרה זמנית.",
+    "refresh_apps": "רענון",
+    "loading_apps": "טוען אפליקציות מותקנות…",
+    "apps_failed": "טעינת האפליקציות נכשלה.",
+    "no_apps": "לא נמצאו אפליקציות משתמש מתאימות.",
+    "features_title": "השהיית תכונות OverDrive",
+    "features_desc": "האפשרויות משהות את התכונה בלי למחוק הגדרות שמורות.",
+    "feature_automations": "אוטומציות",
+    "feature_automations_desc": "השהיית הפעלות אוטומטיות וידניות.",
+    "feature_keymap": "מיפוי מקשים",
+    "feature_keymap_desc": "מניעת הפעלת פעולות ממקשי הרכב.",
+    "warning": "בחר רק אפליקציות שניתן להשבית זמנית. אפליקציות שהיו מושבתות מראש יישארו מושבתות.",
+    "start_now": "התחלה עכשיו",
+    "end_now": "סיום עכשיו",
+    "choose_end_date": "יש לבחור תאריך סיום תקין.",
+    "end_date_future": "תאריך הסיום חייב להיות היום או מאוחר יותר.",
+    "start_failed": "הפעלת מצב השירות נכשלה.",
+    "end_failed": "לא ניתן עדיין לשחזר את כל הפריטים.",
+    "started": "מצב השירות הופעל.",
+    "ended": "מצב השירות הסתיים והפריטים שוחזרו.",
+    "detail_overdrive": "כניסת OverDrive למפעיל מוסתרת",
+    "detail_app": "אפליקציה מוסתרת: {package}",
+    "detail_feature": "תכונה מושהית: {feature}"
   }
 }

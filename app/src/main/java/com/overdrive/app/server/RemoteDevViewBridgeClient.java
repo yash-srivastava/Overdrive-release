@@ -4,6 +4,7 @@ import android.util.Log;
 
 import com.overdrive.app.remote.RemoteDevViewBridgeAuth;
 import com.overdrive.app.remote.RemoteDevViewBridgeService;
+import com.overdrive.app.util.ScratchRoot;
 
 import org.json.JSONObject;
 
@@ -14,6 +15,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.TimeUnit;
 
 /** Shell-daemon client for the protected app-process developer-view bridge. */
 final class RemoteDevViewBridgeClient {
@@ -41,6 +43,53 @@ final class RemoteDevViewBridgeClient {
 
     Response send(JSONObject request) {
         return send(request, 1_000, READ_TIMEOUT_MS, true);
+    }
+
+    /**
+     * Send an app-process command, starting the exported DUMP-protected bridge
+     * service through the shell UID if Android has reclaimed the non-sticky
+     * app process. The command channel itself remains HMAC-authenticated.
+     */
+    Response sendWithServiceStart(
+            JSONObject request, int connectTimeoutMs, int readTimeoutMs, boolean logFailures) {
+        Response response = send(request, connectTimeoutMs, readTimeoutMs, false);
+        if (response != null) return response;
+        if (!startBridgeService()) {
+            if (logFailures) Log.w(TAG, "Could not start app-process bridge service");
+            return null;
+        }
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                Thread.sleep(200L);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return null;
+            }
+            response = send(request, connectTimeoutMs, readTimeoutMs, logFailures);
+            if (response != null) return response;
+        }
+        return null;
+    }
+
+    private static boolean startBridgeService() {
+        Process process = null;
+        try {
+            String command = "am startservice --user 0 -n "
+                    + "com.overdrive.app/.remote.RemoteDevViewBridgeService";
+            process = new ProcessBuilder("sh", "-c", ScratchRoot.remap(command))
+                    .redirectErrorStream(true)
+                    .start();
+            if (!process.waitFor(5L, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                return false;
+            }
+            return process.exitValue() == 0;
+        } catch (Throwable error) {
+            Log.w(TAG, "Bridge service start failed: " + error.getMessage());
+            return false;
+        } finally {
+            try { if (process != null) process.destroy(); } catch (Throwable ignored) { }
+        }
     }
 
     /** Bounded, quiet reads let routine status requests tolerate an unavailable app bridge. */

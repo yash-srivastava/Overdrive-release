@@ -1,7 +1,9 @@
 package com.overdrive.app.remote
 
 import android.app.Service
+import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.IBinder
 import android.util.Log
 import org.json.JSONObject
@@ -208,6 +210,36 @@ class RemoteDevViewBridgeService : Service() {
                             val key = keys.next()
                             response.put(key, result.get(key))
                         }
+                    }
+                    "serviceModeLauncher" -> {
+                        // Only the app process changes its own launcher alias. The
+                        // shell daemon must never run pm disable-user against this
+                        // component, because disabling the package would also stop
+                        // the daemon and the restoration path.
+                        val launcher = ComponentName(
+                            application,
+                            "com.overdrive.app.LauncherActivity",
+                        )
+                        val packageManager = application.packageManager
+                        if (request.has("state")) {
+                            val requestedState = request.optInt("state", -1)
+                            if (requestedState !in
+                                PackageManager.COMPONENT_ENABLED_STATE_DEFAULT..
+                                PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED
+                            ) {
+                                throw IllegalArgumentException("Invalid launcher component state")
+                            }
+                            packageManager.setComponentEnabledSetting(
+                                launcher,
+                                requestedState,
+                                PackageManager.DONT_KILL_APP,
+                            )
+                        }
+                        response.put("success", true)
+                        response.put(
+                            "enabledState",
+                            packageManager.getComponentEnabledSetting(launcher),
+                        )
                     }
                     "launch" -> {
                         val launch = RemoteDevVirtualDisplay.start(application)

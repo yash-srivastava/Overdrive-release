@@ -797,8 +797,52 @@ open class MainActivity : AppCompatActivity() {
     }
 
     
+    /**
+     * App-process recovery for the Service Mode launcher alias. The daemon is
+     * responsible for scheduled restoration, but if it has died the app must
+     * still be able to restore its own launcher entry when the user opens the
+     * direct MainActivity launcher entry. The socket probe runs off the UI thread.
+     */
+    private fun recoverServiceModeLauncherIfDaemonUnavailable() {
+        Thread({
+            try {
+                val alias = android.content.ComponentName(
+                    this,
+                    "com.overdrive.app.LauncherActivity"
+                )
+                val current = packageManager.getComponentEnabledSetting(alias)
+                if (current != android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED &&
+                    current != android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER) {
+                    return@Thread
+                }
+                val daemonAvailable = try {
+                    java.net.Socket().use { socket ->
+                        socket.connect(java.net.InetSocketAddress("127.0.0.1", 8080), 700)
+                        true
+                    }
+                } catch (_: Throwable) {
+                    false
+                }
+                if (!daemonAvailable) {
+                    packageManager.setComponentEnabledSetting(
+                        alias,
+                        android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                        android.content.pm.PackageManager.DONT_KILL_APP
+                    )
+                    android.util.Log.w("MainActivity", "Restored Service Mode launcher alias because daemon is unavailable")
+                }
+            } catch (t: Throwable) {
+                android.util.Log.w("MainActivity", "Service Mode launcher recovery failed: ${t.message}")
+            }
+        }, "ServiceModeLauncherRecovery").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
     override fun onResume() {
         super.onResume()
+        recoverServiceModeLauncherIfDaemonUnavailable()
         // PIN gate: if Settings → Security has the app lock enabled and the
         // session isn't currently unlocked (or the auto-lock timeout has
         // elapsed since last pause), bring up the lock screen on top of
