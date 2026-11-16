@@ -281,6 +281,27 @@ public class TariffManagerUsageReplayContractTest {
     }
 
     @Test
+    public void legacySingleObjectTariffIsReadableAsOneProfile()
+            throws Exception {
+        JSONObject lone = new JSONObject()
+                .put("id", "home")
+                .put("label", "Home")
+                .put("lat", 32.08)
+                .put("lng", 34.78)
+                .put("radiusM", 50)
+                .put("acRate", 1.0)
+                .put("enabled", true);
+        JSONObject section = new JSONObject().put("tariffs", lone);
+        JSONArray normalized = TariffManager.tariffsArrayFromSection(section);
+        assertEquals(1, normalized.length());
+        assertEquals("home", normalized.getJSONObject(0).getString("id"));
+
+        JSONObject root = new JSONObject().put("chargingAnalytics", section);
+        JSONObject status = TariffManager.getInstance().toStatusJson(root, 0, 0);
+        assertEquals(1, status.getJSONArray("tariffs").length());
+    }
+
+    @Test
     public void statusMatchesDcOnlyTariffAtCurrentLocation()
             throws Exception {
         JSONObject tariff = new JSONObject()

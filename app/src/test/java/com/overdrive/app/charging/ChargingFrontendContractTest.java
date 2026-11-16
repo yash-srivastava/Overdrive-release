@@ -184,6 +184,8 @@ public class ChargingFrontendContractTest {
         String charging = readRepositoryFile(
                 "app/src/main/assets/web/shared/charging.js");
 
+        assertTrue(charging.contains("_tariffListFromPayload"));
+        assertTrue(charging.contains("_upsertTariffFromServer"));
         assertTrue(charging.contains(
                 "d.repricingStatus !== 'complete'"));
         assertTrue(charging.contains(

@@ -3712,8 +3712,7 @@ var CHARGING = {
         return this._fetchJson('/api/charging/tariffs')
             .then(function (d) {
                 if (generation !== self._tariffsGeneration) return null;
-                if (!d || d.success !== true || d.error
-                        || !Array.isArray(d.tariffs)) {
+                if (!d || d.success !== true || !self._tariffListFromPayload(d)) {
                     throw new Error('invalid tariffs payload');
                 }
                 self._applyTariffs(d);
@@ -3730,6 +3729,31 @@ var CHARGING = {
      * `meta` carries the default id, the live GPS fix and which tariff matches
      * it — that's what drives the "auto here" pill without a second request.
      */
+    /** Resolve the profile list from a tariffs GET/bootstrap payload. */
+    _tariffListFromPayload: function (d) {
+        if (!d || d.error || d.success === false) return null;
+        var meta = d.meta || d;
+        if (Array.isArray(d.tariffs)) return d.tariffs;
+        if (meta && Array.isArray(meta.tariffs)) return meta.tariffs;
+        return null;
+    },
+
+    _upsertTariffFromServer: function (t) {
+        if (!t || !t.id) return;
+        var rows = (this.tariffs || []).slice(0);
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].id === t.id) {
+                rows[i] = t;
+                this.tariffs = rows;
+                this.renderTariffs();
+                return;
+            }
+        }
+        rows.push(t);
+        this.tariffs = rows;
+        this.renderTariffs();
+    },
+
     _applyTariffs: function (d) {
         if (!d) return;
         // A failed endpoint/bootstrap section yields {error:...} (or success:false),
@@ -3737,9 +3761,10 @@ var CHARGING = {
         // rendered rows AND closed an open editor on a transient failure. Keep the
         // last good state instead.
         if (d.error || d.success === false) return;
-        if (!d.tariffs && !(d.meta && d.meta.tariffs)) return;
+        var list = this._tariffListFromPayload(d);
+        if (!list) return;
         var meta = d.meta || d;
-        this.tariffs = d.tariffs || meta.tariffs || [];
+        this.tariffs = list;
         this.defaultTariffId = meta.defaultTariffId || '';
         this.matchedTariffId = meta.matchedTariffId || '';
         this.maxTariffs = meta.maxTariffs || 40;
@@ -4072,6 +4097,7 @@ var CHARGING = {
                   return;
               }
               self.closeTariffEditor();
+              if (!editing && d.tariff) self._upsertTariffFromServer(d.tariff);
               // Confirm the automatic behaviour explicitly on save — the whole
               // point of a tariff is that the user never touches it again, so
               // say so once with the actual radius rather than leaving them to

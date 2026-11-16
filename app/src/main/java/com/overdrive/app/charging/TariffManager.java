@@ -171,9 +171,35 @@ public class TariffManager {
             this.root = root;
             JSONObject existing = root.optJSONObject(SECTION);
             this.section = existing != null ? existing : new JSONObject();
-            JSONArray existingTariffs = section.optJSONArray(KEY_TARIFFS);
-            this.tariffs = existingTariffs != null ? existingTariffs : new JSONArray();
+            this.tariffs = tariffsArrayFromSection(section);
         }
+    }
+
+    /**
+     * Normalize {@code chargingAnalytics.tariffs} for read/mutate paths.
+     *
+     * <p>Canonical storage is a JSON array. Early builds and hand-edited configs
+     * sometimes stored a single profile as a JSON object instead. Treating that
+     * as "no tariffs" and starting a fresh array on add wiped the existing profile
+     * when a second location was saved — only the newest row survived.
+     */
+    static JSONArray tariffsArrayFromSection(JSONObject section) {
+        if (section == null) return new JSONArray();
+        JSONArray arr = section.optJSONArray(KEY_TARIFFS);
+        if (arr != null) {
+            try {
+                return new JSONArray(arr.toString());
+            } catch (Exception ignored) {
+                return new JSONArray();
+            }
+        }
+        JSONObject lone = section.optJSONObject(KEY_TARIFFS);
+        if (lone != null) {
+            JSONArray out = new JSONArray();
+            out.put(lone);
+            return out;
+        }
+        return new JSONArray();
     }
 
     private static final class PublishedImage {
@@ -311,13 +337,11 @@ public class TariffManager {
         String requestedDefault = "";
         if (section != null) {
             requestedDefault = section.optString(KEY_DEFAULT_ID, "");
-            JSONArray tariffs = section.optJSONArray(KEY_TARIFFS);
-            if (tariffs != null) {
-                for (int i = 0; i < tariffs.length()
-                        && parsed.size() < MAX_PROFILES; i++) {
-                    JSONObject profile = tariffs.optJSONObject(i);
-                    if (profile != null) parsed.add(new TariffProfile(profile));
-                }
+            JSONArray tariffs = tariffsArrayFromSection(section);
+            for (int i = 0; i < tariffs.length()
+                    && parsed.size() < MAX_PROFILES; i++) {
+                JSONObject profile = tariffs.optJSONObject(i);
+                if (profile != null) parsed.add(new TariffProfile(profile));
             }
         }
         String publishedDefault = "";
@@ -883,17 +907,14 @@ public class TariffManager {
                     JSONObject root =
                             UnifiedConfigManager.readDurableConfigStrict();
                     JSONObject section = root.optJSONObject(SECTION);
-                    JSONArray tariffs = section != null
-                            ? section.optJSONArray(KEY_TARIFFS) : null;
+                    JSONArray tariffs = tariffsArrayFromSection(section);
                     JSONObject target = null;
-                    if (tariffs != null) {
-                        for (int i = 0; i < tariffs.length(); i++) {
-                            JSONObject candidate = tariffs.optJSONObject(i);
-                            if (candidate != null
-                                    && id.equals(candidate.optString("id", ""))) {
-                                target = candidate;
-                                break;
-                            }
+                    for (int i = 0; i < tariffs.length(); i++) {
+                        JSONObject candidate = tariffs.optJSONObject(i);
+                        if (candidate != null
+                                && id.equals(candidate.optString("id", ""))) {
+                            target = candidate;
+                            break;
                         }
                     }
 
@@ -907,10 +928,13 @@ public class TariffManager {
                         return usageSnapshot(section, false);
                     }
 
-                    // Patch the current durable profile in place so unknown fields, peer
-                    // tariff edits, and the current defaultTariffId all survive unchanged.
+                    // Patch the profile and publish a canonical tariffs array. Legacy
+                    // configs stored one profile as an object; writing the normalized
+                    // array migrates them without dropping sibling rows.
                     target.put("useCount", normalizedCount);
                     target.put("lastUsedAt", normalizedLastUsed);
+                    section.put(KEY_TARIFFS, tariffs);
+                    root.put(SECTION, section);
                     if (!UnifiedConfigManager.saveConfig(root)) {
                         return UsageReconcileResult.failure(
                                 "config persistence rejected usage replay");
@@ -951,13 +975,11 @@ public class TariffManager {
         String requestedDefault = "";
         if (section != null) {
             requestedDefault = section.optString(KEY_DEFAULT_ID, "");
-            JSONArray tariffs = section.optJSONArray(KEY_TARIFFS);
-            if (tariffs != null) {
-                for (int i = 0; i < tariffs.length()
-                        && parsed.size() < MAX_PROFILES; i++) {
-                    JSONObject profile = tariffs.optJSONObject(i);
-                    if (profile != null) parsed.add(new TariffProfile(profile));
-                }
+            JSONArray tariffs = tariffsArrayFromSection(section);
+            for (int i = 0; i < tariffs.length()
+                    && parsed.size() < MAX_PROFILES; i++) {
+                JSONObject profile = tariffs.optJSONObject(i);
+                if (profile != null) parsed.add(new TariffProfile(profile));
             }
         }
         String publishedDefault = "";
