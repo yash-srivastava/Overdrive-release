@@ -6772,6 +6772,11 @@
     "copied": "דוח האבחון הועתק ללוח.",
     "copy_failed": "לא ניתן היה להעתיק את הדוח.",
     "fallback_module_name": "מודול",
-    "fallback_reading_name": "מדידה"
+    "fallback_reading_name": "מדידה",
+    "dashboard_kicker": "מצב הרכב",
+    "dashboard_title": "זוהו תקלות במודולים",
+    "dashboard_summary": "הרכב מדווח על אזהרות אבחון.",
+    "dashboard_details": "הצג פרטי תקלות במודולים",
+    "dashboard_warning_count": "{count} אזהרות מודולים"
   }
 }

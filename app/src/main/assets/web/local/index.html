@@ -245,6 +245,19 @@
                     </svg>
                 </button>
 
+                    <article class="dash-card dash-module-faults-card" id="dashModuleFaults" data-card-id="module-faults" hidden aria-live="polite">
+                        <div class="dash-card-head">
+                            <div>
+                                <span class="dash-card-kicker" data-i18n="moduleFaults.dashboard_kicker">Vehicle health</span>
+                                <h2 data-i18n="moduleFaults.dashboard_title">Module faults detected</h2>
+                            </div>
+                            <span class="dash-module-faults-count" id="dashModuleFaultsCount"></span>
+                        </div>
+                        <p class="dash-module-faults-summary" id="dashModuleFaultsSummary" data-i18n="moduleFaults.dashboard_summary">The vehicle is reporting diagnostic warnings.</p>
+                        <ul class="dash-module-faults-list" id="dashModuleFaultsList"></ul>
+                        <a class="dash-module-faults-link" href="module-faults.html" data-i18n="moduleFaults.dashboard_details">View module fault details</a>
+                    </article>
+
                     <article class="dash-card dash-actions-card" data-card-id="commands">
                         <div class="dash-card-head">
                             <div>
@@ -531,6 +544,45 @@
             grid-area: main;
             min-width: 0;
         }
+
+        .dash-module-faults-card {
+            border: 1px solid var(--status-warning);
+            background-image: linear-gradient(180deg, var(--status-warning-container, rgba(245, 158, 11, .10)) 0%, var(--tile) 150px);
+        }
+        .dash-module-faults-card[hidden] { display: none; }
+        .dash-module-faults-count {
+            flex: 0 0 auto;
+            min-width: 28px;
+            padding: 5px 9px;
+            border-radius: 999px;
+            background: var(--status-warning-container, rgba(245, 158, 11, .14));
+            color: var(--status-warning);
+            font: 700 12px/1.2 'JetBrains Mono', monospace;
+            text-align: center;
+        }
+        .dash-module-faults-summary {
+            margin: 12px 0 0;
+            color: var(--on-surface);
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .dash-module-faults-list {
+            display: grid;
+            gap: 6px;
+            margin: 10px 0 0;
+            padding-left: 19px;
+            color: var(--on-surface);
+            font-size: 13px;
+        }
+        .dash-module-faults-link {
+            align-self: flex-start;
+            margin-top: 14px;
+            color: var(--primary);
+            font-size: 13px;
+            font-weight: 650;
+            text-decoration: none;
+        }
+        .dash-module-faults-link:hover { text-decoration: underline; }
 
         .dash-card h2 {
             margin: 0;
@@ -2809,6 +2861,7 @@
     <script src="../shared/auth.js"></script>
     <script src="../shared/pwa-init.js?v=index1"></script>
     <script src="../shared/core.js?v=24"></script>
+    <script src="../shared/module-faults-dashboard.js?v=1"></script>
     <script src="../shared/update-flow.js?v=3"></script>
     <script src="../shared/map.js?v=8"></script>
     <script>
@@ -4259,6 +4312,7 @@
 
         BYD.i18n.init().then(function() {
             BYD.core.init();
+            if (BYD.moduleFaultsDashboard) BYD.moduleFaultsDashboard.init();
             if (BYD.map) BYD.map.init();
             // The map fills its tile, whose height follows the bento row; Leaflet
             // only re-measures on window resize, so re-measure when the box changes.
