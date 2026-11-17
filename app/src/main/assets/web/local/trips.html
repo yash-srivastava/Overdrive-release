@@ -604,9 +604,11 @@
             position: sticky;
             top: var(--trip-sticky-top);
             z-index: 5;
-            margin-bottom: 4px;
+            margin-bottom: 0;
             padding: 0;
+            border: 0;
             background: transparent;
+            box-shadow: none;
             pointer-events: none;
         }
         #tripListView > #tripFilters.trips-period-sticky > * { pointer-events: auto; }
@@ -614,20 +616,25 @@
             top: var(--trip-sticky-top-shell);
         }
         #tripListView > #tripFilters.trips-period-sticky .trip-period-row {
-            margin-bottom: 0;
+            margin: 0;
         }
         #tripListView > #tripFilters.trips-period-sticky .trip-period-row > * {
-            margin-bottom: 0;
+            margin: 0;
         }
         .trip-period-row {
+            display: -webkit-flex;
             display: flex;
+            -webkit-flex-wrap: wrap;
             flex-wrap: wrap;
+            -webkit-align-items: center;
             align-items: center;
-            margin: 0 -8px 8px 0;
+            -webkit-justify-content: space-between;
+            justify-content: space-between;
+            width: 100%;
+            margin: 0 0 8px;
+            box-sizing: border-box;
         }
-        .trip-period-row > * { margin: 0 8px 8px 0; }
-        [dir="rtl"] .trip-period-row { margin: 0 0 8px -8px; }
-        [dir="rtl"] .trip-period-row > * { margin: 0 0 8px 8px; }
+        .trip-period-row > * { margin: 0 0 8px; }
         .calendar-toggle {
             display: flex;
             align-items: center;

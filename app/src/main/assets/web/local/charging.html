@@ -98,18 +98,22 @@
            (negative-margin toolbar, no flex gap) instead of clipping Custom. */
         .filter-tabs.charge-segmented-control {
             display: -webkit-flex; display: flex;
+            -webkit-flex-wrap: wrap;
             flex-wrap: wrap;
+            -webkit-align-items: center;
             align-items: center;
+            -webkit-justify-content: space-between;
+            justify-content: space-between;
+            width: 100%;
             max-width: none;
-            margin: 0 -8px 8px 0;
+            margin: 0 0 8px;
             padding: 0;
             overflow: visible;
             border-radius: 0;
             background: transparent;
+            box-sizing: border-box;
         }
-        .filter-tabs.charge-segmented-control > * { margin: 0 8px 8px 0; }
-        [dir="rtl"] .filter-tabs.charge-segmented-control { margin: 0 0 8px -8px; }
-        [dir="rtl"] .filter-tabs.charge-segmented-control > * { margin: 0 0 8px 8px; }
+        .filter-tabs.charge-segmented-control > * { margin: 0 0 8px; }
         .charge-period-seg {
             display: -webkit-inline-flex; display: inline-flex;
             max-width: 100%;
@@ -165,9 +169,11 @@
             position: sticky;
             top: var(--ch-sticky-top);
             z-index: 5;
-            margin-bottom: 4px;
+            margin-bottom: 0;
             padding: 0;
+            border: 0;
             background: transparent;
+            box-shadow: none;
             pointer-events: none;
         }
         #sessionFilters > * { pointer-events: auto; }
@@ -175,10 +181,10 @@
             top: var(--ch-sticky-top-tabs);
         }
         #sessionFilters > .filter-tabs.charge-segmented-control.charge-period-control {
-            margin-bottom: 4px;
+            margin: 0;
         }
         #sessionFilters > .filter-tabs.charge-segmented-control.charge-period-control > * {
-            margin-bottom: 0;
+            margin: 0;
         }
         #sessionFilters > .charge-location-filter-row,
         #sessionFilters > #chargeLocationFilterRow {
