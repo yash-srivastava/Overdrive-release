@@ -165,15 +165,6 @@
             --ch-sticky-detail-top: calc(var(--tabs-h, 48px) + 12px);
         }
         #sessionFilters {
-            margin-bottom: 0;
-            padding: 0;
-            border: 0;
-            background: none;
-            background-color: transparent;
-            background-image: none;
-            box-shadow: none;
-        }
-        #sessionFilters > .filter-tabs.charge-segmented-control.charge-period-control {
             position: -webkit-sticky;
             position: sticky;
             top: var(--ch-sticky-top);
@@ -182,14 +173,22 @@
             padding: 0;
             border: 0;
             background: none;
-            background-color: transparent;
+            background-color: rgba(0, 0, 0, 0);
             background-image: none;
             box-shadow: none;
             pointer-events: none;
         }
-        #sessionFilters > .filter-tabs.charge-segmented-control.charge-period-control > * { pointer-events: auto; }
-        :root[data-app-shell="1"] #sessionFilters > .filter-tabs.charge-segmented-control.charge-period-control {
+        #sessionFilters::before,
+        #sessionFilters::after {
+            content: none;
+            display: none;
+        }
+        #sessionFilters > * { pointer-events: auto; }
+        :root[data-app-shell="1"] #sessionFilters {
             top: var(--ch-sticky-top-tabs);
+        }
+        #sessionFilters > .filter-tabs.charge-segmented-control.charge-period-control {
+            margin: 0;
         }
         #sessionFilters > .filter-tabs.charge-segmented-control.charge-period-control > * {
             margin: 0;
