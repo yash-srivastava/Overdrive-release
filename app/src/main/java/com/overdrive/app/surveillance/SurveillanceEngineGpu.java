@@ -1203,10 +1203,10 @@ public class SurveillanceEngineGpu {
     //     a per-quadrant request flag with the latest centroid; non-blocking.
     //     Then calls pollFoveatedSlot(q) to read the most recent result; null
     //     if no result yet (caller falls back to mosaic for THIS tick).
-    //   - GL thread: at the END of each renderLoop iteration, calls
-    //     serviceFoveatedRequestsOnGlThread(). This walks the request flags,
-    //     performs the crop synchronously on the GL thread (no hop, no post),
-    //     deep-copies the result into the slot, clears the request flag.
+    //   - AiLaneGl: on its shared EGL context, calls
+    //     serviceFoveatedRequestsOnGlThread() under the camera-texture lifetime
+    //     lock. The crop is submitted there; its borrowed CPU result is copied
+    //     and published after the lock is released, then the request is cleared.
     //
     // Cost: foveated results lag the requesting AI tick by ~1 motion cycle
     // (~100ms at V2's 10Hz). At 30 fps that's 3 frames behind — well below
@@ -2107,11 +2107,10 @@ public class SurveillanceEngineGpu {
 
     /**
      * GL-thread hook. Called from PanoramicCameraGpu.renderLoop once per
-     * frame. Walks the per-quadrant request flags, performs each requested
-     * crop synchronously on the GL thread (since this method is itself called
-     * on the GL thread), publishes the result to the matching slot, and
-     * clears the request flag. Deep-copies the cropper's internal buffer
-     * because FoveatedCropper.crop() returns a pointer to a shared array.
+     * frame. Walks the per-quadrant request flags, performs one requested
+     * crop on the GL thread, and clears the request flag. It returns the
+     * cropper's borrowed result; CPU copying/publication is deferred until
+     * after the caller releases the camera-texture lifetime lock.
      *
      * MUST be called on the GL thread that owns cameraTextureId.
      *
@@ -2121,18 +2120,36 @@ public class SurveillanceEngineGpu {
      * simultaneously, they're serviced round-robin across consecutive
      * render frames.
      */
-    /** Returns true if a crop was attempted (and could have queued GPU work). */
-    public boolean serviceFoveatedRequestsOnGlThread() {
+    /**
+     * Result of servicing one foveated request. The cropper's returned RGB
+     * array is borrowed storage and must be copied before the next crop call;
+     * callers may defer that CPU copy until after releasing the camera-texture
+     * lifetime lock. {@code attempted} remains true when a crop may have queued
+     * GPU work but produced no CPU result, so the caller still issues its GPU
+     * lifetime barrier.
+     */
+    public static final class FoveatedServiceResult {
+        public final boolean attempted;
+        private final FoveatedCropper.Result result;
+
+        public FoveatedServiceResult(boolean attempted, FoveatedCropper.Result result) {
+            this.attempted = attempted;
+            this.result = result;
+        }
+    }
+
+    /** Returns null when no crop was attempted; otherwise returns the borrowed result. */
+    public FoveatedServiceResult serviceFoveatedRequestsOnGlThread() {
         FoveatedCropper cropper = this.foveatedCropper;
         int texId = this.cameraTextureId;
-        if (cropper == null || texId < 0 || !cropper.isInitialized()) return false;
+        if (cropper == null || texId < 0 || !cropper.isInitialized()) return null;
 
         // SOTA throttle: even with double-buffered async readback, the row pack
         // + Y-flip costs ~3 ms per call on Adreno 610. Capping to one service
         // per 150 ms keeps total per-frame GL cost predictable across the
         // entire event window.
         long nowNs = System.nanoTime();
-        if (nowNs - lastFoveatedServiceNs < FOVEATED_SERVICE_INTERVAL_NS) return false;
+        if (nowNs - lastFoveatedServiceNs < FOVEATED_SERVICE_INTERVAL_NS) return null;
 
         // Snapshot the requests under the lock, then service at most one per
         // call. Round-robin via a per-instance cursor so no quadrant starves.
@@ -2151,7 +2168,7 @@ public class SurveillanceEngineGpu {
                 }
             }
         }
-        if (qToServe < 0) return false;
+        if (qToServe < 0) return null;
 
         lastFoveatedServiceNs = nowNs;
 
@@ -2164,28 +2181,33 @@ public class SurveillanceEngineGpu {
             result = cropper.crop(texId, qToServe, cx, cy);
         } catch (Throwable t) {
             logger.warn("Foveated crop (GL inline) failed: " + t.getMessage());
-            return true; // A draw may already have been queued.
+            return new FoveatedServiceResult(true, null); // A draw may already be queued.
         }
         if (result == null || result.rgb == null || result.quadrant < 0
                 || result.quadrant >= FOVEATED_NUM_QUADRANTS) {
-            return true; // Async crop can return null after a GPU submission.
+            return new FoveatedServiceResult(true, null); // Async crop may have queued GPU work.
         }
-        // Deep-copy: cropper.rgb is a pointer to its shared internal buffer;
-        // the next service call will overwrite it. The copy is 1.2 MB —
-        // negligible vs. the 200 ms YOLO inference downstream.
+        // Do not copy or publish here: the caller may still hold the camera
+        // texture lifetime lock. The borrowed bytes remain stable until the
+        // next crop() call, which is serialized on the same AI GL handler.
+        return new FoveatedServiceResult(true, result);
+    }
+
+    /** Copy and publish a completed crop after the camera-texture lock is released. */
+    public void publishFoveatedResult(FoveatedServiceResult pending) {
+        if (pending == null || pending.result == null) return;
+        FoveatedCropper.Result result = pending.result;
+        // Deep-copy: cropper.rgb is borrowed internal storage and the next
+        // service call overwrites it. Keep the copy outside cameraTextureLock
+        // so a 1.2 MB CPU memcpy cannot delay SurfaceTexture buffer turnover.
         byte[] copy = new byte[result.rgb.length];
         System.arraycopy(result.rgb, 0, copy, 0, result.rgb.length);
-        // Publish the crop rect's affine ATOMICALLY with the rgb — the same
-        // AtomicReference swap. The affine describes the window THESE bytes
-        // came from (which, on the async ring, is an earlier crop() call than
-        // the centroid we just requested), so the bbox is mapped with the
-        // matching window downstream.
+        // Publish pixels and their affine in one immutable slot swap.
         foveatedSlots[result.quadrant].set(new FoveatedSlot(
                 copy, System.nanoTime(),
                 result.width, result.height,
                 result.mapAx, result.mapBx, result.mapAy, result.mapBy,
                 result.hasAffine(), result.captureNanos));
-        return true;
     }
 
     private int foveatedRoundRobin = 0;
@@ -2235,9 +2257,8 @@ public class SurveillanceEngineGpu {
         if (d != null) d.reset();
     }
 
-    // cropOnGlThread() removed — foveated crops now run synchronously on the
-    // GL thread inside serviceFoveatedRequestsOnGlThread() (called from
-    // PanoramicCameraGpu.renderLoop). The AI worker uses the mailbox
+    // cropOnGlThread() removed — foveated crops now run on AiLaneGl's shared
+    // GL context inside serviceFoveatedRequestsOnGlThread(). The AI worker uses the mailbox
     // (requestFoveatedCrop / pollFoveatedSlot) and never blocks on GL.
 
     /**
