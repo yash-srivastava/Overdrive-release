@@ -8,8 +8,6 @@ import android.content.Context;
 
 import com.overdrive.app.daemon.CameraDaemon;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -231,39 +229,13 @@ public final class BluetoothMonitor {
         return null;
     }
 
+    /**
+     * Share the network monitor's bounded shell runner instead of creating a
+     * reader thread on every Bluetooth poll. A failed or timed-out dumpsys must
+     * not publish a partial snapshot as a disconnected device.
+     */
     private static String exec(String cmd) {
-        Process p = null;
-        try {
-            p = new ProcessBuilder("sh", "-c", cmd).redirectErrorStream(true).start();
-            final Process fp = p;
-            StringBuilder sb = new StringBuilder();
-            // Read on a daemon thread so a dumpsys that hangs BEFORE producing output
-            // (readLine() would otherwise block the BT poll thread indefinitely) can be
-            // bounded: we join the reader with a timeout and force-kill the child below.
-            Thread reader = new Thread(() -> {
-                try (BufferedReader r = new BufferedReader(new InputStreamReader(fp.getInputStream()))) {
-                    String line;
-                    int lines = 0;
-                    // Bound the read: bluetooth_manager dumps can be large; the connected
-                    // section is near the top, so cap at a few hundred lines.
-                    while ((line = r.readLine()) != null && lines++ < 400) {
-                        synchronized (sb) { sb.append(line).append('\n'); }
-                    }
-                } catch (Throwable ignored) { /* pipe closed on kill */ }
-            }, "bt-dumpsys-read");
-            reader.setDaemon(true);
-            reader.start();
-            // Whole exec bounded to 4s — plenty for a healthy dumpsys, short enough that
-            // a wedged one can't park the 20s BT poll cadence.
-            if (!p.waitFor(4, java.util.concurrent.TimeUnit.SECONDS)) {
-                p.destroyForcibly();
-            }
-            reader.join(500);
-            synchronized (sb) { return sb.toString(); }
-        } catch (Throwable t) {
-            return null;
-        } finally {
-            if (p != null) p.destroyForcibly();
-        }
+        BoundedShell.Result result = BoundedShell.run(cmd, 4_000L);
+        return result.ok() ? result.output : null;
     }
 }
