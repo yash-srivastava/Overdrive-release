@@ -610,9 +610,9 @@ public final class HighResPreviewSampler {
         try {
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo);
             GLES20.glViewport(0, 0, width, height);
-            GLES20.glClearColor(0f, 0f, 0f, 1f);
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-
+            // The triangle strip covers the complete FBO on every sample.
+            // Clearing first writes the same pixels twice and can force extra
+            // GPU tile-memory work before the synchronous glReadPixels below.
             GLES20.glUseProgram(program);
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(
