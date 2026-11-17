@@ -2272,10 +2272,10 @@ public class SurveillanceApiHandler {
             }
             
             // Manual camera ID override. Persists into the same `camera`
-            // section keys the new resolver reads (probedCameraId,
-            // probedSurfaceMode, probedWidth, probedHeight, probedAndValidated,
-            // manualOverride), with width/height pulled from the resolved
-            // profile so a Tang override keeps Tang's 720 height, not Seal's 960.
+            // section keys the resolver reads. Manual selection is a user
+            // preference, NOT a successful hardware probe. Clear any previous
+            // probe's surface/geometry so the resolver uses profile defaults
+            // until a real producer observation is available.
             //
             // Surfaces save failures back to the caller — UnifiedConfigManager
             // can return false on this device when the app UID can't write
@@ -2300,15 +2300,16 @@ public class SurveillanceApiHandler {
                                 + "by the vehicle HAL");
                         return;
                     }
-                    com.overdrive.app.camera.ResolvedCameraConfig resolvedCamera =
-                        com.overdrive.app.camera.CameraConfigResolver.resolve();
                     org.json.JSONObject camCfg = new org.json.JSONObject();
                     try {
                         camCfg.put("probedCameraId", camId);
-                        camCfg.put("probedSurfaceMode", resolvedCamera.getPanoSurfaceMode());
-                        camCfg.put("probedWidth", resolvedCamera.getPanoWidth());
-                        camCfg.put("probedHeight", resolvedCamera.getPanoHeight());
-                        camCfg.put("probedAndValidated", true);
+                        // updateSection merges keys; use invalid sentinels to
+                        // invalidate measurements from the previously selected
+                        // camera rather than retaining stale positive values.
+                        camCfg.put("probedSurfaceMode", -1);
+                        camCfg.put("probedWidth", -1);
+                        camCfg.put("probedHeight", -1);
+                        camCfg.put("probedAndValidated", false);
                         camCfg.put("fallbackFromProbe", false);
                         camCfg.put("manualOverride", true);
                     } catch (org.json.JSONException je) {
@@ -2364,14 +2365,12 @@ public class SurveillanceApiHandler {
                         "Manual camera IDs are unavailable in DiLink 5 mode");
                     return;
                 }
-                com.overdrive.app.camera.ResolvedCameraConfig resolvedCamera =
-                    com.overdrive.app.camera.CameraConfigResolver.resolve();
                 org.json.JSONObject camCfg = new org.json.JSONObject();
                 try {
                     camCfg.put("probedCameraId", -1);
                     camCfg.put("probedSurfaceMode", -1);
-                    camCfg.put("probedWidth", resolvedCamera.getPanoWidth());
-                    camCfg.put("probedHeight", resolvedCamera.getPanoHeight());
+                    camCfg.put("probedWidth", -1);
+                    camCfg.put("probedHeight", -1);
                     camCfg.put("probedAndValidated", false);
                     camCfg.put("fallbackFromProbe", false);
                     camCfg.put("manualOverride", false);
