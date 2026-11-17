@@ -20,6 +20,7 @@ import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -539,20 +540,24 @@ public final class HighResPreviewSampler {
         }
         final Object lock = new Object();
         final AtomicReference<byte[]> result = new AtomicReference<>();
+        final AtomicBoolean abandoned = new AtomicBoolean(false);
         final boolean[] completed = {false};
-        boolean accepted = handler.post(() -> {
+        // An HTTP request may time out while another GPU readback is queued.
+        // Skip preview work that its caller can no longer consume.
+        final Runnable previewTask = () -> {
             try {
+                if (abandoned.get()) return;
                 Object activeSourceLock = sourceLock;
                 SourceGuard activeSourceGuard = sourceGuard;
                 if (activeSourceLock != null) {
                     synchronized (activeSourceLock) {
-                        if (activeSourceGuard == null
-                                || activeSourceGuard.isSourceValid(textureId)) {
+                        if (!abandoned.get() && (activeSourceGuard == null
+                                || activeSourceGuard.isSourceValid(textureId))) {
                             result.set(job.run());
                         }
                     }
-                } else if (activeSourceGuard == null
-                        || activeSourceGuard.isSourceValid(textureId)) {
+                } else if (!abandoned.get() && (activeSourceGuard == null
+                        || activeSourceGuard.isSourceValid(textureId))) {
                     result.set(job.run());
                 }
             } catch (Throwable t) {
@@ -563,8 +568,8 @@ public final class HighResPreviewSampler {
                     lock.notifyAll();
                 }
             }
-        });
-        if (!accepted) {
+        };
+        if (!handler.post(previewTask)) {
             logger.warn("Sampler GL thread rejected preview job");
             return null;
         }
@@ -576,12 +581,16 @@ public final class HighResPreviewSampler {
             while (!completed[0]) {
                 long remaining = deadline - android.os.SystemClock.elapsedRealtime();
                 if (remaining <= 0) {
+                    abandoned.set(true);
+                    handler.removeCallbacks(previewTask);
                     logger.warn("Sampler GL job timed out");
                     return null;
                 }
                 try {
                     lock.wait(remaining);
                 } catch (InterruptedException ignored) {
+                    abandoned.set(true);
+                    handler.removeCallbacks(previewTask);
                     Thread.currentThread().interrupt();
                     return null;
                 }
