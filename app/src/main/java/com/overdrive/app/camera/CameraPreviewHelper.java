@@ -722,23 +722,29 @@ public final class CameraPreviewHelper {
         }
         if (android.os.Build.VERSION.SDK_INT >= 29) {
             HardwareBuffer hwb = null;
+            Bitmap bmp = null;
+            Bitmap copy = null;
             try {
                 hwb = image.getHardwareBuffer();
                 if (hwb == null) return null;
-                Bitmap bmp = Bitmap.wrapHardwareBuffer(hwb,
+                bmp = Bitmap.wrapHardwareBuffer(hwb,
                         android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB));
                 if (bmp == null) return null;
-                Bitmap copy = bmp.copy(Bitmap.Config.ARGB_8888, false);
-                bmp.recycle();
+                copy = bmp.copy(Bitmap.Config.ARGB_8888, false);
                 if (copy == null) return null;
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
-                copy.compress(Bitmap.CompressFormat.JPEG, quality, out);
-                copy.recycle();
+                if (!copy.compress(Bitmap.CompressFormat.JPEG, quality, out)) return null;
                 return out.toByteArray();
             } catch (Throwable t) {
                 logger.debug("PRIVATE → JPEG conversion failed: " + t.getMessage());
                 return null;
             } finally {
+                if (copy != null) {
+                    try { copy.recycle(); } catch (Throwable ignored) {}
+                }
+                if (bmp != null) {
+                    try { bmp.recycle(); } catch (Throwable ignored) {}
+                }
                 if (hwb != null) {
                     try { hwb.close(); } catch (Throwable ignored) {}
                 }
