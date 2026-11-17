@@ -55,6 +55,8 @@ var CHARGING = {
     tariffGpsLat: null,
     tariffGpsLng: null,
     _editingTariff: null,
+    /** Create flow: non-null when user picked a session place instead of live GPS. */
+    _tariffPinDraft: null,
     // Default match radius for a new tariff, in metres. Mirrors
     // TariffProfile.DEFAULT_RADIUS_M — tight enough to mean "this charger"
     // rather than "this neighbourhood", while covering normal GPS scatter.
@@ -3712,8 +3714,7 @@ var CHARGING = {
         return this._fetchJson('/api/charging/tariffs')
             .then(function (d) {
                 if (generation !== self._tariffsGeneration) return null;
-                if (!d || d.success !== true || d.error
-                        || !Array.isArray(d.tariffs)) {
+                if (!d || d.success !== true || !self._tariffListFromPayload(d)) {
                     throw new Error('invalid tariffs payload');
                 }
                 self._applyTariffs(d);
@@ -3730,6 +3731,31 @@ var CHARGING = {
      * `meta` carries the default id, the live GPS fix and which tariff matches
      * it — that's what drives the "auto here" pill without a second request.
      */
+    /** Resolve the profile list from a tariffs GET/bootstrap payload. */
+    _tariffListFromPayload: function (d) {
+        if (!d || d.error || d.success === false) return null;
+        var meta = d.meta || d;
+        if (Array.isArray(d.tariffs)) return d.tariffs;
+        if (meta && Array.isArray(meta.tariffs)) return meta.tariffs;
+        return null;
+    },
+
+    _upsertTariffFromServer: function (t) {
+        if (!t || !t.id) return;
+        var rows = (this.tariffs || []).slice(0);
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].id === t.id) {
+                rows[i] = t;
+                this.tariffs = rows;
+                this.renderTariffs();
+                return;
+            }
+        }
+        rows.push(t);
+        this.tariffs = rows;
+        this.renderTariffs();
+    },
+
     _applyTariffs: function (d) {
         if (!d) return;
         // A failed endpoint/bootstrap section yields {error:...} (or success:false),
@@ -3737,9 +3763,10 @@ var CHARGING = {
         // rendered rows AND closed an open editor on a transient failure. Keep the
         // last good state instead.
         if (d.error || d.success === false) return;
-        if (!d.tariffs && !(d.meta && d.meta.tariffs)) return;
+        var list = this._tariffListFromPayload(d);
+        if (!list) return;
         var meta = d.meta || d;
-        this.tariffs = d.tariffs || meta.tariffs || [];
+        this.tariffs = list;
         this.defaultTariffId = meta.defaultTariffId || '';
         this.matchedTariffId = meta.matchedTariffId || '';
         this.maxTariffs = meta.maxTariffs || 40;
@@ -3751,7 +3778,10 @@ var CHARGING = {
         this._renderLocationFilterControl();
         // Keep the chip honest about the fix the save will actually use.
         var ed = document.getElementById('tariffEditor');
-        if (ed && ed.style.display !== 'none') this._renderTariffLocChip();
+        if (ed && ed.style.display !== 'none') {
+            this._renderTariffLocPicker();
+            this._renderTariffLocChip();
+        }
     },
 
     renderTariffs: function () {
@@ -3944,6 +3974,8 @@ var CHARGING = {
             t ? (t.dcRate > 0 ? t.dcRate : '') : (this.dcRate > 0 ? this.dcRate : ''));
         this._setInput('tariffRadiusInput', t ? (t.radiusM || this.TARIFF_DEFAULT_RADIUS_M) : this.TARIFF_DEFAULT_RADIUS_M);
 
+        this._tariffPinDraft = null;
+        this._renderTariffLocPicker();
         this._renderTariffLocChip();
         this._setTariffError('');
         editor.style.display = '';
@@ -3957,14 +3989,97 @@ var CHARGING = {
      * previously showed the page-load snapshot while the save sent a newer fix, so
      * the tariff could be pinned somewhere the user never confirmed.
      */
+    _sessionPlacesForTariffPin: function () {
+        var sessions = this.sessions || [];
+        var seen = {};
+        var out = [];
+        for (var i = 0; i < sessions.length; i++) {
+            var s = sessions[i];
+            if (!s || s.lat == null || s.lng == null) continue;
+            var lat = Number(s.lat);
+            var lng = Number(s.lng);
+            if (!isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0)) continue;
+            var key = lat.toFixed(3) + ',' + lng.toFixed(3);
+            if (seen[key]) continue;
+            seen[key] = true;
+            var label = this._locationLabel(s);
+            out.push({
+                lat: lat,
+                lng: lng,
+                label: label || (lat.toFixed(3) + ', ' + lng.toFixed(3))
+            });
+        }
+        return out;
+    },
+
+    _effectiveTariffPinCoordinates: function () {
+        var t = this._editingTariff;
+        if (t && t.lat != null && t.lng != null) {
+            return { lat: t.lat, lng: t.lng };
+        }
+        if (this._tariffPinDraft) {
+            return { lat: this._tariffPinDraft.lat, lng: this._tariffPinDraft.lng };
+        }
+        if (this.tariffGpsLat != null && this.tariffGpsLng != null) {
+            return { lat: this.tariffGpsLat, lng: this.tariffGpsLng };
+        }
+        return null;
+    },
+
+    setTariffPinFromPick: function (value) {
+        if (!value || value === 'gps') {
+            this._tariffPinDraft = null;
+        } else {
+            var parts = String(value).split(',');
+            if (parts.length === 2) {
+                var lat = parseFloat(parts[0]);
+                var lng = parseFloat(parts[1]);
+                if (isFinite(lat) && isFinite(lng)) {
+                    this._tariffPinDraft = { lat: lat, lng: lng };
+                }
+            }
+        }
+        this._renderTariffLocChip();
+    },
+
+    _renderTariffLocPicker: function () {
+        var sel = document.getElementById('tariffLocPick');
+        var hint = document.getElementById('tariffLocPickHint');
+        if (!sel) return;
+        if (this._editingTariff) {
+            sel.style.display = 'none';
+            if (hint) hint.style.display = 'none';
+            return;
+        }
+        var places = this._sessionPlacesForTariffPin();
+        if (places.length === 0) {
+            sel.style.display = 'none';
+            sel.innerHTML = '';
+            if (hint) hint.style.display = 'none';
+            return;
+        }
+        sel.style.display = '';
+        if (hint) hint.style.display = '';
+        var html = '<option value="gps">' + this._esc(
+            this._t('charge.tariff_loc_gps', 'Current position')) + '</option>';
+        var pin = this._tariffPinDraft;
+        for (var i = 0; i < places.length; i++) {
+            var p = places[i];
+            var val = p.lat + ',' + p.lng;
+            var selected = pin && pin.lat === p.lat && pin.lng === p.lng;
+            html += '<option value="' + val + '"' + (selected ? ' selected' : '') + '>'
+                + this._esc(p.label) + '</option>';
+        }
+        sel.innerHTML = html;
+        if (!pin) sel.value = 'gps';
+    },
+
     _renderTariffLocChip: function () {
         var locText = document.getElementById('tariffLocText');
         if (!locText) return;
-        var t = this._editingTariff;
-        if (t && t.lat != null && t.lng != null) {
-            locText.textContent = t.lat.toFixed(5) + ', ' + t.lng.toFixed(5);
-        } else if (this.tariffGpsLat != null && this.tariffGpsLng != null) {
-            locText.textContent = this.tariffGpsLat.toFixed(5) + ', ' + this.tariffGpsLng.toFixed(5);
+        var pin = this._effectiveTariffPinCoordinates();
+        if (pin) {
+            locText.textContent = pin.lat.toFixed(5) + ', ' + pin.lng.toFixed(5);
         } else {
             locText.textContent = this._t('charge.tariff_no_gps', 'Waiting for GPS…');
         }
@@ -3974,6 +4089,7 @@ var CHARGING = {
         var editor = document.getElementById('tariffEditor');
         if (editor) editor.style.display = 'none';
         this._editingTariff = null;
+        this._tariffPinDraft = null;
         this._setTariffError('');
     },
 
@@ -4047,12 +4163,12 @@ var CHARGING = {
         };
         if (editing) {
             body.id = editing.id;
-        } else if (this.tariffGpsLat != null && this.tariffGpsLng != null) {
-            // Pin to the fix the user was shown in the location chip. Otherwise the
-            // server re-reads GPS at POST time and the tariff can land somewhere the
-            // user never confirmed (they may have driven off since opening the form).
-            body.lat = this.tariffGpsLat;
-            body.lng = this.tariffGpsLng;
+        } else {
+            var pin = this._effectiveTariffPinCoordinates();
+            if (pin) {
+                body.lat = pin.lat;
+                body.lng = pin.lng;
+            }
         }
 
         var btn = document.getElementById('tariffSaveBtn');
@@ -4072,6 +4188,7 @@ var CHARGING = {
                   return;
               }
               self.closeTariffEditor();
+              if (!editing && d.tariff) self._upsertTariffFromServer(d.tariff);
               // Confirm the automatic behaviour explicitly on save — the whole
               // point of a tariff is that the user never touches it again, so
               // say so once with the actual radius rather than leaving them to

@@ -1189,6 +1189,8 @@
     "tariff_radius": "רדיוס התאמה",
     "tariff_radius_hint": "כמה קרובה צריכה להיות הטעינה כדי להשתמש בתעריף זה",
     "tariff_location": "מיקום",
+    "tariff_loc_gps": "המיקום הנוכחי",
+    "tariff_loc_pick_desc": "או בחר מקום מהיסטוריית הטעינה",
     "tariff_ac_short": "AC",
     "tariff_dc_short": "DC",
     "tariff_no_rate": "לא הוגדר תעריף",

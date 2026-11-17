@@ -1691,8 +1691,10 @@
                             <div class="setting-row">
                                 <div class="setting-info">
                                     <div class="setting-name" data-i18n="charge.tariff_location">Location</div>
+                                    <div class="setting-desc" id="tariffLocPickHint" style="display:none;" data-i18n="charge.tariff_loc_pick_desc">Or choose a place from charging history</div>
                                 </div>
                                 <div class="setting-control">
+                                    <select id="tariffLocPick" class="ch-text-field" style="display:none;margin-bottom:6px;" onchange="CHARGING.setTariffPinFromPick(this.value)" aria-label="Location source" data-i18n-attr="aria-label:charge.tariff_location"></select>
                                     <span id="tariffLocText" class="ch-value-text">--</span>
                                 </div>
                             </div>

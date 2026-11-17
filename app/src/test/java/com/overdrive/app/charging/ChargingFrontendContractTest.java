@@ -183,7 +183,17 @@ public class ChargingFrontendContractTest {
             throws IOException {
         String charging = readRepositoryFile(
                 "app/src/main/assets/web/shared/charging.js");
+        String html = readRepositoryFile(
+                "app/src/main/assets/web/local/charging.html");
+        String english = readRepositoryFile(
+                "app/src/main/assets/web/i18n/en.json");
 
+        assertTrue(charging.contains("_tariffListFromPayload"));
+        assertTrue(charging.contains("_upsertTariffFromServer"));
+        assertTrue(charging.contains("setTariffPinFromPick"));
+        assertTrue(charging.contains("_sessionPlacesForTariffPin"));
+        assertTrue(html.contains("id=\"tariffLocPick\""));
+        assertTrue(english.contains("\"tariff_loc_gps\""));
         assertTrue(charging.contains(
                 "d.repricingStatus !== 'complete'"));
         assertTrue(charging.contains(
