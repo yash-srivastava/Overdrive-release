@@ -334,7 +334,27 @@ public final class HighResPreviewSampler {
     }
 
     private void ensureFbo(int width, int height) {
-        if (fbo >= 0 && fboWidth == width && fboHeight == height) return;
+        // The viewport and glReadPixels use the requested dimensions, not the
+        // attachment dimensions. A larger RGBA attachment can therefore serve
+        // a smaller quadrant preview without another GPU texture allocation.
+        // Keep the original capacity for a subsequent full-mosaic request.
+        if (fbo >= 0 && width <= fboWidth && height <= fboHeight) {
+            if (jpegBitmap != null
+                    && jpegBitmap.getWidth() == width
+                    && jpegBitmap.getHeight() == height) return;
+            try {
+                // Only the JPEG bitmap must match the output dimensions;
+                // the readback buffers and pixel array already have capacity.
+                Bitmap resized = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                Bitmap previous = jpegBitmap;
+                jpegBitmap = resized;
+                if (previous != null) previous.recycle();
+            } catch (Throwable t) {
+                logger.warn("ensureFbo bitmap resize failed: " + t.getMessage());
+                releaseFbo();
+            }
+            return;
+        }
         releaseFbo();
         try {
             int[] texIds = new int[1];
