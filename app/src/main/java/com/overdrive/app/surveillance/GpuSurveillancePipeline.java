@@ -2592,10 +2592,9 @@ public class GpuSurveillancePipeline {
             + ", size=" + resolvedCamera.getPanoWidth() + "x" + resolvedCamera.getPanoHeight()
             + ", surfaceMode=" + resolvedCamera.getPanoSurfaceMode() + ")");
 
-        // Camera selection priority:
-        //   1. Validated/manual override saved in UnifiedConfigManager → use as-is.
-        //   2. BmmCameraInfo system hint → preferred over profile default if available.
-        //   3. Profile default (Seal=1, Tang=2).
+        // Camera selection is resolved once by CameraConfigResolver, including
+        // HAL tag discovery and saved-ID validation. Do not re-discover here:
+        // diagnostics and the actual recorder must agree on the effective ID.
         if (resolvedCamera.isValidated() || resolvedCamera.isManualPanoOverride()) {
             logger.info("Using saved panoramic config: id=" + resolvedCamera.getPanoCameraId()
                 + ", surfaceMode=" + resolvedCamera.getPanoSurfaceMode()
@@ -2607,15 +2606,9 @@ public class GpuSurveillancePipeline {
             // false negatives in low-light/uniform scenes.
             camera.setSkipFrameValidation(true);
         } else {
-            int discoveredId = com.overdrive.app.camera.AvmCameraHelper.discoverPanoCameraId();
-            if (discoveredId >= 0) {
-                logger.info("Using BmmCameraInfo panoramic hint: camera ID " + discoveredId);
-                camera.setCameraId(discoveredId);
-            } else {
-                logger.info("Using profile default panoramic camera ID "
-                    + resolvedCamera.getPanoCameraId());
-                camera.setCameraId(resolvedCamera.getPanoCameraId());
-            }
+            logger.info("Using resolved panoramic camera ID " + resolvedCamera.getPanoCameraId()
+                + " (source=" + resolvedCamera.getPanoCameraIdSource() + ")");
+            camera.setCameraId(resolvedCamera.getPanoCameraId());
             camera.setCameraSurfaceMode(resolvedCamera.getPanoSurfaceMode());
             camera.setAutoProbeCameras(false);
             // OEM-PARITY: dilink4 trusts the HAL camera-id resolution

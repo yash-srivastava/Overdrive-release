@@ -28,6 +28,11 @@ public final class AvmCameraHelper {
     private static final String[] LEGACY_PANO_TAGS =
             {"pano_h", "pano_l", "byd_apa", "apa"};
     private static volatile PanoCameraSelection cachedPanoSelection;
+    // resolve() is also read by HTTP diagnostics. Bound repeated hidden-API probes
+    // without caching a missing HAL mapping forever (the service can initialize late).
+    private static final long PANO_ID_LOOKUP_CACHE_MS = 10_000L;
+    private static long lastPanoIdLookupMs = -1L;
+    private static int lastPanoIdLookupResult = -1;
 
     private AvmCameraHelper() {}
 
@@ -102,36 +107,14 @@ public final class AvmCameraHelper {
             logger.info(sb.toString());
 
             // DIPlus pano_h/pano_l path: preview index 0.
-            for (String tag : DI4_PANO_TAGS) {
-                Object result = getCameraId.invoke(null, tag);
-                if (result instanceof Integer) {
-                    int id = (Integer) result;
-                    if (id >= 0) {
-                        PanoCameraSelection selection =
-                                new PanoCameraSelection(id, 0, tag);
-                        cachedPanoSelection = selection;
-                        logger.info("Discovered panoramic camera: " + tag
-                                + " → ID " + id + ", previewIndex=0");
-                        return selection;
-                    }
-                }
-            }
-
-            // DIPlus APA fallback: preview index 1.
-            for (String tag : APA_FALLBACK_TAGS) {
-                Object result = getCameraId.invoke(null, tag);
-                if (result instanceof Integer) {
-                    int id = (Integer) result;
-                    if (id >= 0) {
-                        PanoCameraSelection selection =
-                                new PanoCameraSelection(id, 1, tag);
-                        cachedPanoSelection = selection;
-                        logger.info("Discovered panoramic camera fallback: "
-                                + tag + " → ID " + id
-                                + ", previewIndex=1");
-                        return selection;
-                    }
-                }
+            PanoCameraSelection selection = findDi4Selection(
+                    tag -> getCameraId.invoke(null, tag));
+            if (selection != null) {
+                cachedPanoSelection = selection;
+                logger.info("Discovered panoramic camera: " + selection.getTag()
+                        + " -> ID " + selection.getCameraId()
+                        + ", previewIndex=" + selection.getPreviewIndex());
+                return selection;
             }
             logger.info("BmmCameraInfo: no panoramic camera found for any tag");
             return null;
@@ -144,31 +127,85 @@ public final class AvmCameraHelper {
         }
     }
 
+    /** Use only known panoramic tags, preserving DIPlus preview-index semantics. */
+    static PanoCameraSelection findDi4Selection(CameraTagLookup lookup) {
+        String[][] groups = {DI4_PANO_TAGS, APA_FALLBACK_TAGS};
+        for (int group = 0; group < groups.length; group++) {
+            for (String tag : groups[group]) {
+                try {
+                    Object value = lookup.cameraIdFor(tag);
+                    if (value instanceof Integer) {
+                        int id = (Integer) value;
+                        if (PanoramicCameraIdPolicy.isValidCameraId(id)) {
+                            return new PanoCameraSelection(id, group, tag);
+                        }
+                        if (id >= 0) {
+                            logger.warn("Ignoring out-of-range BmmCameraInfo " + tag + "=" + id);
+                        }
+                    }
+                } catch (Exception | LinkageError e) {
+                    logger.warn("BmmCameraInfo " + tag + " lookup failed: " + e.getMessage());
+                }
+            }
+        }
+        return null;
+    }
+
     /**
      * Legacy ID-only discovery. Keep its historical fallback order unchanged
      * so enabling the DI4 path cannot alter older vehicle behavior.
      */
-    public static int discoverPanoCameraId() {
+    public static synchronized int discoverPanoCameraId() {
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (lastPanoIdLookupMs >= 0 && now >= lastPanoIdLookupMs
+                && now - lastPanoIdLookupMs < PANO_ID_LOOKUP_CACHE_MS) {
+            return lastPanoIdLookupResult;
+        }
+        int discovered = discoverPanoCameraIdUncached();
+        lastPanoIdLookupResult = discovered;
+        lastPanoIdLookupMs = now;
+        return discovered;
+    }
+
+    private static int discoverPanoCameraIdUncached() {
         try {
             Class<?> bmmClass = Class.forName(BMM_CAMERA_INFO_CLASS);
             java.lang.reflect.Method getCameraId =
                     bmmClass.getDeclaredMethod("getCameraId", String.class);
             getCameraId.setAccessible(true);
-            for (String tag : LEGACY_PANO_TAGS) {
-                Object result = getCameraId.invoke(null, tag);
-                if (result instanceof Integer && (Integer) result >= 0) {
-                    int id = (Integer) result;
-                    logger.info("Discovered panoramic camera: " + tag
-                            + " → ID " + id);
-                    return id;
-                }
-            }
-            logger.info("BmmCameraInfo: no panoramic camera found for any tag");
+            return findPanoIdForTags(tag -> getCameraId.invoke(null, tag));
         } catch (ClassNotFoundException e) {
-            logger.warn("BmmCameraInfo class not available on this device");
-        } catch (Exception e) {
-            logger.warn("BmmCameraInfo discovery failed: " + e.getMessage());
+            logger.info("BmmCameraInfo class unavailable; panoramic ID is not system-discoverable");
+        } catch (ReflectiveOperationException | SecurityException | LinkageError e) {
+            logger.warn("BmmCameraInfo lookup unavailable: " + e.getMessage());
         }
+        return -1;
+    }
+
+    /** Per-tag errors are independent: one bad vendor tag must not hide a later good one. */
+    interface CameraTagLookup {
+        Object cameraIdFor(String tag) throws Exception;
+    }
+
+    static int findPanoIdForTags(CameraTagLookup lookup) {
+        for (String tag : LEGACY_PANO_TAGS) {
+            try {
+                Object value = lookup.cameraIdFor(tag);
+                if (value instanceof Integer) {
+                    int id = (Integer) value;
+                    if (PanoramicCameraIdPolicy.isValidCameraId(id)) {
+                        logger.info("BmmCameraInfo panoramic tag " + tag + " -> camera ID " + id);
+                        return id;
+                    }
+                    if (id >= 0) {
+                        logger.warn("Ignoring out-of-range BmmCameraInfo " + tag + "=" + id);
+                    }
+                }
+            } catch (Exception | LinkageError e) {
+                logger.warn("BmmCameraInfo " + tag + " lookup failed: " + e.getMessage());
+            }
+        }
+        logger.info("BmmCameraInfo has no usable panoramic tag (pano_h/pano_l/APA)");
         return -1;
     }
 

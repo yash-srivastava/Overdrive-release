@@ -11,15 +11,15 @@ import org.json.JSONObject;
 import java.util.EnumMap;
 
 /**
- * Resolves persisted + inferred camera settings into a concrete runtime config.
+ * Resolves persisted + HAL-discovered or profile-fallback settings into a runtime config.
  *
  * Per-role mappings (windshield / cabin / 360-front/right/rear/left) are stored
  * under {@code unified.camera.roleMappings} keyed by role; the resolver merges
  * profile defaults with persisted overrides at runtime. Profile selection
  * ({@code cameraProfile}) tracks vehicle-class geometry,
  * and probe results ({@code probedCameraId}, {@code probedSurfaceMode},
- * {@code probedWidth}, {@code probedHeight}) record the actual stream the GL
- * pipeline locked onto.
+ * {@code probedWidth}, {@code probedHeight}) are legacy keys: valid saved
+ * dimensions may only have been seeded from a profile, not observed from the HAL.
  */
 public final class CameraConfigResolver {
     private static final DaemonLogger logger = DaemonLogger.getInstance("CameraConfigResolver");
@@ -55,13 +55,38 @@ public final class CameraConfigResolver {
                 ? CameraProfiles.infer(vehicleModelHint)
                 : CameraProfiles.get(selectedProfileId);
 
-        int persistedPanoCameraId = dilink5 ? profile.getPanoCameraId()
-                : optNonNegative(camera, "probedCameraId", profile.getPanoCameraId());
-        int panoCameraId = persistedPanoCameraId;
-        int panoSurfaceMode = dilink5 ? profile.getPanoSurfaceMode()
-                : optNonNegative(camera, "probedSurfaceMode", profile.getPanoSurfaceMode());
+        boolean manual = !dilink5 && camera.optBoolean("manualOverride", false);
+        boolean validated = dilink5 || camera.optBoolean("probedAndValidated", false);
+        boolean fallback = !dilink5 && camera.optBoolean("fallbackFromProbe", false);
+        int savedId = dilink5 ? -1 : camera.optInt("probedCameraId", -1);
+        int savedMode = dilink5 ? -1 : camera.optInt("probedSurfaceMode", -1);
+        if ((manual || validated) && savedId >= 0
+                && !PanoramicCameraIdPolicy.isValidCameraId(savedId)) {
+            logger.warn("Ignoring invalid saved panoramic ID " + savedId
+                    + "; discovering from the HAL or using the profile fallback");
+        }
+        // Read-only BmmCameraInfo lookup; no opportunistic camera open / scan.
+        // Avoid an extra HAL query when a valid manual or frame-validated ID is present.
+        // An invalid saved ID is not authoritative, even if its flags say otherwise.
+        boolean savedIdUsable = PanoramicCameraIdPolicy.isValidCameraId(savedId);
+        int halPanoId = !dilink5 && !dilink4 && (!(manual || validated) || !savedIdUsable)
+                ? AvmCameraHelper.discoverPanoCameraId() : -1;
+        PanoramicCameraIdPolicy.Selection selected = PanoramicCameraIdPolicy.choose(
+                profile.getPanoCameraId(), savedId, manual, validated, halPanoId);
+        int panoCameraId = selected.cameraId;
+        String cameraIdSource = dilink5 ? "mode-profile" : selected.source;
+        manual = manual && PanoramicCameraIdPolicy.MANUAL.equals(selected.source);
+        validated = dilink5 || (validated && selected.usesSavedId());
+        int panoSurfaceMode = profile.getPanoSurfaceMode();
+        String surfaceModeSource = "profile-fallback-unverified";
+        if (!dilink5 && selected.usesSavedId() && savedMode >= 0 && savedMode <= 4) {
+            panoSurfaceMode = savedMode;
+            surfaceModeSource = selected.source;
+        } else if (selected.usesSavedId() && savedMode > 4) {
+            logger.warn("Ignoring invalid saved panoramic preview index " + savedMode);
+        }
         // Saved dimensions may have been seeded from a profile rather than observed. A partial,
-        // zero, odd or implausibly large saved pair is never geometry; valid pairs are kept.
+        // zero, non-strip-aligned or implausibly large saved pair is not geometry; valid pairs are kept.
         int savedWidth = camera.optInt("probedWidth", -1);
         int savedHeight = camera.optInt("probedHeight", -1);
         boolean savedGeometryUsable = isUsablePanoramicGeometry(savedWidth, savedHeight);
@@ -71,9 +96,12 @@ public final class CameraConfigResolver {
         }
         int panoWidth = !dilink5 && savedGeometryUsable ? savedWidth : profile.getPanoWidth();
         int panoHeight = !dilink5 && savedGeometryUsable ? savedHeight : profile.getPanoHeight();
-        boolean manual = !dilink5 && camera.optBoolean("manualOverride", false);
-        boolean validated = dilink5 || camera.optBoolean("probedAndValidated", false);
-        boolean fallback = !dilink5 && camera.optBoolean("fallbackFromProbe", false);
+        String geometrySource = !dilink5 && savedGeometryUsable
+                ? "saved-unverified" : "profile-fallback-unverified";
+        if (dilink5) {
+            geometrySource = "mode-profile";
+            surfaceModeSource = "mode-profile";
+        }
 
         if (dilink4) {
             // DIPlus panoramic recording does not use a vehicle-profile pin
@@ -96,6 +124,8 @@ public final class CameraConfigResolver {
                 }
                 panoCameraId = halSelection.getCameraId();
                 panoSurfaceMode = halSelection.getPreviewIndex();
+                cameraIdSource = "hal-bmm-tag";
+                surfaceModeSource = "hal-tag-preview-index";
             }
             // Effective DI4 selection is HAL-owned, not a manual/profile pin.
             manual = false;
@@ -139,6 +169,9 @@ public final class CameraConfigResolver {
                 manual,
                 validated,
                 fallback,
+                cameraIdSource,
+                surfaceModeSource,
+                geometrySource,
                 roleMappings);
     }
 
@@ -160,6 +193,9 @@ public final class CameraConfigResolver {
                 false,
                 true,
                 false,
+                "mode-profile",
+                "mode-profile",
+                "mode-profile",
                 profile.getDefaultRoleMappings());
     }
 
@@ -180,6 +216,9 @@ public final class CameraConfigResolver {
                 false,
                 true,
                 false,
+                "mode-profile",
+                "mode-profile",
+                "mode-profile",
                 profile.getDefaultRoleMappings());
     }
 
@@ -384,7 +423,8 @@ public final class CameraConfigResolver {
     static boolean isUsablePanoramicGeometry(int width, int height) {
         return width >= 2 && height >= 2
                 && width <= 8192 && height <= 8192
-                && (width & 1) == 0 && (height & 1) == 0;
+                // Every legacy AVM strip is split into four equal-width views.
+                && (width & 3) == 0 && (height & 1) == 0;
     }
 
     static String profileForMode(String profileId, boolean dilink5) {
@@ -525,6 +565,9 @@ public final class CameraConfigResolver {
         putSafely(out, "resolvedCameraProfileLabel", resolved.getProfile().getDisplayName());
         putSafely(out, "panoCameraId", resolved.getPanoCameraId());
         putSafely(out, "panoSurfaceMode", resolved.getPanoSurfaceMode());
+        putSafely(out, "panoCameraIdSource", resolved.getPanoCameraIdSource());
+        putSafely(out, "panoSurfaceModeSource", resolved.getPanoSurfaceModeSource());
+        putSafely(out, "panoGeometrySource", resolved.getPanoGeometrySource());
         putSafely(out, "panoWidth", resolved.getPanoWidth());
         putSafely(out, "panoHeight", resolved.getPanoHeight());
         boolean passiveApa = isPassiveApaModeEnabled();
@@ -541,11 +584,6 @@ public final class CameraConfigResolver {
         putSafely(out, "cameraPanoramicSlices", resolved.panoramicSlicesToJson());
         putSafely(out, "cameraPreviewCandidates", buildPreviewCandidates(resolved));
         return out;
-    }
-
-    private static int optNonNegative(JSONObject obj, String key, int defaultValue) {
-        int value = obj.optInt(key, defaultValue);
-        return value >= 0 ? value : defaultValue;
     }
 
     private static void putSafely(JSONObject object, String key, Object value) {

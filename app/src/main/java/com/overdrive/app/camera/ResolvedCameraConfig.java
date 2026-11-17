@@ -29,6 +29,9 @@ public final class ResolvedCameraConfig {
     private final boolean manualPanoOverride;
     private final boolean validated;
     private final boolean fallbackFromProbe;
+    private final String panoCameraIdSource;
+    private final String panoSurfaceModeSource;
+    private final String panoGeometrySource;
     private final EnumMap<CameraRole, CameraSourceRef> roleMappings;
 
     public ResolvedCameraConfig(
@@ -42,6 +45,9 @@ public final class ResolvedCameraConfig {
             boolean manualPanoOverride,
             boolean validated,
             boolean fallbackFromProbe,
+            String panoCameraIdSource,
+            String panoSurfaceModeSource,
+            String panoGeometrySource,
             Map<CameraRole, CameraSourceRef> roleMappings) {
         this.profile = profile;
         this.selectedProfileId = selectedProfileId;
@@ -53,6 +59,9 @@ public final class ResolvedCameraConfig {
         this.manualPanoOverride = manualPanoOverride;
         this.validated = validated;
         this.fallbackFromProbe = fallbackFromProbe;
+        this.panoCameraIdSource = panoCameraIdSource;
+        this.panoSurfaceModeSource = panoSurfaceModeSource;
+        this.panoGeometrySource = panoGeometrySource;
         this.roleMappings = new EnumMap<>(CameraRole.class);
         if (roleMappings != null) {
             this.roleMappings.putAll(roleMappings);
@@ -98,6 +107,13 @@ public final class ResolvedCameraConfig {
     public boolean isFallbackFromProbe() {
         return fallbackFromProbe;
     }
+
+    /** Provenance labels distinguish observed HAL selection from a profile assumption. */
+    public String getPanoCameraIdSource() { return panoCameraIdSource; }
+
+    public String getPanoSurfaceModeSource() { return panoSurfaceModeSource; }
+
+    public String getPanoGeometrySource() { return panoGeometrySource; }
 
     public EnumMap<CameraRole, CameraSourceRef> getRoleMappings() {
         return new EnumMap<>(roleMappings);
