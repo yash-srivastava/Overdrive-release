@@ -18,6 +18,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
+import java.nio.IntBuffer;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -48,6 +49,8 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class HighResPreviewSampler {
     private static final DaemonLogger logger =
             DaemonLogger.getInstance("HighResPreviewSampler");
+    private static final boolean LITTLE_ENDIAN =
+            ByteOrder.nativeOrder() == ByteOrder.LITTLE_ENDIAN;
 
     // oem-parity: uTexMatrix from SurfaceTexture.getTransformMatrix()
     // crops to the HAL's live region. Identity by default.
@@ -225,7 +228,7 @@ public final class HighResPreviewSampler {
     private FloatBuffer vertexBuffer;
     private FloatBuffer texCoordBuffer;
     private ByteBuffer readBuffer;
-    private byte[] scratchRgba;
+    private IntBuffer readPixels;
     private int[] argbPixels;
     // Sampler-thread-owned; reused until the FBO dimensions change.
     private Bitmap jpegBitmap;
@@ -362,7 +365,7 @@ public final class HighResPreviewSampler {
             int rgbaBytes = width * height * 4;
             readBuffer = ByteBuffer.allocateDirect(rgbaBytes);
             readBuffer.order(ByteOrder.nativeOrder());
-            scratchRgba = new byte[rgbaBytes];
+            readPixels = readBuffer.asIntBuffer();
             argbPixels = new int[width * height];
             jpegBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
             fboWidth = width;
@@ -676,21 +679,26 @@ public final class HighResPreviewSampler {
             GLES20.glReadPixels(0, 0, width, height,
                     GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, readBuffer);
 
-            int rgbaBytes = width * height * 4;
-            readBuffer.rewind();
-            readBuffer.get(scratchRgba, 0, rgbaBytes);
+            // The native-order IntBuffer views the same direct RGBA memory.
+            // Bulk-read directly into the reusable pixel array, avoiding a
+            // second full-frame byte[] and its extra copy on every preview.
+            readPixels.position(0);
+            readPixels.get(argbPixels, 0, width * height);
 
-            byte[] src = scratchRgba;
-            int rowRgbaBytes = width * 4;
-            int dstIdx = 0;
-            for (int y = height - 1; y >= 0; y--) {
-                int srcRow = y * rowRgbaBytes;
+            // OpenGL rows start at the bottom. Flip rows in-place and convert
+            // native RGBA words to Android's opaque ARGB pixel representation.
+            // Little-endian RGBA bytes form ABGR ints; big-endian form RGBA.
+            for (int y = 0; y < (height + 1) / 2; y++) {
+                int top = y * width;
+                int bottom = (height - 1 - y) * width;
                 for (int x = 0; x < width; x++) {
-                    int s = srcRow + (x << 2);
-                    int r = src[s] & 0xFF;
-                    int g = src[s + 1] & 0xFF;
-                    int b = src[s + 2] & 0xFF;
-                    argbPixels[dstIdx++] = 0xFF000000 | (r << 16) | (g << 8) | b;
+                    int topPixel = argbPixels[top + x];
+                    if (top == bottom) {
+                        argbPixels[top + x] = rgbaToOpaqueArgb(topPixel);
+                    } else {
+                        argbPixels[top + x] = rgbaToOpaqueArgb(argbPixels[bottom + x]);
+                        argbPixels[bottom + x] = rgbaToOpaqueArgb(topPixel);
+                    }
                 }
             }
 
@@ -711,6 +719,14 @@ public final class HighResPreviewSampler {
         }
     }
 
+    private static int rgbaToOpaqueArgb(int packed) {
+        if (LITTLE_ENDIAN) {
+            return 0xFF000000 | ((packed & 0xFF) << 16)
+                    | (packed & 0x0000FF00) | ((packed >>> 16) & 0xFF);
+        }
+        return 0xFF000000 | ((packed >>> 8) & 0x00FFFFFF);
+    }
+
     private void releaseFbo() {
         if (fbo >= 0) {
             try { GLES20.glDeleteFramebuffers(1, new int[]{fbo}, 0); } catch (Throwable ignored) {}
@@ -720,11 +736,10 @@ public final class HighResPreviewSampler {
             try { GLES20.glDeleteTextures(1, new int[]{fboTexture}, 0); } catch (Throwable ignored) {}
             fboTexture = -1;
         }
-        // Drop the readback scratch (~3.6 MB at 1280×720). Lazy ensureFbo
-        // re-creates these on the next sample; without this they survive
-        // every camera re-init for the daemon's lifetime.
+        // Release the direct readback storage and its view when frame
+        // dimensions change or the sampler shuts down.
         readBuffer = null;
-        scratchRgba = null;
+        readPixels = null;
         argbPixels = null;
         if (jpegBitmap != null) {
             jpegBitmap.recycle();
