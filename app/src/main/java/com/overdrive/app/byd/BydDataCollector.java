@@ -21484,12 +21484,14 @@ public class BydDataCollector {
                                 .probeDiLink5AccOn(context);
                 boolean accReady = VehicleActuatorBridge.hasDiLink5RequestScope()
                         ? !VehicleActuatorBridge.isDiLink5RequestExpired()
-                                && Boolean.TRUE.equals(requestAccOn)
-                        : com.overdrive.app.monitor.AccMonitor
+                                && (Boolean.TRUE.equals(requestAccOn)
+                                        || Boolean.TRUE.equals(liveAccOn))
+                        : (com.overdrive.app.monitor.AccMonitor
                                         .isAccStateAuthoritative()
                                 && com.overdrive.app.monitor.AccMonitor
                                         .isAccStateFreshForSafety()
-                                && com.overdrive.app.monitor.AccMonitor.isAccOn();
+                                && com.overdrive.app.monitor.AccMonitor.isAccOn())
+                                || Boolean.TRUE.equals(liveAccOn);
                 accReady = accReady && !Boolean.FALSE.equals(liveAccOn);
                 if (!accReady) {
                     logger.warn("setSeatMemoryPosition: fresh ACC-on state is required");
@@ -21506,22 +21508,32 @@ public class BydDataCollector {
                     logger.warn("setSeatMemoryPosition: another seat-memory operation is pending");
                     return false;
                 }
+                boolean invokedDirect = false;
+                try {
+                    java.lang.reflect.Method resetM = settingDevice.getClass()
+                            .getMethod("resetSeatParams", int.class, int.class);
+                    resetM.invoke(settingDevice, position, 1);
+                    invokedDirect = true;
+                } catch (NoSuchMethodException ignored) {
+                    // Older/other DiLink 5 variants fall back to WAKE_SET below.
+                }
+                if (!invokedDirect) {
+                    Integer result = setSeatMemoryCommand(
+                            BydFeatureIds.SETTING_LF_MEMORY_LOCATION_WAKE_SET, position);
+                    if (result == null || result.intValue() < 0) return false;
+                }
+                long timeoutMs = diLink5CommandConfirmationTimeoutMs(
+                        VehicleActuatorBridge.currentDiLink5RequestDeadline(),
+                        SystemClock.elapsedRealtime());
+                if (!confirmation.await(timeoutMs)) {
+                    logger.warn("setSeatMemoryPosition: recall result was not confirmed");
+                    return false;
+                }
+                return isDiLink5SeatMemorySuccess(confirmation.code);
             }
             Integer result = setSeatMemoryCommand(
                     BydFeatureIds.SETTING_LF_MEMORY_LOCATION_WAKE_SET, position);
-            // The DiLink 5 feature-id dispatcher returns an actual Integer and may
-            // use a positive acceptance code. Never manufacture success for a void
-            // or otherwise unexpected reflection result.
-            boolean accepted = result != null && result.intValue() >= 0;
-            if (!accepted || confirmation == null) return accepted;
-            long timeoutMs = diLink5CommandConfirmationTimeoutMs(
-                    VehicleActuatorBridge.currentDiLink5RequestDeadline(),
-                    SystemClock.elapsedRealtime());
-            if (!confirmation.await(timeoutMs)) {
-                logger.warn("setSeatMemoryPosition: recall result was not confirmed");
-                return false;
-            }
-            return isDiLink5SeatMemorySuccess(confirmation.code);
+            return result != null && result.intValue() >= 0;
         } catch (Exception e) {
             logger.debug("setSeatMemoryPosition failed: " + e.getMessage());
         } finally {

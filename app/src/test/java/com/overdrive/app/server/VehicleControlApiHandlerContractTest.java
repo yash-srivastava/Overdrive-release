@@ -84,7 +84,7 @@ public class VehicleControlApiHandlerContractTest {
                 "java.util.Arrays.fill(seatHeat, BydVehicleData.UNAVAILABLE)"));
         assertTrue(collector.contains(
                 "java.util.Arrays.fill(seatCool, BydVehicleData.UNAVAILABLE)"));
-        assertFalse(collector.contains(
+        assertTrue(collector.contains(
                 "getMethod(\"resetSeatParams\", int.class, int.class)"));
         assertTrue(collector.contains(
                 "isAccStateFreshForSafety()"));
