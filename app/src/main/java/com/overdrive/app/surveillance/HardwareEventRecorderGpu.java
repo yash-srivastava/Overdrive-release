@@ -220,6 +220,10 @@ public class HardwareEventRecorderGpu {
     private volatile boolean audioUpgradeRotationRequested = false;
     private static final long AUDIO_UPGRADE_MIN_PACKETS = 25;
     private static final long AUDIO_UPGRADE_MIN_SEGMENT_AGE_MS = 1_500;
+    // A segment's open time is not its playable length: after ACC ON the
+    // camera may take seconds to deliver the first frame. Avoid rotating a
+    // near-empty MP4 simply because cabin AAC became available meanwhile.
+    private static final long AUDIO_UPGRADE_MIN_VIDEO_SPAN_US = 5_000_000L;
     private static final long AUDIO_UPGRADE_MIN_SPACING_MS = 60_000;
     private volatile long lastAudioUpgradeElapsedMs = 0L;
     // Latest ring PTS at the Surveillance -> ACC ON edge: the next start's pre-roll begins after it (one-shot).
@@ -812,6 +816,7 @@ public class HardwareEventRecorderGpu {
         // is just lastFramePtsUs (since firstFramePtsUs == 0).
         if (firstFramePtsUs < 0) firstFramePtsUs = rebasedPts;
         lastFramePtsUs = rebasedPts;
+        writtenVideoSpanUs = lastFramePtsUs - firstFramePtsUs;
         if (mux == muxer) {
             if (lensRawAt(absolutePts)) segLensRawFrames++;
             else segLensOtherFrames++;
@@ -1512,6 +1517,10 @@ public class HardwareEventRecorderGpu {
     private int recordedFrames = 0;
     private long firstFramePtsUs = -1;   // PTS of first frame written to muxer
     private long lastFramePtsUs = -1;    // PTS of last frame written to muxer
+    // Published only after a successful VIDEO write; read by the AAC ingest
+    // thread without taking muxerLock (which can block on a slow SD card).
+    // -1 means no video has been written in the current segment.
+    private volatile long writtenVideoSpanUs = -1L;
     // Last ABSOLUTE (un-rebased, source-domain) video PTS handed to
     // writeRebased. Used by the clock-domain jump guard to detect a
     // discontinuity (HW→nanoTime transition or an origin re-seeded in one
@@ -2933,6 +2942,9 @@ public class HardwareEventRecorderGpu {
                     && isWritingToFile && audioTrackIndex < 0 && !awaitLiveMuxerKeyframe
                     && !rotationInFlight.get() && segmentStartTime > 0
                     && System.currentTimeMillis() - segmentStartTime >= AUDIO_UPGRADE_MIN_SEGMENT_AGE_MS
+                    // Wall time alone is insufficient after a camera handover:
+                    // the muxer may have been open for 7s but contain <1s of video.
+                    && writtenVideoSpanUs >= AUDIO_UPGRADE_MIN_VIDEO_SPAN_US
                     && (lastAudioUpgradeElapsedMs == 0L || android.os.SystemClock.elapsedRealtime()
                             - lastAudioUpgradeElapsedMs >= AUDIO_UPGRADE_MIN_SPACING_MS)) {
                 audioUpgradeRotationRequested = true;
@@ -3696,6 +3708,7 @@ public class HardwareEventRecorderGpu {
             lensCutPendingPts.set(Long.MIN_VALUE);
             firstFramePtsUs = -1;
             lastFramePtsUs = -1;
+            writtenVideoSpanUs = -1L;
             actualPreRecordDurationMs = 0L;
             ptsOriginUs = -1;
             lastSourcePtsUs = -1;
@@ -4482,6 +4495,7 @@ public class HardwareEventRecorderGpu {
             lensCutPendingPts.set(Long.MIN_VALUE);
             firstFramePtsUs = -1;
             lastFramePtsUs = -1;
+            writtenVideoSpanUs = -1L;
             ptsOriginUs = -1;
             lastSourcePtsUs = -1;
             lastSourceDrainUs = -1;
@@ -7236,6 +7250,7 @@ public class HardwareEventRecorderGpu {
             segLensOtherFrames = 0;
             firstFramePtsUs = -1;
             lastFramePtsUs = -1;
+            writtenVideoSpanUs = -1L;
             ptsOriginUs = -1;
             lastSourcePtsUs = -1;
             lastSourceDrainUs = -1;
@@ -7284,6 +7299,8 @@ public class HardwareEventRecorderGpu {
                 segLensOtherFrames = oldLensOtherFrames;
                 firstFramePtsUs = oldFirstPtsUs;
                 lastFramePtsUs = oldLastPtsUs;
+                writtenVideoSpanUs = oldFirstPtsUs >= 0 && oldLastPtsUs >= oldFirstPtsUs
+                        ? oldLastPtsUs - oldFirstPtsUs : -1L;
                 ptsOriginUs = oldPtsOriginUs;
                 lastSourcePtsUs = oldLastSourcePtsUs;
                 lastSourceDrainUs = oldLastSourceDrainUs;
