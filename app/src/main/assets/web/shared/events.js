@@ -2014,6 +2014,8 @@ BYD.events = {
                 '<span class="sk-badge" data-sk-file="' + this._esc(rec.filename) + '" hidden></span>' +
                 '</div>' +
                 '<div class="recording-info">' +
+                '<span class="clip-watch-state clip-watch-state--unwatched"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="6"/></svg>' + this._esc(BYD.i18n.t('events.unwatched_clip')) + '</span>' +
+                '<span class="clip-watch-state clip-watch-state--watched"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="m4 12 5 5L20 6"/></svg>' + this._esc(BYD.i18n.t('events.watched_clip')) + '</span>' +
                 '<div class="clip-line"><span class="clip-time">' + rec.timeFormatted + '</span>' + storageChip + '</div>' +
                 placeRow +
                 actorRow +

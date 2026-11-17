@@ -2384,6 +2384,8 @@
     "page_of": "Page {page} of {total}",
     "recording_badge": "Recording",
     "live_badge": "Live",
+    "watched_clip": "Watched",
+    "unwatched_clip": "Unwatched",
     "available_in_seconds": "Available in a few seconds…",
     "index_warming": "Building library index — {done} / {total} ({pct}%)",
     "video_count": {

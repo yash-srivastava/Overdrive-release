@@ -929,18 +929,55 @@
             flex: 1 1 auto;
             min-width: 0;
             padding: 12px 14px 14px;
-            /* New clips have a solid grey info panel. Only the info panel
-               changes; thumbnails and trigger/severity tags remain intact. */
+            /* Keep the in-flight placeholder's established appearance. */
             background-color: rgba(120, 128, 138, 0.16);
             transition: background-color 160ms ease;
         }
-        .recording-card.watched .recording-info {
-            background-color: rgba(120, 128, 138, 0.045);
+        /* Unwatched clips stand out without changing trigger/severity badges. */
+        .recording-card:not(.watched):not(.recording-card-inflight) .recording-info {
+            background-color: var(--primary-soft);
+            box-shadow: inset 4px 0 0 var(--primary);
         }
+        [dir="rtl"] .recording-card:not(.watched):not(.recording-card-inflight) .recording-info {
+            box-shadow: inset -4px 0 0 var(--primary);
+        }
+        .recording-card.watched .recording-info {
+            background-color: var(--well-2);
+            box-shadow: none;
+        }
+        .recording-card.watched .recording-thumbnail img { opacity: 0.5; }
         .recording-card.watched .clip-time {
             color: var(--on-surface-variant);
             font-weight: 500;
         }
+
+        /* Always spell out the viewing state; a shade difference alone was
+           too subtle in the car and on a phone. Both labels stay in the DOM,
+           so the successful watched POST can switch them by adding .watched. */
+        .clip-watch-state {
+            display: inline-flex;
+            align-items: center;
+            align-self: flex-start;
+            min-height: 26px;
+            margin-bottom: 8px;
+            padding: 0 10px;
+            border-radius: 7px;
+            background: var(--primary);
+            color: var(--on-primary);
+            font-size: 12px;
+            font-weight: 800;
+            line-height: 1.3;
+            white-space: nowrap;
+        }
+        .clip-watch-state svg { width: 14px; height: 14px; margin-right: 6px; }
+        [dir="rtl"] .clip-watch-state svg { margin-right: 0; margin-left: 6px; }
+        .clip-watch-state--watched {
+            display: none;
+            background: var(--tile);
+            color: var(--on-surface-variant);
+        }
+        .recording-card.watched .clip-watch-state--unwatched { display: none; }
+        .recording-card.watched .clip-watch-state--watched { display: inline-flex; }
 
         .clip-line {
             display: flex;
@@ -1963,7 +2000,7 @@
     <script src="../shared/core.js?v=27"></script>
     <script src="../shared/update-flow.js?v=3"></script>
     <script src="../shared/safekeep-badges.js?v=4"></script>
-    <script src="../shared/events.js?v=revamp20"></script>
+    <script src="../shared/events.js?v=revamp21"></script>
     <script>
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
