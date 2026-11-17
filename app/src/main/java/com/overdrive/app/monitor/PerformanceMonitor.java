@@ -37,7 +37,7 @@ public class PerformanceMonitor {
     private static final DaemonLogger logger = DaemonLogger.getInstance(TAG);
     
     // Singleton
-    private static PerformanceMonitor instance;
+    private static volatile PerformanceMonitor instance;
     private static final Object lock = new Object();
     
     // Configuration
@@ -132,9 +132,10 @@ public class PerformanceMonitor {
     // ==================== LIFECYCLE ====================
     
     public void init(Context context) {
-        this.context = context;
-        if (context != null) {
-            this.activityManager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        // A singleton must not retain an Activity across configuration changes.
+        this.context = context == null ? null : context.getApplicationContext();
+        if (this.context != null) {
+            this.activityManager = (ActivityManager) this.context.getSystemService(Context.ACTIVITY_SERVICE);
         }
         this.pid = Process.myPid();
         this.uid = Process.myUid();
@@ -143,8 +144,21 @@ public class PerformanceMonitor {
     
     public synchronized void start() {
         if (isRunning) return;
+        // The previous viewer may have disconnected minutes ago. Reusing the
+        // old /proc and kgsl counters would make the first new sample average
+        // over that entire idle gap instead of the configured 2-second period.
+        lastCpuTime = 0;
+        lastIdleTime = 0;
+        lastAppCpuTime = 0;
+        lastCpuTimeForApp = 0;
+        lastGpuBusy = -1;
+        lastGpuTotal = -1;
+        synchronized (history) {
+            history.clear();
+        }
+        latestSnapshot.set(null);
         isRunning = true;
-        
+
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "PerfMonitor");
             t.setPriority(Thread.MIN_PRIORITY);
@@ -325,9 +339,10 @@ public class PerformanceMonitor {
     private void collectCpuMetrics(PerformanceSnapshot snapshot) {
         try {
             // Read /proc/stat for system CPU
-            RandomAccessFile reader = new RandomAccessFile("/proc/stat", "r");
-            String line = reader.readLine();
-            reader.close();
+            String line;
+            try (RandomAccessFile reader = new RandomAccessFile("/proc/stat", "r")) {
+                line = reader.readLine();
+            }
             
             if (line != null && line.startsWith("cpu ")) {
                 String[] parts = line.split("\\s+");
@@ -356,9 +371,10 @@ public class PerformanceMonitor {
             }
             
             // Read /proc/[pid]/stat for app CPU
-            RandomAccessFile appReader = new RandomAccessFile("/proc/" + pid + "/stat", "r");
-            String appLine = appReader.readLine();
-            appReader.close();
+            String appLine;
+            try (RandomAccessFile appReader = new RandomAccessFile("/proc/" + pid + "/stat", "r")) {
+                appLine = appReader.readLine();
+            }
             
             if (appLine != null) {
                 // /proc/<pid>/stat field 2 (comm) is parenthesized and may
