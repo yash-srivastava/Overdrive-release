@@ -795,7 +795,9 @@ public final class CameraPreviewHelper {
         byte[] nv21 = yuv420888ToNv21(image);
         YuvImage yuvImage = new YuvImage(nv21, ImageFormat.NV21, image.getWidth(), image.getHeight(), null);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        yuvImage.compressToJpeg(new Rect(0, 0, image.getWidth(), image.getHeight()), quality, out);
+        if (!yuvImage.compressToJpeg(new Rect(0, 0, image.getWidth(), image.getHeight()), quality, out)) {
+            return null;
+        }
         return out.toByteArray();
     }
 
@@ -859,10 +861,22 @@ public final class CameraPreviewHelper {
         ByteBuffer yBuffer = planes[0].getBuffer();
         int yRowStride = planes[0].getRowStride();
         int yPixelStride = planes[0].getPixelStride();
-        for (int row = 0; row < height; row++) {
-            int rowOffset = row * yRowStride;
-            for (int col = 0; col < width; col++) {
-                out[dst++] = yBuffer.get(rowOffset + col * yPixelStride);
+        // Most YUV_420_888 producers expose contiguous luma. Copy those rows
+        // in bulk rather than issuing one ByteBuffer.get per pixel. Keep the
+        // strided fallback for HALs with padded or interleaved Y planes.
+        if (yPixelStride == 1) {
+            ByteBuffer rowBuffer = yBuffer.duplicate();
+            for (int row = 0; row < height; row++) {
+                rowBuffer.position(row * yRowStride);
+                rowBuffer.get(out, dst, width);
+                dst += width;
+            }
+        } else {
+            for (int row = 0; row < height; row++) {
+                int rowOffset = row * yRowStride;
+                for (int col = 0; col < width; col++) {
+                    out[dst++] = yBuffer.get(rowOffset + col * yPixelStride);
+                }
             }
         }
 
