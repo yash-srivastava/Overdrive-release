@@ -225,50 +225,54 @@ public class RecordingModeManager {
             // is a soft-pre-check that just decides whether to spawn the
             // warmup in the first place.
             //
-            // One last hardware probe: the latch may have been released by
-            // a stale GearMonitor delivery before the AccSentry IPC landed,
-            // in which case accIsOn still reflects the constructor's
-            // possibly-stale read. Pulling fresh from the bodywork HAL here
-            // prevents auto-activate from racing against an ACC OFF that
-            // hasn't propagated to the field yet.
-            //
-            // FIX (rmm: BootAutoActivate post-latch HW probe pinned by slow
-            // binder): wrap the HW probe in a Future with 1.5s timeout. If
-            // the BYDAuto binder is wedged the probe could otherwise hang
-            // past BOOT_AUTO_ACTIVATE_HARD_CAP_MS. On timeout, fall through
-            // to the existing accIsOn (which carries the AccMonitor IPC
-            // value or constructor probe).
+            // The first processed ACC IPC has already delivered the current
+            // state. Re-probing BYDAuto here adds up to 1.5s to boot recording
+            // and can read a transient power-level dip after the IPC. Only
+            // GearMonitor / timeout releases need the fallback hardware probe.
+            // An IPC can arrive while that probe is in flight; the snapshot
+            // below must not overwrite its newer state with the probe result.
             boolean hwAccPostLatch;
-            java.util.concurrent.ExecutorService probeExec =
-                java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
-                    Thread th = new Thread(r, "BootAutoActivate-HwProbe");
-                    th.setDaemon(true);
-                    return th;
-                });
-            try {
-                java.util.concurrent.Future<Boolean> probeFut =
-                    probeExec.submit(() -> queryAccStateFromHardware());
+            if (accIpcSeen) {
+                hwAccPostLatch = accIsOn;
+                logger.debug("Boot auto-activate: ACC IPC already processed; skipping redundant HW probe");
+            } else {
+                // A gear signal (or the 5s deadline) can beat the first ACC
+                // IPC. Retain the bounded probe in that case, including its
+                // fallback when the HAL binder is slow or unavailable.
+                java.util.concurrent.ExecutorService probeExec =
+                    java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                        Thread th = new Thread(r, "BootAutoActivate-HwProbe");
+                        th.setDaemon(true);
+                        return th;
+                    });
                 try {
-                    hwAccPostLatch = probeFut.get(1500L,
-                        java.util.concurrent.TimeUnit.MILLISECONDS);
-                } catch (java.util.concurrent.TimeoutException te) {
-                    probeFut.cancel(true);
-                    logger.warn("Boot auto-activate HW probe timed out (>1.5s) — "
-                        + "falling back to accIsOn=" + accIsOn);
-                    hwAccPostLatch = accIsOn;
-                } catch (Exception e) {
-                    logger.warn("Boot auto-activate HW probe failed: " + e.getMessage()
-                        + " — falling back to accIsOn=" + accIsOn);
-                    hwAccPostLatch = accIsOn;
+                    java.util.concurrent.Future<Boolean> probeFut =
+                        probeExec.submit(() -> queryAccStateFromHardware());
+                    try {
+                        hwAccPostLatch = probeFut.get(1500L,
+                            java.util.concurrent.TimeUnit.MILLISECONDS);
+                    } catch (java.util.concurrent.TimeoutException te) {
+                        probeFut.cancel(true);
+                        logger.warn("Boot auto-activate HW probe timed out (>1.5s) — "
+                            + "falling back to accIsOn=" + accIsOn);
+                        hwAccPostLatch = accIsOn;
+                    } catch (Exception e) {
+                        logger.warn("Boot auto-activate HW probe failed: " + e.getMessage()
+                            + " — falling back to accIsOn=" + accIsOn);
+                        hwAccPostLatch = accIsOn;
+                    }
+                } finally {
+                    probeExec.shutdownNow();
                 }
-            } finally {
-                probeExec.shutdownNow();
             }
             Mode targetMode;
             int gearNow;
             boolean accNow;
             synchronized (RecordingModeManager.this) {
-                if (hwAccPostLatch != accIsOn) {
+                // An ACC IPC may have completed while the fallback probe was
+                // waiting on the binder. Never let that older probe override
+                // the IPC's state; the next activation guard checks it again.
+                if (!accIpcSeen && hwAccPostLatch != accIsOn) {
                     logger.info("Boot auto-activate: HW probe corrects accIsOn "
                         + accIsOn + " -> " + hwAccPostLatch);
                     accIsOn = hwAccPostLatch;
