@@ -749,6 +749,9 @@
 
     <!-- Update channel selector (Settings → About) -->
     <string name="settings_update_channel_title">Update channel</string>
+    <string name="settings_auto_update_title">Install updates automatically</string>
+    <string name="settings_auto_update_desc">Off by default. On Braveheart only, check every 6 hours and install only when ACC is confirmed off and recording is inactive. Updating restarts OverDrive; locally modified builds will be replaced.</string>
+    <string name="settings_auto_update_save_failed">Could not save automatic update preference</string>
     <string name="settings_update_channel_alpha">Alpha</string>
     <string name="settings_update_channel_braveheart">Braveheart</string>
     <string name="settings_update_channel_alpha_desc">The stable release. Every published version is kept — pick any to install (downgrades allowed). Recommended for everyday use.</string>

@@ -1132,10 +1132,21 @@ public class AppUpdater {
     }
 
     /**
-     * Download APK, then stop daemons, then install silently.
-     * Download happens first so user can cancel before daemons are killed.
+     * Download the APK before stopping daemons. The optional admission
+     * check protects unattended installs; manual entry points pass null and
+     * retain their existing behavior.
+     * Callers must verify the condition both before download and again before
+     * the non-reversible daemon-stop/pm-install sequence.
      */
+    public interface AutoInstallGuard {
+        boolean canInstall();
+    }
+
     public void downloadAndInstall(InstallCallback callback) {
+        downloadAndInstall(callback, null);
+    }
+
+    public void downloadAndInstall(InstallCallback callback, AutoInstallGuard guard) {
         cancelled = false;
         executor.execute(() -> {
             boolean rollbackMetadataOnException = false;
@@ -1146,6 +1157,10 @@ public class AppUpdater {
             try {
                 if (latestDownloadUrl == null) {
                     postInstallError(callback, "No download URL");
+                    return;
+                }
+                if (guard != null && !guard.canInstall()) {
+                    postInstallError(callback, "Automatic update deferred: vehicle not idle");
                     return;
                 }
 
@@ -1277,6 +1292,14 @@ public class AppUpdater {
                     return;
                 }
 
+                // The car may have switched ACC ON during the (potentially
+                // lengthy) APK download. An automatic install MUST NOT stop
+                // camera daemons on an outdated parking observation.
+                if (guard != null && !guard.canInstall()) {
+                    postInstallError(callback, "Automatic update deferred: vehicle became active");
+                    return;
+                }
+
                 // OTA is intentionally force-forward: do not gate installation
                 // on /prepare-restart. On the legacy camera path a planned
                 // teardown can emit HAL event 1002, race the automatic camera
@@ -1291,6 +1314,12 @@ public class AppUpdater {
                 // the update retryable and never reads as "install underway".
                 boolean cameraPrepareAttempted = prepareDiLink5CameraForInstall();
                 abortCameraOnException = cameraPrepareAttempted;
+
+                if (guard != null && !guard.canInstall()) {
+                    if (abortCameraOnException) abortPreparedCameraRestart();
+                    postInstallError(callback, "Automatic update deferred: vehicle became active");
+                    return;
+                }
 
                 // Step 3: Save update info BEFORE we touch any daemon (the daemon
                 // process — if we're running inside it — is about to die, and the
@@ -1360,6 +1389,14 @@ public class AppUpdater {
                 //   /data/local/tmp/ and kick it off detached (subshell + closed
                 //   stdio so init reparents it), then return. The script runs
                 //   on its own; our death is fine.
+                if (guard != null && !guard.canInstall()) {
+                    rollbackPreparedUpdateMetadata(
+                            channel, priorUpdateTimestamp, priorDisplayVersion);
+                    if (abortCameraOnException) abortPreparedCameraRestart();
+                    rollbackMetadataOnException = false;
+                    postInstallError(callback, "Automatic update deferred: vehicle became active");
+                    return;
+                }
                 if (canWriteLocalTmp()) {
                     postProgress(callback, "Stopping daemons & installing...");
                     boolean detachedStarted = runDetachedInstall(

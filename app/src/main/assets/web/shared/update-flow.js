@@ -100,6 +100,11 @@
         .upd-channel-seg.active { background:var(--secondary-container); color:var(--on-secondary-container); }
         .upd-channel-seg:disabled { cursor:default; opacity:0.7; }
         .upd-channel-desc { font-size:12px; color:var(--on-surface-variant); line-height:1.5; margin:-8px 0 16px; }
+        .upd-auto { display:block; margin:12px 0 18px; font-size:13px; color:var(--on-surface); }
+        .upd-auto > span { display:flex; align-items:center; font-weight:600; }
+        .upd-auto input { width:20px; height:20px; margin:0 10px 0 0; accent-color:var(--primary); }
+        [dir="rtl"] .upd-auto input { margin:0 0 0 10px; }
+        .upd-auto small { display:block; margin-top:5px; color:var(--on-surface-variant); font-size:12px; line-height:1.5; }
 
         /* Report-a-bug block (Braveheart beta channel) */
         .upd-report { background:var(--warning-soft); border:0; border-radius:var(--radius-md); padding:12px 14px; margin:0 0 16px; }
@@ -323,6 +328,7 @@
                 downgradeRowHtml +
                 recommendRowHtml +
               '</div>' +
+              '<div id="updAutoMount"></div>' +
               '<div class="upd-actions">' +
                 '<button class="upd-btn upd-btn-cancel" id="updCancel">' + escapeHtml(BYD.i18n.t('common.cancel')) + '</button>' +
                 '<button class="upd-btn upd-btn-primary" id="updConfirm">' + escapeHtml(recommend ? BYD.i18n.t('update.install_anyway') : BYD.i18n.t('update.install')) + '</button>' +
@@ -330,6 +336,8 @@
             '</div>';
 
         document.body.appendChild(bg);
+        var autoMount = $('updAutoMount');
+        if (autoMount) autoMount.appendChild(buildAutoUpdateControl());
         $('updCancel').addEventListener('click', closeModal);
         $('updConfirm').addEventListener('click', function () {
             startInstall(res.currentVersion, res.remoteVersion, res._targetTag);
@@ -426,7 +434,50 @@
             });
             wrap.appendChild(b);
         });
-        return wrap;
+        var box = document.createElement('div');
+        box.appendChild(wrap);
+        box.appendChild(buildAutoUpdateControl());
+        return box;
+    }
+
+    function buildAutoUpdateControl() {
+        var label = document.createElement('label');
+        label.className = 'upd-auto';
+        var row = document.createElement('span');
+        var input = document.createElement('input');
+        input.type = 'checkbox';
+        input.disabled = true;
+        row.appendChild(input);
+        var title = document.createElement('span');
+        title.textContent = BYD.i18n.t('update.auto_install_title');
+        row.appendChild(title);
+        label.appendChild(row);
+        var detail = document.createElement('small');
+        detail.textContent = BYD.i18n.t('update.auto_install_desc');
+        label.appendChild(detail);
+        fetch('/api/update/auto').then(function (r) { return r.json(); }).then(function (res) {
+            if (!res || typeof res.enabled !== 'boolean') return;
+            input.checked = res.enabled;
+            input.disabled = false;
+        }).catch(function () { /* Fail closed without falsely promising persistence. */ });
+        input.addEventListener('change', function () {
+            var requested = input.checked;
+            input.disabled = true;
+            fetch('/api/update/auto?enabled=' + requested, {method:'POST'})
+                .then(function (r) { return r.json(); })
+                .then(function (res) {
+                    if (!res || res.enabled !== requested) {
+                        input.checked = !requested;
+                        toast(BYD.i18n.t('update.auto_install_failed'), 'error');
+                    }
+                    input.disabled = false;
+                }).catch(function () {
+                    input.checked = !requested;
+                    input.disabled = false;
+                    toast(BYD.i18n.t('update.auto_install_failed'), 'error');
+                });
+        });
+        return label;
     }
 
     // Report-a-bug block for the Braveheart (beta) channel: the "send logs →

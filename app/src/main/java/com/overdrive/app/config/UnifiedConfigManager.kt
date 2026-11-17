@@ -3285,14 +3285,26 @@ object UnifiedConfigManager {
     /**
      * Persist the user-selected update channel.
      *
-     * Full-JSON rewrite via [updateSection] (which auto-routes app-UID writes
+     * Merged write via [updateValues] (which auto-routes app-UID writes
      * to the daemon over IPC for atomicity) — callers MUST invoke this OFF the
      * main looper (it can block on the IPC round-trip).
      */
     @JvmStatic
     fun setUpdateChannel(channel: String): Boolean {
-        return updateSection("updates", JSONObject().put("channel", channel))
+        // Never replace the whole section: autoInstall is an independent user
+        // preference and must survive switching between Alpha and Braveheart.
+        return updateValues("updates", mapOf("channel" to channel))
     }
+
+    /** Explicit opt-in. Old configs and locally patched APKs remain untouched. */
+    @JvmStatic
+    fun isAutoUpdateEnabled(): Boolean =
+        loadConfig().optJSONObject("updates")?.optBoolean("autoInstall", false) ?: false
+
+    /** Merged write so switching channels never clears auto-install consent. */
+    @JvmStatic
+    fun setAutoUpdateEnabled(enabled: Boolean): Boolean =
+        updateValues("updates", mapOf("autoInstall" to enabled))
 
     /**
      * Get status-overlay (floating pill) visibility section.
