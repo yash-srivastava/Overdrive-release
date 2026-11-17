@@ -485,6 +485,7 @@ public final class CameraConfigResolver {
         putSafely(out, "cameraManualOverride", resolved.isManualPanoOverride());
         putSafely(out, "cameraValidated", resolved.isValidated());
         putSafely(out, "cameraFallbackFromProbe", resolved.isFallbackFromProbe());
+        putSafely(out, "cameraHardwareInventory", CameraHardwareInventory.snapshot());
         putSafely(out, "cameraProfiles", CameraProfiles.toJsonArray());
         putSafely(out, "cameraRoleOptions", roleOptionsJson());
         putSafely(out, "cameraRoleMappings", resolved.roleMappingsToJson());
