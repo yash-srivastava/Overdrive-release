@@ -143,7 +143,7 @@ public class PerformanceMonitor {
         logger.info("PerformanceMonitor initialized (PID: " + pid + ", UID: " + uid + ")");
     }
     
-    public void start() {
+    public synchronized void start() {
         if (isRunning) return;
         isRunning = true;
         
@@ -161,7 +161,7 @@ public class PerformanceMonitor {
         logger.info("Performance monitoring started");
     }
     
-    public void stop() {
+    public synchronized void stop() {
         isRunning = false;
         if (scheduler != null) {
             scheduler.shutdownNow();
@@ -176,7 +176,7 @@ public class PerformanceMonitor {
      * Register a client connection. Starts monitoring if this is the first client.
      * @param clientId Unique identifier for the client (e.g., session ID or IP:port)
      */
-    public void clientConnected(String clientId) {
+    public synchronized void clientConnected(String clientId) {
         if (clientId == null || clientId.isEmpty()) {
             clientId = "anonymous-" + System.currentTimeMillis();
         }
@@ -211,7 +211,7 @@ public class PerformanceMonitor {
      * Unregister a client connection. Stops monitoring if this was the last client.
      * @param clientId Client identifier
      */
-    public void clientDisconnected(String clientId) {
+    public synchronized void clientDisconnected(String clientId) {
         if (clientId == null) return;
         
         Long removed = activeClients.remove(clientId);
@@ -230,7 +230,7 @@ public class PerformanceMonitor {
     /**
      * Start the client cleanup scheduler to remove stale clients.
      */
-    private void startClientCleanup() {
+    private synchronized void startClientCleanup() {
         if (clientCleanupScheduler != null) return;
         
         clientCleanupScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -246,7 +246,7 @@ public class PerformanceMonitor {
     /**
      * Stop the client cleanup scheduler.
      */
-    private void stopClientCleanup() {
+    private synchronized void stopClientCleanup() {
         if (clientCleanupScheduler != null) {
             clientCleanupScheduler.shutdownNow();
             clientCleanupScheduler = null;
@@ -267,8 +267,16 @@ public class PerformanceMonitor {
         }
         
         for (String clientId : staleClients) {
-            logger.debug("Removing stale client: " + clientId);
-            clientDisconnected(clientId);
+            // A heartbeat may have refreshed this client after the scan.
+            // Compare-and-remove under the same lock as connect/disconnect so
+            // an old cleanup pass cannot evict a live dashboard session.
+            synchronized (this) {
+                Long lastSeen = activeClients.get(clientId);
+                if (lastSeen != null && now - lastSeen > CLIENT_TIMEOUT_MS) {
+                    logger.debug("Removing stale client: " + clientId);
+                    clientDisconnected(clientId);
+                }
+            }
         }
     }
     
