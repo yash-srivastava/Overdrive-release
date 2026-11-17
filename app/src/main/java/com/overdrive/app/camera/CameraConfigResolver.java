@@ -65,10 +65,22 @@ public final class CameraConfigResolver {
         boolean fixedGeometry = dilink5 || dilink100;
         int panoSurfaceMode = fixedGeometry ? profile.getPanoSurfaceMode()
                 : optNonNegative(camera, "probedSurfaceMode", profile.getPanoSurfaceMode());
-        int panoWidth = fixedGeometry ? profile.getPanoWidth()
-                : optNonNegative(camera, "probedWidth", profile.getPanoWidth());
-        int panoHeight = fixedGeometry ? profile.getPanoHeight()
-                : optNonNegative(camera, "probedHeight", profile.getPanoHeight());
+        // Legacy installs may have "probed" dimensions seeded from a model
+        // profile rather than observed from the producer. Never accept a
+        // partial, zero, odd, or implausibly large saved pair as geometry.
+        // Preserve valid existing pairs for compatibility: changing an
+        // ImageReader/encoder size on a running fleet is not a safe probe.
+        int savedWidth = camera.optInt("probedWidth", -1);
+        int savedHeight = camera.optInt("probedHeight", -1);
+        boolean savedGeometryUsable = isUsablePanoramicGeometry(savedWidth, savedHeight);
+        if (!fixedGeometry && (camera.has("probedWidth") || camera.has("probedHeight"))
+                && !savedGeometryUsable) {
+            logger.warn("Ignoring invalid saved panoramic geometry; using profile dimensions");
+        }
+        int panoWidth = !fixedGeometry && savedGeometryUsable
+                ? savedWidth : profile.getPanoWidth();
+        int panoHeight = !fixedGeometry && savedGeometryUsable
+                ? savedHeight : profile.getPanoHeight();
         boolean manual = !fixedGeometry && camera.optBoolean("manualOverride", false);
         boolean validated = fixedGeometry || camera.optBoolean("probedAndValidated", false);
         boolean fallback = !fixedGeometry && camera.optBoolean("fallbackFromProbe", false);
@@ -307,10 +319,8 @@ public final class CameraConfigResolver {
     /**
      * Persist the user-selected camera profile (vehicle class). Empty / "auto"
      * resets to inferred-from-{@code ro.product.model}; any other id must
-     * exist in {@link CameraProfiles}. When switching to a known profile we
-     * seed {@code probedWidth/Height} from the profile defaults if not yet
-     * set, so the next pipeline init has correct strip geometry even before
-     * the runtime probe completes.
+     * exist in {@link CameraProfiles}. Profile defaults are resolved at runtime,
+     * never written as though they were observed probe dimensions.
      */
     public static boolean saveCameraProfile(String profileId) {
         if (isCamera2RuntimeSelected()) return false;
@@ -326,15 +336,18 @@ public final class CameraConfigResolver {
                 return false;
             }
             putSafely(update, "cameraProfile", profileId);
-            JSONObject section = getCameraSection();
-            CameraProfile profile = CameraProfiles.get(profileId);
-            if (!section.has("probedWidth"))  putSafely(update, "probedWidth",  profile.getPanoWidth());
-            if (!section.has("probedHeight")) putSafely(update, "probedHeight", profile.getPanoHeight());
         } else {
             logger.warn("Ignoring unknown camera profile: " + profileId);
             return false;
         }
         return UnifiedConfigManager.updateSection("camera", update);
+    }
+
+    /** Bounds only reject corrupt saved dimensions; they do not certify a HAL stream. */
+    static boolean isUsablePanoramicGeometry(int width, int height) {
+        return width >= 2 && height >= 2
+                && width <= 8192 && height <= 8192
+                && (width & 1) == 0 && (height & 1) == 0;
     }
 
     static String profileForMode(String profileId, boolean dilink5) {
