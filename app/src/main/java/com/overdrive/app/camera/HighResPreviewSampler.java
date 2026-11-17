@@ -181,7 +181,9 @@ public final class HighResPreviewSampler {
     private EGLDisplay eglDisplay = EGL14.EGL_NO_DISPLAY;
     private EGLContext eglContext = EGL14.EGL_NO_CONTEXT;
     private EGLSurface eglSurface = EGL14.EGL_NO_SURFACE;
-    private boolean glReady = false;
+    // Startup is asynchronous; preview workers await completion, not a polling loop.
+    private volatile boolean glReady = false;
+    private final java.util.concurrent.CountDownLatch glInitComplete = new java.util.concurrent.CountDownLatch(1);
 
     private int mosaicProgram = 0;
     private int mosaicAPos = -1, mosaicATex = -1, mosaicUTex = -1;
@@ -259,9 +261,10 @@ public final class HighResPreviewSampler {
         this.thread = new HandlerThread("HighResPreviewSampler");
         this.thread.start();
         this.handler = new Handler(thread.getLooper());
-        // Initialize EGL on the sampler thread. Posted async — sample calls
-        // will block on glReady internally.
-        handler.post(this::initGl);
+        // Initialization can fail; still wake any preview worker promptly.
+        if (!handler.post(this::initGl)) {
+            glInitComplete.countDown();
+        }
     }
 
     public void setSourceGuard(Object lock, SourceGuard guard) {
@@ -330,6 +333,8 @@ public final class HighResPreviewSampler {
             logger.info("HighResPreviewSampler GL initialized on dedicated thread");
         } catch (Throwable t) {
             logger.warn("initGl failed: " + t.getMessage());
+        } finally {
+            glInitComplete.countDown();
         }
     }
 
@@ -522,15 +527,15 @@ public final class HighResPreviewSampler {
 
     private byte[] runOnSamplerThread(int textureId, GlJob job) {
         if (!glReady) {
-            // GL might still be initializing — give it a brief moment.
-            for (int i = 0; i < 20 && !glReady; i++) {
-                try { Thread.sleep(50); } catch (InterruptedException ignored) {
-                    Thread.currentThread().interrupt();
+            // Wait at most as long as the prior 20 x 50 ms polls, but wake
+            // immediately on success or failure instead of checking every 50 ms.
+            try {
+                if (!glInitComplete.await(1, java.util.concurrent.TimeUnit.SECONDS) || !glReady) {
+                    logger.warn("Sampler GL initialization unavailable");
                     return null;
                 }
-            }
-            if (!glReady) {
-                logger.warn("GL not ready after 1s wait");
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
                 return null;
             }
         }
