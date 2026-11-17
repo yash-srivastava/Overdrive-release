@@ -99,6 +99,9 @@ public class Automations {
     // hot path) is a field read instead of a full stream scan of the map. Maintained under SAVE_LOCK
     // alongside every mutation. volatile for cross-thread visibility from the telemetry thread.
     private static volatile int enabledCount = 0;
+    // Service Mode is a runtime-only gate; it never mutates saved automation settings.
+    private static volatile boolean serviceModeDisabled = false;
+    private static volatile long serviceModePauseGeneration = 0L;
     // Bumped whenever the automation feature crosses the enabled/disabled boundary. A publisher
     // samples this before and after its callback so a complete disable -> enable cycle cannot hide
     // between two identical isDisabled() reads and silently drop the observed vehicle state.
@@ -834,8 +837,41 @@ public class Automations {
      *
      * @return Whether the automation feature is enabled
      */
+    /**
+     * Whether automation execution is globally paused because no rule is enabled
+     * or Service Mode has installed its runtime-only gate.
+     */
     public static boolean isDisabled() {
-        return enabledCount == 0;
+        return serviceModeDisabled || enabledCount == 0;
+    }
+
+    /** Runtime-only gate controlled by ServiceModeManager; persisted rules remain untouched. */
+    public static void setServiceModeDisabled(boolean disabled) {
+        boolean changed = false;
+        synchronized (SAVE_LOCK) {
+            if (serviceModeDisabled != disabled) {
+                serviceModeDisabled = disabled;
+                if (disabled) serviceModePauseGeneration++;
+                // Queue workers use this generation to observe a complete
+                // disable/enable transition even if it occurs between polls.
+                enabledStateGeneration++;
+                changed = true;
+            }
+        }
+        if (changed) {
+            if (disabled) AutomationQueue.discardServiceModeReplay();
+            AutomationQueue.checkWorkerState();
+        }
+    }
+
+    /** Used by direct action-group endpoints that do not pass through triggerActionsInternal. */
+    public static boolean isServiceModeDisabled() {
+        return serviceModeDisabled;
+    }
+
+    /** Distinguishes publications overlapping a Service Mode pause, even after End. */
+    static long serviceModePauseGeneration() {
+        return serviceModePauseGeneration;
     }
 
     /** Package-local generation used by {@link AutomationQueue} to detect hidden disable cycles. */
@@ -2378,6 +2414,10 @@ public class Automations {
      * commands, variable mutations, pauses, and other arbitrary prefixes are skipped.
      */
     static boolean triggerQueuedStateSetters(String id) {
+        if (serviceModeDisabled) {
+            logger.info("Skipping queued automation state setters while Service Mode is active: " + id);
+            return true;
+        }
         Automation automation = automations.get(id);
         if (automation == null || automation.isDisabled()) return true;
         long automationRevision = automation.enabledStateRevision();
@@ -2675,6 +2715,11 @@ public class Automations {
             String id, boolean checkConditions, boolean recordStats, boolean explicit) {
         Automation automation = automations.get(id);
         if (automation == null) return false;
+
+        if (serviceModeDisabled) {
+            logger.info("Skipping automation actions while Service Mode is active: " + id);
+            return true;
+        }
 
         // Automatic work accepts only automatic mode. Explicit work additionally
         // accepts manual-only mode, but never a fully disabled automation.

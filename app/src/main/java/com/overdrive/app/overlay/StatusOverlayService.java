@@ -2594,7 +2594,9 @@ public class StatusOverlayService extends Service {
     }
 
     private Notification buildNotification() {
-        Intent intent = getPackageManager().getLaunchIntentForPackage(getPackageName());
+        // Target the single launcher activity without clearing an existing task.
+        Intent intent = new Intent(this, com.overdrive.app.ui.MainActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         PendingIntent pi = PendingIntent.getActivity(this, 0, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Context textContext = themedContext();

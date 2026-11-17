@@ -1631,4 +1631,6 @@
     <string name="voice_enroll_learning">לומד את הקול שלך…</string>
     <string name="voice_enroll_done">מעולה — OverDrive מכיר עכשיו את הקול שלך</string>
     <string name="voice_enroll_failed">לא הצלחתי ללמוד את הקול שלך. נסו שוב ברכב שקט</string>
+    <string name="settings_section_service_mode">מצב שירות</string>
+    <string name="settings_section_service_mode_subtitle">הסתרת יישומים זמנית ושחזורם לאחר ביקור במוסך.</string>
 </resources>

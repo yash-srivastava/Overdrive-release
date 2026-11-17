@@ -644,6 +644,13 @@ public final class AutomationApiHandler {
      * @return true so the router treats the request as handled
      */
     private static boolean testAutomation(String id, OutputStream out) throws Exception {
+        if (Automations.isServiceModeDisabled()) {
+            HttpResponse.sendJson(out, 403, new JSONObject()
+                    .put("success", false)
+                    .put("error", "Automation execution is paused by Service Mode.")
+                    .toString());
+            return true;
+        }
         if (!Automations.exists(id)) {
             HttpResponse.sendError(out, 404, "Automation not found.");
             return true;
@@ -683,6 +690,13 @@ public final class AutomationApiHandler {
      * where it is needed.
      */
     private static boolean runActionGroup(String id, OutputStream out) throws Exception {
+        if (Automations.isServiceModeDisabled()) {
+            HttpResponse.sendJson(out, 403, new JSONObject()
+                    .put("success", false)
+                    .put("error", "Action-group execution is paused by Service Mode.")
+                    .toString());
+            return true;
+        }
         if (!com.overdrive.app.automation.ActionGroups.exists(id)) {
             HttpResponse.sendError(out, 404, "Action group not found.");
             return true;

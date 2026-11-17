@@ -315,11 +315,15 @@ public class AutomationQueue {
         final long enabledStateGeneration;
         final int automationConfigGeneration;
         final boolean retainedReplay;
+        final boolean serviceModePausedAtStart;
+        final long serviceModePauseGeneration;
 
         LatestStatePublication(
                 LatestStateStream key, long generation, long sequence,
                 long enabledStateGeneration, int automationConfigGeneration,
                 boolean retainedReplay) {
+            this.serviceModePausedAtStart = Automations.isServiceModeDisabled();
+            this.serviceModePauseGeneration = Automations.serviceModePauseGeneration();
             this.key = key;
             this.generation = generation;
             this.sequence = sequence;
@@ -658,7 +662,13 @@ public class AutomationQueue {
                 boolean configChanged =
                         current.automationConfigGeneration
                                 != Automations.configGeneration();
-                if (Automations.isDisabled() || enabledStateChanged || configChanged) {
+                // An event observed during or across Service Mode must not be
+                // retained for post-End replay, even if End raced this callback.
+                boolean crossedServiceMode = current.serviceModePausedAtStart
+                        || current.serviceModePauseGeneration
+                                != Automations.serviceModePauseGeneration();
+                if (!crossedServiceMode
+                        && (Automations.isDisabled() || enabledStateChanged || configChanged)) {
                     retainDisabledLatestStateReconciliationLocked(
                             current.key, publication,
                             current.generation, current.sequence);
@@ -854,6 +864,7 @@ public class AutomationQueue {
     private static void retainDisabledLatestStateReconciliationLocked(
             LatestStateStream publicationKey, Runnable publication,
             long generation, long sequence) {
+        if (Automations.isServiceModeDisabled()) return;
         LatestStateReconciliation retained =
                 disabledLatestStateReconciliations.get(publicationKey);
         if (retained != null) {
@@ -899,6 +910,7 @@ public class AutomationQueue {
 
     /** Preserve a tagged item before disabled-state teardown drops or isolates its owner. */
     private static void retainLatestStateReconciliationLocked(DelayedAutomation item) {
+        if (Automations.isServiceModeDisabled()) return;
         if (item == null || item.latestStatePublicationGenerations.isEmpty()) return;
         for (java.util.Map.Entry<LatestStateStream, LatestStateTag> entry :
                 item.latestStatePublicationGenerations.entrySet()) {
@@ -1197,12 +1209,18 @@ public class AutomationQueue {
         return found;
     }
 
+    /** Drop deferred edges when a temporary Service Mode pause begins.
+     * Unlike disabled-all, this pause must never replay events after End. */
+    static void discardServiceModeReplay() {
+        synchronized (lock) {
+            disabledLatestStateReconciliations.clear();
+            enableReconciliationPending = false;
+        }
+    }
+
     /**
-     * Check whether the worker should currently be running
-     * If there are no running automations, then there is no need for a worker to be running
-     * Synchronized on {@link #lock} so two concurrent HTTP threads cannot both observe a null worker
-     * and start two threads (which would double-fire actions), and so a disable-all cannot orphan a
-     * live worker while another thread is mid-start.
+     * Reconcile queue workers with the current enabled state.
+     * All worker lifecycle decisions are serialized on the queue lock.
      */
     public static void checkWorkerState() {
         Thread disabledWorker = null;

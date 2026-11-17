@@ -278,6 +278,7 @@
             android:screenOrientation="unspecified"
             android:configChanges="keyboardHidden"
             android:launchMode="singleTop">
+            <!-- Keep the standard launcher entry; Service Mode never hides OverDrive. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -612,7 +613,7 @@
             android:foregroundServiceType="mediaPlayback"
             android:exported="true" />
 
-        <!-- Loopback-only, HMAC-authenticated app-process bridge for Remote Dev View. -->
+        <!-- App-process bridge is private. Socket commands remain HMAC-authenticated. -->
         <service
             android:name="com.overdrive.app.remote.RemoteDevViewBridgeService"
             android:exported="false" />
