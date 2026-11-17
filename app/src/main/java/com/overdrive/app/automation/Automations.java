@@ -155,6 +155,8 @@ public class Automations {
                 () -> com.overdrive.app.automation.condition.GearEvent.refresh());
         runIsolatedStartupStep("climate poller",
                 () -> com.overdrive.app.automation.condition.ClimateEvent.refresh());
+        runIsolatedStartupStep("ADAS state poller",
+                () -> com.overdrive.app.automation.condition.AdasStateEvent.refresh());
         runIsolatedStartupStep("charging-power poller",
                 () -> com.overdrive.app.automation.condition.ChargingPowerEvent.refresh());
         runIsolatedStartupStep("door fallback poller",

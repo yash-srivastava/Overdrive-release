@@ -40,6 +40,10 @@ public class BydEvent {
     // published ONLY when the vehicle really reports the switch, so a trim that cannot read it
     // never fires either edge (instead of a permanent, wrong "off").
     public static final EventData AMBIENT_STATE = new EventData("ambient", Map.of());
+    // Read-back of the existing ESP and iTAC automation actions. These are not
+    // inferred from command success: only definite live OEM getter values publish.
+    public static final EventData ESP_CONTROL = new EventData("esp_control");
+    public static final EventData ITAC = new EventData("itac");
     public static final EventData SLW = new EventData("slw");
     public static final EventData CPD = new EventData("cpd");
     // Drive mode (normal/eco/sport/snow) normalized from the live Energy/Setting axes, and the

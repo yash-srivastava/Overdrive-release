@@ -103,6 +103,21 @@ public class Conditions {
                 new EnumType(new Label("state", "automation.state"),
                         new Label("on", "automation.on"),
                         new Label("off", "automation.off"))));
+        // Bidirectional ADAS coverage: these two features already have SET actions.
+        // Read-only IF/WHEN states come from getESPState / getItacState, not the last
+        // requested action value. Unknown OEM readings never become a false "off".
+        addCondition(new EventCondition(
+                new Label("esp_control", "automation.esp_state"),
+                "automation.esp_state_description",
+                new EnumType(new Label("state", "automation.state"),
+                        new Label("on", "automation.on"),
+                        new Label("off", "automation.off"))));
+        addCondition(new EventCondition(
+                new Label("itac", "automation.itac_state"),
+                "automation.itac_state_description",
+                new EnumType(new Label("state", "automation.state"),
+                        new Label("on", "automation.on"),
+                        new Label("off", "automation.off"))));
         addCondition(new EventCondition(
                 new Label("slw", "automation.slw"),
                 "automation.slw_description",
