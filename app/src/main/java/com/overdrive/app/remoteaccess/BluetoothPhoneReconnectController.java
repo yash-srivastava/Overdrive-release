@@ -21,6 +21,7 @@ final class BluetoothPhoneReconnectController {
     static final int BACKOFF_AFTER_FAILURES = 2;
     static final long BACKOFF_BASE_MS = CONNECTION_TIMEOUT_MS;
     static final long BACKOFF_CAP_MS = 120_000;
+    static final long RADIO_RESTORE_GRACE_MS = 90_000;
 
     interface Clock {
         long elapsedRealtime();
@@ -112,6 +113,7 @@ final class BluetoothPhoneReconnectController {
     private long bindingStarted;
     private long profileGeneration;
     private long nextGlobalAttempt;
+    private long radioRestoreGraceUntilElapsedMs;
     private long attemptOrdinal;
     private String connectingAddress;
     private long connectionDeadline;
@@ -310,6 +312,24 @@ final class BluetoothPhoneReconnectController {
                 phone.errorStage, phone.errorClass);
     }
 
+    /** A radio restored after safe-zone suppression starts a fresh reconnect window. */
+    synchronized void radioRestored() {
+        if (stopped) return;
+        long now = clock.elapsedRealtime();
+        nextGlobalAttempt = Math.min(nextGlobalAttempt, now);
+        radioRestoreGraceUntilElapsedMs = now + RADIO_RESTORE_GRACE_MS;
+        releaseProfile();
+        for (Phone phone : phones.values()) {
+            if ("connected".equals(phone.state)) continue;
+            // Clear the absence backoff as well as the reconnect timer; a newly
+            // restored radio starts a fresh attempt window immediately.
+            clearBackoff(phone, now);
+            phone.nextAttemptElapsedMs = Math.min(phone.nextAttemptElapsedMs, now);
+            clearFailure(phone);
+            set(phone, "waiting", "radio_restored");
+        }
+    }
+
     synchronized void stop() {
         if (!stopped) {
             stopped = true;
@@ -457,6 +477,12 @@ final class BluetoothPhoneReconnectController {
      * single-phone roster, whose scheduling is unchanged; the global 3 s spacing is untouched.
      */
     private void backOff(Phone phone, long now) {
+        if (now < radioRestoreGraceUntilElapsedMs) {
+            // A returning phone can take several connection windows to reappear after
+            // the radio is restored. Keep the normal retry cadence during this grace.
+            phone.nextAttemptElapsedMs = Math.max(phone.nextAttemptElapsedMs, now + RETRY_INTERVAL_MS);
+            return;
+        }
         if (phone.consecutiveFailures < Integer.MAX_VALUE) phone.consecutiveFailures++;
         if (phones.size() < 2 || phone.consecutiveFailures < BACKOFF_AFTER_FAILURES) return;
         int step = Math.min(3, phone.consecutiveFailures - BACKOFF_AFTER_FAILURES);

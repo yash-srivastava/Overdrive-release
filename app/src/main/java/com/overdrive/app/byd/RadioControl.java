@@ -63,6 +63,11 @@ public final class RadioControl {
                     logger.warn("RadioControl: could not save shared Bluetooth intent");
                     return false;
                 }
+                if (enable) {
+                    // A deliberate ON from Automations or Key Mapping wins over a stale
+                    // parked safe-zone lock confirmation in this daemon process.
+                    com.overdrive.app.server.RemoteAccessApiHandler.noteBluetoothExplicitlyEnabled();
+                }
             } catch (Throwable t) {
                 logger.warn("RadioControl: could not save shared Bluetooth intent: "
                         + t.getMessage());

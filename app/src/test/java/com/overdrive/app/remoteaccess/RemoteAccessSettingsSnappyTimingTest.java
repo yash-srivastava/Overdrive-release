@@ -32,6 +32,7 @@ public class RemoteAccessSettingsSnappyTimingTest {
         assertTrue(defaults.getBoolean(RemoteAccessSettings.CONFIRM_WITH_VEHICLE_KEY));
         assertEquals(10_000L, defaults.getLong(RemoteAccessSettings.RELOCK_GRACE_MS_KEY));
         assertEquals(10_000L, defaults.getLong(RemoteAccessSettings.POST_LOCK_QUIET_MS_KEY));
+        assertFalse(defaults.getBoolean("parkedBluetoothSafeZoneEnabled"));
         assertFalse(defaults.has(RemoteAccessSettings.TIMING_EXPLICIT_KEY));
         assertFalse(defaults.has(RemoteAccessSettings.DI5_LOCK_SETTINGS_EXPLICIT_KEY));
         // The settings defaults differ from the evaluators' own constants on purpose: those stay the

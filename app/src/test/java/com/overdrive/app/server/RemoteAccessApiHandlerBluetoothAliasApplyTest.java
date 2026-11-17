@@ -420,6 +420,46 @@ public class RemoteAccessApiHandlerBluetoothAliasApplyTest {
         assertEquals(1, count(handler, "performKeyFob(observation, settings, evaluated.event);"));
     }
 
+    /** A disabled safe-zone option must neither arm the parked-radio latch nor register its door observer. */
+    @Test
+    public void parkedBluetoothLatchIsOptInAndDoesNotUseUnlockDispatchHookOnLock() throws Exception {
+        String handler = readRepositoryFile(HANDLER);
+        int performStart = handler.indexOf("    private static void perform(ProximityEvaluator.Snapshot reading, JSONObject settings, long observed,");
+        int performEnd = handler.indexOf("    private static void performKeyFob(", performStart);
+        assertTrue(performStart > 0 && performEnd > performStart);
+        String perform = handler.substring(performStart, performEnd);
+        assertTrue(perform.contains("if (!arriving && settings.optBoolean(\"parkedBluetoothSafeZoneEnabled\"))"));
+        assertTrue(perform.contains("registerDoorOpenObserver(BydDataCollector.getInstance())"));
+        assertFalse(perform.contains("ensureDoorOpenObserver"));
+        assertFalse(perform.contains("noteProximityUnlockDispatched"));
+
+        String satisfied = handler.substring(handler.indexOf("@Override void satisfied() throws Exception {", performStart),
+                handler.indexOf("private boolean capturedEpisodeCurrent", performStart));
+        assertTrue(satisfied.contains("config.optBoolean(\"parkedBluetoothSafeZoneEnabled\")"));
+        assertTrue(satisfied.contains("!parkedBluetoothExplicitOnOverride"));
+        assertTrue(satisfied.indexOf("parkedBluetoothLockConfirmed = true")
+                > satisfied.indexOf("config.optBoolean(\"parkedBluetoothSafeZoneEnabled\")"));
+    }
+
+    /** Explicit Bluetooth ON from RadioControl clears the daemon-owned directive before the next reply. */
+    @Test
+    public void explicitAutomationBluetoothOnClearsParkedSafeZoneLatch() throws Exception {
+        String handler = readRepositoryFile(HANDLER);
+        String clear = method(handler, "    public static void noteBluetoothExplicitlyEnabled() {");
+        for (String field : new String[] {"parkedBluetoothLockConfirmed = false",
+                "parkedBluetoothLockConfirmedAtElapsedMs = -1",
+                "parkedBluetoothSafeZoneDisableDirective = false",
+                "parkedBluetoothSafeZoneDirectiveAtElapsedMs = -1",
+                "parkedBluetoothExplicitOnOverride = true"})
+            assertTrue(field, clear.contains(field));
+        String radio = readRepositoryFile("app/src/main/java/com/overdrive/app/byd/RadioControl.java");
+        int save = radio.indexOf("UnifiedConfigManager.setBluetoothKeepAliveEnabled(enable)");
+        int explicitOn = radio.indexOf("if (enable)", save);
+        int clearCall = radio.indexOf("RemoteAccessApiHandler.noteBluetoothExplicitlyEnabled()", explicitOn);
+        int dispatch = radio.indexOf("String cmd =", clearCall);
+        assertTrue(save > 0 && explicitOn > save && clearCall > explicitOn && dispatch > clearCall);
+    }
+
     private static int count(String text, String needle) {
         int count = 0;
         for (int at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + needle.length())) count++;
