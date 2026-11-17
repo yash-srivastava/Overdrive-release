@@ -794,7 +794,15 @@ public final class CameraPreviewHelper {
     private static byte[] yuv420888ToJpeg(Image image, int quality) {
         byte[] nv21 = yuv420888ToNv21(image);
         YuvImage yuvImage = new YuvImage(nv21, ImageFormat.NV21, image.getWidth(), image.getHeight(), null);
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        // ByteArrayOutputStream otherwise starts at 32 bytes and repeatedly
+        // reallocates/copies as the encoder emits a full preview JPEG. Start
+        // with a modest resolution-based capacity, capped to avoid reserving
+        // excessive memory for large or highly compressible frames. The stream
+        // can still grow when a detailed image needs more space.
+        long pixels = (long) image.getWidth() * image.getHeight();
+        int initialCapacity = (int) Math.min(256L * 1024L,
+                Math.max(4L * 1024L, pixels / 8L));
+        ByteArrayOutputStream out = new ByteArrayOutputStream(initialCapacity);
         yuvImage.compressToJpeg(new Rect(0, 0, image.getWidth(), image.getHeight()), quality, out);
         return out.toByteArray();
     }
