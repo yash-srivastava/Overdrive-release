@@ -7,8 +7,9 @@ import com.overdrive.app.monitor.AccMonitor;
  * Legacy AVC HAL warmup.
  *
  * <p>On older BYD camera stacks, production cold opens launch
- * {@code com.byd.avc}, wait for the HAL to settle, then open our camera. A
- * bounded keep-alive can relaunch that package if it is conclusively absent.
+ * {@code com.byd.avc}, wait for the HAL to settle, then open our camera.
+ * If AVC is already running with a stable PID, no new settle delay is needed.
+ * A bounded keep-alive can relaunch that package if it is conclusively absent.
  *
  * <p><b>DiLink 4 is deliberately excluded.</b> DIPlus beta18 does not launch
  * AVC as part of its panorama path. On DI4, {@link #warmupAndWait()} returns
@@ -56,7 +57,7 @@ public class AvcHalWarmup {
         }
     }
 
-    /** Time to wait after launching com.byd.avc before opening our camera. */
+    /** Time to settle after actually launching/restarting com.byd.avc. */
     private static final long HAL_WARMUP_DELAY_MS = 4000;
 
     /**
@@ -248,7 +249,8 @@ public class AvcHalWarmup {
     }
 
     /**
-     * Launches com.byd.avc and blocks for HAL_WARMUP_DELAY_MS.
+     * Ensures com.byd.avc is running and waits HAL_WARMUP_DELAY_MS after
+     * launching it; an already-running, stable AVC skips the settle wait.
      * Call this BEFORE opening the camera on ACC ON transitions.
      *
      * This is a blocking call — run it on a background thread.
@@ -305,8 +307,6 @@ public class AvcHalWarmup {
                     isRecoveryLaunchDue(android.os.SystemClock.elapsedRealtime());
             coldOpenWarmupInProgress = true;
             try {
-                logger.info("Warming up camera HAL via com.byd.avc (waiting " +
-                    HAL_WARMUP_DELAY_MS + "ms)...");
                 AvcProbeResult beforeLaunch = probeAvcProcess();
                 if (!isWarmupStillRequired(stillRequired)) {
                     logger.info("AVC warmup cancelled after process probe; "
@@ -318,6 +318,41 @@ public class AvcHalWarmup {
                 boolean launchAttempted = recoveryLaunch
                         || beforeLaunch.state != AvcProbeState.RUNNING;
                 boolean launched = false;
+                if (!launchAttempted) {
+                    // ACC ON often finds AVC already alive from parked surveillance.
+                    // A settled, still-running AVC needs no additional 4s sleep.
+                    // Verify the same PID again so a process restarted during
+                    // our probe does not skip the required cold-launch settle.
+                    AvcProbeResult confirmedRunning = probeAvcProcess();
+                    if (!isWarmupStillRequired(stillRequired)) {
+                        logger.info("AVC warmup cancelled during running-process check");
+                        return false;
+                    }
+                    if (confirmedRunning.state == AvcProbeState.RUNNING
+                            && confirmedRunning.pid == beforeLaunch.pid) {
+                        consecutiveLaunchFailures = 0;
+                        lastWarmupCompletedNanos = System.nanoTime();
+                        logger.info("AVC already running and confirmed ("
+                                + confirmedRunning.detail
+                                + "); opening camera without HAL settle delay");
+                        return true;
+                    }
+                    if (confirmedRunning.state == AvcProbeState.RUNNING) {
+                        // AVC relaunched during our probes. Do not bring its
+                        // Activity to the foreground, but allow the HAL to settle.
+                        logger.info("AVC PID changed (" + beforeLaunch.detail
+                                + " -> " + confirmedRunning.detail
+                                + "); waiting for HAL settle");
+                    } else {
+                        logger.warn("AVC no longer confirmed running ("
+                                + confirmedRunning.detail
+                                + "); using full cold-launch warmup");
+                        beforeLaunch = confirmedRunning;
+                        launchAttempted = true;
+                    }
+                }
+                logger.info("Warming up camera HAL via com.byd.avc (waiting " +
+                    HAL_WARMUP_DELAY_MS + "ms after launch)...");
                 if (launchAttempted) {
                     if (beforeLaunch.state == AvcProbeState.UNKNOWN) {
                         // Cold-open is the one load-bearing launch boundary.
@@ -336,10 +371,6 @@ public class AvcHalWarmup {
                     if (recoveryLaunch && launched) {
                         noteRecoveryLaunch(android.os.SystemClock.elapsedRealtime());
                     }
-                } else {
-                    logger.info("AVC already running (" + beforeLaunch.detail
-                            + "); skipping foreground Activity launch");
-                    consecutiveLaunchFailures = 0;
                 }
                 if (!isWarmupStillRequired(stillRequired)) {
                     logger.info("AVC warmup owner retired after launch decision");
