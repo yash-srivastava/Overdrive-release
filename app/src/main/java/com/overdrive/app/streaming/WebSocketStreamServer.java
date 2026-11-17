@@ -321,13 +321,18 @@ public class WebSocketStreamServer extends WebSocketServer
 
     @Override
     public void onSpsPps(ByteBuffer sps, ByteBuffer pps) {
-        int spsSize = sps.remaining();
-        int ppsSize = pps.remaining();
-        cachedSpsPps = new byte[spsSize + ppsSize];
-        sps.get(cachedSpsPps, 0, spsSize);
-        pps.get(cachedSpsPps, spsSize, ppsSize);
+        // The callback may be shared with other consumers of the codec format.
+        // Do not consume their ByteBuffer positions while caching headers.
+        ByteBuffer spsView = sps.duplicate();
+        ByteBuffer ppsView = pps.duplicate();
+        int spsSize = spsView.remaining();
+        int ppsSize = ppsView.remaining();
+        byte[] headers = new byte[spsSize + ppsSize];
+        spsView.get(headers, 0, spsSize);
+        ppsView.get(headers, spsSize, ppsSize);
+        cachedSpsPps = headers;
         logger.info("Cached SPS/PPS: " + spsSize + " + " + ppsSize + " bytes");
-        sendToAll(cachedSpsPps);
+        sendToAll(headers);
     }
 
     @Override
@@ -339,6 +344,11 @@ public class WebSocketStreamServer extends WebSocketServer
         // viewer the encoder still drains, but onH264Packet exits at the
         // empty-clients check above and we never spend the 256 KB.
         int frameSize = info.size;
+        if (!CodecBufferWindow.isValid(data, info.offset, frameSize)) {
+            logger.warn("Dropping invalid H.264 buffer window: offset=" + info.offset
+                    + " size=" + frameSize + " limit=" + data.limit());
+            return;
+        }
         // Hard cap before any allocation: a corrupt encoder output larger
         // than MAX_REUSABLE_FRAME_BYTES is dropped. Putting this BEFORE the
         // lazy-init branch closes a window where buf=null + frameSize>MAX
@@ -364,8 +374,16 @@ public class WebSocketStreamServer extends WebSocketServer
             logger.warn("Resized frame buffer to " + buf.length + " bytes");
         }
 
-        data.position(info.offset);
-        data.get(buf, 0, frameSize);
+        // The encoder drainer currently restores this buffer after dispatch,
+        // but a stream callback must not change the position seen by another
+        // callback or by future callers. No per-frame duplicate allocation.
+        int originalPosition = data.position();
+        try {
+            data.position(info.offset);
+            data.get(buf, 0, frameSize);
+        } finally {
+            data.position(originalPosition);
+        }
 
         // Send to all clients (they copy internally)
         sendToAll(buf, frameSize);
