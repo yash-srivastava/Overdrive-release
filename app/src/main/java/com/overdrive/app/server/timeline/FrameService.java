@@ -54,6 +54,8 @@ public final class FrameService {
     private static final long STRAY_FILE_AGE_MS = 60_000;
     private static final long FAILURE_TTL_NS = TimeUnit.SECONDS.toNanos(60);
     private static final long SWEEP_EVERY_NS = TimeUnit.MINUTES.toNanos(10);
+    // Do not retain a decoder thread or wake the storage volume after the viewer goes away.
+    private static final long WORKER_IDLE_NS = TimeUnit.SECONDS.toNanos(30);
     private static final int FAILURES_MAX = 256;
 
     private static final Pattern RECORDING_ID = Pattern.compile("[0-9a-f]{32}");
@@ -76,6 +78,9 @@ public final class FrameService {
     private static Job running;
     private static Thread worker;
     private static long runningSinceNs;
+    // Guarded by LOCK. Retaining the deadline across idle worker retirement
+    // prevents a full cache sweep on every reopen of the timeline.
+    private static long nextSweepNs;
     private static int generation;
     private static final java.util.List<Thread> ABANDONED = new java.util.ArrayList<>();
     private static final long STUCK_NS = TimeUnit.SECONDS.toNanos(10);
@@ -85,7 +90,6 @@ public final class FrameService {
     private static long cacheBytes = -1;
     private static boolean cacheOff;
     private static long cacheOffSinceNs;
-    private static long nextSweepNs;
 
     private FrameService() {}
 
@@ -178,19 +182,31 @@ public final class FrameService {
         synchronized (LOCK) {
             myGeneration = generation;
         }
-        nextSweepNs = System.nanoTime();
+        long lastJobNs = System.nanoTime();
         while (true) {
             Job job = null;
             boolean sweep = false;
             synchronized (LOCK) {
                 if (myGeneration != generation) return;
+                if (nextSweepNs == 0) nextSweepNs = System.nanoTime();
                 if (PENDING.isEmpty()) {
-                    long waitMs = TimeUnit.NANOSECONDS.toMillis(nextSweepNs - System.nanoTime());
-                    if (waitMs > 0) {
+                    long now = System.nanoTime();
+                    long idleLeftNs = WORKER_IDLE_NS - (now - lastJobNs);
+                    if (idleLeftNs <= 0) {
+                        // The null assignment and the empty-queue check share LOCK
+                        // with enqueue. A new request therefore starts a new worker
+                        // rather than stranding a job on an exiting thread.
+                        if (worker == Thread.currentThread()) worker = null;
+                        return;
+                    }
+                    long sweepLeftNs = Math.max(0L, nextSweepNs - now);
+                    long waitNs = Math.min(idleLeftNs, sweepLeftNs);
+                    if (waitNs > 0) {
                         try {
-                            LOCK.wait(waitMs);
+                            LOCK.wait(Math.max(1L, TimeUnit.NANOSECONDS.toMillis(waitNs)));
                         } catch (InterruptedException e) {
-                            worker = null;
+                            if (worker == Thread.currentThread()) worker = null;
+                            Thread.currentThread().interrupt();
                             return;
                         }
                     }
@@ -201,6 +217,7 @@ public final class FrameService {
                     it.remove();
                     running = job;
                     runningSinceNs = System.nanoTime();
+                    lastJobNs = runningSinceNs;
                 } else {
                     sweep = System.nanoTime() - nextSweepNs >= 0;
                 }
@@ -223,7 +240,11 @@ public final class FrameService {
                     sweep();
                 } catch (Throwable ignored) {
                 }
-                nextSweepNs = System.nanoTime() + SWEEP_EVERY_NS;
+                synchronized (LOCK) {
+                    // A retired worker must not modify the new worker's clock.
+                    if (myGeneration != generation) return;
+                    nextSweepNs = System.nanoTime() + SWEEP_EVERY_NS;
+                }
             }
         }
     }
@@ -241,8 +262,37 @@ public final class FrameService {
                 fail(job.clipKey);
                 return FAILED_FRAME;
             }
-            frame = retriever.getFrameAtTime(job.atMs * 1000L,
-                    MediaMetadataRetriever.OPTION_PREVIOUS_SYNC);
+            // Android 10 exposes getScaledFrameAtTime (API 27+). Decode a
+            // scrub-sized bitmap directly instead of allocating a full camera
+            // frame (often 2560x1920/19 MiB) just to downscale it immediately.
+            // Vendor codecs may not implement scaled retrieval correctly; retain
+            // the original full-resolution path as a compatibility fallback.
+            int sourceWidth = positiveMetadata(retriever,
+                    MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH);
+            int sourceHeight = positiveMetadata(retriever,
+                    MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT);
+            int rotation = positiveMetadata(retriever,
+                    MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION);
+            if (rotation == 90 || rotation == 270) {
+                int temp = sourceWidth;
+                sourceWidth = sourceHeight;
+                sourceHeight = temp;
+            }
+            if (sourceWidth > 0 && sourceHeight > 0) {
+                int targetHeight = Math.max(1, (int) Math.round(
+                        (double) job.width * sourceHeight / sourceWidth));
+                try {
+                    frame = retriever.getScaledFrameAtTime(job.atMs * 1000L,
+                            MediaMetadataRetriever.OPTION_PREVIOUS_SYNC,
+                            job.width, targetHeight);
+                } catch (RuntimeException ignored) {
+                    // Some vendor codecs reject scaled extraction despite API 29.
+                }
+            }
+            if (frame == null) {
+                frame = retriever.getFrameAtTime(job.atMs * 1000L,
+                        MediaMetadataRetriever.OPTION_PREVIOUS_SYNC);
+            }
             if (frame == null || frame.getWidth() <= 0 || frame.getHeight() <= 0) {
                 fail(job.key);
                 return FAILED_FRAME;
@@ -272,6 +322,15 @@ public final class FrameService {
                 retriever.release();
             } catch (Throwable ignored) {
             }
+        }
+    }
+
+    private static int positiveMetadata(MediaMetadataRetriever retriever, int key) {
+        try {
+            String value = retriever.extractMetadata(key);
+            return value == null ? 0 : Math.max(0, Integer.parseInt(value));
+        } catch (RuntimeException ignored) {
+            return 0;
         }
     }
 
