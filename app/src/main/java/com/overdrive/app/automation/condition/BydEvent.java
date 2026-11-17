@@ -26,6 +26,7 @@ public class BydEvent {
     public static final EventData WINDOW_RR = new EventData("windowState", Map.of("area", "rr"));
     public static final EventData WINDOW_SUNROOF = new EventData("windowState", Map.of("area", "sunroof"));
     public static final EventData WINDOW_SUNSHADE = new EventData("windowState", Map.of("area", "sunshade"));
+    public static final EventData SUNSHADE_STATE = new EventData("sunshadeState");
     public static final EventData WINDOW_ALL = new EventData("windowState", Map.of("area", "all"));
     public static final EventData BATTERY_LEVEL = new EventData("batteryLevel");
     public static final EventData TARGET_SOC = new EventData("targetSoc");
@@ -703,7 +704,11 @@ public class BydEvent {
             if (win.length > 2) updateWindow(WINDOW_LR_PERCENT, WINDOW_LR, win[2]);
             if (win.length > 3) updateWindow(WINDOW_RR_PERCENT, WINDOW_RR, win[3]);
             if (win.length > 4) updateWindow(WINDOW_SUNROOF_PERCENT, WINDOW_SUNROOF, win[4]);
-            if (win.length > 5) updateWindow(WINDOW_SUNSHADE_PERCENT, WINDOW_SUNSHADE, win[5]);
+            if (win.length > 5) {
+                updateWindow(WINDOW_SUNSHADE_PERCENT, WINDOW_SUNSHADE, win[5]);
+                // Publish the dedicated condition only for an actual readable HAL value.
+                if (win[5] >= 0) Automations.update(SUNSHADE_STATE, win[5] == 0 ? "closed" : "open");
+            }
 
             // WINDOW_ALL is a convenience shortcut ("are all windows shut?"). Only meaningful once we
             // have at least one real reading: "closed" iff every available (non-negative) slot is 0.
