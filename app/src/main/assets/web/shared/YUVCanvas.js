@@ -104,52 +104,25 @@
 
         gl.viewport(0, 0, width, height);
 
-        var tTop = 0;
-        var tLeft = 0;
-        var tBottom = height / yRowCnt;
-        var tRight = width / yDataPerRow;
-        var texturePosValues = new Float32Array([tRight, tTop, tLeft, tTop, tRight, tBottom, tLeft, tBottom]);
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, texturePosBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, texturePosValues, gl.DYNAMIC_DRAW);
-
-        if (this.customYUV444){
-          tBottom = height / uRowCnt;
-          tRight = width / uDataPerRow;
-        }else{
-          tBottom = (height / 2) / uRowCnt;
-          tRight = (width / 2) / uDataPerRow;
-        };
-        var uTexturePosValues = new Float32Array([tRight, tTop, tLeft, tTop, tRight, tBottom, tLeft, tBottom]);
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, uTexturePosBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, uTexturePosValues, gl.DYNAMIC_DRAW);
-
-
-        if (this.customYUV444){
-          tBottom = height / vRowCnt;
-          tRight = width / vDataPerRow;
-        }else{
-          tBottom = (height / 2) / vRowCnt;
-          tRight = (width / 2) / vDataPerRow;
-        };
-        var vTexturePosValues = new Float32Array([tRight, tTop, tLeft, tTop, tRight, tBottom, tLeft, tBottom]);
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, vTexturePosBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, vTexturePosValues, gl.DYNAMIC_DRAW);
-
+        // Strides/crop extents usually stay fixed across decoded frames.
+        // Leave the attribute buffers alone until their coordinates change.
+        this.updateTextureCoordinates(texturePosBuffer, this.yCoords,
+            width / yDataPerRow, height / yRowCnt);
+        this.updateTextureCoordinates(uTexturePosBuffer, this.uCoords,
+            (this.customYUV444 ? width : width / 2) / uDataPerRow,
+            (this.customYUV444 ? height : height / 2) / uRowCnt);
+        this.updateTextureCoordinates(vTexturePosBuffer, this.vCoords,
+            (this.customYUV444 ? width : width / 2) / vDataPerRow,
+            (this.customYUV444 ? height : height / 2) / vRowCnt);
 
         gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, yTextureRef);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, yDataPerRow, yRowCnt, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, yData);
+        this.uploadPlane(yTextureRef, this.yTextureSize, yDataPerRow, yRowCnt, yData);
 
         gl.activeTexture(gl.TEXTURE1);
-        gl.bindTexture(gl.TEXTURE_2D, uTextureRef);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, uDataPerRow, uRowCnt, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, uData);
+        this.uploadPlane(uTextureRef, this.uTextureSize, uDataPerRow, uRowCnt, uData);
 
         gl.activeTexture(gl.TEXTURE2);
-        gl.bindTexture(gl.TEXTURE_2D, vTextureRef);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, vDataPerRow, vRowCnt, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, vData);
+        this.uploadPlane(vTextureRef, this.vTextureSize, vDataPerRow, vRowCnt, vData);
 
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       };
@@ -171,25 +144,62 @@
 
         gl.viewport(0, 0, width, height);
 
-        var tTop = 0;
-        var tLeft = 0;
-        var tBottom = height / rowCnt;
-        var tRight = width / (dataPerRow / 2);
-        var texturePosValues = new Float32Array([tRight, tTop, tLeft, tTop, tRight, tBottom, tLeft, tBottom]);
+        this.updateTextureCoordinates(texturePosBuffer, this.yCoords,
+            width / (dataPerRow / 2), height / rowCnt);
 
-        gl.bindBuffer(gl.ARRAY_BUFFER, texturePosBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, texturePosValues, gl.DYNAMIC_DRAW);
-
-        gl.uniform2f(gl.getUniformLocation(this.shaderProgram, 'resolution'), dataPerRow, height);
+        if (this.lastResolutionWidth !== dataPerRow) {
+          gl.uniform2f(this.resolutionLocation, dataPerRow, height);
+          this.lastResolutionWidth = dataPerRow;
+        }
 
         gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, textureRef);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, dataPerRow, rowCnt, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, data);
+        this.uploadPlane(textureRef, this.yTextureSize, dataPerRow, rowCnt, data);
 
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       };
     };
 
+  };
+
+  /**
+   * Update a fixed-size vertex buffer only when the decoded plane's crop changes.
+   * The buffer storage and typed array are reused for the life of this canvas.
+   */
+  YUVCanvas.prototype.updateTextureCoordinates = function(buffer, state, right, bottom) {
+    if (state.right === right && state.bottom === bottom) return;
+    var values = state.values;
+    values[0] = right;
+    values[2] = 0;
+    values[4] = right;
+    values[6] = 0;
+    values[1] = 0;
+    values[3] = 0;
+    values[5] = bottom;
+    values[7] = bottom;
+    var gl = this.contextGL;
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, values);
+    state.right = right;
+    state.bottom = bottom;
+  };
+
+  /**
+   * Reallocate a luminance texture only when the decoder changes plane size.
+   * WebGL texImage2D on every frame discards the previous GPU storage even
+   * though most frames have identical dimensions. texSubImage2D updates it.
+   */
+  YUVCanvas.prototype.uploadPlane = function(texture, size, width, height, data) {
+    var gl = this.contextGL;
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    if (size.width !== width || size.height !== height) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, width, height, 0,
+          gl.LUMINANCE, gl.UNSIGNED_BYTE, data);
+      size.width = width;
+      size.height = height;
+    } else {
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height,
+          gl.LUMINANCE, gl.UNSIGNED_BYTE, data);
+    }
   };
 
   /**
@@ -366,6 +376,10 @@ YUVCanvas.prototype.initProgram = function() {
   gl.uniformMatrix4fv(YUV2RGBRef, false, YUV2RGB);
 
   this.shaderProgram = program;
+  if (this.type === 'yuv422') {
+    this.resolutionLocation = gl.getUniformLocation(program, 'resolution');
+    this.lastResolutionWidth = null;
+  }
 };
 
 /**
@@ -388,6 +402,7 @@ YUVCanvas.prototype.initBuffers = function() {
     var animationTime = this.animationTime;
     var timePassed = 0;
     var stepTime = 15;
+    var animationVertices = new Float32Array(8);
 
     var aniFun = function(){
 
@@ -403,13 +418,12 @@ YUVCanvas.prototype.initBuffers = function() {
       var neg = -1 * mul;
       var pos = 1 * mul;
 
-      var vertexPosBuffer = gl.createBuffer();
+      // Animation must not allocate a new GPU buffer every 15 ms.
+      animationVertices[0] = animationVertices[1] = animationVertices[4] = pos;
+      animationVertices[2] = animationVertices[3] = animationVertices[6] = animationVertices[7] = neg;
+      animationVertices[5] = neg;
       gl.bindBuffer(gl.ARRAY_BUFFER, vertexPosBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([pos, pos, neg, pos, pos, neg, neg, neg]), gl.STATIC_DRAW);
-
-      var vertexPosRef = gl.getAttribLocation(program, 'vertexPos');
-      gl.enableVertexAttribArray(vertexPosRef);
-      gl.vertexAttribPointer(vertexPosRef, 2, gl.FLOAT, false, 0, 0);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, animationVertices);
 
       try{
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -431,6 +445,9 @@ YUVCanvas.prototype.initBuffers = function() {
   gl.vertexAttribPointer(texturePosRef, 2, gl.FLOAT, false, 0, 0);
 
   this.texturePosBuffer = texturePosBuffer;
+  // Initial attribute coordinates are (0..1), so ordinary tightly-packed
+  // frames require no per-frame buffer uploads.
+  this.yCoords = { right: 1, bottom: 1, values: new Float32Array(8) };
 
   if (this.type === "yuv420"){
     var uTexturePosBuffer = gl.createBuffer();
@@ -442,6 +459,7 @@ YUVCanvas.prototype.initBuffers = function() {
     gl.vertexAttribPointer(uTexturePosRef, 2, gl.FLOAT, false, 0, 0);
 
     this.uTexturePosBuffer = uTexturePosBuffer;
+    this.uCoords = { right: 1, bottom: 1, values: new Float32Array(8) };
 
 
     var vTexturePosBuffer = gl.createBuffer();
@@ -453,6 +471,7 @@ YUVCanvas.prototype.initBuffers = function() {
     gl.vertexAttribPointer(vTexturePosRef, 2, gl.FLOAT, false, 0, 0);
 
     this.vTexturePosBuffer = vTexturePosBuffer;
+    this.vCoords = { right: 1, bottom: 1, values: new Float32Array(8) };
   };
 
 };
@@ -470,16 +489,19 @@ YUVCanvas.prototype.initTextures = function() {
     var ySamplerRef = gl.getUniformLocation(program, 'ySampler');
     gl.uniform1i(ySamplerRef, 0);
     this.yTextureRef = yTextureRef;
+    this.yTextureSize = { width: 0, height: 0 };
 
     var uTextureRef = this.initTexture();
     var uSamplerRef = gl.getUniformLocation(program, 'uSampler');
     gl.uniform1i(uSamplerRef, 1);
     this.uTextureRef = uTextureRef;
+    this.uTextureSize = { width: 0, height: 0 };
 
     var vTextureRef = this.initTexture();
     var vSamplerRef = gl.getUniformLocation(program, 'vSampler');
     gl.uniform1i(vSamplerRef, 2);
     this.vTextureRef = vTextureRef;
+    this.vTextureSize = { width: 0, height: 0 };
 
   }else if (this.type === "yuv422"){
     // only one texture for 422
@@ -487,6 +509,7 @@ YUVCanvas.prototype.initTextures = function() {
     var samplerRef = gl.getUniformLocation(program, 'sampler');
     gl.uniform1i(samplerRef, 0);
     this.textureRef = textureRef;
+    this.yTextureSize = { width: 0, height: 0 };
 
   };
 };
