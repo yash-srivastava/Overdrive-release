@@ -1,5 +1,5 @@
-<?xml version='1.0' encoding='UTF-8'?>
-<resources xmlns:tools="http://schemas.android.com/tools">
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
     <string name="app_name">OverDrive</string>
     <string name="accessibility_service_description">שומר על ניטור הרכב של Overdrive פעיל ברקע. שירות זה אינו קורא תוכן מהמסך ואינו מקיים איתו אינטראקציה.</string>
     <string name="action_cancel">ביטול</string>
@@ -1450,7 +1450,7 @@
     <string name="network_warn_body">במסך הרכב קיים רכיב אלחוטי יחיד, ולכן הוא אינו יכול לשמש כנקודה חמה ולהישאר מחובר לרשת Wi-Fi בו-זמנית. כאשר הנקודה החמה מופעלת, הרכב מתנתק מה-Wi-Fi ומשתמש בנתונים הסלולריים של כרטיס ה-SIM המובנה עבורו ועבור כל המכשירים המחוברים. חיבור ה-Wi-Fi ישוב לפעול עם כיבוי הנקודה החמה.</string>
     <string name="network_warn_continue">הפעל נקודה חמה</string>
     <string name="network_warn_cancel">ביטול</string>
-    <!-- Closed-repository features added after the upstream Hebrew pass. -->
+    
     <string name="action_create_evidence_pack">יצירת חבילת ראיות</string>
     <string name="action_share_evidence_pack">שיתוף חבילת ראיות</string>
     <string name="tailscale_enable_https">הצגת ממשק האינטרנט דרך HTTPS</string>
@@ -1493,7 +1493,7 @@
 
     <string name="roi_tap_to_add_points">הקש להוספת נקודות (%1$d-%2$d)</string>
 
-    <!-- Cluster transport (which OEM protocol drives the cluster projection) -->
+    
     <string name="projection_transport_title">פרוטוקול הצג</string>
     <string name="projection_transport_desc">איזה פרוטוקול של היצרן מפעיל את צג הנהג. אוטומטי מזהה אותו מהקושחה; שנה זאת רק אם ההקרנה נכשלת.</string>
     <string name="projection_transport_auto">אוטומטי</string>
@@ -1504,7 +1504,7 @@
     <string name="projection_transport_save_failed">לא ניתן לשמור את הגדרת הפרוטוקול.</string>
     <string name="projection_oem_cluster_takeover">אפליקציית הצג של הרכב ממשיכה לקחת בחזרה את הצג בכל משטח זמין. כבה את תצוגת סייען הנהיגה (SR) או את הקרנת הניווט של הצג בהגדרות הרכב, ואז נסה שוב.</string>
 
-    <!-- Diagnostics "Vehicle setup" card -->
+    
     <string name="vehicle_setup_title">הגדרת הרכב</string>
     <string name="vehicle_setup_checking">בודק…</string>
     <string name="vehicle_setup_detected">זוהה: %1$s</string>
@@ -1597,7 +1597,7 @@
     <string name="diagnostics_section_module_faults">תקלות מודולים</string>
     <string name="diagnostics_module_faults_summary">תצוגת אזהרות מהרכב הזמינות כרגע (כיסוי חלקי)</string>
 
-    <!-- Daemon storage (scratch root) -->
+    
     <string name="diagnostics_section_daemon_storage">אחסון הדמונים</string>
     <string name="scratch_root_dialog_title">אחסון הדמונים</string>
     <string name="scratch_root_dialog_intro">OverDrive משתף את ההגדרות, הנעילות והיומנים בין האפליקציה לדמוני הרקע דרך תיקייה שבבעלות מעטפת ה־ADB. בחלק מיחידות הראש (BYD Shark 6 ויחידות DiLink 5.0 אחרות) הקושחה נועלת את התיקייה הזו, המעטפת לא יכולה ליצור בה קבצים, ואף דמון לא יכול לעלות.</string>
@@ -1613,7 +1613,7 @@
     <string name="scratch_root_failed_adb">מעטפת ה־ADB אינה נגישה. הפעל ניפוי באגים ב־USB/אלחוטי ונסה שוב.</string>
     <string name="scratch_root_restart">הפעל מחדש עכשיו</string>
 
-    <!-- Voice assistant overlay -->
+    
     <string name="voice_overlay_listening">מאזין…</string>
     <string name="voice_overlay_thinking">חושב…</string>
     <string name="voice_overlay_speaking">מדבר…</string>
@@ -1631,4 +1631,35 @@
     <string name="voice_enroll_learning">לומד את הקול שלך…</string>
     <string name="voice_enroll_done">מעולה — OverDrive מכיר עכשיו את הקול שלך</string>
     <string name="voice_enroll_failed">לא הצלחתי ללמוד את הקול שלך. נסו שוב ברכב שקט</string>
+    <string name="settings_dilink5_adb_recover">DiLink 5 · שחזור ADB מאומת</string>
+    <string name="settings_dilink5_adb_recovery_no_listener">לא נמצא מאזין ADB מקומי ב-TLS.</string>
+    <string name="settings_native_vehicle_ac_off">כבה את המיזוג</string>
+    <string name="settings_native_vehicle_ac_on">הפעל את המיזוג</string>
+    <string name="settings_native_vehicle_actions_title">בחר פעולה ידנית</string>
+    <string name="settings_native_vehicle_confirm_body">לשלוח את “%1$s”? ודא שהרכב במצב בטוח לפני ההמשך.</string>
+    <string name="settings_native_vehicle_confirm_title">אישור פעולת רכב</string>
+    <string name="settings_native_vehicle_enable_action">הפעל פעולות ידניות</string>
+    <string name="settings_native_vehicle_enable_body">פקדים אלה כבויים כברירת מחדל ולא אומתו עבור רכב זה. הפעלתם רק חושפת פעולות ידניות. היא אינה מפעילה שליטה מרחוק או אוטומציה.</string>
+    <string name="settings_native_vehicle_enable_title">להפעיל פקדים שלא אומתו?</string>
+    <string name="settings_native_vehicle_hazards_off">כבה אורות מצוקה</string>
+    <string name="settings_native_vehicle_hazards_on">הדלק אורות מצוקה</string>
+    <string name="settings_native_vehicle_overline">פרופיל רכב ידני</string>
+    <string name="settings_native_vehicle_profile_off">כבוי · התאימות לא אומתה</string>
+    <string name="settings_native_vehicle_profile_on">מופעל · התאימות לא אומתה · פעולות ידניות בלבד</string>
+    <string name="settings_native_vehicle_profile_title">פקדי רכב מקוריים</string>
+    <string name="settings_native_vehicle_result_accepted">הבקשה התקבלה. התנועה הפיזית לא אומתה.</string>
+    <string name="settings_native_vehicle_result_rejected">הבקשה נדחתה. לא דווח על פעולה שהצליחה.</string>
+    <string name="settings_native_vehicle_result_unknown">התוצאה אינה ידועה. אל תחזור על הפעולה לפני שבדקת את הרכב.</string>
+    <string name="settings_native_vehicle_save_failed">לא ניתן לשמור את פרופיל הרכב הידני.</string>
+    <string name="settings_native_vehicle_send_action">שלח פעולה</string>
+    <string name="settings_native_vehicle_sunroof_close">סגור את חלון הגג</string>
+    <string name="settings_native_vehicle_sunroof_comfort">העבר את חלון הגג למצב נוחות</string>
+    <string name="settings_native_vehicle_sunroof_open">פתח את חלון הגג</string>
+    <string name="settings_native_vehicle_sunroof_stop">עצור את חלון הגג</string>
+    <string name="settings_native_vehicle_sunroof_tilt">הטה את חלון הגג</string>
+    <string name="settings_native_vehicle_sunroof_updip">הגבה את חלון הגג</string>
+    <string name="settings_native_vehicle_sunshade_close">סגור את וילון השמש</string>
+    <string name="settings_native_vehicle_sunshade_open">פתח את וילון השמש</string>
+    <string name="settings_native_vehicle_tailgate_close">סגור את דלת תא המטען</string>
+    <string name="settings_native_vehicle_tailgate_open">פתח את דלת תא המטען</string>
 </resources>

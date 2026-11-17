@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="projection_cluster_back">חזרה</string>
+    <string name="projection_cluster_control_unavailable">פקד לוח המחוונים אינו זמין. בדוק את השידור הפעיל והפעל מחדש את תהליך הרקע לאחר העדכון.</string>
+    <string name="projection_cluster_controls">פקדי לוח המחוונים</string>
+    <string name="projection_cluster_home">בית</string>
+    <string name="projection_cluster_volume_down">עוצמה −</string>
+    <string name="projection_cluster_volume_up">עוצמה +</string>
+</resources>

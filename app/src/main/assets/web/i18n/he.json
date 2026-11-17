@@ -1205,7 +1205,8 @@
     "tariff_deleted": "התעריף נמחק",
     "tariff_repriced": {
       "one": "{count} טעינה קודמת תומחרה מחדש",
-      "other": "{count} טעינות קודמות תומחרו מחדש"
+      "other": "{count} טעינות קודמות תומחרו מחדש",
+      "two": "{count} טעינות קודמות תומחרו מחדש"
     },
     "tariff_confirm_delete": "למחוק תעריף זה? טעינות שחויבו לפיו יחושבו לפי התעריפים האחרים שלך.",
     "tariff_err_no_rate": "הזן תעריף AC או DC",
@@ -1290,7 +1291,8 @@
     },
     "stored": {
       "one": "נסיעה {count} נשמרה",
-      "other": "{count} נסיעות נשמרו"
+      "other": "{count} נסיעות נשמרו",
+      "two": "{count} נסיעות נשמרו"
     },
     "no_trips_yet": "טרם הוקלטו נסיעות",
     "no_trips_hint": "הפעל ניתוח נסיעות והתחל לנהוג כדי לראות את הנסיעות שלך כאן",
@@ -1385,7 +1387,8 @@
       "delete_confirm": "למחוק קובצי מצלמת דרך ישנים של BYD כדי לפנות מקום?",
       "files_deleted": {
         "one": "קובץ {count} נמחק",
-        "other": "{count} קבצים נמחקו"
+        "other": "{count} קבצים נמחקו",
+        "two": "{count} קבצים נמחקו"
       },
       "title": "ניקוי אוטומטי של מצלמת דרך BYD",
       "auto_delete": "מחיקה אוטומטית של קובצי מצלמת דרך ישנים",
@@ -2105,7 +2108,8 @@
     "index_warming": "בונה אינדקס ספריה — {done} / {total} ({pct}%)",
     "video_count": {
       "one": "סרטון {count}",
-      "other": "{count} סרטונים"
+      "other": "{count} סרטונים",
+      "two": "{count} סרטונים"
     },
     "empty_failed_title": "טעינת ההקלטות נכשלה",
     "empty_failed_text": "בדוק את החיבור ונסה שוב",
@@ -2132,7 +2136,8 @@
     "n_selected": "{n} נבחרו",
     "confirm_delete_n": {
       "one": "למחוק הקלטה {count}? לא ניתן לבטל פעולה זו.",
-      "other": "למחוק {count} הקלטות? לא ניתן לבטל פעולה זו."
+      "other": "למחוק {count} הקלטות? לא ניתן לבטל פעולה זו.",
+      "two": "למחוק {count} הקלטות? לא ניתן לבטל פעולה זו."
     },
     "batch_deleted": "{deleted} נמחקו",
     "batch_deleted_with_failures": "{deleted} נמחקו, {failed} נכשלו",
@@ -2149,7 +2154,8 @@
     "place_search_hint": "חפש מקומות…",
     "place_search_hits": {
       "one": "התאמה {count}",
-      "other": "{count} התאמות"
+      "other": "{count} התאמות",
+      "two": "{count} התאמות"
     },
     "actor_any": "הכל",
     "actor_person": "אדם",
@@ -6830,6 +6836,25 @@
     "dashboard_title": "זוהו תקלות במודולים",
     "dashboard_summary": "הרכב מדווח על אזהרות אבחון.",
     "dashboard_details": "הצג פרטי תקלות במודולים",
-    "dashboard_warning_count": "{count} אזהרות מודולים"
+    "dashboard_warning_count": {
+      "other": "{count} אזהרות מודולים",
+      "two": "{count} אזהרות מודולים"
+    }
+  },
+  "tlview": {
+    "momentsCount": {
+      "two": "{count} רגעים"
+    }
+  },
+  "trip_briefing": {
+    "first_offer": {
+      "two": "היה מתחיל להציע אחרי {count} ימים"
+    },
+    "trips_checked": {
+      "two": "{count} נסיעות נבדקו"
+    },
+    "trips": {
+      "two": "{count} נסיעות"
+    }
   }
 }

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="projection_app_density">DPI של האפליקציה</string>
+    <string name="projection_app_guidance">כלי אפליקציה</string>
+    <string name="projection_app_keyboard">מקלדת</string>
+    <string name="projection_density_description">צפיפות עבור %1$s בשידור הבא. השתמש ב-0 כדי לשמור על צפיפות התצוגה, או 96–480 DPI.\n\nהצפיפות משפיעה על כל מפה ושכבה במסך זה במהלך השידור. לאחר העצירה, שינוי הצפיפות הקודם משוחזר כשהמסך זמין בבטחה.</string>
+    <string name="projection_density_not_applied">השידור האחרון לא הצליח להחיל צפיפות זו: %1$s</string>
+    <string name="projection_density_range">הזן 0 או מספר שלם בין 96 ל-480.</string>
+    <string name="projection_density_saved">נשמר. עצור ושדר את האפליקציה שוב כדי להחיל את הצפיפות.</string>
+    <string name="projection_guidance_di3">רצועת לוח המחוונים והנחיות על השמשה הקדמית ב-DI3 (נדרשת בדיקה ברכב)</string>
+    <string name="projection_guidance_di5">רצועת לוח המחוונים ב-DI5 (ניסיוני)</string>
+    <string name="projection_guidance_notifications">גישה להתראות המפה</string>
+    <string name="projection_guidance_saved">נשמר. הנחיות על השמשה הקדמית זמינות ב-DI3 בלבד; הצגה ברצועת DI5 עדיין דורשת בדיקה ברכב.</string>
+    <string name="projection_guidance_setup">שמור, ואז התחל ניווט ב-RoadSense. גם Google Maps וגם Waze דורשים גישה להתראות המפה.\n\nהשאר את התצוגה העילית (HUD) של DI3 דולקת ועצור כל ניווט מובנה. אם ברכב שלך יש הגדרת HUD לתוכן ניווט, הפעל אותה; לא בכל דגם יש כזו. מתג זה אינו מדליק את ה-HUD, ועדיין יש לאשר את הצגת החצים ברכב.</string>
+    <string name="projection_guidance_setup_di5">שמור, ואז התחל ניווט ב-RoadSense. גם Google Maps וגם Waze דורשים גישה להתראות המפה.\n\nרצועת לוח המחוונים ב-DI5 היא ניסיונית. עצור כל שידור או מפה במסך מלא ללוח המחוונים לפני הבדיקה. הנחיות על השמשה הקדמית אינן זמינות ב-DI5.</string>
+    <string name="projection_keyboard_auto">פתיחה אוטומטית של מקלדת DI5 בשדות טקסט בלוח המחוונים</string>
+    <string name="projection_tools_daemon_unavailable">תהליך הרקע של לוח המחוונים אינו זמין. נסה שוב כשהוא מחובר.</string>
+    <string name="projection_tools_density">גודל תצוגת האפליקציה</string>
+    <string name="projection_tools_density_default">0 שומר על צפיפות התצוגה · 96–480 קובע גודל מותאם</string>
+    <string name="projection_tools_density_description">התאם את צפיפות התצוגה של האפליקציה שנבחרה בשידור הבא שלה.</string>
+    <string name="projection_tools_density_value">צפיפות תצוגה (DPI)</string>
+    <string name="projection_tools_description">הגדר ניווט, גודל אפליקציה והזנת טקסט ללוח המחוונים.</string>
+    <string name="projection_tools_di3_description">שלח הנחיות לתצוגה העילית (HUD) ולרצועת לוח המחוונים. אשר את הצגת החצים ברכב.</string>
+    <string name="projection_tools_di3_only">זמין במצב DI3.</string>
+    <string name="projection_tools_di3_title">תצוגה עילית (HUD) ולוח מחוונים ב-DI3</string>
+    <string name="projection_tools_di5_description">הנחיות ניסיוניות ברצועת לוח המחוונים. הנחיות על השמשה הקדמית אינן זמינות ב-DI5.</string>
+    <string name="projection_tools_di5_only">זמין במצב DI5.</string>
+    <string name="projection_tools_di5_title">רצועת לוח המחוונים ב-DI5</string>
+    <string name="projection_tools_dialog_title">כלי שיקוף</string>
+    <string name="projection_tools_keyboard_description">הזן טקסט לאפליקציה משודרת ונהל פתיחה אוטומטית. ב-DI5 בלבד.</string>
+    <string name="projection_tools_navigation">הנחיות ניווט</string>
+    <string name="projection_tools_navigation_description">בחר היכן יופיעו הנחיות מ-RoadSense או מהתראות המפה.</string>
+    <string name="projection_tools_save">שמור</string>
+    <string name="projection_tools_save_failed">לא ניתן לשמור את ההגדרה. נסה שוב.</string>
+    <string name="projection_tools_select_app">בחר תחילה אפליקציה לשידור.</string>
+    <string name="projection_tools_setup">מדריך התחלה</string>
+    <string name="projection_tools_title">כלים</string>
+</resources>

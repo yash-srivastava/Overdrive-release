@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cluster_text_auto_prompt">פתיחה אוטומטית לשדות טקסט בלוח המחוונים</string>
+    <string name="cluster_text_checking">בודק את שדה הטקסט בלוח המחוונים…</string>
+    <string name="cluster_text_enable_hint">הפעל את “הזנת טקסט ללוח המחוונים של OverDrive” בהגדרות הנגישות, ואז הקש על שדה טקסט באפליקציה המשודרת ובדוק שוב.</string>
+    <string name="cluster_text_enable_service">הגדרות נגישות</string>
+    <string name="cluster_text_field_changed">הפעלת השידור או השדה הממוקד השתנו. בדוק את השדה שוב לפני השליחה.</string>
+    <string name="cluster_text_hint">טקסט לאפליקציה בלוח המחוונים</string>
+    <string name="cluster_text_no_field">לא נמצא שדה טקסט נגיש וממוקד בלוח המחוונים. הקש על שדה באפליקציה המשודרת ובדוק שוב. שדות סיסמה אינם כלולים.</string>
+    <string name="cluster_text_rejected">האפליקציה לא אישרה את הטקסט. בדוק את השדה בלוח המחוונים לפני ניסיון נוסף.</string>
+    <string name="cluster_text_requires_android11">הזנת טקסט ללוח המחוונים דורשת DiLink 5 עם Android 11 ומעלה, וגישה לחלונות הנגישות של לוח המחוונים. קושחה זו אינה יכולה לאמת לאיזה מסך שייך שדה הטקסט.</string>
+    <string name="cluster_text_requires_cast">הפעל שידור אפליקציה ב-DiLink 5 לפני הזנת טקסט.</string>
+    <string name="cluster_text_retry">בדוק את השדה הממוקד</string>
+    <string name="cluster_text_send">שלח טקסט</string>
+    <string name="cluster_text_send_submit">שלח טקסט ולחץ Enter</string>
+    <string name="cluster_text_service_description">מאפשר להזין טקסט ממסך המולטימדיה לשדה הטקסט הממוקד באפליקציה המשודרת ללוח המחוונים ב-DiLink 5. שדות סיסמה אינם כלולים. הפעל פתיחה אוטומטית רק אם ברצונך שחלון המקלדת ייפתח כששדה טקסט בלוח המחוונים מקבל מיקוד.</string>
+    <string name="cluster_text_service_label">הזנת טקסט ללוח המחוונים של OverDrive</string>
+    <string name="cluster_text_submit_rejected">הטקסט נשלח, אך האפליקציה לא קיבלה את Enter. שלח מתוך האפליקציה בלוח המחוונים.</string>
+    <string name="cluster_text_target">שדה טקסט ב-%1$s</string>
+    <string name="cluster_text_title">הזנת טקסט ללוח המחוונים</string>
+    <string name="cluster_text_unavailable">לא ניתן לאמת את שדה הטקסט בלוח המחוונים. בדוק את השידור ואת חיבור הנגישות, ונסה שוב.</string>
+</resources>
