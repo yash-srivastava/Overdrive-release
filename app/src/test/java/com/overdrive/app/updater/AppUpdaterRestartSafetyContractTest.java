@@ -360,10 +360,52 @@ public class AppUpdaterRestartSafetyContractTest {
                 "UpdateLifecycle.hardResetDaemons(this)"));
         assertTrue(main.contains(
                 "daemonStartupManager.initializeOnAppLaunch()"));
-        assertTrue(startup.contains(
-                "handler.postDelayed({ startCoreDaemons() }, 45000)"));
-        assertTrue(startup.contains(
-                "handler.postDelayed({ startOptionalDaemonsFromPreferences() }, 60000)"));
+        // ADB readiness releases independent core branches at boot-age windows;
+        // only public tunnels depend on a confirmed, enabled Singbox process.
+        assertTrue(startup.contains("awaitAdbReadiness {"));
+        assertTrue(startup.contains("getprop sys.boot_completed"));
+        assertTrue(startup.contains("echo overdrive_boot_ready"));
+        assertTrue(startup.contains("startupReleased.compareAndSet(false, true)"));
+        assertTrue(startup.contains("vm.startDaemon(DaemonType.SINGBOX_PROXY, userInitiated = false) { status, message ->"));
+        assertTrue(startup.contains("Singbox process confirmed; releasing tunnel branches"));
+        assertTrue(startup.contains("minOf(30_000L, 1_000L shl minOf(attempt - 1, 5))"));
+        String singboxLauncher = readRepositoryFile(
+                "app/src/main/java/com/overdrive/app/launcher/SingboxLauncher.kt");
+        assertTrue(singboxLauncher.contains("command = \"pidof sing-box\""));
+        assertFalse(singboxLauncher.contains("pgrep -f sing-box"));
+        // Preserve the proven head-unit stabilization windows: SystemUI and
+        // power-service may still be recovering after sys.boot_completed.
+        assertTrue(startup.contains("remainingBootWindow(45_000L)"));
+        assertTrue(startup.contains("remainingBootWindow(60_000L)"));
+        assertTrue(startup.contains("remainingBootWindow(90_000L)"));
+        assertTrue(startup.contains("android.os.SystemClock.elapsedRealtime()"));
+
+        String coreStartup = methodBody(
+                startup,
+                "private fun startCoreDaemons()",
+                "private fun startCoreDaemonsViaAdb()");
+        assertTrue(coreStartup.contains("DaemonType.CAMERA_DAEMON"));
+        assertTrue(coreStartup.contains("DaemonType.SENTRY_DAEMON"));
+        assertTrue(coreStartup.contains("DaemonType.ACC_SENTRY_DAEMON"));
+        assertFalse(coreStartup.contains("postDelayed"));
+
+        String optionalStartup = methodBody(
+                startup,
+                "private fun startOptionalDaemonsFromPreferences()",
+                "private fun hasEnabledPublicTunnel()");
+        assertTrue(optionalStartup.contains("awaitSingboxDependency(vm)"));
+        assertTrue(optionalStartup.contains("startPrivateTunnelsFromPreferences(vm)"));
+        assertTrue(optionalStartup.contains("vm.singboxController.isRunning { running ->"));
+        assertTrue(startup.contains("startPrivateTunnelsViaAdb()"));
+        assertTrue(startup.contains("adbLauncher.isSingboxRunning { running ->"));
+        assertFalse(optionalStartup.contains("postDelayed"));
+
+        String singboxDependency = methodBody(
+                startup,
+                "private fun awaitSingboxDependency(",
+                "private fun scheduleSingboxDependencyRetry(");
+        assertTrue(singboxDependency.contains("DaemonStatus.RUNNING"));
+        assertTrue(singboxDependency.contains("scheduleSingboxDependencyRetry(vm, message)"));
     }
 
     private static boolean inRange(int value, int start, int end) {
