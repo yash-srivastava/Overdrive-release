@@ -3572,7 +3572,11 @@
     "view_name_3": "Rear",
     "view_name_4": "Left",
     "view_name_5": "Raw",
-    "view_name_6": "OEM Dashcam"
+    "view_name_6": "OEM Dashcam",
+    "view_name_9": "All cameras + DVR",
+    "combined_view_label": "All + DVR",
+    "combined_view_unsupported": "Combined AVM + DVR unavailable",
+    "combined_view_dvr_not_live": "DVR feed not live"
   },
   "auth": {
     "code_placeholder": "xxxxxxxx"

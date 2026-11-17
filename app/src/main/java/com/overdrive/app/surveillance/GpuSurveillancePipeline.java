@@ -9871,7 +9871,7 @@ public class GpuSurveillancePipeline {
     /**
      * Sets the stream view mode (which camera to show).
      * 
-    * @param mode 0=Mosaic (2x2 grid), 1=Front, 2=Right, 3=Rear, 4=Left
+    * @param mode 0=Mosaic (2x2 grid), 1=Front, 2=Right, 3=Rear, 4=Left, 9=AVM + DVR
      */
     public void setStreamViewMode(int mode) {
         com.overdrive.app.streaming.GpuStreamScaler scaler = streamScaler;
@@ -10662,6 +10662,34 @@ public class GpuSurveillancePipeline {
      * feeding the WS sink throughout. We only tell the scaler to stop
      * sampling the OEM OES texture and resume reading the AVM mosaic.
      */
+    /** Bind the running OEM camera as a secondary GPU texture without changing
+     * the WebSocket encoder source. Used by combined AVM + DVR view mode 9. */
+    public boolean bindOemSourceForComposite(
+            com.overdrive.app.camera.OemDashcamPipeline oemPipeline) {
+        streamLifecycleLock.lock();
+        try {
+            if (!streamingEnabled || streamScaler == null || oemPipeline == null
+                    || !oemPipeline.isRouteReady() || !oemPipeline.hasRecentFrame(5000L)) {
+                return false;
+            }
+            int texture = oemPipeline.getCameraTextureId();
+            android.graphics.SurfaceTexture surface = oemPipeline.getCameraSurfaceTexture();
+            if (texture == 0 || surface == null) return false;
+            boolean sourceWasBound = streamScaler.isOemSourceBound();
+            streamScaler.bindOemSource(texture, surface);
+            if (!sourceWasBound) oemSourceFenceGeneration++;
+            oemPipeline.setStreamScalerForOemPublish(streamScaler);
+            // A recent source frame was verified before binding. Its next
+            // transform publish will make the sampler active on the GL thread.
+            return streamScaler.isOemSourceBound();
+        } catch (Throwable t) {
+            logger.warn("bindOemSourceForComposite failed: " + t.getMessage());
+            return false;
+        } finally {
+            streamLifecycleLock.unlock();
+        }
+    }
+
     public boolean reattachOwnStreamCallback() {
         // Held under streamLifecycleLock so a concurrent disableStreaming
         // can't null streamScaler between our null-check and the
@@ -10676,7 +10704,7 @@ public class GpuSurveillancePipeline {
             // that nulls streamScaler post-capture can't NPE us.
             final com.overdrive.app.streaming.GpuStreamScaler scaler = streamScaler;
             if (!streamingEnabled || scaler == null) return false;
-            if (!externalStreamSourceActive) return false;
+            if (!externalStreamSourceActive && !scaler.isOemSourceBound()) return false;
             externalStreamSourceActive = false;
             try {
                 scaler.unbindOemSource();

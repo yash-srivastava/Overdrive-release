@@ -585,6 +585,7 @@ public class HttpServer {
             // state as /api/vehicle/media?poll=… (1 Hz while armed); its pause/resume calls use
             // the plain path and still log. All other requests still log.
             if (!(requestLine.contains("/api/stream/turn")
+                    || requestLine.contains("/api/stream/combined-availability")
                     || requestLine.contains("/api/bs/status")
                     || requestLine.contains("/api/bs/live")
                     || requestLine.startsWith("GET /status")
@@ -2607,7 +2608,7 @@ public class HttpServer {
             // into the AVM mosaic branch — the "DVR view shows the 4-pano mosaic" bug
             // described in the block below. For view 6 we leave the scaler on its
             // previous view until the bind lands, then set it in the routed branch.
-            if (savedViewMode > 0 && savedViewMode != 6) {
+            if (savedViewMode > 0 && savedViewMode != 6 && savedViewMode != 9) {
                 pipeline.setStreamViewMode(savedViewMode);
                 CameraDaemon.log("WS: View mode " + savedViewMode);
             }
@@ -2664,6 +2665,35 @@ public class HttpServer {
                 }
             }
             
+            // Combined view 9 keeps the pano encoder as the WebSocket source,
+            // but must rebind the OEM camera as the scaler's secondary texture
+            // after a fresh stream scaler is created on reconnect.
+            if (savedViewMode == 9
+                    && StreamingApiHandler.getLastDesiredViewMode() == 9) {
+                try {
+                    org.json.JSONObject cameraCfg =
+                        com.overdrive.app.config.UnifiedConfigManager.loadConfig()
+                            .optJSONObject("camera");
+                    com.overdrive.app.camera.OemDashcamPipeline oem =
+                        CameraDaemon.getOemDashcamPipeline();
+                    boolean supported = cameraCfg != null
+                        && cameraCfg.optInt("concurrentAvmSupported", -1) == 1;
+                    boolean rebound = supported && oem != null
+                        && oem.isRouteReady() && oem.hasRecentFrame(5000L)
+                        && pipeline.bindOemSourceForComposite(oem);
+                    if (rebound) {
+                        pipeline.setStreamViewMode(9);
+                        CameraDaemon.log("WS: Restored combined AVM + DVR view");
+                    } else {
+                        pipeline.setStreamViewMode(0);
+                        CameraDaemon.log("WS: Combined view unavailable after reconnect; restored AVM mosaic");
+                    }
+                } catch (Throwable t) {
+                    pipeline.setStreamViewMode(0);
+                    CameraDaemon.log("WS: Combined view restore failed: " + t.getMessage());
+                }
+            }
+
             // Stream callback with congestion control
             final java.util.concurrent.atomic.AtomicBoolean headersReceived =
                 new java.util.concurrent.atomic.AtomicBoolean(false);
