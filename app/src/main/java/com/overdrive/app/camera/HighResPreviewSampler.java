@@ -177,6 +177,11 @@ public final class HighResPreviewSampler {
     private final HandlerThread thread;
     private final Handler handler;
 
+    // Admit at most one waiting HTTP preview request at a time. A second
+    // request must not enqueue more GPU work while the sampler is busy.
+    private final java.util.concurrent.atomic.AtomicInteger activePreviewRequest =
+            new java.util.concurrent.atomic.AtomicInteger();
+
     // GL state — owned by the sampler thread.
     private EGLDisplay eglDisplay = EGL14.EGL_NO_DISPLAY;
     private EGLContext eglContext = EGL14.EGL_NO_CONTEXT;
@@ -521,6 +526,17 @@ public final class HighResPreviewSampler {
     }
 
     private byte[] runOnSamplerThread(int textureId, GlJob job) {
+        // Fail fast rather than queueing competing full-frame readbacks.
+        // Release the slot on all exits, including timeouts and interrupts.
+        if (!activePreviewRequest.compareAndSet(0, 1)) return null;
+        try {
+            return runAdmittedPreview(textureId, job);
+        } finally {
+            activePreviewRequest.set(0);
+        }
+    }
+
+    private byte[] runAdmittedPreview(int textureId, GlJob job) {
         if (!glReady) {
             // GL might still be initializing — give it a brief moment.
             for (int i = 0; i < 20 && !glReady; i++) {
